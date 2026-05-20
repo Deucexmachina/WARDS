@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>External Defacement Simulator</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: Inter, Arial, sans-serif;
+        background: #f4f7fb;
+        color: #0f172a;
+      }
+      header {
+        background: #111827;
+        color: white;
+        padding: 30px min(6vw, 70px);
+      }
+      main {
+        padding: 28px min(6vw, 70px);
+      }
+      .notice {
+        background: #fff7ed;
+        border: 1px solid #fed7aa;
+        border-radius: 12px;
+        margin-bottom: 22px;
+        padding: 16px 18px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 18px;
+      }
+      .card {
+        background: white;
+        border: 1px solid #dbe3ef;
+        border-radius: 12px;
+        padding: 20px;
+        box-shadow: 0 12px 24px rgba(15, 23, 42, 0.08);
+      }
+      .badge {
+        display: inline-flex;
+        border-radius: 999px;
+        padding: 5px 10px;
+        background: #fee2e2;
+        color: #991b1b;
+        font-size: 12px;
+        font-weight: 800;
+      }
+      .target {
+        border-radius: 10px;
+        background: #eef2ff;
+        color: #312e81;
+        font-size: 13px;
+        font-weight: 800;
+        margin: 12px 0;
+        padding: 10px 12px;
+        word-break: break-word;
+      }
+      .verify {
+        color: #475569;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      button {
+        width: 100%;
+        border: 0;
+        border-radius: 10px;
+        background: #b91c1c;
+        color: white;
+        cursor: pointer;
+        font-weight: 800;
+        padding: 12px 14px;
+      }
+      button:hover {
+        background: #991b1b;
+      }
+      pre {
+        min-height: 120px;
+        overflow: auto;
+        border-radius: 12px;
+        background: #0f172a;
+        color: #dbeafe;
+        padding: 16px;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <p>Third-party website</p>
+      <h1>External Defacement Simulator</h1>
+      <p>Runs independently on port 3010 and modifies WARDS files as an outside attacker simulation.</p>
+    </header>
+    <main>
+      <div class="notice">
+        Create a Security Dashboard manual backup first. If WARDS backend is in deployed monitoring mode, restoration should happen automatically. Otherwise, run Verify System Integrity.
+      </div>
+      <div class="grid" id="cards"></div>
+      <h2>Result</h2>
+      <pre id="result">Waiting for an attack...</pre>
+    </main>
+    <script>
+      const attacks = [
+        ['visual-defacement', 'Visual Defacement', 'Adds a HACKED marker to the public home page source.', 'High', 'WARDS Home page', 'WARDS/frontend/src/pages/public/Home.jsx', 'Open the WARDS public home page. This should affect the home page, then restoration should remove it.'],
+        ['css-defacement', 'CSS Defacement', 'Adds a red hacked banner through global CSS.', 'Low/Medium', 'WARDS Home page and any visible WARDS page', 'WARDS/frontend/src/index.css', 'Open the WARDS public home page. A red fixed banner should briefly appear before restoration.'],
+        ['script-injection', 'Script Injection', 'Injects an external script reference.', 'Critical', 'WARDS app shell', 'WARDS/frontend/index.html', 'Check Security Incidents for script injection details.'],
+        ['iframe-injection', 'iFrame Injection', 'Adds a hidden iframe pattern.', 'High', 'WARDS React app source', 'WARDS/frontend/src/App.jsx', 'Check Security Incidents for iframe behavior flags.'],
+        ['content-manipulation', 'Content Manipulation', 'Adds false public-facing notice text.', 'Medium', 'WARDS Contact page', 'WARDS/frontend/src/pages/public/Contact.jsx', 'Open the Contact page if restoration is delayed.'],
+        ['sql-pattern', 'SQL Pattern', 'Adds a classic SQL injection signature to login source.', 'Medium', 'WARDS login page source', 'WARDS/frontend/src/pages/auth/UnifiedLogin.jsx', 'Check Detection History for SQL-like pattern details.'],
+        ['file-delete', 'File Deletion', 'Deletes a monitored file. Should be logged as deletion.', 'High', 'Taxpayer guide page file', 'WARDS/frontend/src/pages/public/TaxpayerGuide.jsx', 'Check File Status, Detection History, and Recovery History for deletion recovery.'],
+        ['mass-defacement', 'Mass Defacement', 'Runs visual, CSS, and contact-page modifications quickly.', 'Critical', 'Home page, global CSS, and Contact page', 'Home.jsx, index.css, Contact.jsx', 'Open the WARDS public home page and then check grouped incidents/logs.'],
+        ['config-tamper', 'Config Tamper', 'Adds credential-like content to backend .env.', 'High', 'Backend environment file', 'WARDS/backend/.env', 'Check Security Incidents for configuration tampering.'],
+      ];
+
+      const result = document.getElementById('result');
+      document.getElementById('cards').innerHTML = attacks.map(([id, title, description, severity, page, file, verify]) => `
+        <article class="card">
+          <span class="badge">${severity}</span>
+          <h2>${title}</h2>
+          <p>${description}</p>
+          <div class="target">Target page: ${page}<br />Target file: ${file}</div>
+          <p class="verify">${verify}</p>
+          <button onclick="runAttack('${id}')">Execute Attack</button>
+        </article>
+      `).join('');
+
+      async function runAttack(id) {
+        if (!confirm(`Execute ${id}? This will modify files in the WARDS folder.`)) {
+          return;
+        }
+        result.textContent = `Running ${id}...`;
+        try {
+          const response = await fetch(`/api/attacks/${id}`, { method: 'POST' });
+          const payload = await response.json();
+          result.textContent = JSON.stringify(payload, null, 2);
+        } catch (error) {
+          result.textContent = error.message;
+        }
+      }
+    </script>
+  </body>
+</html>

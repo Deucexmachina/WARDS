@@ -1,0 +1,661 @@
+{
+  "message": "Whisper operation completed",
+  "status": "processed",
+  "whisper_hash": "2a6d39dd|b78e9e3629edb466b87307603478bb1d",
+  "status_code": 200,
+  "extraction": {
+    "confidence_metadata": [
+      [],
+      [],
+      [],
+      [],
+      [
+        {
+          "confidence": "0.611",
+          "offset": 752,
+          "text": "GOSONM",
+          "width": 35
+        }
+      ],
+      [],
+      [],
+      [
+        {
+          "confidence": "0.618",
+          "offset": 66,
+          "text": "Pe/26/2026",
+          "width": 117
+        }
+      ],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [
+        {
+          "confidence": "0.829",
+          "offset": 400,
+          "text": "O",
+          "width": 11
+        }
+      ],
+      [],
+      [],
+      [],
+      [
+        {
+          "confidence": "0.634",
+          "offset": 28,
+          "text": "6-006-00157",
+          "width": 140
+        }
+      ],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [
+        {
+          "confidence": "0.849",
+          "offset": 296,
+          "text": "Garbage",
+          "width": 88
+        }
+      ],
+      [],
+      [],
+      [],
+      [],
+      [
+        {
+          "confidence": "0.677",
+          "offset": 239,
+          "text": "0",
+          "width": 20
+        },
+        {
+          "confidence": "0.831",
+          "offset": 267,
+          "text": "of",
+          "width": 28
+        }
+      ],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [
+        {
+          "confidence": "0.567",
+          "offset": 2,
+          "text": "Received",
+          "width": 88
+        }
+      ],
+      [],
+      [],
+      [
+        {
+          "confidence": "0.645",
+          "offset": 2,
+          "text": "[ ]",
+          "width": 58
+        },
+        {
+          "confidence": "0.535",
+          "offset": 328,
+          "text": "[ ]",
+          "width": 71
+        }
+      ],
+      [],
+      [
+        {
+          "confidence": "0.645",
+          "offset": 3,
+          "text": "[ ]",
+          "width": 53
+        },
+        {
+          "confidence": "0.535",
+          "offset": 328,
+          "text": "[ ]",
+          "width": 70
+        }
+      ],
+      [],
+      [],
+      [],
+      [],
+      [
+        {
+          "confidence": "0.658",
+          "offset": 5,
+          "text": "e",
+          "width": 9
+        }
+      ],
+      [],
+      [],
+      [],
+      [],
+      [
+        {
+          "confidence": "0.665",
+          "offset": 125,
+          "text": "02.30",
+          "width": 98
+        },
+        {
+          "confidence": "0.882",
+          "offset": 441,
+          "text": "0.00)",
+          "width": 97
+        },
+        {
+          "confidence": "0.847",
+          "offset": 481,
+          "text": "02.30",
+          "width": 99
+        },
+        {
+          "confidence": "0.854",
+          "offset": 519,
+          "text": "4.70)",
+          "width": 96
+        }
+      ],
+      [],
+      []
+    ],
+    "line_metadata": [
+      [
+        0,
+        0,
+        0,
+        1966
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        112,
+        39,
+        1966
+      ],
+      [
+        0,
+        137,
+        28,
+        1966
+      ],
+      [
+        0,
+        162,
+        45,
+        1966
+      ],
+      [
+        0,
+        188,
+        26,
+        1966
+      ],
+      [
+        0,
+        232,
+        31,
+        1966
+      ],
+      [
+        0,
+        271,
+        36,
+        1966
+      ],
+      [
+        0,
+        292,
+        38,
+        1966
+      ],
+      [
+        0,
+        332,
+        25,
+        1966
+      ],
+      [
+        0,
+        344,
+        25,
+        1966
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        410,
+        23,
+        1966
+      ],
+      [
+        0,
+        423,
+        30,
+        1966
+      ],
+      [
+        0,
+        454,
+        21,
+        1966
+      ],
+      [
+        0,
+        481,
+        34,
+        1966
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        532,
+        24,
+        1966
+      ],
+      [
+        0,
+        547,
+        21,
+        1966
+      ],
+      [
+        0,
+        575,
+        33,
+        1966
+      ],
+      [
+        0,
+        608,
+        34,
+        1966
+      ],
+      [
+        0,
+        640,
+        33,
+        1966
+      ],
+      [
+        0,
+        673,
+        34,
+        1966
+      ],
+      [
+        0,
+        705,
+        33,
+        1966
+      ],
+      [
+        0,
+        738,
+        33,
+        1966
+      ],
+      [
+        0,
+        771,
+        32,
+        1966
+      ],
+      [
+        0,
+        806,
+        35,
+        1966
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        874,
+        33,
+        1966
+      ],
+      [
+        0,
+        910,
+        33,
+        1966
+      ],
+      [
+        0,
+        947,
+        34,
+        1966
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1059,
+        27,
+        1966
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1115,
+        25,
+        1966
+      ],
+      [
+        0,
+        1129,
+        37,
+        1966
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1206,
+        27,
+        1966
+      ],
+      [
+        0,
+        1226,
+        24,
+        1966
+      ],
+      [
+        0,
+        1251,
+        25,
+        1966
+      ],
+      [
+        0,
+        1283,
+        54,
+        1966
+      ],
+      [
+        0,
+        1306,
+        28,
+        1966
+      ],
+      [
+        0,
+        1345,
+        59,
+        1966
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1418,
+        29,
+        1966
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1522,
+        30,
+        1966
+      ],
+      [
+        0,
+        1537,
+        29,
+        1966
+      ],
+      [
+        0,
+        1551,
+        27,
+        1966
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1666,
+        29,
+        1966
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1852,
+        100,
+        1966
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "metadata": {
+      "0": {
+        "font_info": {
+          "average_char_height": 29.80653518266264,
+          "average_char_width": 12.0020723808358,
+          "std_dev_char_height": 14.378122746582635,
+          "std_dev_char_width": 3.3554705043087636
+        },
+        "line_count": 55,
+        "line_end": 55,
+        "line_start": 0,
+        "page_number": 0,
+        "potential_subtitles": [
+          {
+            "page": 0,
+            "position": 2,
+            "section_length": 5,
+            "text": "OFFICIAL RECEIPT"
+          },
+          {
+            "page": 0,
+            "position": 7,
+            "section_length": 1,
+            "text": "Pe/26/2026 09:50:59"
+          },
+          {
+            "page": 0,
+            "position": 8,
+            "section_length": 6,
+            "text": "No."
+          },
+          {
+            "page": 0,
+            "position": 15,
+            "section_length": 3,
+            "text": "ELEANOR M"
+          },
+          {
+            "page": 0,
+            "position": 19,
+            "section_length": 1,
+            "text": "6-006-00157"
+          },
+          {
+            "page": 0,
+            "position": 20,
+            "section_length": 1,
+            "text": "G-006-00157"
+          },
+          {
+            "page": 0,
+            "position": 21,
+            "section_length": 1,
+            "text": "G-006-00157"
+          },
+          {
+            "page": 0,
+            "position": 22,
+            "section_length": 1,
+            "text": "G-006-00157"
+          },
+          {
+            "page": 0,
+            "position": 23,
+            "section_length": 1,
+            "text": "G-006-00157"
+          },
+          {
+            "page": 0,
+            "position": 24,
+            "section_length": 2,
+            "text": "G-006-00157"
+          },
+          {
+            "page": 0,
+            "position": 26,
+            "section_length": 1,
+            "text": "G-006-00157 2026 1-4 SHT TAX CREDIT 2019"
+          },
+          {
+            "page": 0,
+            "position": 28,
+            "section_length": 2,
+            "text": "SubTotal"
+          },
+          {
+            "page": 0,
+            "position": 30,
+            "section_length": 3,
+            "text": "Page"
+          },
+          {
+            "page": 0,
+            "position": 35,
+            "section_length": 4,
+            "text": "* SHTTC AVAILED: (0.00)"
+          },
+          {
+            "page": 0,
+            "position": 40,
+            "section_length": 0,
+            "text": "[ ]"
+          },
+          {
+            "page": 0,
+            "position": 40,
+            "section_length": 2,
+            "text": "[ ]"
+          },
+          {
+            "page": 0,
+            "position": 42,
+            "section_length": 0,
+            "text": "[ ]"
+          },
+          {
+            "page": 0,
+            "position": 42,
+            "section_length": 6,
+            "text": "[ ]"
+          },
+          {
+            "page": 0,
+            "position": 52,
+            "section_length": 0,
+            "text": "02.30"
+          },
+          {
+            "page": 0,
+            "position": 52,
+            "section_length": 0,
+            "text": "02.30 0.00 0.00 0.00) 02.30 4.70)"
+          },
+          {
+            "page": 0,
+            "position": 53,
+            "section_length": 0,
+            "text": "7.00"
+          }
+        ]
+      }
+    },
+    "result_text": "\n\n                                OFFICIAL RECEIPT \n                                     Republic of the Philippines \n                                    Office of the City Treasurer                     GOSONM QUEZON \n                                            Quezon City                          METRO MANILA \n          Computerized Official Receipt                               ORIGINAL \n       Pe/26/2026 09:50:59 AM \n                                                   No.       A4COR12698756-4 \n                                                        R-2026-002-256-0000400-ALEJ23 \n               Machine Validation No. \n\n                    Bill Number \n                                              R 2026-01-21-001900001 \n      Payor \n     ELEANOR M DE ASIS M/TO DANILO O DE ASIS \n\n            NATURE OF COLLECTION                       FUND AND                     AMOUNT \n                                                    ACCOUNT CODE \n   6-006-00157 2026 1-4 Basic Tax                                              241.38 \n   G-006-00157 2026 1-4 Special Education Fund                                 160.92 \n  G-006-00157 2026 1-4 Idle Land Tax                                              0.00 \n  G-006-00157 2026 1-4 Socialized Housing Tax                                     0.00 \n  G-006-00157       2026 1-4 Discount                                            44.70 \n  G-006-00157 2026 1-4 Penalty                                                     0.00 \nG-006-00157 2026 1-4 Garbage Fee                                                   0.00 \nG-006-00157 2026 1-4             SHT TAX CREDIT 2019                               0.00 \n\n                    SubTotal                                                   402.30 \n                    GrandTotal                                                    402.30 \n                    Page 0 of 1 \n\n                               TOTAL \n\nAmount In Words \n                                 * SHTTC AVAILED: (0.00) \n\nReceived                                                               Received the Amount \n                                                                       stated above. \n        Cash                                   Check \n[ ]                                  [ ] \n        Treasury Warrant                       Money Order \n[ ]                                  [ ] \n\nasury Warrant, Check, Money Order Number \n\n                                                                          EDGAR T. VILLANUEVA \ne of Treasury Warrant, Check, Money Order \n                                                                                  City Treasurer \n\nVrite the number and date of this receipt on the back of the treasury warrant, check or money order re \n\n              02.30             02.30 0.00 0.00 0.00) 02.30 4.70)                         7.00 \n<<<\f",
+    "webhook_metadata": "",
+    "whisper_metadata": {
+      "avg_page_processing_time": 5.0,
+      "mode": "form",
+      "processed_page_count": 1,
+      "requested_page_count": 1,
+      "total_page_count": 1
+    }
+  }
+}

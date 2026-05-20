@@ -1,0 +1,3 @@
+
+class LLMWhispererClientException(Exception):
+    pass

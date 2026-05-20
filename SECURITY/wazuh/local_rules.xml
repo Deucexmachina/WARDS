@@ -1,0 +1,28 @@
+<group name="wards_security,">
+  <rule id="110001" level="12">
+    <if_sid>550</if_sid>
+    <field name="file">\.(py|js|jsx|tsx|html|css|json|env|sql)$</field>
+    <description>WARDS: monitored application file modified</description>
+    <group>fim,defacement,wards</group>
+  </rule>
+
+  <rule id="110002" level="13">
+    <if_sid>553</if_sid>
+    <description>WARDS: monitored application file deleted</description>
+    <group>fim,defacement,deletion,wards</group>
+  </rule>
+
+  <rule id="110003" level="14" frequency="5" timeframe="60">
+    <if_matched_sid>110001</if_matched_sid>
+    <description>WARDS: rapid multi-file modification pattern</description>
+    <group>fim,mass_defacement,wards</group>
+  </rule>
+
+  <rule id="110004" level="12">
+    <if_sid>550</if_sid>
+    <match>hacked|defaced|owned|pwned|script src=|iframe src=|javascript:</match>
+    <description>WARDS: defacement or injection keyword detected</description>
+    <group>fim,web_attack,wards</group>
+  </rule>
+</group>
+

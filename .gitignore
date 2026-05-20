@@ -1,0 +1,44 @@
+# Dependencies and virtual environments
+**/node_modules/
+**/venv/
+**/.venv/
+**/env/
+
+# Build outputs and caches
+**/dist/
+**/build/
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+
+# Environment and secrets
+**/.env
+**/.env.*
+!**/.env.example
+
+# Local databases and generated files
+**/*.db
+**/*.sqlite
+**/*.sqlite3
+**/uploads/
+**/logs/
+**/*.log
+
+# Security runtime artifacts
+SECURITY/local_backups/
+SECURITY/BACKUPS/
+QUARANTINE/
+DEFACEMENT/attack_backups/
+
+# Development-only generated folders
+DEFACEMENT/venv/
+OCR/frontend/node_modules/
+WARDS/frontend/node_modules/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo

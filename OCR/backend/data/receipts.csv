@@ -1,0 +1,4 @@
+id,category,taxpayer_name,transaction_date,nature_or_tax_decl,amount_paid,image_path
+2,RPT,ELEANOR M DE ASIS M/TO DANILO O DE ASIS,2026-02-20,G-006-00157,402.3,input/RPT 1.jpg
+2,MISC,ROSALINDA BOGURO,2026-02-20,Electricity,247.1,input/MISC TAX.png
+3,BUSINESS,MAZFORD PARTS CENTER INC.,2026-02-20,,134822.0,input/BT 1.jpg

@@ -1,0 +1,52 @@
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-wards_root_password}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-wards_db}
+    ports:
+      - "3306:3306"
+    volumes:
+      - wards_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: ./WARDS/backend/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./WARDS/backend/.env
+    environment:
+      DATABASE_URL: mysql+pymysql://root:${MYSQL_ROOT_PASSWORD:-wards_root_password}@mysql:3306/${MYSQL_DATABASE:-wards_db}
+      SECURITY_DEPLOYMENT_MODE: deployed
+      SECURITY_MONITORING_ENABLED: "true"
+    ports:
+      - "8000:8000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ./WARDS:/WARDS
+      - ./OCR:/OCR
+      - ./SECURITY:/SECURITY
+      - ./QUARANTINE:/QUARANTINE
+
+  frontend:
+    build:
+      context: ./WARDS/frontend
+    restart: unless-stopped
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  wards_mysql_data:

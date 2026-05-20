@@ -1,0 +1,91 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 4694 >>
+stream
+q 1.00 w 1.000 1.000 1.000 rg 0.00 0.00 612.00 792.00 re f Q
+q 1.00 w 0.070 0.200 0.390 rg 44.00 675.00 524.00 88.00 re f Q
+q 1.00 w 0.100 0.340 0.580 rg 44.00 640.00 524.00 35.00 re f Q
+q 1.10 w 0.830 0.880 0.940 RG 44.00 54.00 524.00 708.00 re S Q
+BT /F2 9 Tf 0.840 0.910 0.980 rg 1 0 0 1 64.00 736.00 Tm (CITY TREASURER'S OFFICE) Tj ET
+BT /F2 24 Tf 1.000 1.000 1.000 rg 1 0 0 1 64.00 708.00 Tm (PAYMENT CONFIRMATION RECEIPT) Tj ET
+BT /F1 10 Tf 0.920 0.970 1.000 rg 1 0 0 1 64.00 653.00 Tm (This document confirms your PayMongo payment and may be submitted to the branch treasury office for validation.) Tj ET
+q 1.00 w 0.820 0.940 0.860 rg 403.50 698.00 144.50 26.00 re f Q
+BT /F2 10 Tf 0.070 0.440 0.220 rg 1 0 0 1 419.50 707.00 Tm (PAYMENT SUBMITTED) Tj ET
+q 1.00 w 0.950 0.980 1.000 rg 0.820 0.880 0.950 RG 62.00 572.00 488.00 58.00 re B Q
+BT /F2 12 Tf 0.070 0.200 0.390 rg 1 0 0 1 78.00 606.00 Tm (PAYMENT SUBMITTED) Tj ET
+BT /F1 10 Tf 0.260 0.330 0.430 rg 1 0 0 1 78.00 586.00 Tm (Reference TXN-770197 has been recorded and is waiting for branch treasury validation.) Tj ET
+q 1.00 w 0.830 0.880 0.940 RG 62.00 332.00 488.00 224.00 re S Q
+BT /F2 13 Tf 0.070 0.200 0.390 rg 1 0 0 1 76.00 535.00 Tm (TRANSACTION DETAILS) Tj ET
+q 1.00 w 0.860 0.900 0.960 RG 76.00 526.00 m 536.00 526.00 l S Q
+BT /F2 8 Tf 0.430 0.500 0.620 rg 1 0 0 1 62.00 500.00 Tm (REFERENCE NUMBER) Tj ET
+BT /F2 10 Tf 0.110 0.160 0.240 rg 1 0 0 1 62.00 484.00 Tm (TXN-770197) Tj ET
+BT /F2 8 Tf 0.430 0.500 0.620 rg 1 0 0 1 319.00 500.00 Tm (TRANSACTION NUMBER) Tj ET
+BT /F2 10 Tf 0.110 0.160 0.240 rg 1 0 0 1 319.00 484.00 Tm (TX-2026-85267) Tj ET
+q 0.80 w 0.900 0.930 0.970 RG 76.00 472.00 m 536.00 472.00 l S Q
+BT /F2 8 Tf 0.430 0.500 0.620 rg 1 0 0 1 62.00 458.00 Tm (TAXPAYER NAME) Tj ET
+BT /F2 10 Tf 0.110 0.160 0.240 rg 1 0 0 1 62.00 442.00 Tm (Justin Paolo M. Cortez) Tj ET
+BT /F2 8 Tf 0.430 0.500 0.620 rg 1 0 0 1 319.00 458.00 Tm (TIN) Tj ET
+BT /F2 10 Tf 0.110 0.160 0.240 rg 1 0 0 1 319.00 442.00 Tm (123-123-123-123) Tj ET
+q 0.80 w 0.900 0.930 0.970 RG 76.00 430.00 m 536.00 430.00 l S Q
+BT /F2 8 Tf 0.430 0.500 0.620 rg 1 0 0 1 62.00 416.00 Tm (TAX TYPE) Tj ET
+BT /F2 10 Tf 0.110 0.160 0.240 rg 1 0 0 1 62.00 400.00 Tm (Real Property Tax) Tj ET
+BT /F2 8 Tf 0.430 0.500 0.620 rg 1 0 0 1 319.00 416.00 Tm (PAYMENT METHOD) Tj ET
+BT /F2 10 Tf 0.110 0.160 0.240 rg 1 0 0 1 319.00 400.00 Tm (GCASH) Tj ET
+q 0.80 w 0.900 0.930 0.970 RG 76.00 388.00 m 536.00 388.00 l S Q
+BT /F2 8 Tf 0.430 0.500 0.620 rg 1 0 0 1 62.00 374.00 Tm (BRANCH) Tj ET
+BT /F2 10 Tf 0.110 0.160 0.240 rg 1 0 0 1 62.00 358.00 Tm (Galas) Tj ET
+BT /F2 8 Tf 0.430 0.500 0.620 rg 1 0 0 1 319.00 374.00 Tm (PAYMENT TIMESTAMP) Tj ET
+BT /F2 10 Tf 0.110 0.160 0.240 rg 1 0 0 1 319.00 358.00 Tm (May 08, 2026 05:59 PM PHT) Tj ET
+q 0.80 w 0.900 0.930 0.970 RG 76.00 346.00 m 536.00 346.00 l S Q
+BT /F2 8 Tf 0.430 0.500 0.620 rg 1 0 0 1 62.00 332.00 Tm (RECEIPT EMAIL) Tj ET
+BT /F2 10 Tf 0.110 0.160 0.240 rg 1 0 0 1 62.00 316.00 Tm (bakazoto.r32@gmail.com) Tj ET
+BT /F2 8 Tf 0.430 0.500 0.620 rg 1 0 0 1 319.00 332.00 Tm (CURRENT STAGE) Tj ET
+BT /F2 10 Tf 0.110 0.160 0.240 rg 1 0 0 1 319.00 316.00 Tm (Payment Submitted) Tj ET
+q 0.80 w 0.900 0.930 0.970 RG 76.00 304.00 m 536.00 304.00 l S Q
+q 1.00 w 0.830 0.880 0.940 RG 62.00 156.00 488.00 154.00 re S Q
+BT /F2 13 Tf 0.070 0.200 0.390 rg 1 0 0 1 76.00 288.00 Tm (RPT PAYMENT ITEMS) Tj ET
+BT /F2 9 Tf 0.430 0.500 0.620 rg 1 0 0 1 76.00 262.00 Tm (Item 1) Tj ET
+BT /F2 11 Tf 0.110 0.160 0.240 rg 1 0 0 1 124.00 262.00 Tm (RPT-GAL-2026-0001) Tj ET
+BT /F2 11 Tf 0.070 0.200 0.390 rg 1 0 0 1 418.00 262.00 Tm (PHP 2,175.00) Tj ET
+BT /F1 9 Tf 0.350 0.420 0.510 rg 1 0 0 1 124.00 246.00 Tm (18 Sampaguita St., Galas, Quezon City) Tj ET
+BT /F1 9 Tf 0.350 0.420 0.510 rg 1 0 0 1 124.00 233.00 Tm (Payment Mode: Quarterly | Bill Coverage: Current Quarter) Tj ET
+q 1.00 w 0.070 0.200 0.390 rg 400.00 74.00 168.00 72.00 re f Q
+BT /F2 9 Tf 0.840 0.910 0.980 rg 1 0 0 1 418.00 124.00 Tm (TOTAL AMOUNT PAID) Tj ET
+BT /F2 18 Tf 1.000 1.000 1.000 rg 1 0 0 1 418.00 94.00 Tm (PHP 2,175.00) Tj ET
+q 1.00 w 0.980 0.980 0.960 rg 0.910 0.880 0.720 RG 62.00 72.00 310.00 74.00 re B Q
+BT /F2 10 Tf 0.460 0.340 0.070 rg 1 0 0 1 76.00 124.00 Tm (TREASURY VALIDATION NOTE) Tj ET
+BT /F1 9 Tf 0.380 0.320 0.180 rg 1 0 0 1 76.00 105.00 Tm (This payment confirmation is not yet the final Official) Tj ET
+BT /F1 9 Tf 0.380 0.320 0.180 rg 1 0 0 1 76.00 94.00 Tm (Receipt. Final receipt issuance remains under the) Tj ET
+BT /F1 9 Tf 0.380 0.320 0.180 rg 1 0 0 1 76.00 83.00 Tm (authority of the selected branch treasury office.) Tj ET
+BT /F1 8 Tf 0.550 0.610 0.700 rg 1 0 0 1 467.00 28.00 Tm (Generated May 08, 2026 06:01 PM PHT) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+6 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000251 00000 n 
+0000004997 00000 n 
+0000005067 00000 n 
+trailer
+<< /Size 7 /Root 1 0 R >>
+startxref
+5142
+%%EOF
