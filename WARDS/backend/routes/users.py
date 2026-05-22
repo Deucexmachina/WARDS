@@ -49,7 +49,7 @@ class ProtectedAccountAction(BaseModel):
 
 
 def is_admin_role(role: str) -> bool:
-    return role in {"main_admin", "admin"}
+    return role in {"main_admin", "admin", "superadmin"}
 
 
 def is_branch_role(role: str) -> bool:

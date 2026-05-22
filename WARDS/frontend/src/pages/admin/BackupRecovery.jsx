@@ -163,7 +163,7 @@ const ConfirmModal = ({ confirm, onCancel, onConfirm, busy }) => {
         <h3 className="mt-2 text-xl font-bold text-slate-900">{confirm.title}</h3>
         <p className="mt-3 text-sm leading-6 text-slate-600">{confirm.message}</p>
         <div className="mt-6 flex justify-end gap-3">
-          <button className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700" onClick={onCancel} disabled={busy}>Cancel</button>
+          <button className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-200" onClick={onCancel}>Cancel</button>
           <button className="rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-60" onClick={onConfirm} disabled={busy}>{busy ? 'Working...' : confirm.confirmText || 'Confirm'}</button>
         </div>
       </div>
@@ -235,6 +235,7 @@ const BackupRecovery = () => {
   const [openRows, setOpenRows] = useState({});
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+  const [busyLabel, setBusyLabel] = useState('');
   const [confirm, setConfirm] = useState(null);
   const [weeklyAiData, setWeeklyAiData] = useState(null);
   const [seenNotifications, setSeenNotifications] = useState(() => ({
@@ -245,7 +246,9 @@ const BackupRecovery = () => {
   const [recoveryFilters, setRecoveryFilters] = useState({ keyword: '', date_from: '', date_to: '', type: '', status: '', sort: 'newest' });
   const [incidentFilters, setIncidentFilters] = useState({ keyword: '', status: '', severity: '', date_from: '', date_to: '', sort: 'newest' });
   const [aiRules, setAiRules] = useState({});
+  const [aiRuleTemplates, setAiRuleTemplates] = useState([]);
   const [showAiRules, setShowAiRules] = useState(false);
+  const [showBackupPath, setShowBackupPath] = useState(false);
   const [folderPicker, setFolderPicker] = useState({
     open: false,
     mode: '',
@@ -264,10 +267,14 @@ const BackupRecovery = () => {
     aiDay: 'Sunday',
     aiTime: '23:00',
     scanInterval: 30,
+    monitoringEnabled: true,
+    aiRuleTemplate: '',
   });
   const navigate = useNavigate();
 
   const adminUser = useMemo(() => JSON.parse(localStorage.getItem('adminUser') || '{}'), []);
+  const isSuperadmin = adminUser?.internal_role === 'superadmin';
+  const adminLabel = isSuperadmin ? 'Superadmin' : 'Main Admin';
 
   const refreshDashboard = async () => {
     const response = await api.get('/security/dashboard');
@@ -276,6 +283,7 @@ const BackupRecovery = () => {
       ...current,
       backupPath: response.data?.health?.backup_location || current.backupPath,
       scanInterval: Number(response.data?.health?.scan_interval_seconds || current.scanInterval || 30),
+      monitoringEnabled: String(response.data?.health?.monitoring_enabled || 'false').toLowerCase() === 'true',
     }));
   };
 
@@ -318,7 +326,10 @@ const BackupRecovery = () => {
   };
 
   const refreshAiRules = async () => {
-    const response = await api.get('/security/ai/rules');
+    const [response, templatesResponse] = await Promise.all([
+      api.get('/security/ai/rules'),
+      api.get('/security/ai/rule-templates'),
+    ]);
     const rules = {};
     Object.entries(response.data || {}).forEach(([key, value]) => {
       rules[key] = {
@@ -328,12 +339,35 @@ const BackupRecovery = () => {
       };
     });
     setAiRules(rules);
+    setAiRuleTemplates(templatesResponse.data || []);
+  };
+
+  const refreshActiveTab = async (tab = activeTab) => {
+    if (tab === 'File Status') {
+      await refreshFiles();
+      return;
+    }
+    if (tab === 'Detection History') {
+      await refreshDetections();
+      return;
+    }
+    if (tab === 'Recovery History') {
+      await refreshRecoveries();
+      return;
+    }
+    if (tab === 'Security Incidents') {
+      await refreshIncidents();
+      return;
+    }
+    if (tab === 'Manual Controls') {
+      await refreshAiRules();
+    }
   };
 
   const refreshAll = async () => {
     try {
-      await api.post('/security/initialize');
-      await Promise.all([refreshDashboard(), refreshFiles(), refreshDetections(), refreshRecoveries(), refreshIncidents(), refreshAiRules()]);
+      await refreshDashboard();
+      await refreshActiveTab();
     } catch (error) {
       setNotice(error.response?.data?.detail || 'Unable to load the Security Dashboard.');
     }
@@ -356,15 +390,21 @@ const BackupRecovery = () => {
   }, [controls.scanInterval, activeTab, detectionFilters, recoveryFilters, incidentFilters]);
 
   useEffect(() => {
-    refreshDetections();
+    if (activeTab === 'Detection History') {
+      refreshDetections();
+    }
   }, [detectionFilters]);
 
   useEffect(() => {
-    refreshRecoveries();
+    if (activeTab === 'Recovery History') {
+      refreshRecoveries();
+    }
   }, [recoveryFilters]);
 
   useEffect(() => {
-    refreshIncidents();
+    if (activeTab === 'Security Incidents') {
+      refreshIncidents();
+    }
   }, [incidentFilters]);
 
   const markSeen = (type, ids) => {
@@ -383,21 +423,27 @@ const BackupRecovery = () => {
       markSeen('recoveries', recoveries.map((item) => item.id));
     }
     setActiveTab(tab);
+    refreshActiveTab(tab).catch((error) => {
+      setNotice(error.response?.data?.detail || `Unable to load ${tab}.`);
+    });
   };
 
-  const runAction = async (action, success) => {
+  const runAction = async (action, success, label = 'Working on the requested security operation...') => {
     setBusy(true);
+    setBusyLabel(label);
     setNotice('');
     try {
       const result = await action();
       setNotice(typeof success === 'function' ? success(result) : success);
       if (!result?.skipRefresh) {
-        await refreshAll();
+        await refreshDashboard();
+        await refreshActiveTab();
       }
     } catch (error) {
       setNotice(error.response?.data?.detail || error.message || 'Action failed.');
     } finally {
       setBusy(false);
+      setBusyLabel('');
     }
   };
 
@@ -409,9 +455,11 @@ const BackupRecovery = () => {
     const current = confirm;
     setConfirm(null);
     if (current) {
-      await runAction(current.action, current.success);
+      await runAction(current.action, current.success, current.title);
     }
   };
+
+  const disabledButtonClass = busy ? ' opacity-60 cursor-not-allowed' : '';
 
   const toggleRow = (key) => setOpenRows((current) => ({ ...current, [key]: !current[key] }));
 
@@ -462,12 +510,28 @@ const BackupRecovery = () => {
     await api.put('/security/ai/rules', { rules });
   };
 
+  const addSelectedAiRule = async () => {
+    if (!controls.aiRuleTemplate) {
+      throw new Error('Choose an approved rule from the list first.');
+    }
+    await api.post('/security/ai/rules/add', { rule_key: controls.aiRuleTemplate });
+    setControls((current) => ({ ...current, aiRuleTemplate: '' }));
+    await refreshAiRules();
+  };
+
   const saveScanInterval = () => {
     const seconds = Number(controls.scanInterval);
     if (!Number.isFinite(seconds) || seconds < 5) {
       throw new Error('Scan interval must be at least 5 seconds.');
     }
     return api.put('/security/scan-interval', { seconds });
+  };
+
+  const toggleMonitoring = async () => {
+    const nextEnabled = !controls.monitoringEnabled;
+    const response = await api.put('/security/monitoring', { enabled: nextEnabled });
+    setControls((current) => ({ ...current, monitoringEnabled: nextEnabled }));
+    return response;
   };
 
   const openFolderPicker = async (mode, title, path) => {
@@ -507,7 +571,7 @@ const BackupRecovery = () => {
     const response = await api.get('/security/ai/weekly-data');
     setWeeklyAiData(response.data);
     return response;
-  }, 'This week\'s AI behavior data loaded.');
+  }, 'This week\'s AI behavior data loaded.', 'Loading this week\'s AI behavior data...');
 
   const cards = dashboard ? [
     ['System Status', dashboard.system_status],
@@ -516,12 +580,21 @@ const BackupRecovery = () => {
     ['Last Scan', dashboard.last_scan ? formatDateTime(dashboard.last_scan) : 'No scans yet'],
   ] : [];
 
+  const dashboardNotifications = dashboard?.notification_counts || {};
   const notificationCounts = {
     Dashboard: Number(dashboard?.active_incidents || 0),
-    'File Status': files.filter((file) => ['modified', 'missing', 'compromised'].includes(String(file.status).toLowerCase())).length,
-    'Detection History': detections.filter((item) => !item.is_legitimate && !seenNotifications.detections.includes(String(item.id))).length,
-    'Recovery History': recoveries.filter((item) => ['failed', 'reverted'].includes(String(item.status).toLowerCase()) && !seenNotifications.recoveries.includes(String(item.id))).length,
-    'Security Incidents': incidents.filter((item) => ['open', 'investigating'].includes(String(item.status).toLowerCase())).length,
+    'File Status': files.length
+      ? files.filter((file) => ['modified', 'missing', 'compromised'].includes(String(file.status).toLowerCase())).length
+      : Number(dashboardNotifications.files || 0),
+    'Detection History': detections.length
+      ? detections.filter((item) => !item.is_legitimate && !seenNotifications.detections.includes(String(item.id))).length
+      : Number(dashboardNotifications.detections || 0),
+    'Recovery History': recoveries.length
+      ? recoveries.filter((item) => ['failed', 'reverted'].includes(String(item.status).toLowerCase()) && !seenNotifications.recoveries.includes(String(item.id))).length
+      : Number(dashboardNotifications.recoveries || 0),
+    'Security Incidents': incidents.length
+      ? incidents.filter((item) => ['open', 'investigating'].includes(String(item.status).toLowerCase())).length
+      : Number(dashboardNotifications.incidents || dashboard?.active_incidents || 0),
     'Manual Controls': 0,
   };
 
@@ -555,14 +628,14 @@ const BackupRecovery = () => {
             </div>
           </div>
           <button onClick={returnToAdmin} className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-primary transition hover:bg-blue-50">
-            Return to admin dashboard
+            Return to {isSuperadmin ? 'superadmin' : 'admin'} dashboard
           </button>
         </div>
       </nav>
 
       <aside className="fixed left-0 top-16 h-[calc(100vh-4rem)] w-72 overflow-y-auto border-r border-slate-200 bg-white p-4 shadow-sm">
         <div className="mb-5 rounded-xl bg-purple-100 p-4 text-center text-purple-800">
-          <p className="text-sm font-bold">Main Admin</p>
+          <p className="text-sm font-bold">{adminLabel}</p>
         </div>
         <div className="space-y-2">
           {tabs.map((tab) => (
@@ -585,9 +658,7 @@ const BackupRecovery = () => {
           <section className="rounded-[2rem] border border-slate-300 bg-white px-8 py-7 text-slate-900 shadow-2xl shadow-slate-200/60">
             <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.26em] text-slate-500">Main Admin Dashboard</p>
-                <h2 className="mt-3 text-3xl font-bold md:text-4xl">{activeTab}</h2>
-                <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
+                <p className="max-w-3xl text-sm leading-6 text-slate-600">
                   Local backup, Wazuh-fed monitoring, AI anomaly detection, quarantine, and recovery controls for the WARDS and OCR folders.
                 </p>
               </div>
@@ -598,6 +669,12 @@ const BackupRecovery = () => {
           {notice && (
             <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-800">
               {notice}
+            </div>
+          )}
+
+          {busy && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
+              {busyLabel || 'Working on the requested security operation...'}
             </div>
           )}
 
@@ -638,7 +715,7 @@ const BackupRecovery = () => {
 
               <Section title="System Health">
                 <div className="grid gap-3 md:grid-cols-5">
-                  {Object.entries(dashboard?.health || {}).map(([key, value]) => (
+                  {Object.entries(dashboard?.health || {}).filter(([key]) => key !== 'backup_location').map(([key, value]) => (
                     <div key={key} className="min-w-0 rounded-xl border border-green-100 bg-green-50/80 p-4">
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-green-700">{key.replaceAll('_', ' ')}</p>
                       <p className="mt-2 overflow-hidden break-words text-sm font-bold text-green-900">{value}</p>
@@ -674,8 +751,8 @@ const BackupRecovery = () => {
                         <td>{Number(file.size_bytes || 0).toLocaleString()} B</td>
                         <td>{file.last_checked ? new Date(file.last_checked).toLocaleString() : 'n/a'}</td>
                         <td className="flex gap-2 py-2">
-                          <button className="rounded-lg bg-slate-100 px-3 py-2 font-semibold text-slate-700 hover:bg-slate-200" onClick={() => runAction(() => api.post(`/security/files/${file.id}/scan`), (result) => result?.data?.detection ? `Changes found in ${file.relative_path}. Detection log created.` : `No changes found in ${file.relative_path}.`)}>Scan</button>
-                          <button className="rounded-lg bg-primary px-3 py-2 font-semibold text-white hover:bg-blue-900" onClick={() => runAction(() => api.post(`/security/files/${file.id}/recover`), 'File recovery complete.')}>Recover</button>
+                          <button disabled={busy} className={`rounded-lg bg-slate-100 px-3 py-2 font-semibold text-slate-700 hover:bg-slate-200${disabledButtonClass}`} onClick={() => runAction(() => api.post(`/security/files/${file.id}/scan`), (result) => result?.data?.detection ? `Changes found in ${file.relative_path}. Detection log created.` : `No changes found in ${file.relative_path}.`, `Scanning ${file.relative_path}...`)}>Scan</button>
+                          <button disabled={busy} className={`rounded-lg bg-primary px-3 py-2 font-semibold text-white hover:bg-blue-900${disabledButtonClass}`} onClick={() => askConfirm('Recover this file from backup?', `This will restore ${file.relative_path} from the trusted local backup. There may be file or path mismatches if the file was moved, renamed, or backed up before recent structural changes. A full system backup is still recommended before relying on individual file recovery.`, () => api.post(`/security/files/${file.id}/recover`), 'File recovery complete.', 'Recover file')}>Recover</button>
                         </td>
                       </tr>
                     ))}
@@ -777,9 +854,9 @@ const BackupRecovery = () => {
               }
             >
               <div className="mb-4 flex flex-wrap gap-2">
-                <button className="rounded-xl bg-green-600 px-4 py-2 text-sm font-bold text-white" onClick={() => askConfirm('Mark all unresolved incidents as resolved?', 'This will close every open or investigating incident, refresh the clean backup, and delete their quarantine folders. Logs will remain.', () => api.patch('/security/incidents/bulk-action', { action: 'resolve' }), 'All unresolved incidents marked as resolved.', 'Resolve all')}>Mark all as resolved</button>
-                <button className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-white" onClick={() => askConfirm('Mark all unresolved incidents as false positives?', 'This will accept every open or investigating quarantined file as authorized, update the backup, and delete quarantine folders. Logs will remain.', () => api.patch('/security/incidents/bulk-action', { action: 'false_positive' }), 'All unresolved incidents marked as false positive.', 'Mark all False+')}>Mark all as False+</button>
-                <button className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white" onClick={() => askConfirm('Mark all open incidents as investigating?', 'This will move every open incident into investigating status so your team can review them. No files will be restored or deleted.', () => api.patch('/security/incidents/bulk-action', { action: 'investigating' }), 'All open incidents marked as investigating.', 'Mark investigating')}>Mark all as investigating</button>
+                <button disabled={busy} className={`rounded-xl bg-green-600 px-4 py-2 text-sm font-bold text-white${disabledButtonClass}`} onClick={() => askConfirm('Mark all unresolved incidents as resolved?', 'This will close every open or investigating incident and delete their quarantine folders. Logs will remain. The backup will not be changed because resolved incidents keep the current clean files.', () => api.patch('/security/incidents/bulk-action', { action: 'resolve' }), 'All unresolved incidents marked as resolved.', 'Resolve all')}>Mark all as resolved</button>
+                <button disabled={busy} className={`rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-white${disabledButtonClass}`} onClick={() => askConfirm('Mark all unresolved incidents as false positives?', 'This will accept every open or investigating quarantined file as authorized, update the backup, and delete quarantine folders. Logs will remain.', () => api.patch('/security/incidents/bulk-action', { action: 'false_positive' }), 'All unresolved incidents marked as false positive.', 'Mark all False+')}>Mark all as False+</button>
+                <button disabled={busy} className={`rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white${disabledButtonClass}`} onClick={() => askConfirm('Mark all open incidents as investigating?', 'This will move every open incident into investigating status so your team can review them. No files will be restored or deleted.', () => api.patch('/security/incidents/bulk-action', { action: 'investigating' }), 'All open incidents marked as investigating.', 'Mark investigating')}>Mark all as investigating</button>
               </div>
               <div className="space-y-3">
                 {incidents.map((item) => {
@@ -810,10 +887,12 @@ const BackupRecovery = () => {
                           <p className="text-sm text-slate-700"><strong>Behaviors:</strong> {(item.behaviors || []).map(humanize).join(', ') || 'None'}</p>
                           <p className="text-sm text-slate-700"><strong>Affected files:</strong> {(item.affected_files || []).join(', ') || 'None'}</p>
                           <pre className="max-h-64 overflow-auto rounded-xl bg-slate-50 p-4 text-xs text-slate-700">{JSON.stringify(item.changed_lines, null, 2)}</pre>
-                          <div className="flex flex-wrap gap-2">
-                            <button className="rounded-lg bg-green-600 px-3 py-2 text-sm font-semibold text-white hover:bg-green-700" onClick={(event) => { event.stopPropagation(); askConfirm('Resolve this incident?', 'WARDS will keep the restored clean file, update the backup, and delete this incident quarantine folder. The log remains.', () => api.patch(`/security/incidents/${item.id}/resolve`), 'Incident resolved and quarantine cleared.', 'Resolve'); }}>Resolve</button>
-                            <button className="rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-600" onClick={(event) => { event.stopPropagation(); askConfirm('Mark this incident as false positive?', 'WARDS will restore the quarantined file as an authorized change, update the backup, and delete the quarantine folder. The log remains.', () => api.patch(`/security/incidents/${item.id}/false-positive`), 'Incident marked as false positive and authorized file restored. Staying on Security Incidents for review.', 'False+'); }}>False+</button>
-                          </div>
+                          {unresolved && (
+                            <div className="flex flex-wrap gap-2">
+                              <button disabled={busy} className={`rounded-lg bg-green-600 px-3 py-2 text-sm font-semibold text-white hover:bg-green-700${disabledButtonClass}`} onClick={(event) => { event.stopPropagation(); askConfirm('Resolve this incident?', 'WARDS will keep the restored clean file and delete this incident quarantine folder. The log remains. The backup will not be changed.', () => api.patch(`/security/incidents/${item.id}/resolve`), 'Incident resolved and quarantine cleared.', 'Resolve'); }}>Resolve</button>
+                              <button disabled={busy} className={`rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-600${disabledButtonClass}`} onClick={(event) => { event.stopPropagation(); askConfirm('Mark this incident as false positive?', 'WARDS will restore the quarantined file as an authorized change, update the backup, and delete the quarantine folder. The log remains.', () => api.patch(`/security/incidents/${item.id}/false-positive`), 'Incident marked as false positive and authorized file restored. Staying on Security Incidents for review.', 'False+'); }}>False+</button>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -852,21 +931,22 @@ const BackupRecovery = () => {
                   <button disabled={busy} className="w-full rounded-xl bg-primary px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Create manual backup?', 'WARDS will replace the latest trusted local backup with the current monitored files.', () => api.post('/security/backup/manual'), 'Manual local backup completed.', 'Create backup')}>Manual Backup</button>
                   <div className="grid gap-3 md:grid-cols-[1fr_auto]">
                     <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" type="datetime-local" min={toDateInputMin()} value={controls.backupDate} onChange={(e) => setControls({ ...controls, backupDate: e.target.value })} />
-                    <button className="rounded-xl bg-slate-900 px-4 py-2 font-semibold text-white" onClick={() => {
+                    <button disabled={busy} className={`rounded-xl bg-slate-900 px-4 py-2 font-semibold text-white${disabledButtonClass}`} onClick={() => {
                       if (!controls.backupDate || new Date(controls.backupDate) <= new Date()) {
                         setNotice('Choose a future date and time for the scheduled backup.');
                         return;
                       }
-                      runAction(() => api.post('/security/backup/schedule', { frequency: 'weekly', next_run: controls.backupDate }), 'Automatic backup schedule saved.');
+                      runAction(() => api.post('/security/backup/schedule', { frequency: 'weekly', next_run: controls.backupDate }), 'Automatic backup schedule saved.', 'Saving automatic backup schedule...');
                     }}>Schedule Automatic Backups</button>
                   </div>
                   <div className="grid gap-3">
                     <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
                       <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Current backup location</p>
-                      <p className="mt-1 break-all text-sm font-semibold text-slate-800">{controls.backupPath || 'No folder selected yet.'}</p>
+                      <p className="mt-1 break-all text-sm font-semibold text-slate-800">{showBackupPath ? (controls.backupPath || 'No folder selected yet.') : 'File path hidden for security.'}</p>
                     </div>
+                    <button disabled={busy} className={`rounded-xl bg-blue-50 px-4 py-3 font-semibold text-primary${disabledButtonClass}`} onClick={() => setShowBackupPath((value) => !value)}>{showBackupPath ? 'Hide file path' : 'Show file path'}</button>
                     <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={controls.deletePrevious} onChange={(e) => setControls({ ...controls, deletePrevious: e.target.checked })} /> Delete backups from previous folder after changing location</label>
-                    <button className="rounded-xl bg-slate-100 px-4 py-3 font-semibold text-slate-800" onClick={() => openFolderPicker('backup', 'Choose backup location', controls.backupPath)}>Backup Location</button>
+                    <button disabled={busy} className={`rounded-xl bg-slate-100 px-4 py-3 font-semibold text-slate-800${disabledButtonClass}`} onClick={() => openFolderPicker('backup', 'Choose backup location', controls.backupPath)}>Backup Location</button>
                   </div>
                 </div>
               </Section>
@@ -878,10 +958,33 @@ const BackupRecovery = () => {
                     <p className="mt-1 break-all text-sm font-semibold text-slate-800">{controls.monitoredFolder || 'No extra monitored folder selected yet.'}</p>
                   </div>
                   <div className="grid gap-3 md:grid-cols-2">
-                    <button className="rounded-xl bg-primary px-4 py-3 font-semibold text-white" onClick={() => openFolderPicker('add-monitor', 'Add monitored folder', controls.monitoredFolder)}>Add monitored folder</button>
-                    <button className="rounded-xl bg-red-50 px-4 py-3 font-semibold text-red-700" onClick={() => openFolderPicker('remove-monitor', 'Remove monitored folder', controls.monitoredFolder)}>Remove monitored folder</button>
+                    <button disabled={busy} className={`rounded-xl bg-primary px-4 py-3 font-semibold text-white${disabledButtonClass}`} onClick={() => openFolderPicker('add-monitor', 'Add monitored folder', controls.monitoredFolder)}>Add monitored folder</button>
+                    <button disabled={busy} className={`rounded-xl bg-red-50 px-4 py-3 font-semibold text-red-700${disabledButtonClass}`} onClick={() => openFolderPicker('remove-monitor', 'Remove monitored folder', controls.monitoredFolder)}>Remove monitored folder</button>
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="mb-4 flex flex-col gap-3 rounded-xl bg-white p-3 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <p className="text-sm font-bold text-slate-900">Automatic deployment scans</p>
+                        <p className="text-xs leading-5 text-slate-500">Current status: {controls.monitoringEnabled ? 'Enabled' : 'Disabled'}</p>
+                      </div>
+                      <button
+                        disabled={busy}
+                        className={`rounded-xl px-4 py-3 font-semibold text-white ${controls.monitoringEnabled ? 'bg-orange-500' : 'bg-green-600'}${disabledButtonClass}`}
+                        onClick={() => askConfirm(
+                          controls.monitoringEnabled ? 'Turn off automatic scans?' : 'Turn on automatic scans?',
+                          controls.monitoringEnabled
+                            ? 'This is only recommended during development or deployment changes. While automatic scans are off, use manual scanning and manual backups to protect the system.'
+                            : 'Before automatic scans resume, WARDS will first update the trusted backup with the current files. This prevents legitimate development changes made while scans were off from being logged as incidents.',
+                          toggleMonitoring,
+                          controls.monitoringEnabled
+                            ? 'Automatic scans turned off.'
+                            : (result) => result?.data?.backup_refreshed ? 'Automatic scans turned on after refreshing the trusted backup.' : 'Automatic scans turned on.',
+                          controls.monitoringEnabled ? 'Turn off scans' : 'Turn on scans',
+                        )}
+                      >
+                        {controls.monitoringEnabled ? 'Turn Off Automatic Scans' : 'Turn On Automatic Scans'}
+                      </button>
+                    </div>
                     <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
                       <label className="text-sm font-semibold text-slate-700">
                         Automatic file scan interval in seconds
@@ -894,7 +997,7 @@ const BackupRecovery = () => {
                           onChange={(e) => setControls({ ...controls, scanInterval: e.target.value })}
                         />
                       </label>
-                      <button className="rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white" onClick={() => runAction(saveScanInterval, 'Automatic scan interval saved.')}>Save Scan Interval</button>
+                      <button disabled={busy} className={`rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white${disabledButtonClass}`} onClick={() => runAction(saveScanInterval, 'Automatic scan interval saved.', 'Saving automatic scan interval...')}>Save Scan Interval</button>
                     </div>
                     <p className="mt-2 text-xs leading-5 text-slate-500">Default is 30 seconds. Lower values detect faster but use more backend resources.</p>
                   </div>
@@ -908,10 +1011,10 @@ const BackupRecovery = () => {
                       {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((item) => <option key={item} value={item}>{item}</option>)}
                     </select>
                     <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" type="time" value={controls.aiTime} onChange={(e) => setControls({ ...controls, aiTime: e.target.value })} />
-                    <button className="rounded-xl bg-slate-900 px-4 py-2 font-semibold text-white" onClick={() => runAction(() => api.post('/security/ai/schedule', { day: controls.aiDay, time: controls.aiTime }), 'AI retraining schedule saved.')}>Scheduled AI Retrain</button>
+                    <button disabled={busy} className={`rounded-xl bg-slate-900 px-4 py-2 font-semibold text-white${disabledButtonClass}`} onClick={() => runAction(() => api.post('/security/ai/schedule', { day: controls.aiDay, time: controls.aiTime }), 'AI retraining schedule saved.', 'Saving AI retraining schedule...')}>Scheduled AI Retrain</button>
                   </div>
                   <button disabled={busy} className="w-full rounded-xl bg-primary px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Retrain AI model?', 'WARDS will retrain using historical validated behavior and the newest verified activity.', () => api.post('/security/ai/retrain'), 'AI model retrained with historical and recent validated data.', 'Retrain AI')}>Manual AI Retrain</button>
-                  <button className="w-full rounded-xl bg-slate-100 px-4 py-3 font-semibold text-slate-800" onClick={loadWeeklyAiData}>Show this week's data</button>
+                  <button disabled={busy} className={`w-full rounded-xl bg-slate-100 px-4 py-3 font-semibold text-slate-800${disabledButtonClass}`} onClick={loadWeeklyAiData}>Show this week's data</button>
                   {weeklyAiData && (
                     <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                       <p className="font-bold text-slate-900">Behavior data since {formatDateTime(weeklyAiData.since)}</p>
@@ -967,7 +1070,7 @@ const BackupRecovery = () => {
               <Section
                 title="Behavioral Anomaly Rules"
                 actions={(
-                  <button className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white" onClick={() => setShowAiRules((value) => !value)}>
+                  <button disabled={busy} className={`rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white${disabledButtonClass}`} onClick={() => setShowAiRules((value) => !value)}>
                     Manage AI Rules
                   </button>
                 )}
@@ -978,6 +1081,19 @@ const BackupRecovery = () => {
                   </p>
                   {showAiRules ? (
                     <>
+                      <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
+                        <p className="text-sm font-bold text-blue-950">Add approved defacement rule</p>
+                        <p className="mt-1 text-xs leading-5 text-blue-900">Only predefined rules based on the defacement dictionary can be added, so every new rule stays compatible with the AI scoring model and receives initial sample patterns.</p>
+                        <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto]">
+                          <select className="rounded-xl border border-blue-200 px-3 py-2 text-sm" value={controls.aiRuleTemplate} onChange={(e) => setControls({ ...controls, aiRuleTemplate: e.target.value })}>
+                            <option value="">Select an approved rule</option>
+                            {aiRuleTemplates.filter((item) => !item.already_added).map((item) => (
+                              <option key={item.key} value={item.key}>{item.label}</option>
+                            ))}
+                          </select>
+                          <button disabled={busy} className={`rounded-xl bg-primary px-4 py-2 text-sm font-bold text-white${disabledButtonClass}`} onClick={() => runAction(addSelectedAiRule, 'AI rule added with initial samples.', 'Adding approved AI rule...')}>Add AI Rule</button>
+                        </div>
+                      </div>
                       <div className="grid gap-3">
                         {Object.entries(aiRules).map(([key, rule]) => (
                           <div key={key} className="rounded-xl border border-slate-200 p-4">
@@ -1010,7 +1126,7 @@ const BackupRecovery = () => {
                       <button disabled={busy} className="w-full rounded-xl bg-primary px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => runAction(saveAiRules, 'AI behavioral rules saved.')}>Save AI Rules</button>
                     </>
                   ) : (
-                    <button className="rounded-xl bg-blue-50 px-4 py-3 text-sm font-bold text-primary" onClick={() => setShowAiRules(true)}>
+                    <button disabled={busy} className={`rounded-xl bg-blue-50 px-4 py-3 text-sm font-bold text-primary${disabledButtonClass}`} onClick={() => setShowAiRules(true)}>
                       Open Manage AI Rules
                     </button>
                   )}

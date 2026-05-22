@@ -9,6 +9,10 @@ const BranchProtectedRoute = ({ children }) => {
 
   useEffect(() => {
     verifyToken();
+    const interval = window.setInterval(() => {
+      verifyToken();
+    }, 10000);
+    return () => window.clearInterval(interval);
   }, []);
 
   const verifyToken = async () => {
@@ -30,13 +34,30 @@ const BranchProtectedRoute = ({ children }) => {
         }
       });
 
+      const branchAuthenticatedAt = Date.parse(localStorage.getItem('branchAuthenticatedAt') || '');
+      const serverStartedAt = Date.parse(response.data.server_started_at || '');
+      if (serverStartedAt && (!branchAuthenticatedAt || branchAuthenticatedAt <= serverStartedAt)) {
+        setIsAuthenticated(false);
+        localStorage.removeItem('branchToken');
+        localStorage.removeItem('branchUser');
+        localStorage.removeItem('branchAuthenticatedAt');
+        sessionStorage.setItem('redirectAfterLogin', location.pathname);
+        sessionStorage.setItem('loginPortal', 'branch');
+        sessionStorage.setItem('loginMessage', 'Please login again after the backend restarts.');
+        return;
+      }
+
       if (response.data.valid && response.data.user?.role === 'branch') {
         setIsAuthenticated(true);
         localStorage.setItem('branchUser', JSON.stringify(response.data.user));
+        if (!localStorage.getItem('branchAuthenticatedAt')) {
+          localStorage.setItem('branchAuthenticatedAt', new Date().toISOString());
+        }
       } else {
         setIsAuthenticated(false);
         localStorage.removeItem('branchToken');
         localStorage.removeItem('branchUser');
+        localStorage.removeItem('branchAuthenticatedAt');
         sessionStorage.setItem('redirectAfterLogin', location.pathname);
         sessionStorage.setItem('loginPortal', 'branch');
         sessionStorage.setItem('loginMessage', 'Please login with your branch account to continue.');
@@ -45,6 +66,7 @@ const BranchProtectedRoute = ({ children }) => {
       setIsAuthenticated(false);
       localStorage.removeItem('branchToken');
       localStorage.removeItem('branchUser');
+      localStorage.removeItem('branchAuthenticatedAt');
       sessionStorage.setItem('redirectAfterLogin', location.pathname);
       sessionStorage.setItem('loginPortal', 'branch');
       sessionStorage.setItem('loginMessage', 'Please login with your branch account to continue.');

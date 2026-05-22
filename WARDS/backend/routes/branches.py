@@ -34,6 +34,8 @@ from utils.field_crypto import apply_invite_security, find_active_invite_by_emai
 from middleware.admin_auth import get_current_admin_user, require_main_admin
 from services.email_service import send_branch_access_email, smtp_is_configured
 from utils.field_crypto import build_redacted_text, get_decrypted_or_raw, set_encrypted_hash_companions
+from routes.branch_auth_v2 import create_access_token as create_branch_access_token
+from routes.branch_auth_v2 import get_branch_dashboard_url, get_session_timeout_minutes
 from utils.security_validation import (
     ensure_branch_name_is_unique,
     ensure_email_is_unique,
@@ -242,6 +244,91 @@ async def get_branch(branch_id: int, db: Session = Depends(get_db)):
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
     return serialize_branch(branch, db)
+
+
+@router.post("/{branch_id}/superadmin-access")
+async def create_superadmin_branch_session(
+    branch_id: int,
+    current_user: Admin = Depends(require_main_admin()),
+    db: Session = Depends(get_db),
+):
+    if current_user.role != "superadmin":
+        raise HTTPException(status_code=403, detail="Only the Superadmin account can manage a branch directly.")
+
+    branch = db.query(Branch).filter(Branch.id == branch_id).first()
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+
+    staff = (
+        db.query(BranchStaff)
+        .filter(BranchStaff.branch_id == branch_id, BranchStaff.role == "branch_admin", BranchStaff.status == "Active")
+        .order_by(BranchStaff.id.asc())
+        .first()
+    )
+    if not staff:
+        raise HTTPException(status_code=404, detail="This branch does not have an active branch admin account to manage.")
+
+    window_accounts = (
+        db.query(BranchStaff)
+        .filter(
+            BranchStaff.branch_id == branch_id,
+            BranchStaff.account_scope == "queue_window",
+            BranchStaff.status == "Active",
+        )
+        .order_by(BranchStaff.service_window.asc(), BranchStaff.id.asc())
+        .all()
+    )
+
+    access_token = create_branch_access_token(
+        data={
+            "sub": staff.username,
+            "role": "branch",
+            "internal_role": staff.role,
+            "branch_id": staff.branch_id,
+            "account_scope": staff.account_scope or "full_branch",
+            "service_window": staff.service_window,
+            "user_id": staff.id,
+            "type": "branch",
+            "managed_by": "superadmin",
+        },
+        expires_delta=timedelta(minutes=get_session_timeout_minutes(db)),
+    )
+    db.add(ActivityLog(
+        action="Superadmin Branch Access",
+        user=current_user.username,
+        details=f"Superadmin opened branch dashboard for {get_decrypted_or_raw(branch, 'name') or branch.name}",
+        type="security",
+    ))
+    db.commit()
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": staff.id,
+            "username": "superadmin",
+            "email": staff.email,
+            "full_name": "superadmin",
+            "role": "branch",
+            "internal_role": staff.role,
+            "branch_id": staff.branch_id,
+            "dashboard_url": get_branch_dashboard_url(staff),
+            "status": staff.status,
+            "account_scope": staff.account_scope or "full_branch",
+            "service_window": staff.service_window,
+            "superadmin_managed_branch": True,
+            "window_accounts": [
+                {
+                    "id": account.id,
+                    "username": account.username,
+                    "full_name": account.full_name,
+                    "service_window": account.service_window,
+                    "window_label": SERVICE_WINDOW_LABELS.get(account.service_window, account.service_window),
+                }
+                for account in window_accounts
+            ],
+        },
+    }
 
 @router.post("/")
 async def create_branch(

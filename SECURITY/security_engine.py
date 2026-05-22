@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable
 
+import requests
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -75,6 +76,11 @@ SUSPICIOUS_PATTERNS = {
     "defacement_keywords": ("hacked", "defaced", "owned", "pwned"),
     "credential_access": ("password=", "token=", "secret=", "api_key"),
     "sql_injection": ("' or '1'='1", "union select", "drop table", "--"),
+    "ransom_note_keywords": ("your files have been encrypted", "pay ransom", "bitcoin wallet", "decrypt key"),
+    "malicious_redirect": ("window.location=", "location.href=", "http-equiv=\"refresh\"", "meta refresh"),
+    "destructive_script": ("localstorage.clear", "sessionstorage.clear", "delete all", "removechild(document.body"),
+    "phishing_form": ("verify your password", "enter your password", "account suspended", "login again"),
+    "style_takeover": ("position: fixed", "z-index: 2147483647", "filter: blur", "pointer-events: none"),
 }
 
 BEHAVIOR_LABELS = {
@@ -88,6 +94,11 @@ BEHAVIOR_LABELS = {
     "defacement_keywords": "Defacement wording",
     "credential_access": "Credential-like content",
     "sql_injection": "SQL injection pattern",
+    "ransom_note_keywords": "Ransom note wording",
+    "malicious_redirect": "Malicious redirect pattern",
+    "destructive_script": "Destructive browser script",
+    "phishing_form": "Phishing wording",
+    "style_takeover": "Visual style takeover",
 }
 
 DEFAULT_AI_RULES = {
@@ -184,6 +195,64 @@ DEFAULT_AI_RULES = {
     },
 }
 
+APPROVED_ADDITIONAL_AI_RULES = {
+    "ransom_note_keywords": {
+        "label": "Ransom Note Wording",
+        "description": "Detects ransom/extortion wording commonly used in defacement pages.",
+        "enabled": True,
+        "weight": 0.28,
+        "config": {"patterns": list(SUSPICIOUS_PATTERNS["ransom_note_keywords"])},
+        "initial_samples": [
+            "Your files have been encrypted. Pay ransom to recover access.",
+            "Send payment to this bitcoin wallet to receive the decrypt key.",
+        ],
+    },
+    "malicious_redirect": {
+        "label": "Malicious Redirect",
+        "description": "Detects forced redirects away from WARDS pages.",
+        "enabled": True,
+        "weight": 0.24,
+        "config": {"patterns": list(SUSPICIOUS_PATTERNS["malicious_redirect"])},
+        "initial_samples": [
+            "window.location='https://attacker.example/login'",
+            "<meta http-equiv=\"refresh\" content=\"0;url=https://attacker.example\">",
+        ],
+    },
+    "destructive_script": {
+        "label": "Destructive Browser Script",
+        "description": "Detects browser-side destructive or disruptive script patterns.",
+        "enabled": True,
+        "weight": 0.22,
+        "config": {"patterns": list(SUSPICIOUS_PATTERNS["destructive_script"])},
+        "initial_samples": [
+            "localStorage.clear(); sessionStorage.clear();",
+            "document.body.removeChild(document.body.firstChild);",
+        ],
+    },
+    "phishing_form": {
+        "label": "Phishing Wording",
+        "description": "Detects fake login and account-warning wording.",
+        "enabled": True,
+        "weight": 0.2,
+        "config": {"patterns": list(SUSPICIOUS_PATTERNS["phishing_form"])},
+        "initial_samples": [
+            "Your account is suspended. Enter your password to continue.",
+            "Verify your password to restore access.",
+        ],
+    },
+    "style_takeover": {
+        "label": "Visual Style Takeover",
+        "description": "Detects aggressive CSS overlays that obscure the legitimate WARDS UI.",
+        "enabled": True,
+        "weight": 0.18,
+        "config": {"patterns": list(SUSPICIOUS_PATTERNS["style_takeover"])},
+        "initial_samples": [
+            "body::before { position: fixed; z-index: 2147483647; }",
+            "* { filter: blur(8px); pointer-events: none; }",
+        ],
+    },
+}
+
 
 @dataclass
 class AIPrediction:
@@ -193,8 +262,30 @@ class AIPrediction:
     basis: str
 
 
+_NETWORK_TIME_CACHE = {"value": None, "fetched_at": 0.0, "source": "local_utc"}
+
+
 def now_utc() -> datetime:
+    cache_age = time.time() - float(_NETWORK_TIME_CACHE.get("fetched_at") or 0)
+    if _NETWORK_TIME_CACHE.get("value") and cache_age < 60:
+        return _NETWORK_TIME_CACHE["value"] + timedelta(seconds=cache_age)
+    try:
+        response = requests.get("https://worldtimeapi.org/api/timezone/Etc/UTC", timeout=2)
+        response.raise_for_status()
+        payload = response.json()
+        raw_value = payload.get("utc_datetime") or payload.get("datetime")
+        if raw_value:
+            online_time = datetime.fromisoformat(raw_value.replace("Z", "+00:00")).replace(tzinfo=None)
+            _NETWORK_TIME_CACHE.update({"value": online_time, "fetched_at": time.time(), "source": "online_utc"})
+            return online_time
+    except Exception:
+        pass
+    _NETWORK_TIME_CACHE.update({"value": None, "fetched_at": time.time(), "source": "local_utc_fallback"})
     return datetime.utcnow()
+
+
+def time_source_label() -> str:
+    return str(_NETWORK_TIME_CACHE.get("source") or "local_utc")
 
 
 def json_loads(value, default):
@@ -249,12 +340,22 @@ def is_monitorable(path: Path) -> bool:
 
 def iter_monitorable_files(roots: dict[str, Path] | None = None) -> Iterable[tuple[str, Path]]:
     roots = roots or MONITORED_ROOTS
+    excluded = {item.lower() for item in DEFAULT_EXCLUDED_DIRS}
     for root_name, root_path in roots.items():
         if not root_path.exists():
             continue
-        for path in root_path.rglob("*"):
-            if is_monitorable(path):
-                yield root_name, path.resolve()
+        for current_root, dirnames, filenames in os.walk(root_path):
+            dirnames[:] = [
+                dirname for dirname in dirnames
+                if dirname.lower() not in excluded and not dirname.startswith(".")
+            ]
+            current_path = Path(current_root)
+            if {part.lower() for part in current_path.parts}.intersection(excluded):
+                continue
+            for filename in filenames:
+                path = current_path / filename
+                if path.suffix.lower() in MONITORED_SUFFIXES and is_monitorable(path):
+                    yield root_name, path.resolve()
 
 
 def get_setting(db: Session, key: str, default: str) -> str:
@@ -297,18 +398,41 @@ def seed_settings(db: Session) -> None:
             changed = True
     if changed:
         db.commit()
+    backup_location = Path(get_setting(db, "backup_location", str(DEFAULT_BACKUP_ROOT)))
+    prune_all_backup_types(backup_location, keep=3)
 
 
 def get_ai_rules(db: Session) -> dict:
     saved = json_loads(get_setting(db, "ai_rules", json_dumps(DEFAULT_AI_RULES)), {})
     merged = {}
-    for key, default in DEFAULT_AI_RULES.items():
+    approved = {**DEFAULT_AI_RULES, **APPROVED_ADDITIONAL_AI_RULES}
+    for key, default in approved.items():
         current = saved.get(key, {}) if isinstance(saved, dict) else {}
-        merged[key] = {
-            **default,
-            **current,
-            "config": {**default.get("config", {}), **current.get("config", {})},
-        }
+        if key in DEFAULT_AI_RULES or current:
+            merged[key] = {
+                **default,
+                **current,
+                "config": {**default.get("config", {}), **current.get("config", {})},
+            }
+    return merged
+
+
+def available_ai_rule_templates(db: Session) -> list[dict]:
+    current = get_ai_rules(db)
+    return [
+        {"key": key, **value, "already_added": key in current}
+        for key, value in APPROVED_ADDITIONAL_AI_RULES.items()
+    ]
+
+
+def add_ai_rule(db: Session, rule_key: str, updated_by: str) -> dict:
+    if rule_key not in APPROVED_ADDITIONAL_AI_RULES:
+        raise ValueError("Choose a rule from the approved defacement rule list.")
+    merged = get_ai_rules(db)
+    if rule_key in merged:
+        return merged
+    merged[rule_key] = APPROVED_ADDITIONAL_AI_RULES[rule_key]
+    set_setting(db, "ai_rules", json_dumps(merged), updated_by)
     return merged
 
 
@@ -354,6 +478,50 @@ def latest_backup_root(db: Session) -> Path | None:
 
 def backup_file_path(backup_root: Path, relative_path: str) -> Path:
     return backup_root / relative_path.replace("/", os.sep)
+
+
+def copy_into_backup(source: Path, target: Path, previous_source: Path | None = None, can_reuse_previous: bool = False) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if can_reuse_previous and previous_source and previous_source.exists():
+        try:
+            os.link(previous_source, target)
+            return
+        except Exception:
+            try:
+                shutil.copy2(previous_source, target)
+                return
+            except Exception:
+                pass
+    shutil.copy2(source, target)
+
+
+def prune_backup_type(backup_location: Path, label: str, keep: int = 3) -> None:
+    try:
+        backups = sorted(
+            [
+                item for item in backup_location.iterdir()
+                if item.is_dir() and item.name.startswith(f"{label}_backup_")
+            ],
+            key=lambda item: item.name,
+            reverse=True,
+        )
+        for old_backup in backups[keep:]:
+            shutil.rmtree(old_backup, ignore_errors=True)
+    except Exception:
+        pass
+
+
+def prune_all_backup_types(backup_location: Path, keep: int = 3) -> None:
+    try:
+        labels = {
+            item.name.split("_backup_", 1)[0]
+            for item in backup_location.iterdir()
+            if item.is_dir() and "_backup_" in item.name
+        }
+        for label in labels:
+            prune_backup_type(backup_location, label, keep=keep)
+    except Exception:
+        pass
 
 
 def register_initial_files(db: Session, ensure_backup: bool = True) -> int:
@@ -518,6 +686,9 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
         risk += weight("suspicious_pattern_score", 0.32)
     if enabled("suspicious_pattern_score") and ("credential_access" in flags or "sql_injection" in flags):
         risk += 0.18
+    for additional_rule in APPROVED_ADDITIONAL_AI_RULES:
+        if enabled(additional_rule) and additional_rule in flags:
+            risk += weight(additional_rule, float(APPROVED_ADDITIONAL_AI_RULES[additional_rule].get("weight", 0.18)))
     size_delta = abs(len(new_content.encode("utf-8")) - len(old_content.encode("utf-8")))
     if enabled("file_size_change") and size_delta > int(config("file_size_change").get("large_delta_bytes", 2000)):
         risk += weight("file_size_change", 0.12)
@@ -875,6 +1046,7 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
     seed_settings(db)
     register_count = register_initial_files(db, ensure_backup=False)
     backup_location = Path(get_setting(db, "backup_location", str(DEFAULT_BACKUP_ROOT)))
+    previous_backup_root = latest_backup_root(db)
     timestamp = now_utc().strftime("%Y%m%d_%H%M%S")
     backup_root = backup_location / f"{label}_backup_{timestamp}"
     started = time.time()
@@ -890,9 +1062,14 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
                 continue
             relative = entry.relative_path or safe_rel(path)
             target = backup_file_path(backup_root, relative)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(path, target)
             file_hash = sha256_file(path)
+            previous_source = backup_file_path(previous_backup_root, relative) if previous_backup_root else None
+            copy_into_backup(
+                path,
+                target,
+                previous_source=previous_source,
+                can_reuse_previous=bool(previous_source and entry.baseline_hash == file_hash),
+            )
             entry.baseline_hash = file_hash
             entry.current_hash = file_hash
             entry.status = "clean"
@@ -906,6 +1083,7 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
         event.recovery_duration_ms = int((time.time() - started) * 1000)
         event.summary = f"Local backup completed for WARDS and OCR ({register_count} new files registered)."
         set_setting(db, "latest_backup_path", str(backup_root), str(initiated_by) if initiated_by else "system")
+        prune_backup_type(backup_location, label, keep=3)
     except Exception as exc:
         event.status = "failed"
         event.error_message = str(exc)
@@ -969,7 +1147,6 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int) -> SecurityIn
     cleanup_quarantine_paths(json_loads(incident.quarantine_paths_json, []))
     db.add(incident)
     db.commit()
-    create_manual_backup(db, initiated_by=admin_id, label="post_resolve")
     db.refresh(incident)
     return incident
 
@@ -1030,11 +1207,17 @@ def bulk_update_incidents(db: Session, action: str, admin_id: int) -> dict:
 
 
 def dashboard_payload(db: Session) -> dict:
-    register_initial_files(db)
-    files = db.query(SecurityMonitoredFile).all()
+    monitored_files_count = db.query(SecurityMonitoredFile).count()
+    file_attention_count = db.query(SecurityMonitoredFile).filter(
+        SecurityMonitoredFile.status.in_(["modified", "missing", "compromised"])
+    ).count()
     incidents = db.query(SecurityIncident).filter(SecurityIncident.status.in_(["open", "investigating"])).all()
+    detection_attention_count = db.query(SecurityDetectionEvent).filter(SecurityDetectionEvent.is_legitimate == False).count()  # noqa: E712
+    recovery_attention_count = db.query(SecurityRecoveryEvent).filter(SecurityRecoveryEvent.status.in_(["failed", "reverted"])).count()
     last_detection = db.query(SecurityDetectionEvent).order_by(SecurityDetectionEvent.detected_at.desc()).first()
     last_scan_at = get_setting(db, "last_scan_at", "")
+    backup_location = get_setting(db, "backup_location", str(DEFAULT_BACKUP_ROOT))
+    latest_backup = latest_backup_root(db)
     severity = {key: 0 for key in ["info", "low", "medium", "high", "critical"]}
     attack_types = {}
     behaviors = {}
@@ -1051,9 +1234,10 @@ def dashboard_payload(db: Session) -> dict:
         status = "Compromised"
     elif incidents:
         status = "At Risk"
+    monitoring_enabled = (get_setting(db, "monitoring_enabled", "true") or "true").lower() == "true"
     return {
         "system_status": status,
-        "monitored_files": len(files),
+        "monitored_files": monitored_files_count,
         "active_incidents": len(incidents),
         "last_scan": last_scan_at or (last_detection.detected_at.isoformat() if last_detection else None),
         "next_scheduled_backup": next_backup,
@@ -1065,14 +1249,24 @@ def dashboard_payload(db: Session) -> dict:
             "attacks": summarize_chart("attacks", attack_types),
             "behaviors": summarize_chart("behaviors", behaviors),
         },
+        "notification_counts": {
+            "dashboard": len(incidents),
+            "files": file_attention_count,
+            "detections": detection_attention_count,
+            "recoveries": recovery_attention_count,
+            "incidents": len(incidents),
+        },
         "health": {
-            "wazuh_agent": "configured" if get_setting(db, "wazuh_enabled", "false") == "true" else "optional - not enabled",
+            "wazuh_agent": "Active" if monitoring_enabled else "Inactive",
             "database": "healthy",
-            "backup_location": get_setting(db, "backup_location", str(DEFAULT_BACKUP_ROOT)),
+            "backup_status": "Active" if latest_backup and Path(backup_location).exists() else "Inactive",
+            "backup_location": backup_location,
             "ai_model": "trained" if MODEL_STATE_PATH.exists() else "bootstrap-ready",
             "ai_rules_enabled": sum(1 for item in get_ai_rules(db).values() if item.get("enabled", True)),
             "deployment_mode": get_setting(db, "deployment_mode", "development"),
+            "monitoring_enabled": "true" if monitoring_enabled else "false",
             "scan_interval_seconds": get_setting(db, "scan_interval_seconds", "30"),
+            "time_source": time_source_label(),
         },
     }
 

@@ -81,6 +81,7 @@ export const persistSession = ({ portal, access_token, user }) => {
   if (portal === 'branch') {
     localStorage.setItem('branchToken', access_token);
     localStorage.setItem('branchUser', JSON.stringify(user));
+    localStorage.setItem('branchAuthenticatedAt', new Date().toISOString());
     localStorage.removeItem('adminToken');
     localStorage.removeItem('adminUser');
     localStorage.removeItem('userToken');
@@ -90,6 +91,7 @@ export const persistSession = ({ portal, access_token, user }) => {
 
   localStorage.setItem('userToken', access_token);
   localStorage.setItem('user', JSON.stringify(user));
+  localStorage.setItem('userAuthenticatedAt', new Date().toISOString());
   localStorage.removeItem('adminToken');
   localStorage.removeItem('adminUser');
   localStorage.removeItem('branchToken');
@@ -111,9 +113,11 @@ export const clearSession = (portal) => {
   if (portal === 'branch') {
     localStorage.removeItem('branchToken');
     localStorage.removeItem('branchUser');
+    localStorage.removeItem('branchAuthenticatedAt');
     return;
   }
 
   localStorage.removeItem('userToken');
   localStorage.removeItem('user');
+  localStorage.removeItem('userAuthenticatedAt');
 };

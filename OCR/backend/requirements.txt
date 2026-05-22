@@ -15,4 +15,4 @@ passlib[bcrypt]==1.7.4
 # OCR / Image processing
 Pillow==10.2.0
 pandas==2.2.0
-unstract-llmwhisperer==0.6.3
+llmwhisperer-client>=2.3.1,<2.4.0

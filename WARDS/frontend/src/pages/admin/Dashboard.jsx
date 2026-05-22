@@ -176,6 +176,10 @@ const Dashboard = () => {
   const getDashboardTitle = () => {
     if (!currentUser) return 'Dashboard';
 
+    if (effectiveRole === 'superadmin') {
+      return 'Superadmin Dashboard';
+    }
+
     if (effectiveRole === 'main_admin' || effectiveRole === 'admin') {
       return 'Main Office Dashboard';
     }
@@ -221,17 +225,17 @@ const Dashboard = () => {
     <div>
       <div className="mb-8">
         <WardsPageHero
-          eyebrow={effectiveRole === 'main_admin' ? 'Main Admin Dashboard' : 'Branch Dashboard'}
+          eyebrow={effectiveRole === 'main_admin' || effectiveRole === 'superadmin' ? (effectiveRole === 'superadmin' ? 'Superadmin Dashboard' : 'Main Admin Dashboard') : 'Branch Dashboard'}
           title={getDashboardTitle()}
           subtitle={
-            effectiveRole === 'main_admin'
+            effectiveRole === 'main_admin' || effectiveRole === 'superadmin'
               ? 'Monitor branch activity, apply operational filters, and review live system performance from the central dashboard.'
               : 'Track branch performance, service activity, and operational updates from one consolidated dashboard.'
           }
           className="mb-6"
         />
 
-        {effectiveRole === 'main_admin' ? (
+        {effectiveRole === 'main_admin' || effectiveRole === 'superadmin' ? (
           <div className="mb-6 rounded-lg bg-white p-4 shadow">
             <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
               <div>

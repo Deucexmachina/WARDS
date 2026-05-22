@@ -1,4 +1,5 @@
 import { BrowserRouter as Router, Navigate, Routes, Route } from 'react-router-dom'
+import { Suspense, lazy } from 'react'
 import PublicLayout from './layouts/PublicLayout'
 import AdminLayout from './layouts/AdminLayout'
 import BranchLayout from './layouts/BranchLayout'
@@ -43,7 +44,6 @@ import Announcements from './pages/admin/Announcements'
 import Memos from './pages/admin/Memos'
 import Alerts from './pages/admin/Alerts'
 import ActivityLogs from './pages/admin/ActivityLogs'
-import BackupRecovery from './pages/admin/BackupRecovery'
 import SecurityBackupLogin from './pages/admin/SecurityBackupLogin'
 import Policies from './pages/admin/Policies'
 import Settings from './pages/admin/Settings'
@@ -53,6 +53,8 @@ import ReceiptManagement from './pages/admin/ReceiptManagement'
 import PaymentManagement from './pages/admin/PaymentManagement'
 import DiscrepancyReports from './pages/admin/DiscrepancyReports'
 import TaxAssessment from './pages/admin/TaxAssessment'
+
+const BackupRecovery = lazy(() => import('./pages/admin/BackupRecovery'))
 
 function App() {
   return (
@@ -106,7 +108,7 @@ function App() {
         {/* Admin Portal */}
         <Route path="/admin/login" element={<Navigate to="/login" replace />} />
         <Route path="/admin/backup/login" element={<SecurityBackupLogin />} />
-        <Route path="/admin/backup" element={<SecurityProtectedRoute><BackupRecovery /></SecurityProtectedRoute>} />
+        <Route path="/admin/backup" element={<SecurityProtectedRoute><Suspense fallback={<div className="flex h-screen items-center justify-center text-slate-600">Loading Security Dashboard...</div>}><BackupRecovery /></Suspense></SecurityProtectedRoute>} />
         <Route path="/admin-dashboard" element={<ProtectedRoute><Navigate to="/admin" replace /></ProtectedRoute>} />
         <Route path="/admin" element={<ProtectedRoute><AdminLayout /></ProtectedRoute>}>
           <Route index element={<Dashboard />} />

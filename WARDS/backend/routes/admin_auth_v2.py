@@ -177,7 +177,7 @@ def save_mfa_secret(db: Session, username: str, secret: str):
     db.commit()
 
 def public_role(role: str) -> str:
-    return "admin" if role in {"admin", "main_admin"} else role
+    return "admin" if role in {"admin", "main_admin", "superadmin"} else role
 
 def get_current_admin_from_token(request: Request, db: Session) -> Admin:
     auth_header = request.headers.get("Authorization")

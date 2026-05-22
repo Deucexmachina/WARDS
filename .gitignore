@@ -27,6 +27,7 @@
 # Security runtime artifacts
 SECURITY/local_backups/
 SECURITY/BACKUPS/
+SECURITY/NEWBACKUPS/
 QUARANTINE/
 DEFACEMENT/attack_backups/
 

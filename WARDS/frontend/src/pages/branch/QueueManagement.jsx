@@ -1,4 +1,4 @@
-import { Navigate, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { useEffect, useMemo, useState } from 'react';
 import api from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
@@ -26,6 +26,8 @@ const queueWindowLabels = {
   RPT: 'RPT',
   BUSINESS: 'BT',
   MISC: 'MISC',
+  QW4: 'Queue Window 4',
+  QW5: 'Queue Window 5',
 };
 
 const parseDate = (value) => {
@@ -176,6 +178,7 @@ const QueueSection = ({
   onAction,
   onDeleteRequest,
   now,
+  skippedOnly = false,
 }) => {
   const paginated = useMemo(() => paginateQueues(queues, page), [queues, page]);
 
@@ -251,27 +254,39 @@ const QueueSection = ({
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex flex-wrap gap-2">
-                          <button
-                            onClick={() => onAction('serve', queue)}
-                            disabled={queue.status !== 'called' || queueUnavailable}
-                            className="rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white transition hover:bg-blue-700 disabled:opacity-40"
-                          >
-                            Serve
-                          </button>
-                          <button
-                            onClick={() => onAction('skip', queue)}
-                            disabled={!['called', 'serving'].includes(queue.status) || queueUnavailable}
-                            className="rounded-lg bg-slate-600 px-3 py-1.5 font-semibold text-white transition hover:bg-slate-700 disabled:opacity-40"
-                          >
-                            Skip
-                          </button>
-                          <button
-                            onClick={() => onAction('complete', queue)}
-                            disabled={queue.status !== 'serving' || queueUnavailable}
-                            className="rounded-lg bg-emerald-600 px-3 py-1.5 font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-40"
-                          >
-                            Complete
-                          </button>
+                          {skippedOnly || derivedStatus === 'skipped' ? (
+                            <button
+                              onClick={() => onAction('recall-skipped', queue)}
+                              disabled={queueUnavailable}
+                              className="rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white transition hover:bg-blue-700 disabled:opacity-40"
+                            >
+                              Pull Up
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => onAction('serve', queue)}
+                                disabled={queue.status !== 'called' || queueUnavailable}
+                                className="rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white transition hover:bg-blue-700 disabled:opacity-40"
+                              >
+                                Serve
+                              </button>
+                              <button
+                                onClick={() => onAction('skip', queue)}
+                                disabled={!['called', 'serving'].includes(queue.status) || queueUnavailable}
+                                className="rounded-lg bg-slate-600 px-3 py-1.5 font-semibold text-white transition hover:bg-slate-700 disabled:opacity-40"
+                              >
+                                Skip
+                              </button>
+                              <button
+                                onClick={() => onAction('complete', queue)}
+                                disabled={queue.status !== 'serving' || queueUnavailable}
+                                className="rounded-lg bg-emerald-600 px-3 py-1.5 font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-40"
+                              >
+                                Complete
+                              </button>
+                            </>
+                          )}
                           <button
                             onClick={() => onDeleteRequest(queue)}
                             disabled={queueUnavailable}
@@ -412,11 +427,12 @@ const QueueHistorySection = ({
 const QueueManagement = () => {
   const { branchSlug } = useParams();
   const branchUser = JSON.parse(localStorage.getItem('branchUser') || '{}');
+  const isSuperadminManagedBranch = Boolean(branchUser?.superadmin_managed_branch);
   const isQueueWindowAccount = branchUser?.account_scope === 'queue_window';
-  const isBranchAdmin = branchUser?.role === 'branch_admin' || branchUser?.internal_role === 'branch_admin';
+  const isBranchAdmin = !isSuperadminManagedBranch && (branchUser?.role === 'branch_admin' || branchUser?.internal_role === 'branch_admin');
   const assignedWindowLabel = branchUser?.service_window === 'BUSINESS' ? 'BT' : (branchUser?.service_window || '');
   const assignedWindowKey = branchUser?.service_window || 'MISC';
-  const branchBasePath = branchSlug ? `/branch-dashboard/${branchSlug}` : '/login';
+  const managedWindowAccounts = Array.isArray(branchUser?.window_accounts) ? branchUser.window_accounts : [];
   const [queues, setQueues] = useState([]);
   const [queueHistory, setQueueHistory] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -432,6 +448,7 @@ const QueueManagement = () => {
   const [dateFilter, setDateFilter] = useState('');
   const [timeSlotFilter, setTimeSlotFilter] = useState('');
   const [serviceTypeFilter, setServiceTypeFilter] = useState('all');
+  const [windowFilter, setWindowFilter] = useState('all');
   const [queueNumberFilter, setQueueNumberFilter] = useState('');
   const [searchFilter, setSearchFilter] = useState('');
   const [historySearch, setHistorySearch] = useState({
@@ -441,6 +458,7 @@ const QueueManagement = () => {
   });
   const [immediatePage, setImmediatePage] = useState(1);
   const [appointmentPage, setAppointmentPage] = useState(1);
+  const [skippedPage, setSkippedPage] = useState(1);
 
   const fetchQueues = async () => {
     try {
@@ -469,7 +487,25 @@ const QueueManagement = () => {
   useEffect(() => {
     setImmediatePage(1);
     setAppointmentPage(1);
-  }, [queueTypeFilter, statusFilter, dateFilter, timeSlotFilter, serviceTypeFilter, queueNumberFilter, searchFilter]);
+    setSkippedPage(1);
+  }, [queueTypeFilter, statusFilter, dateFilter, timeSlotFilter, serviceTypeFilter, windowFilter, queueNumberFilter, searchFilter]);
+
+  const windowOptions = useMemo(() => {
+    const fromAccounts = managedWindowAccounts.map((account) => ({
+      key: account.service_window,
+      label: account.window_label || queueWindowLabels[account.service_window] || account.service_window,
+      username: account.username,
+    })).filter((item) => item.key);
+    const seen = new Set(fromAccounts.map((item) => item.key));
+    queues.forEach((queue) => {
+      const key = queue.service_window || 'MISC';
+      if (!seen.has(key)) {
+        seen.add(key);
+        fromAccounts.push({ key, label: queueWindowLabels[key] || key, username: '' });
+      }
+    });
+    return fromAccounts;
+  }, [managedWindowAccounts, queues]);
 
   const openDeleteModal = (queue) => {
     setQueueToDelete(queue);
@@ -502,6 +538,8 @@ const QueueManagement = () => {
     try {
       if (action === 'call-next') {
         await api.post('/branch/queue/call-next');
+      } else if (action === 'delete-skipped') {
+        await api.delete('/branch/queue/skipped');
       } else if (action === 'delete') {
         setDeletingQueueId(queue.id);
         await api.delete(`/branch/queue/${queue.id}`);
@@ -510,6 +548,8 @@ const QueueManagement = () => {
         await api.delete(`/branch/queue/history/${queue.id}`);
       } else if (action === 'complete') {
         await api.post(`/branch/queue/${queue.id}/complete`);
+      } else if (action === 'recall-skipped') {
+        await api.post(`/branch/queue/${queue.id}/recall-skipped`);
       } else {
         await api.post(`/branch/queue/${queue.id}/${action}`);
       }
@@ -574,6 +614,9 @@ const QueueManagement = () => {
       if (serviceTypeFilter !== 'all' && queue.service_type !== serviceTypeFilter) {
         return false;
       }
+      if (windowFilter !== 'all' && (queue.service_window || 'MISC') !== windowFilter) {
+        return false;
+      }
       if (queueNumberFilter && !(queue.queue_number || '').toLowerCase().includes(queueNumberFilter.toLowerCase())) {
         return false;
       }
@@ -582,14 +625,18 @@ const QueueManagement = () => {
       }
       return true;
     });
-  }, [queues, now, queueTypeFilter, statusFilter, dateFilter, timeSlotFilter, serviceTypeFilter, queueNumberFilter, searchFilter]);
+  }, [queues, now, queueTypeFilter, statusFilter, dateFilter, timeSlotFilter, serviceTypeFilter, windowFilter, queueNumberFilter, searchFilter]);
 
   const immediateQueues = useMemo(
-    () => sortQueues(filteredQueues.filter((queue) => queue.queue_type !== 'appointment'), now),
+    () => sortQueues(filteredQueues.filter((queue) => queue.queue_type !== 'appointment' && getDerivedStatus(queue, now) !== 'skipped'), now),
     [filteredQueues, now],
   );
   const appointmentQueues = useMemo(
-    () => sortQueues(filteredQueues.filter((queue) => queue.queue_type === 'appointment'), now),
+    () => sortQueues(filteredQueues.filter((queue) => queue.queue_type === 'appointment' && getDerivedStatus(queue, now) !== 'skipped'), now),
+    [filteredQueues, now],
+  );
+  const skippedQueues = useMemo(
+    () => sortQueues(filteredQueues.filter((queue) => getDerivedStatus(queue, now) === 'skipped'), now),
     [filteredQueues, now],
   );
 
@@ -657,6 +704,7 @@ const QueueManagement = () => {
     appointment: appointmentQueues.length,
     active: queues.filter((queue) => ['waiting', 'called', 'serving'].includes((queue.status || '').toLowerCase())).length,
     scheduled: queues.filter((queue) => getDerivedStatus(queue, now) === 'appointment').length,
+    skipped: queues.filter((queue) => getDerivedStatus(queue, now) === 'skipped').length,
   }), [immediateQueues.length, appointmentQueues.length, queues, now]);
 
   if (loading) {
@@ -670,10 +718,6 @@ const QueueManagement = () => {
     );
   }
 
-  if (isBranchAdmin) {
-    return <Navigate to={branchBasePath} replace />;
-  }
-
   return (
     <div className="space-y-6">
       <WardsPageHero
@@ -682,6 +726,8 @@ const QueueManagement = () => {
         subtitle={
           isQueueWindowAccount && assignedWindowLabel
             ? `Manage only the ${assignedWindowLabel} service window queue for this branch.`
+            : isBranchAdmin
+              ? 'Review skipped queue records and pull taxpayers back to the current window when they return.'
             : 'Manage immediate and appointment queues in separate sections with quick status visibility, search tools, and clean paging.'
         }
       />
@@ -693,6 +739,32 @@ const QueueManagement = () => {
             Other branch modules are hidden, and queue actions are limited to this assigned service window.
           </p>
         </div>
+      ) : null}
+
+      {isSuperadminManagedBranch ? (
+        <section className="rounded-2xl border border-purple-200 bg-purple-50 p-5 text-purple-950 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-purple-500">Window Staff Accounts</p>
+              <h2 className="mt-2 text-xl font-bold">Superadmin Window Queue Selector</h2>
+              <p className="mt-1 text-sm text-purple-800">
+                Select a generated window staff account to focus this branch queue view on that service window.
+              </p>
+            </div>
+            <select
+              value={windowFilter}
+              onChange={(event) => setWindowFilter(event.target.value)}
+              className="min-w-[18rem] rounded-xl border border-purple-200 bg-white px-4 py-3 text-sm font-semibold text-purple-950 outline-none"
+            >
+              <option value="all">All window staff queues</option>
+              {windowOptions.map((account) => (
+                <option key={account.key} value={account.key}>
+                  {account.label}{account.username ? ` - ${account.username}` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+        </section>
       ) : null}
 
       {isBranchAdmin ? (
@@ -729,6 +801,11 @@ const QueueManagement = () => {
           <p className="mt-2 text-3xl font-bold text-primary">{summary.scheduled}</p>
           <p className="mt-2 text-sm text-slate-500">Appointment records not yet ready for servicing.</p>
         </div>
+        <div className="rounded-2xl bg-white p-5 shadow">
+          <p className="text-sm font-medium text-slate-500">Skipped</p>
+          <p className="mt-2 text-3xl font-bold text-primary">{summary.skipped}</p>
+          <p className="mt-2 text-sm text-slate-500">Skipped queue records still waiting for recall or removal.</p>
+        </div>
       </section>
 
       <section className="rounded-2xl bg-white p-6 shadow">
@@ -740,13 +817,22 @@ const QueueManagement = () => {
               Narrow the queue list by type, status, date, time slot, service, queue number, or taxpayer details.
             </p>
           </div>
-          <button
-            onClick={() => performAction('call-next')}
-            disabled={queueUnavailable || Boolean(activeQueue)}
-            className="rounded-xl bg-primary px-6 py-3 font-semibold text-white transition hover:bg-secondary disabled:opacity-50"
-          >
-            Call Next
-          </button>
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <button
+              onClick={() => performAction('call-next')}
+              disabled={queueUnavailable || Boolean(activeQueue) || isBranchAdmin}
+              className="rounded-xl bg-primary px-6 py-3 font-semibold text-white transition hover:bg-secondary disabled:opacity-50"
+            >
+              Call Next
+            </button>
+            <button
+              onClick={() => performAction('delete-skipped')}
+              disabled={queueUnavailable || skippedQueues.length === 0}
+              className="rounded-xl bg-rose-600 px-6 py-3 font-semibold text-white transition hover:bg-rose-700 disabled:opacity-50"
+            >
+              Delete Skipped Queue
+            </button>
+          </div>
         </div>
 
         <div className="mt-5 grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-4">
@@ -772,6 +858,16 @@ const QueueManagement = () => {
               <option key={serviceType} value={serviceType}>{serviceType}</option>
             ))}
           </select>
+          {isSuperadminManagedBranch ? (
+            <select value={windowFilter} onChange={(event) => setWindowFilter(event.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none">
+              <option value="all">All window staff queues</option>
+              {windowOptions.map((account) => (
+                <option key={account.key} value={account.key}>
+                  {account.label}{account.username ? ` - ${account.username}` : ''}
+                </option>
+              ))}
+            </select>
+          ) : null}
           <input
             type="text"
             value={queueNumberFilter}
@@ -793,6 +889,7 @@ const QueueManagement = () => {
               setDateFilter('');
               setTimeSlotFilter('');
               setServiceTypeFilter('all');
+              setWindowFilter('all');
               setQueueNumberFilter('');
               setSearchFilter('');
             }}
@@ -850,6 +947,24 @@ const QueueManagement = () => {
             onDeleteRequest={openDeleteModal}
             now={now}
           />
+        </div>
+      ) : null}
+
+      <QueueSection
+        title="Skipped Queue"
+        description="Skipped taxpayers remain here instead of being deleted. Pull them back up when they return, or clear the skipped list at the end of the day."
+        queues={skippedQueues}
+        page={skippedPage}
+        onPageChange={setSkippedPage}
+        queueUnavailable={queueUnavailable}
+        onAction={performAction}
+        onDeleteRequest={openDeleteModal}
+        now={now}
+        skippedOnly
+      />
+
+      {!isBranchAdmin ? (
+        <div className="space-y-6">
           {visibleHistorySections.map((section) => (
             <QueueHistorySection
               key={section.key}

@@ -604,6 +604,57 @@ async def skip_queue(
     return serialize_queue(queue)
 
 
+@router.post("/queue/{queue_id}/recall-skipped")
+async def recall_skipped_queue(
+    queue_id: int,
+    current_staff: BranchStaff = Depends(get_current_branch_staff),
+    db: Session = Depends(get_db),
+):
+    ensure_branch_queue_operations_enabled(db, current_staff.branch_id)
+    queue = db.query(Queue).filter(Queue.id == queue_id, Queue.branch_id == current_staff.branch_id).first()
+    if not queue:
+        raise HTTPException(status_code=404, detail="Skipped queue record not found")
+    ensure_queue_window_access(current_staff, queue)
+    if queue_value(queue, "status") != "Skipped":
+        raise HTTPException(status_code=409, detail="Only skipped queue records can be pulled back to the current window.")
+    active_queue = get_active_branch_queue(db, current_staff.branch_id, current_staff=current_staff)
+    if active_queue:
+        raise HTTPException(status_code=409, detail="Complete or skip the current active queue before pulling back a skipped queue.")
+
+    queue.status = "Called"
+    apply_queue_security(queue)
+    log_branch_action(db, current_staff, "Skipped Queue Recalled", f"Pulled skipped queue {queue_value(queue, 'queue_number')} back to the current window")
+    db.commit()
+    db.refresh(queue)
+    return serialize_queue(queue)
+
+
+@router.delete("/queue/skipped")
+async def delete_skipped_queues(
+    current_staff: BranchStaff = Depends(get_current_branch_staff),
+    db: Session = Depends(get_db),
+):
+    ensure_branch_queue_operations_enabled(db, current_staff.branch_id)
+    skipped_queues = (
+        db.query(Queue)
+        .filter(Queue.branch_id == current_staff.branch_id, hash_aware_match(Queue, "status", "Skipped"))
+        .order_by(Queue.created_at.asc())
+        .all()
+    )
+    if is_queue_window_staff(current_staff):
+        skipped_queues = [
+            queue for queue in skipped_queues
+            if normalize_service_window(queue_value(queue, "service_type")) == current_staff.service_window
+        ]
+
+    count = len(skipped_queues)
+    for queue in skipped_queues:
+        db.delete(queue)
+    log_branch_action(db, current_staff, "Skipped Queues Deleted", f"Deleted {count} skipped queue record(s)")
+    db.commit()
+    return {"success": True, "deleted": count}
+
+
 @router.post("/queue/{queue_id}/complete")
 async def complete_queue(
     queue_id: int,

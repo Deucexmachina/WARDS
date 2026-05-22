@@ -284,6 +284,7 @@ const Accounts = () => {
   const getRoleDisplay = (role) => {
     const roleMap = {
       main_admin: 'Main Admin',
+      superadmin: 'Superadmin',
       branch_admin: 'Branch Admin',
       branch_staff: 'Branch Staff',
       admin: 'Admin',
@@ -293,14 +294,14 @@ const Accounts = () => {
   };
 
   const getRoleColor = (role) => {
-    if (role === 'main_admin' || role === 'admin') return 'bg-purple-100 text-purple-800';
+    if (role === 'main_admin' || role === 'admin' || role === 'superadmin') return 'bg-purple-100 text-purple-800';
     if (role === 'branch_admin') return 'bg-blue-100 text-blue-800';
     if (role === 'branch_staff') return 'bg-sky-100 text-sky-800';
     if (role === 'public') return 'bg-emerald-100 text-emerald-800';
     return 'bg-gray-100 text-gray-800';
   };
 
-  const adminAccounts = accounts.filter((account) => account.role === 'main_admin' || account.role === 'admin');
+  const adminAccounts = accounts.filter((account) => account.role === 'main_admin' || account.role === 'admin' || account.role === 'superadmin');
   const branchAccounts = accounts.filter((account) => account.role === 'branch_admin' || account.role === 'branch_staff');
   const citizenAccounts = accounts.filter((account) => account.role === 'public');
 

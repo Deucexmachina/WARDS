@@ -9,6 +9,10 @@ const UserProtectedRoute = ({ children }) => {
 
   useEffect(() => {
     verifyToken();
+    const interval = window.setInterval(() => {
+      verifyToken();
+    }, 10000);
+    return () => window.clearInterval(interval);
   }, []);
 
   const verifyToken = async () => {
@@ -29,19 +33,36 @@ const UserProtectedRoute = ({ children }) => {
         }
       });
 
+      const userAuthenticatedAt = Date.parse(localStorage.getItem('userAuthenticatedAt') || '');
+      const serverStartedAt = Date.parse(response.data.server_started_at || '');
+      if (serverStartedAt && (!userAuthenticatedAt || userAuthenticatedAt <= serverStartedAt)) {
+        setIsAuthenticated(false);
+        localStorage.removeItem('userToken');
+        localStorage.removeItem('user');
+        localStorage.removeItem('userAuthenticatedAt');
+        sessionStorage.setItem('redirectAfterLogin', location.pathname);
+        sessionStorage.setItem('loginMessage', 'Please login again after the backend restarts.');
+        return;
+      }
+
       if (response.data.valid && response.data.user?.role === 'public') {
         setIsAuthenticated(true);
         localStorage.setItem('user', JSON.stringify(response.data.user));
+        if (!localStorage.getItem('userAuthenticatedAt')) {
+          localStorage.setItem('userAuthenticatedAt', new Date().toISOString());
+        }
       } else {
         setIsAuthenticated(false);
         localStorage.removeItem('userToken');
         localStorage.removeItem('user');
+        localStorage.removeItem('userAuthenticatedAt');
         sessionStorage.setItem('redirectAfterLogin', location.pathname);
       }
     } catch (error) {
       setIsAuthenticated(false);
       localStorage.removeItem('userToken');
       localStorage.removeItem('user');
+      localStorage.removeItem('userAuthenticatedAt');
       sessionStorage.setItem('redirectAfterLogin', location.pathname);
     } finally {
       setIsLoading(false);

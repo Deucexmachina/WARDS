@@ -30,6 +30,7 @@ from utils.system_settings import get_setting_value
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+SERVER_STARTED_AT = datetime.utcnow().isoformat()
 
 SECRET_KEY = os.getenv("BRANCH_SECRET_KEY", "your-branch-secret-key-change-in-production")
 ALGORITHM = "HS256"
@@ -173,11 +174,12 @@ def slugify_branch_name(name: str) -> str:
 
 def get_branch_dashboard_url(staff: BranchStaff) -> str:
     branch = getattr(staff, "branch", None)
-    if branch and getattr(branch, "dashboard_url", None):
-        return branch.dashboard_url
+    dashboard_url = get_decrypted_or_raw(branch, "dashboard_url") if branch else None
+    if dashboard_url:
+        return dashboard_url
 
     base_url = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000").rstrip("/")
-    branch_name = getattr(branch, "name", "") if branch else ""
+    branch_name = get_decrypted_or_raw(branch, "name") if branch else ""
     if branch_name:
         return f"{base_url}/branch-dashboard/{slugify_branch_name(branch_name)}"
 
@@ -497,6 +499,7 @@ async def verify_token(request: Request, db: Session = Depends(get_db)):
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username = payload.get("sub")
         token_type = payload.get("type")
+        managed_by = payload.get("managed_by")
         
         if token_type != "branch":
             raise HTTPException(
@@ -511,19 +514,51 @@ async def verify_token(request: Request, db: Session = Depends(get_db)):
                 detail="User not found or inactive"
             )
         
+        is_superadmin_managed_branch = managed_by == "superadmin"
+        window_accounts = []
+        if is_superadmin_managed_branch:
+            window_accounts = (
+                db.query(BranchStaff)
+                .filter(
+                    BranchStaff.branch_id == staff.branch_id,
+                    BranchStaff.account_scope == "queue_window",
+                    BranchStaff.status == "Active",
+                )
+                .order_by(BranchStaff.service_window.asc(), BranchStaff.id.asc())
+                .all()
+            )
+
         return {
             "valid": True,
+            "server_started_at": SERVER_STARTED_AT,
             "user": {
                 "id": staff.id,
-                "username": staff.username,
+                "username": "superadmin" if is_superadmin_managed_branch else staff.username,
                 "email": staff.email,
-                "full_name": staff.full_name,
+                "full_name": "superadmin" if is_superadmin_managed_branch else staff.full_name,
                 "role": public_role(staff.role),
                 "internal_role": staff.role,
                 "branch_id": staff.branch_id,
                 "dashboard_url": get_branch_dashboard_url(staff),
                 "account_scope": staff.account_scope or "full_branch",
                 "service_window": staff.service_window,
+                "superadmin_managed_branch": is_superadmin_managed_branch,
+                "window_accounts": [
+                    {
+                        "id": account.id,
+                        "username": account.username,
+                        "full_name": account.full_name,
+                        "service_window": account.service_window,
+                        "window_label": {
+                            "RPT": "RPT Window",
+                            "BUSINESS": "BT Window",
+                            "MISC": "MISC Window",
+                            "QW4": "Queue Window 4",
+                            "QW5": "Queue Window 5",
+                        }.get(account.service_window, account.service_window),
+                    }
+                    for account in window_accounts
+                ],
             }
         }
     except JWTError:

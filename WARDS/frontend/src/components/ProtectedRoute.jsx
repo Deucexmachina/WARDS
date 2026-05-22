@@ -8,6 +8,10 @@ const ProtectedRoute = ({ children }) => {
 
   useEffect(() => {
     verifyToken();
+    const interval = window.setInterval(() => {
+      verifyToken();
+    }, 10000);
+    return () => window.clearInterval(interval);
   }, []);
 
   const clearAdminSession = () => {

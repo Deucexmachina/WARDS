@@ -108,19 +108,19 @@ def require_admin_role(*allowed_roles: str):
     return role_checker
 
 def require_main_admin():
-    return require_admin_role("main_admin")
+    return require_admin_role("main_admin", "superadmin")
 
 def require_branch_admin_or_higher():
-    return require_admin_role("main_admin", "branch_admin")
+    return require_admin_role("main_admin", "superadmin", "branch_admin")
 
 def require_any_admin():
-    return require_admin_role("main_admin", "branch_admin", "branch_staff")
+    return require_admin_role("main_admin", "superadmin", "branch_admin", "branch_staff")
 
 async def verify_branch_access(
     branch_id: int,
     current_user: Admin | BranchStaff = Depends(get_current_admin_user)
 ) -> Admin | BranchStaff:
-    if current_user.role == "main_admin":
+    if current_user.role in {"main_admin", "superadmin"}:
         return current_user
     
     if current_user.role in ["branch_admin", "branch_staff"]:

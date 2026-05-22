@@ -16,10 +16,13 @@ from database.models import get_db
 from routes.admin_auth_v2 import get_current_admin_from_token
 from SECURITY.security_engine import (
     add_monitored_folder,
+    add_ai_rule,
+    available_ai_rule_templates,
     bulk_update_incidents,
     create_manual_backup,
     dashboard_payload,
     full_system_recovery,
+    get_setting,
     get_ai_rules,
     manual_recover_file,
     mark_admin_change,
@@ -83,8 +86,16 @@ class AiRulesRequest(BaseModel):
     rules: dict
 
 
+class AddAiRuleRequest(BaseModel):
+    rule_key: str
+
+
 class ScanIntervalRequest(BaseModel):
     seconds: int
+
+
+class MonitoringToggleRequest(BaseModel):
+    enabled: bool
 
 
 class BulkIncidentRequest(BaseModel):
@@ -108,7 +119,6 @@ def get_dashboard(db: Session = Depends(get_db), _=Depends(current_admin)):
 
 @router.get("/files")
 def list_files(db: Session = Depends(get_db), _=Depends(current_admin)):
-    register_initial_files(db)
     return [serialize_file(item) for item in db.query(SecurityMonitoredFile).order_by(SecurityMonitoredFile.relative_path.asc()).all()]
 
 
@@ -324,6 +334,19 @@ def get_rules(db: Session = Depends(get_db), _=Depends(current_admin)):
     return get_ai_rules(db)
 
 
+@router.get("/ai/rule-templates")
+def ai_rule_templates(db: Session = Depends(get_db), _=Depends(current_admin)):
+    return available_ai_rule_templates(db)
+
+
+@router.post("/ai/rules/add")
+def add_rule(payload: AddAiRuleRequest, db: Session = Depends(get_db), admin=Depends(current_admin)):
+    try:
+        return add_ai_rule(db, payload.rule_key, admin.username)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 @router.put("/ai/rules")
 def save_rules(payload: AiRulesRequest, db: Session = Depends(get_db), admin=Depends(current_admin)):
     return update_ai_rules(db, payload.rules, admin.username)
@@ -337,6 +360,17 @@ def save_scan_interval(payload: ScanIntervalRequest, db: Session = Depends(get_d
         raise HTTPException(status_code=400, detail="Scan interval must be 3600 seconds or less.")
     set_setting(db, "scan_interval_seconds", str(payload.seconds), admin.username)
     return {"scan_interval_seconds": payload.seconds}
+
+
+@router.put("/monitoring")
+def set_monitoring(payload: MonitoringToggleRequest, db: Session = Depends(get_db), admin=Depends(current_admin)):
+    previous = (get_setting(db, "monitoring_enabled", "true") or "true").lower() == "true"
+    if payload.enabled and not previous:
+        event = create_manual_backup(db, admin.id, label="monitoring_resume")
+        if event.status != "success":
+            raise HTTPException(status_code=500, detail=event.error_message or "Unable to refresh backup before enabling automatic scans.")
+    set_setting(db, "monitoring_enabled", "true" if payload.enabled else "false", admin.username)
+    return {"monitoring_enabled": payload.enabled, "backup_refreshed": payload.enabled and not previous}
 
 
 @router.post("/ai/schedule")

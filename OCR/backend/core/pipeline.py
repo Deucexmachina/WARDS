@@ -27,7 +27,7 @@ def _build_llmwhisperer_client():
         from unstract.llmwhisperer import LLMWhispererClientV2
     except ModuleNotFoundError as exc:
         raise RuntimeError(
-            "LLMWhisperer dependency is missing. Install unstract-llmwhisperer in the backend environment."
+            "LLMWhisperer dependency is missing. Install llmwhisperer-client in the backend environment."
         ) from exc
 
     return LLMWhispererClientV2(

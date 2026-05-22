@@ -24,7 +24,7 @@ async def create_invite(
     current_admin=Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
-    if current_admin.role not in {"main_admin", "admin"}:
+    if current_admin.role not in {"main_admin", "admin", "superadmin"}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
 
     if invite_data.role not in {"branch", "admin"}:

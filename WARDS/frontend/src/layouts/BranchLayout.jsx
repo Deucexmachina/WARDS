@@ -12,8 +12,9 @@ const BranchLayout = () => {
   const location = useLocation();
   const { branchSlug } = useParams();
   const staff = JSON.parse(localStorage.getItem('branchUser') || '{}');
+  const isSuperadminManagedBranch = Boolean(staff?.superadmin_managed_branch);
   const isQueueWindowAccount = staff?.account_scope === 'queue_window';
-  const isBranchAdmin = staff?.role === 'branch_admin' || staff?.internal_role === 'branch_admin';
+  const isBranchAdmin = !isSuperadminManagedBranch && (staff?.role === 'branch_admin' || staff?.internal_role === 'branch_admin');
   const assignedWindowLabel = staff?.service_window === 'BUSINESS' ? 'BT' : (staff?.service_window || '');
   const branchDisplayName = branchSlug
     ? `${branchSlug.replace(/-/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase())} Branch`
@@ -32,7 +33,7 @@ const BranchLayout = () => {
     ? [{ label: `${assignedWindowLabel || 'Queue'} Window Queue Management`, path: queueOnlyPath }]
     : [
         { label: 'Dashboard', path: basePath },
-        ...(!isBranchAdmin ? [{ label: 'Queue Management', path: `${basePath}/queue` }] : []),
+        { label: 'Queue Management', path: `${basePath}/queue` },
         { label: 'Receipt Management', path: `${basePath}/receipts` },
         { label: 'Payment Management', path: `${basePath}/payments` },
         { label: 'Branch Reports', path: `${basePath}/reports` },
@@ -40,7 +41,7 @@ const BranchLayout = () => {
         { label: 'Announcements', path: `${basePath}/announcements` },
         { label: 'Discrepancy Reports', path: `${basePath}/discrepancies` },
         { label: 'Policies & SOPs', path: `${basePath}/policies` },
-        ...(isBranchAdmin
+        ...(isBranchAdmin || isSuperadminManagedBranch
           ? [{ label: 'System Settings', path: `${basePath}/settings` }]
           : []),
       ];
@@ -184,6 +185,14 @@ const BranchLayout = () => {
   }, [isQueueWindowAccount]);
 
   const handleLogout = async () => {
+    if (isSuperadminManagedBranch) {
+      localStorage.removeItem('branchToken');
+      localStorage.removeItem('branchUser');
+      localStorage.removeItem('branchAuthenticatedAt');
+      navigate('/admin', { replace: true });
+      return;
+    }
+
     try {
       await api.post('/branch/auth/logout');
     } catch (error) {
@@ -191,6 +200,7 @@ const BranchLayout = () => {
     } finally {
       localStorage.removeItem('branchToken');
       localStorage.removeItem('branchUser');
+      localStorage.removeItem('branchAuthenticatedAt');
       navigate('/login', { replace: true });
     }
   };
@@ -213,7 +223,7 @@ const BranchLayout = () => {
           <div className="mt-2 text-center">
             <h1 className="truncate text-sm font-bold text-white">{branchDisplayName}</h1>
             <p className="truncate text-xs text-slate-300">
-              {staff?.full_name || staff?.username || 'Branch User'}
+              {isSuperadminManagedBranch ? 'superadmin' : (staff?.full_name || staff?.username || 'Branch User')}
               {isQueueWindowAccount && assignedWindowLabel ? ` • ${assignedWindowLabel} Window` : ''}
             </p>
           </div>
@@ -247,7 +257,7 @@ const BranchLayout = () => {
                 <span className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full min-w-[1.5rem] text-center">
                   {announcementCount > 99 ? '99+' : announcementCount}
                 </span>
-              ) : item.label.includes('Queue Management') && queueCount > 0 ? (
+              ) : (item.label.includes('Queue Management') || item.label === 'Window Staff Accounts') && queueCount > 0 ? (
                 <span className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full min-w-[1.5rem] text-center">
                   {queueCount > 99 ? '99+' : queueCount}
                 </span>
@@ -277,9 +287,9 @@ const BranchLayout = () => {
           </div>
           <button
             onClick={handleLogout}
-            className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg font-semibold transition"
+            className={`${isSuperadminManagedBranch ? 'bg-purple-600 hover:bg-purple-700' : 'bg-red-500 hover:bg-red-600'} text-white px-4 py-2 rounded-lg font-semibold transition`}
           >
-            Logout
+            {isSuperadminManagedBranch ? 'Return to superadmin dashboard' : 'Logout'}
           </button>
         </header>
         <main className="p-8">

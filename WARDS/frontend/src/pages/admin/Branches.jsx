@@ -136,6 +136,8 @@ const EMPTY_AUTH_MODAL = {
 };
 
 const Branches = () => {
+  const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}');
+  const isSuperadmin = adminUser?.internal_role === 'superadmin';
   const [branches, setBranches] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [editingBranch, setEditingBranch] = useState(null);
@@ -273,6 +275,26 @@ const Branches = () => {
     setMapSearchQuery('');
     setMapSearchResults([]);
     setShowModal(true);
+  };
+
+  const handleManageBranch = async (branch) => {
+    try {
+      setPageError('');
+      const response = await api.post(`/branches/${branch.id}/superadmin-access`);
+      localStorage.setItem('branchToken', response.data.access_token);
+      localStorage.setItem('branchUser', JSON.stringify(response.data.user));
+      localStorage.setItem('branchAuthenticatedAt', new Date().toISOString());
+      window.location.href = response.data.user?.dashboard_url || buildBranchDashboardUrl(branch.name || 'branch');
+    } catch (error) {
+      setPageError(error.response?.data?.detail || 'Unable to open this branch dashboard as Superadmin.');
+    }
+  };
+
+  const openLocationMapPicker = () => {
+    if (!editingBranch && selectedPreset !== 'custom') {
+      setSelectedPreset('custom');
+    }
+    setShowMapPickerModal(true);
   };
 
   const handleSaveBranch = async () => {
@@ -699,6 +721,14 @@ const Branches = () => {
                   Resend Verification
                 </button>
               )}
+              {isSuperadmin && (
+                <button
+                  onClick={() => handleManageBranch(branch)}
+                  className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-2 rounded-lg font-semibold transition duration-300"
+                >
+                  Manage
+                </button>
+              )}
               <button 
                 onClick={() => handleEditBranch(branch)}
                 className="flex-1 bg-accent hover:bg-blue-600 text-white py-2 rounded-lg font-semibold transition duration-300"
@@ -718,8 +748,8 @@ const Branches = () => {
       </div>
 
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-2xl p-8 max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div className="max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-xl bg-white p-8 shadow-2xl">
             <h3 className="text-2xl font-bold text-primary mb-6">
               {editingBranch ? 'Edit Branch' : 'Add New Branch'}
             </h3>
@@ -728,7 +758,7 @@ const Branches = () => {
                 <p className="font-semibold">{modalError}</p>
               </div>
             )}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div className="grid grid-cols-1 items-start gap-5 md:grid-cols-2">
               {!editingBranch && (
                 <div className="md:col-span-2">
                   <label className="block text-gray-700 font-semibold mb-2">Predefined Branch Office</label>
@@ -751,7 +781,9 @@ const Branches = () => {
               )}
 
               <div>
-                <label className="block text-gray-700 font-semibold mb-2">Branch Name</label>
+                <div className="mb-2 flex min-h-10 items-center">
+                  <label className="block text-gray-700 font-semibold">Branch Name</label>
+                </div>
                 <input 
                   type="text" 
                   name="name"
@@ -762,18 +794,23 @@ const Branches = () => {
                 />
               </div>
               <div>
-                <label className="block text-gray-700 font-semibold mb-2">Location</label>
-                {!editingBranch && selectedPreset === 'custom' && (
-                  <div className="mb-2 flex justify-end">
+                <div className="mb-2 flex min-h-10 items-center justify-between gap-3">
+                  <label className="block font-semibold text-gray-700">Location</label>
+                  {!editingBranch && (
                     <button
                       type="button"
-                      onClick={() => setShowMapPickerModal(true)}
-                      className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white transition duration-300 hover:bg-blue-600"
+                      onClick={openLocationMapPicker}
+                      className="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white transition duration-300 hover:bg-blue-600"
+                      title="Pick branch location from map"
                     >
+                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path d="M12 21s7-5.1 7-11a7 7 0 1 0-14 0c0 5.9 7 11 7 11Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                        <path d="M12 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" stroke="currentColor" strokeWidth="2" />
+                      </svg>
                       Pick from Map
                     </button>
-                  </div>
-                )}
+                  )}
+                </div>
                 <input 
                   type="text" 
                   name="location"
@@ -781,9 +818,9 @@ const Branches = () => {
                   onChange={handleInputChange}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
                 />
-                {!editingBranch && selectedPreset === 'custom' && (
+                {!editingBranch && (
                   <p className="mt-2 text-sm text-gray-500">
-                    Choose a location from the map to auto-fill the branch address for custom branches.
+                    Choose a location from the map to auto-fill the branch address.
                   </p>
                 )}
               </div>
@@ -842,7 +879,7 @@ const Branches = () => {
               
               {!editingBranch && (
                 <>
-                  <div className="md:col-span-2 border-t pt-4 mt-2">
+                  <div className="md:col-span-2 mt-2 border-t pt-5">
                     <h4 className="text-lg font-bold text-gray-700 mb-3">Branch Admin Account</h4>
                     <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                       Branch admin access stays in <span className="font-semibold">Pending Verification</span> until the recipient verifies the email from the branch access message.
@@ -892,7 +929,7 @@ const Branches = () => {
                       Password must be more than 12 characters with uppercase, lowercase, and a number or special character.
                     </p>
                   </div>
-                  <div className="md:col-span-2 border-t pt-4 mt-2">
+                  <div className="md:col-span-2 mt-2 border-t pt-5">
                     <h4 className="text-lg font-bold text-gray-700 mb-3">Service Counters / Queue Window Staff Accounts</h4>
                     <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
                       Service counters and queue window staff accounts are the same setup here. If you set {getNormalizedCounterCount(formData.counters)} service counter{getNormalizedCounterCount(formData.counters) > 1 ? 's' : ''}, the system will generate {getNormalizedCounterCount(formData.counters)} queue-only branch staff account{getNormalizedCounterCount(formData.counters) > 1 ? 's' : ''}. The system automatically generates the usernames, passwords, and staff names, then includes those credentials in the same branch admin email verification message. Every generated queue account uses Microsoft Authenticator MFA on first login.

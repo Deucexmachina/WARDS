@@ -87,8 +87,21 @@ def status():
 def visual_defacement():
     path = target_path("frontend/src/pages/public/Home.jsx")
     original = read(path)
-    payload = "\n\n{/* WARDS_DEFACEMENT_TEST: HACKED BY EXTERNAL DEFACEMENT SITE */}\n"
-    write(path, original + payload)
+    payload = """<>
+      <div style={{position:'fixed', inset:0, zIndex:2147483647, background:'rgba(127, 29, 29, 0.96)', color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', textAlign:'center', padding:'40px'}}>
+        <div>
+          <p style={{fontSize:'14px', letterSpacing:'0.24em', fontWeight:900}}>WARDS_DEFACEMENT_TEST</p>
+          <h1 style={{fontSize:'56px', margin:'16px 0', fontWeight:900}}>SYSTEM COMPROMISED</h1>
+          <p style={{fontSize:'22px'}}>Public tax services have been replaced by an unauthorized page.</p>
+          <p style={{marginTop:'18px', fontSize:'16px'}}>Restore operations from the Security Dashboard immediately.</p>
+        </div>
+      </div>
+"""
+    if "return (\n    <>" in original:
+        modified = original.replace("return (\n    <>", "return (\n    " + payload, 1)
+    else:
+        modified = original + "\n/* WARDS_DEFACEMENT_TEST: SYSTEM COMPROMISED */\n"
+    write(path, modified)
     return result("visual_defacement", path, "Added a visible defacement marker to the public home page source.")
 
 
@@ -100,7 +113,7 @@ def css_defacement():
 
 /* WARDS_DEFACEMENT_TEST_CSS */
 body::before {
-  content: "HACKED BY EXTERNAL DEFACEMENT SITE";
+  content: "WARDS SECURITY ALERT: THIS PAGE HAS BEEN DEFACED - UNAUTHORIZED CONTROL MESSAGE";
   position: fixed;
   z-index: 2147483647;
   top: 0;
@@ -111,6 +124,20 @@ body::before {
   color: white;
   text-align: center;
   font: 800 20px Arial, sans-serif;
+}
+body::after {
+  content: "SYSTEM COMPROMISED";
+  position: fixed;
+  z-index: 2147483646;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.72);
+  color: #ef4444;
+  font: 900 64px Arial, sans-serif;
+  letter-spacing: 0.08em;
+  pointer-events: none;
 }
 """
     write(path, original + payload)
@@ -187,4 +214,3 @@ def config_tamper():
 
 
 app.mount("/", StaticFiles(directory=str(BASE_DIR), html=True), name="defacement-ui")
-

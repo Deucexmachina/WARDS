@@ -15,13 +15,13 @@ from dotenv import load_dotenv
 from passlib.context import CryptContext
 from sqlalchemy import text, inspect, or_
 
+load_dotenv(Path(__file__).resolve().with_name(".env"), override=True)
+
 from routes import auth, branches, reports, announcements, memos, alerts, logs, backup, users, payments, receipts, settings, policies, rbac_routes, dashboard, public, public_auth, admin_auth_v2, user_auth_v2, branch_auth_v2, invites, admin_users, branch_portal, branch_settings, unified_auth, discrepancies, tax_assessment, security_dashboard
 from services import ocr_routes
 from database.models import Base, engine, SessionLocal, Admin, Branch, BusinessRegistry, BusinessTaxApplication, DiscrepancyReport, EmailOTP, EmailVerificationToken, FAQ, Invite, Memo, MemoView, MFASecret, Payment, Queue, QueueActivity, ReceiptRecord, ReceiptRequest, ReceiptRequestHistory, RPTPropertyRecord, Service, ServiceWindowConfig, TaxpayerGuide
 from utils.field_crypto import apply_citizen_user_security, apply_discrepancy_report_security, apply_email_otp_security, apply_email_verification_token_security, apply_faq_security, apply_invite_security, apply_memo_security, apply_memo_view_security, apply_mfa_secret_security, apply_payment_security, apply_queue_activity_security, apply_queue_security, apply_receipt_record_security, apply_receipt_request_history_security, apply_receipt_request_security, apply_rpt_property_record_security, apply_service_security, apply_service_window_config_security, apply_system_setting_security, apply_tax_assessment_record_security, apply_taxpayer_guide_security, apply_taxpayer_identifier_submission_security, build_redacted_text, get_decrypted_or_raw, hash_optional_value, set_encrypted_hash_companions
 from utils.system_settings import seed_system_settings
-
-load_dotenv(Path(__file__).resolve().with_name(".env"))
 
 app = FastAPI(title="WARDS API", version="1.0.0")
 
@@ -997,6 +997,26 @@ def bootstrap_admin():
     finally:
         db.close()
 
+def bootstrap_superadmin():
+    db = SessionLocal()
+    try:
+        existing = db.query(Admin).filter(Admin.username == "superadmin").first()
+        if existing:
+            return
+
+        pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+        db.add(Admin(
+            username="superadmin",
+            email=os.getenv("SUPERADMIN_EMAIL", "superadmin@wards.local"),
+            hashed_password=pwd_context.hash(os.getenv("SUPERADMIN_PASSWORD", "superadmin123")),
+            role="superadmin",
+            status="Active",
+            is_verified=True,
+        ))
+        db.commit()
+    finally:
+        db.close()
+
 
 def seed_business_registry():
     db = SessionLocal()
@@ -1309,6 +1329,7 @@ def backfill_branch_and_business_registry_security():
 
 ensure_auth_extensions()
 bootstrap_admin()
+bootstrap_superadmin()
 seed_business_registry()
 backfill_branch_and_business_registry_security()
 
@@ -1322,13 +1343,16 @@ def start_security_monitor_if_enabled():
     default_interval = max(5, int(os.getenv("SECURITY_SCAN_INTERVAL_SECONDS", "30")))
 
     def monitor_loop():
-        from SECURITY.security_engine import create_manual_backup, get_setting, scan_all_files
+        from SECURITY.security_engine import create_manual_backup, get_setting, set_setting, scan_all_files
 
         startup_db = SessionLocal()
         try:
+            set_setting(startup_db, "startup_baseline_status", "in_progress", "system")
             create_manual_backup(startup_db, initiated_by=None, label="startup_baseline")
+            set_setting(startup_db, "startup_baseline_status", "complete", "system")
             print("[SECURITY MONITOR] startup baseline backup refreshed before scanning")
         except Exception as exc:
+            set_setting(startup_db, "startup_baseline_status", "failed", "system")
             print(f"[SECURITY MONITOR] startup baseline refresh failed: {exc}")
         finally:
             startup_db.close()
@@ -1337,7 +1361,9 @@ def start_security_monitor_if_enabled():
             db = SessionLocal()
             interval = default_interval
             try:
-                scan_all_files(db, context={"background_monitor": True})
+                monitoring_enabled = (get_setting(db, "monitoring_enabled", "true") or "true").lower() == "true"
+                if monitoring_enabled:
+                    scan_all_files(db, context={"background_monitor": True})
                 interval = max(5, int(get_setting(db, "scan_interval_seconds", str(default_interval))))
             except Exception as exc:
                 print(f"[SECURITY MONITOR] scan failed: {exc}")

@@ -149,18 +149,35 @@ Copy-Item .env.example .env
 notepad .env
 ```
 
-Minimum local `.env`:
+### WARDS Backend `.env` (WARDS/backend/.env)
+
+This is the main system backend. It handles admin authentication, payments, email verification, OCR integration, and the Security Dashboard.
 
 ```text
+# === Authentication & Security ===
 SECRET_KEY=replace-with-a-long-random-secret
 ADMIN_SECRET_KEY=replace-with-a-different-long-random-admin-secret
-CORS_ORIGINS=http://localhost:3000,http://localhost:3001
-API_PORT=8000
 
+# === Admin Account (created on first startup) ===
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=change-this-password-immediately
 ADMIN_EMAIL=admin@wards.local
+SUPERADMIN_EMAIL=superadmin@wards.local
+SUPERADMIN_PASSWORD=superadmin123
 
+# === Rate Limiting ===
+MAX_LOGIN_ATTEMPTS=5
+LOCKOUT_DURATION_MINUTES=15
+RATE_LIMIT_REQUESTS=10
+RATE_LIMIT_WINDOW_SECONDS=60
+
+# === Server & CORS ===
+API_PORT=8000
+CORS_ORIGINS=http://localhost:3000,http://localhost:3001
+FRONTEND_BASE_URL=http://localhost:3000
+BACKEND_BASE_URL=http://localhost:8000
+
+# === Email (Gmail SMTP for admin notifications) ===
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USERNAME=your-email@example.com
@@ -169,20 +186,40 @@ SMTP_FROM_EMAIL=your-email@example.com
 SMTP_FROM_NAME=WARDS Admin
 SMTP_USE_TLS=true
 
-FRONTEND_BASE_URL=http://localhost:3000
-BACKEND_BASE_URL=http://localhost:8000
-
+# === External APIs ===
 QUICKEMAILVERIFICATION_API_KEY=replace-with-your-api-key
+QUICKEMAILVERIFICATION_TIMEOUT_SECONDS=8
 PAYMONGO_SECRET_KEY=sk_test_replace_with_your_secret_key
 PAYMONGO_PUBLIC_KEY=pk_test_replace_with_your_public_key
+LLMWHISPERER_API_KEY=replace-with-your-unstract-llmwhisperer-api-key
+LLMWHISPERER_BASE_URL=https://llmwhisperer-api.us-central.unstract.com/api/v2
 
+# === Database ===
 DATABASE_URL=mysql+pymysql://wards_user:change_this_password@localhost:3306/wards_db
 
+# === Security Dashboard ===
 SECURITY_DEPLOYMENT_MODE=development
 SECURITY_MONITORING_ENABLED=false
 WAZUH_ENABLED=true
 SECURITY_SCAN_INTERVAL_SECONDS=30
 ```
+
+**Key differences from OCR backend:**
+
+- Contains admin/superadmin account credentials
+- Uses Gmail SMTP for admin notifications
+- Has PayMongo payment keys
+- Has Security Dashboard settings
+- Rate limiting configuration
+
+The backend also auto-creates a Superadmin account on startup:
+
+```text
+username: superadmin
+password: superadmin123
+```
+
+For actual deployment, change `SUPERADMIN_PASSWORD` before the first startup or update the account password immediately after setup.
 
 Development mode recommendation:
 
@@ -398,17 +435,105 @@ Copy-Item .env.example .env
 notepad .env
 ```
 
-Use the same MySQL database:
+### OCR Backend `.env` (OCR/backend/.env)
+
+This is the taxpayer-facing receipt/OCR service. It handles taxpayer verification, OTP emails, and receipt scanning.
 
 ```text
+# === Database (same as WARDS backend) ===
 DATABASE_URL=mysql+pymysql://wards_user:change_this_password@localhost:3306/wards_db
+
+# === OCR API ===
+LLMWHISPERER_API_KEY=replace-with-your-unstract-llmwhisperer-api-key
+LLMWHISPERER_BASE_URL=https://llmwhisperer-api.us-central.unstract.com/api/v2
+
+# === Email Verification ===
+QUICKEMAILVERIFICATION_API_KEY=replace-with-your-api-key
+
+# === Email (Brevo SMTP for taxpayer OTP) ===
+BREVO_SMTP_HOST=smtp-relay.brevo.com
+BREVO_SMTP_PORT=587
+BREVO_SMTP_USERNAME=your_brevo_smtp_login
+BREVO_SMTP_PASSWORD=your_brevo_smtp_key
+BREVO_SENDER_EMAIL=your_verified_sender@example.com
+BREVO_SENDER_NAME=WARDS Taxpayer Verification
+
+# === OTP Settings ===
+OTP_EXPIRE_MINUTES=10
+OTP_RESEND_COOLDOWN_SECONDS=60
+OTP_HASH_SECRET=change_this_random_secret
+
+# === Data Security ===
+DATA_HASH_SECRET=change_this_data_hash_secret
+DATA_ENCRYPTION_SECRET=change_this_data_encryption_secret
+
+# === Security Phase 2 ===
+WARDS_SECURITY_PHASE2_REDACT=true
 ```
+
+**Key differences from WARDS backend:**
+
+- Uses Brevo SMTP (not Gmail) for taxpayer OTP emails
+- Has OTP expiration and cooldown settings
+- Has data hashing/encryption secrets for sensitive taxpayer fields
+- No admin credentials, PayMongo, or Security Dashboard settings
+- Shares `DATABASE_URL` and `LLMWHISPERER_API_KEY` with WARDS backend
+
+**Important:** Both backends must use the same `LLMWHISPERER_API_KEY` and `DATABASE_URL` values.
 
 Start OCR backend:
 
 ```powershell
 uvicorn main:app --reload --host 0.0.0.0 --port 8001
 ```
+
+LLMWhisperer OCR notes:
+
+```text
+The current Python package is llmwhisperer-client, not unstract-llmwhisperer.
+If pip says "No matching distribution found for unstract-llmwhisperer==0.6.3", pull the latest code and reinstall OCR/backend/requirements.txt.
+```
+
+Install or repair the OCR dependency:
+
+```powershell
+.\venv\Scripts\Activate.ps1
+pip install --upgrade pip
+pip install "llmwhisperer-client>=2.3.1,<2.4.0"
+pip install -r requirements.txt
+```
+
+The error below means the API key is missing, expired, copied incorrectly, or belongs to the wrong Unstract/LLMWhisperer account:
+
+```text
+401 Client Error: Unauthorized for url: https://llmwhisperer-api.us-central.unstract.com/api/v2/whisper
+```
+
+Fix:
+
+```text
+1. Get a valid LLMWhisperer API key from Unstract.
+2. Add the same key to WARDS/backend/.env and OCR/backend/.env:
+   LLMWHISPERER_API_KEY=your_valid_key
+3. Confirm the endpoint matches your account/region:
+   LLMWHISPERER_BASE_URL=https://llmwhisperer-api.us-central.unstract.com/api/v2
+4. Remove accidental spaces or quotes around the key.
+5. Restart the WARDS backend after editing .env.
+6. Retry OCR upload.
+```
+
+The branch admin OCR upload is served by the WARDS backend route, so updating only `OCR/backend/.env` is not enough unless `OCR_PROJECT_DIR` points to that folder and the WARDS backend is restarted. The safest setup is to put `LLMWHISPERER_API_KEY` directly in `WARDS/backend/.env`.
+
+The WARDS backend now reads `WARDS/backend/.env` directly for OCR before falling back to `OCR/backend/.env` or Windows environment variables. This prevents an old Windows user/system environment variable from overriding the project key. If OCR still reports a fingerprint that does not match your intended key, remove stale Windows environment values, close PowerShell, reopen it, and restart the backend:
+
+```powershell
+[Environment]::SetEnvironmentVariable("LLMWHISPERER_API_KEY", $null, "User")
+[Environment]::SetEnvironmentVariable("LLMWHISPERER_API_KEY", $null, "Machine")
+```
+
+If the WARDS backend error shows a key fingerprint, compare only that short fingerprint with the start/end of the key you intended to use. Never paste the full key into chat, GitHub issues, screenshots, or documentation. A 401 from LLMWhisperer means the external API rejected the key or endpoint; it is not caused by a MySQL database mismatch.
+
+The OCR backend currently uses Python 3.11 in this project. Newer `llmwhisperer-client` releases require Python 3.12, so the requirements file pins the newest Python 3.11-compatible line: `llmwhisperer-client>=2.3.1,<2.4.0`.
 
 Start OCR frontend:
 
@@ -502,7 +627,66 @@ git check-ignore -v QUARANTINE
 
 If `git status` shows `.env`, backup folders, quarantine folders, `node_modules`, or `venv`, do not commit yet.
 
-## 13. Quick Verification Checklist
+## 13. CI/CD Integration
+
+The project uses GitHub Actions for Continuous Integration. The workflow file is located at:
+
+```text
+.github/workflows/wards-ci.yml
+```
+
+### What CI Does
+
+On every push or pull request to `main`, GitHub Actions automatically runs:
+
+1. **Backend job**
+   - Sets up Python 3.11
+   - Installs `WARDS/backend/requirements.txt`
+   - Runs syntax checks on `WARDS/backend/main.py` and `SECURITY/security_engine.py`
+
+2. **Frontend job**
+   - Sets up Node.js 20
+   - Runs `npm ci` in `WARDS/frontend`
+   - Runs `npm run build` to verify the production build
+
+### Viewing CI Results
+
+After pushing to GitHub:
+
+1. Go to your repository on GitHub.
+2. Click the **Actions** tab.
+3. Select the latest workflow run to see build status and logs.
+
+A green checkmark means all checks passed. A red X means a job failed—click into it to see error details.
+
+### CI Troubleshooting
+
+```text
+If backend job fails:
+  - Check that WARDS/backend/requirements.txt has valid dependencies.
+  - Verify main.py and security_engine.py have no syntax errors locally:
+    python -m py_compile WARDS/backend/main.py
+    python -m py_compile SECURITY/security_engine.py
+
+If frontend job fails:
+  - Check that WARDS/frontend/package-lock.json exists and is committed.
+  - Verify the build works locally:
+    cd WARDS/frontend
+    npm ci
+    npm run build
+```
+
+### CD (Deployment)
+
+CD is documented in `SECURITY/CI_CD_DEPLOYMENT.md` but is not active yet. The planned production path is:
+
+```text
+GitHub Actions CI/CD -> Docker -> DigitalOcean -> Cloudflare WAF
+```
+
+Docker and DigitalOcean deployment will be configured when the project is ready for production hosting.
+
+## 14. Quick Verification Checklist
 
 ```text
 [ ] MySQL Workbench shows wards_db.

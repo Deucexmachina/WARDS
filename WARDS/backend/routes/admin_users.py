@@ -42,7 +42,7 @@ class AdminUserUpdate(BaseModel):
 
 
 def ensure_admin_role(current_admin):
-    if current_admin.role not in {"main_admin", "admin"}:
+    if current_admin.role not in {"main_admin", "admin", "superadmin"}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
 
 

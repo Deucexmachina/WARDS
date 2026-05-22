@@ -55,6 +55,10 @@ const SecurityProtectedRoute = ({ children }) => {
     };
 
     verify();
+    const interval = window.setInterval(() => {
+      verify();
+    }, 10000);
+    return () => window.clearInterval(interval);
   }, []);
 
   if (allowed === null) {

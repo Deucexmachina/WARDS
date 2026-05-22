@@ -5,12 +5,27 @@ from database.models import User, get_db
 
 # Role definitions
 ROLE_MAIN_ADMIN = "main_admin"
+ROLE_SUPERADMIN = "superadmin"
 ROLE_BRANCH_ADMIN = "branch_admin"
 ROLE_BRANCH_STAFF = "branch_staff"
 
 # Permission mappings
 PERMISSIONS = {
     ROLE_MAIN_ADMIN: [
+        "view_all_branches",
+        "manage_branches",
+        "view_system_stats",
+        "manage_announcements",
+        "manage_memos",
+        "manage_discrepancies",
+        "view_alerts",
+        "view_activity_logs",
+        "manage_settings",
+        "manage_users",
+        "manage_backup",
+        "manage_policies"
+    ],
+    ROLE_SUPERADMIN: [
         "view_all_branches",
         "manage_branches",
         "view_system_stats",
@@ -76,7 +91,7 @@ def require_role(*allowed_roles: str):
 
 def check_branch_access(user: User, branch_id: int) -> bool:
     """Check if user has access to a specific branch"""
-    if user.role == ROLE_MAIN_ADMIN:
+    if user.role in {ROLE_MAIN_ADMIN, ROLE_SUPERADMIN}:
         return True
     
     if user.role in [ROLE_BRANCH_ADMIN, ROLE_BRANCH_STAFF]:
@@ -97,7 +112,7 @@ def require_branch_access(branch_id: int):
 
 def filter_by_branch(user: User, query, model):
     """Filter query results by user's branch access"""
-    if user.role == ROLE_MAIN_ADMIN:
+    if user.role in {ROLE_MAIN_ADMIN, ROLE_SUPERADMIN}:
         return query
     
     if user.role in [ROLE_BRANCH_ADMIN, ROLE_BRANCH_STAFF]:
@@ -110,7 +125,7 @@ def get_accessible_branches(user: User, db: Session):
     """Get list of branches accessible to user"""
     from database.models import Branch
     
-    if user.role == ROLE_MAIN_ADMIN:
+    if user.role in {ROLE_MAIN_ADMIN, ROLE_SUPERADMIN}:
         return db.query(Branch).all()
     
     if user.role in [ROLE_BRANCH_ADMIN, ROLE_BRANCH_STAFF] and user.branch_id:
@@ -120,7 +135,7 @@ def get_accessible_branches(user: User, db: Session):
 
 def get_sidebar_modules(role: str) -> list:
     """Get sidebar modules based on user role"""
-    if role == ROLE_MAIN_ADMIN:
+    if role in {ROLE_MAIN_ADMIN, ROLE_SUPERADMIN}:
         return [
             {"name": "Dashboard", "path": "/admin", "icon": "dashboard"},
             {"name": "Manage Branches", "path": "/admin/branches", "icon": "branches"},

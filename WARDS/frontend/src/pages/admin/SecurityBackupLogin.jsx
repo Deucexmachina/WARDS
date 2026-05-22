@@ -23,6 +23,8 @@ const SecurityBackupLogin = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const currentAdmin = JSON.parse(localStorage.getItem('adminUser') || '{}');
+  const isSuperadmin = currentAdmin?.internal_role === 'superadmin';
 
   useEffect(() => {
     if (!localStorage.getItem('adminToken')) {
@@ -38,6 +40,14 @@ const SecurityBackupLogin = () => {
     setError('');
 
     try {
+      const normalizedIdentifier = identifier.trim().toLowerCase();
+      const currentUsername = String(currentAdmin?.username || '').toLowerCase();
+      const currentEmail = String(currentAdmin?.email || '').toLowerCase();
+      if (normalizedIdentifier && currentUsername && currentEmail && normalizedIdentifier !== currentUsername && normalizedIdentifier !== currentEmail) {
+        setError('Use the same admin account that is already signed in to the main dashboard.');
+        return;
+      }
+
       const response = await axios.post(`${API_URL}/api/auth/unified/login`, {
         identifier,
         password,
@@ -51,7 +61,13 @@ const SecurityBackupLogin = () => {
       }
 
       if (response.data.portal !== 'admin') {
-        setError('Only main office admin accounts can access the Security Dashboard.');
+        setError('Only main office admin or superadmin accounts can access the Security Dashboard.');
+        return;
+      }
+
+      if (currentAdmin?.id && response.data.user?.id && Number(response.data.user.id) !== Number(currentAdmin.id)) {
+        setError('Security Dashboard re-authentication must use the same admin account that opened the main dashboard.');
+        clearSecuritySession();
         return;
       }
 
@@ -62,6 +78,7 @@ const SecurityBackupLogin = () => {
       }
       sessionStorage.setItem('securityAuthenticated', 'true');
       sessionStorage.setItem('securityAuthenticatedAt', new Date().toISOString());
+      import('./BackupRecovery');
       navigate('/admin/backup', { replace: true });
     } catch (err) {
       const detail = err.response?.data?.detail || 'Security Dashboard login failed.';
@@ -177,7 +194,7 @@ const SecurityBackupLogin = () => {
 
         <div className="mt-8 text-center">
           <Link to="/admin" className="text-sm font-semibold text-slate-600 hover:text-primary">
-            Return to main admin dashboard
+            Return to {isSuperadmin ? 'superadmin' : 'main admin'} dashboard
           </Link>
         </div>
       </div>

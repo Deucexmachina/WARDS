@@ -69,7 +69,7 @@ const DynamicSidebar = () => {
         const unreadCount = Number(unreadResponse.data.unread_count || 0);
         const totalMemoCount = Array.isArray(memosResponse.data) ? memosResponse.data.length : 0;
         setUnreadMemoCount(Math.max(unreadCount, totalMemoCount));
-      } else if (storedRole === 'main_admin') {
+      } else if (storedRole === 'main_admin' || storedRole === 'superadmin') {
         const response = await api.get('/memos/unread-count');
         setUnreadMemoCount(response.data.unread_count || 0);
       }
@@ -81,7 +81,7 @@ const DynamicSidebar = () => {
   const fetchUnreadPolicyCount = async () => {
     try {
       const storedRole = getStoredRole();
-      if (storedRole === 'main_admin') {
+      if (storedRole === 'main_admin' || storedRole === 'superadmin') {
         const response = await api.get('/policies/unread-count');
         setUnreadPolicyCount(response.data.unread_count || 0);
       }
@@ -96,7 +96,7 @@ const DynamicSidebar = () => {
       if (storedRole === 'branch_admin' || storedRole === 'branch_staff') {
         const response = await discrepancyAPI.getBranchUnreadCount();
         setUnreadDiscrepancyCount(response.data.unread_count || 0);
-      } else if (storedRole === 'main_admin') {
+      } else if (storedRole === 'main_admin' || storedRole === 'superadmin') {
         const response = await discrepancyAPI.getAdminUnreadCount();
         setUnreadDiscrepancyCount(response.data.unread_count || 0);
       }
@@ -120,7 +120,7 @@ const DynamicSidebar = () => {
     try {
       const storedRole = getStoredRole();
 
-      if (storedRole === 'main_admin') {
+      if (storedRole === 'main_admin' || storedRole === 'superadmin') {
         const [
           announcementsResult,
           alertsResult,
@@ -228,7 +228,7 @@ const DynamicSidebar = () => {
   };
 
   const getDefaultModules = (role) => {
-    if (role === 'main_admin') {
+    if (role === 'main_admin' || role === 'superadmin') {
       return [
         { name: 'Dashboard', path: '/admin', icon: 'dashboard' },
         { name: 'Manage Branches', path: '/admin/branches', icon: 'branches' },
@@ -295,6 +295,7 @@ const DynamicSidebar = () => {
   const getRoleBadge = () => {
     const badges = {
       main_admin: { text: 'Main Admin', color: 'bg-purple-500' },
+      superadmin: { text: 'Superadmin', color: 'bg-fuchsia-600' },
       branch_admin: { text: 'Branch Admin', color: 'bg-blue-500' },
       branch_staff: { text: 'Staff', color: 'bg-green-500' }
     };

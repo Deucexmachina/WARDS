@@ -36,6 +36,16 @@ Feature vector:
 | suspicious_pattern_score | Defacement/injection pattern score. |
 | vpn_activity | Raises risk but does not automatically mark malicious. |
 
+Approved optional rules can be added from Manual Controls > Manage AI Rules. These are selected from a fixed defacement dictionary so admins cannot create arbitrary incompatible rules. Each added rule includes initial sample patterns and can be enabled, disabled, and tuned like the default rules.
+
+| Optional Rule | Validation Dictionary Basis | Initial Sample Type |
+|---|---|---|
+| ransom_note_keywords | Ransom/extortion phrases such as encrypted files, ransom payment, bitcoin wallet, decrypt key. | Ransom note text snippets. |
+| malicious_redirect | Forced redirect patterns such as `window.location`, `location.href`, and meta refresh. | Redirect code snippets. |
+| destructive_script | Browser disruption patterns such as local/session storage clearing and DOM removal. | JavaScript disruption snippets. |
+| phishing_form | Fake login/account warning wording. | Phishing text snippets. |
+| style_takeover | Full-page overlay and CSS takeover patterns. | CSS overlay snippets. |
+
 Initial sample data is in `SECURITY/ml/initial_training_samples.csv`. The backend also generates 640 bootstrap samples during retraining.
 
 ## Validation Basis
@@ -82,4 +92,3 @@ Validation measurement:
 | To be filled during local QA | Visual defacement | TBD | TBD | Pending | Use `DEFACEMENT/index.html` instructions. |
 | To be filled during local QA | File deletion | TBD | TBD | Pending | Verify quarantine and restore. |
 | To be filled during local QA | False positive | TBD | TBD | Pending | Recovery should show reverted. |
-

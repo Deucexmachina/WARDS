@@ -41,6 +41,7 @@ from utils.security_validation import (
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+SERVER_STARTED_AT = datetime.utcnow().isoformat()
 
 SECRET_KEY = os.getenv("USER_SECRET_KEY", "your-user-secret-key-change-in-production")
 ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "your-admin-secret-key-change-in-production-immediately")
@@ -885,6 +886,7 @@ async def verify_token(request: Request, db: Session = Depends(get_db)):
         
         return {
             "valid": True,
+            "server_started_at": SERVER_STARTED_AT,
             "user": build_public_user_response(user)
         }
     except JWTError:
