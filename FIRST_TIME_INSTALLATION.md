@@ -98,15 +98,51 @@ DEFACEMENT tester: http://localhost:3010
 
 ## 3. MySQL Workbench Database Setup
 
-Open MySQL Workbench and connect to your local MySQL server.
+Open MySQL Workbench and create/connect to your local MySQL server connection:
 
-Create the database:
+1. Open MySQL Workbench.
+2. On the home screen, click the `+` icon beside **MySQL Connections**.
+3. Use these recommended local settings:
+
+```text
+Connection Name: WARDS Local MySQL
+Connection Method: Standard (TCP/IP)
+Hostname: 127.0.0.1
+Port: 3306
+Username: root
+Password: Store in Vault... then enter your MySQL root password
+```
+
+4. Click **Test Connection**.
+5. If the test succeeds, click **OK**.
+6. Open the new **WARDS Local MySQL** connection.
+
+Create the database/schema:
 
 ```sql
 CREATE DATABASE IF NOT EXISTS wards_db
 CHARACTER SET utf8mb4
 COLLATE utf8mb4_unicode_ci;
 ```
+
+If you already have a project SQL dump, import it through MySQL Workbench:
+
+1. Open the **WARDS Local MySQL** connection.
+2. Go to **Server** > **Data Import**.
+3. Select **Import from Self-Contained File**.
+4. Click `...` and choose the project `.sql` backup/dump file.
+5. Under **Default Target Schema**, choose `wards_db`.
+6. Click **Start Import**.
+
+If the import fails because there is no target schema:
+
+1. Go back to the SQL editor.
+2. Run the `CREATE DATABASE IF NOT EXISTS wards_db` SQL command above.
+3. Return to **Server** > **Data Import**.
+4. Select **Import from Self-Contained File** again.
+5. Choose the `.sql` file again.
+6. Select `wards_db` in **Default Target Schema**.
+7. Click **Start Import** again.
 
 Create a local project user if you do not want to use `root`:
 

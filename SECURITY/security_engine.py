@@ -269,8 +269,10 @@ def now_utc() -> datetime:
     cache_age = time.time() - float(_NETWORK_TIME_CACHE.get("fetched_at") or 0)
     if _NETWORK_TIME_CACHE.get("value") and cache_age < 60:
         return _NETWORK_TIME_CACHE["value"] + timedelta(seconds=cache_age)
+    if _NETWORK_TIME_CACHE.get("source") == "local_utc_fallback" and cache_age < 60:
+        return datetime.utcnow()
     try:
-        response = requests.get("https://worldtimeapi.org/api/timezone/Etc/UTC", timeout=2)
+        response = requests.get("https://worldtimeapi.org/api/timezone/Etc/UTC", timeout=0.5)
         response.raise_for_status()
         payload = response.json()
         raw_value = payload.get("utc_datetime") or payload.get("datetime")
@@ -524,24 +526,26 @@ def prune_all_backup_types(backup_location: Path, keep: int = 3) -> None:
         pass
 
 
-def register_initial_files(db: Session, ensure_backup: bool = True) -> int:
+def register_initial_files(db: Session, ensure_backup: bool = True, refresh_existing: bool = True) -> int:
     seed_settings(db)
     created = 0
     for root_name, path in iter_monitorable_files():
         relative = safe_rel(path)
-        current_hash = sha256_file(path)
         existing = db.query(SecurityMonitoredFile).filter(SecurityMonitoredFile.file_path == str(path)).first()
         if existing:
             existing.relative_path = relative
             existing.folder_root = root_name
-            existing.current_hash = current_hash
-            existing.baseline_hash = existing.baseline_hash or current_hash
-            existing.status = "clean" if existing.baseline_hash == current_hash else existing.status
             existing.file_type = file_type(path)
-            existing.size_bytes = path.stat().st_size
-            existing.last_checked = now_utc()
+            if refresh_existing:
+                current_hash = sha256_file(path)
+                existing.current_hash = current_hash
+                existing.baseline_hash = existing.baseline_hash or current_hash
+                existing.status = "clean" if existing.baseline_hash == current_hash else existing.status
+                existing.size_bytes = path.stat().st_size
+                existing.last_checked = now_utc()
             db.add(existing)
             continue
+        current_hash = sha256_file(path)
         db.add(
             SecurityMonitoredFile(
                 file_path=str(path),
@@ -893,6 +897,215 @@ def restore_from_backup(db: Session, file_entry: SecurityMonitoredFile, detectio
     return recovery
 
 
+def restore_from_quarantine(db: Session, file_entry: SecurityMonitoredFile, detection_id: int | None, initiated_by: int, quarantine_path: str) -> SecurityRecoveryEvent:
+    recovery = SecurityRecoveryEvent(
+        detection_event_id=detection_id,
+        file_id=file_entry.id,
+        recovery_type="false_positive_restore",
+        initiated_by=initiated_by,
+        status="in_progress",
+        quarantine_path=quarantine_path,
+    )
+    db.add(recovery)
+    db.commit()
+    db.refresh(recovery)
+
+    started = time.time()
+    try:
+        source = Path(quarantine_path)
+        target = Path(file_entry.file_path)
+        if not source.exists() or not source.is_file():
+            raise FileNotFoundError(f"Quarantined copy not found for {file_entry.relative_path}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+        restored_hash = sha256_file(target)
+        file_entry.baseline_hash = restored_hash
+        file_entry.current_hash = restored_hash
+        file_entry.status = "clean"
+        file_entry.size_bytes = target.stat().st_size
+        file_entry.last_checked = now_utc()
+        recovery.status = "success"
+        recovery.completed_at = now_utc()
+        recovery.recovery_duration_ms = int((time.time() - started) * 1000)
+        recovery.summary = f"Restored authorized quarantined copy for {file_entry.relative_path}."
+        db.add(file_entry)
+        db.add(recovery)
+        db.commit()
+    except Exception as exc:
+        recovery.status = "failed"
+        recovery.error_message = str(exc)
+        recovery.completed_at = now_utc()
+        recovery.recovery_duration_ms = int((time.time() - started) * 1000)
+        recovery.summary = f"False positive restore failed for {file_entry.relative_path}."
+        db.add(recovery)
+        db.commit()
+    db.refresh(recovery)
+    return recovery
+
+
+def current_hash_index(db: Session) -> dict[str, list[SecurityMonitoredFile]]:
+    index: dict[str, list[SecurityMonitoredFile]] = {}
+    for entry in db.query(SecurityMonitoredFile).all():
+        path = Path(entry.file_path)
+        if not path.exists() or not path.is_file():
+            continue
+        current_hash = entry.current_hash
+        if not current_hash:
+            try:
+                current_hash = sha256_file(path)
+            except Exception:
+                continue
+        index.setdefault(current_hash, []).append(entry)
+    return index
+
+
+def replacement_path_for(entry: SecurityMonitoredFile, hash_index: dict[str, list[SecurityMonitoredFile]]) -> str | None:
+    for candidate in hash_index.get(entry.baseline_hash, []):
+        if candidate.file_path != entry.file_path:
+            return candidate.relative_path or candidate.file_path
+    return None
+
+
+def mark_verified_removal(db: Session, file_entry: SecurityMonitoredFile, reason: str, replacement_path: str | None = None, actor: str = "trusted_baseline") -> SecurityDetectionEvent:
+    label = "Verified rename" if reason == "verified_renamed" else "Verified deletion"
+    summary = f"{label}: {file_entry.relative_path}"
+    if replacement_path:
+        summary = f"{summary} -> {replacement_path}"
+    detection = (
+        db.query(SecurityDetectionEvent)
+        .filter(
+            SecurityDetectionEvent.file_id == file_entry.id,
+            SecurityDetectionEvent.change_type.in_(["file_deleted", "verified_deleted", "verified_renamed"]),
+        )
+        .order_by(SecurityDetectionEvent.detected_at.desc())
+        .first()
+    )
+    if detection:
+        detection.change_type = reason
+        detection.is_legitimate = True
+        detection.ai_prediction = "normal"
+        detection.ai_score = 0.0
+        detection.confidence = 1.0
+        detection.severity_level = "info"
+        detection.cvss_score = 0.0
+        detection.nist_category = "CAT 0 - Exercise/Test"
+        detection.enisa_threat_type = "N/A"
+        detection.trigger_summary = summary
+        detection.accuracy_basis = "Accepted during trusted baseline reconciliation."
+        context = json_loads(detection.context_json, {})
+        context.update({"verified_removal": True, "replacement_path": replacement_path, "actor": actor, "removal_type": reason})
+        detection.context_json = json_dumps(context)
+        db.add(detection)
+    else:
+        detection = SecurityDetectionEvent(
+            file_id=file_entry.id,
+            target_type="file",
+            target_name=file_entry.relative_path,
+            actor=actor,
+            change_type=reason,
+            old_hash=file_entry.current_hash or file_entry.baseline_hash,
+            new_hash=None,
+            is_legitimate=True,
+            ai_score=0.0,
+            ai_prediction="normal",
+            confidence=1.0,
+            severity_level="info",
+            cvss_score=0.0,
+            nist_category="CAT 0 - Exercise/Test",
+            enisa_threat_type="N/A",
+            trigger_summary=summary,
+            accuracy_basis="Accepted during trusted baseline reconciliation.",
+            behavior_flags_json=json_dumps([]),
+            changed_lines_json=json_dumps({}),
+            context_json=json_dumps({"verified_removal": True, "replacement_path": replacement_path, "actor": actor, "removal_type": reason}),
+        )
+        db.add(detection)
+        db.flush()
+
+    for incident in db.query(SecurityIncident).filter(SecurityIncident.detection_event_id == detection.id, SecurityIncident.status.in_(["open", "investigating"])).all():
+        incident.status = reason
+        incident.response_action = reason
+        incident.resolved_at = now_utc()
+        cleanup_quarantine_paths(json_loads(incident.quarantine_paths_json, []))
+        db.add(incident)
+    for recovery in db.query(SecurityRecoveryEvent).filter(SecurityRecoveryEvent.detection_event_id == detection.id, SecurityRecoveryEvent.status == "success").all():
+        recovery.status = "verified_removal"
+        recovery.summary = "Trusted baseline accepted; previous automatic recovery is no longer treated as a security incident."
+        db.add(recovery)
+
+    file_entry.current_hash = None
+    file_entry.status = reason
+    file_entry.last_checked = now_utc()
+    db.add(file_entry)
+    db.flush()
+    return detection
+
+
+def mark_existing_deletion_incident_verified_rename(db: Session, detection: SecurityDetectionEvent, file_entry: SecurityMonitoredFile, replacement_path: str, actor: str) -> None:
+    detection.change_type = "verified_renamed"
+    detection.is_legitimate = True
+    detection.ai_prediction = "normal"
+    detection.ai_score = 0.0
+    detection.confidence = 1.0
+    detection.severity_level = "info"
+    detection.cvss_score = 0.0
+    detection.nist_category = "CAT 0 - Exercise/Test"
+    detection.enisa_threat_type = "N/A"
+    detection.trigger_summary = f"Verified rename: {file_entry.relative_path} -> {replacement_path}"
+    detection.accuracy_basis = "Accepted during trusted baseline reconciliation."
+    context = json_loads(detection.context_json, {})
+    context.update({"verified_removal": True, "replacement_path": replacement_path, "actor": actor, "removal_type": "verified_renamed"})
+    detection.context_json = json_dumps(context)
+    db.add(detection)
+
+    for incident in db.query(SecurityIncident).filter(SecurityIncident.detection_event_id == detection.id, SecurityIncident.status.in_(["open", "investigating"])).all():
+        incident.status = "verified_renamed"
+        incident.response_action = "verified_renamed"
+        incident.resolved_at = now_utc()
+        cleanup_quarantine_paths(json_loads(incident.quarantine_paths_json, []))
+        db.add(incident)
+
+    for recovery in db.query(SecurityRecoveryEvent).filter(SecurityRecoveryEvent.detection_event_id == detection.id, SecurityRecoveryEvent.status == "success").all():
+        recovery.status = "verified_removal"
+        recovery.summary = "Trusted baseline accepted; previous automatic recovery is no longer treated as a security incident."
+        db.add(recovery)
+    file_entry.current_hash = None
+    file_entry.status = "verified_renamed"
+    file_entry.last_checked = now_utc()
+    db.add(file_entry)
+
+
+def reconcile_trusted_file_removals(db: Session, actor: str = "trusted_baseline") -> dict[str, int]:
+    hash_index = current_hash_index(db)
+    verified_deleted = 0
+    verified_renamed = 0
+    for entry in db.query(SecurityMonitoredFile).order_by(SecurityMonitoredFile.relative_path.asc()).all():
+        path = Path(entry.file_path)
+        if path.exists():
+            continue
+        replacement_path = replacement_path_for(entry, hash_index)
+        if replacement_path:
+            mark_verified_removal(db, entry, "verified_renamed", replacement_path=replacement_path, actor=actor)
+            verified_renamed += 1
+        else:
+            mark_verified_removal(db, entry, "verified_deleted", actor=actor)
+            verified_deleted += 1
+    open_deletion_incidents = (
+        db.query(SecurityIncident, SecurityDetectionEvent, SecurityMonitoredFile)
+        .join(SecurityDetectionEvent, SecurityIncident.detection_event_id == SecurityDetectionEvent.id)
+        .join(SecurityMonitoredFile, SecurityDetectionEvent.file_id == SecurityMonitoredFile.id)
+        .filter(SecurityIncident.status.in_(["open", "investigating"]), SecurityDetectionEvent.change_type == "file_deleted")
+        .all()
+    )
+    for _incident, detection, entry in open_deletion_incidents:
+        replacement_path = replacement_path_for(entry, hash_index)
+        if not replacement_path:
+            continue
+        mark_existing_deletion_incident_verified_rename(db, detection, entry, replacement_path, actor)
+        verified_renamed += 1
+    return {"verified_deleted": verified_deleted, "verified_renamed": verified_renamed}
+
+
 def create_incident(db: Session, detection: SecurityDetectionEvent, classification: dict, flags: list[str], changed: dict, quarantine_path: str | None) -> SecurityIncident:
     incident = SecurityIncident(
         detection_event_id=detection.id,
@@ -916,7 +1129,7 @@ def create_incident(db: Session, detection: SecurityDetectionEvent, classificati
     return incident
 
 
-def scan_single_file(db: Session, file_entry: SecurityMonitoredFile, context: dict | None = None) -> SecurityDetectionEvent | None:
+def scan_single_file(db: Session, file_entry: SecurityMonitoredFile, context: dict | None = None, commit_clean: bool = True) -> SecurityDetectionEvent | None:
     context = context or {}
     path = Path(file_entry.file_path)
     old_hash = file_entry.current_hash
@@ -925,6 +1138,15 @@ def scan_single_file(db: Session, file_entry: SecurityMonitoredFile, context: di
     old_content = read_text(backup_source) if backup_source and backup_source.exists() else ""
 
     if not path.exists():
+        if file_entry.status in {"verified_deleted", "verified_renamed"}:
+            file_entry.current_hash = None
+            file_entry.last_checked = now_utc()
+            db.add(file_entry)
+            if commit_clean:
+                db.commit()
+            else:
+                db.flush()
+            return None
         file_entry.status = "missing"
         file_entry.current_hash = None
         file_entry.last_checked = now_utc()
@@ -946,7 +1168,10 @@ def scan_single_file(db: Session, file_entry: SecurityMonitoredFile, context: di
 
     file_entry.status = "clean"
     db.add(file_entry)
-    db.commit()
+    if commit_clean:
+        db.commit()
+    else:
+        db.flush()
     return None
 
 
@@ -1007,7 +1232,7 @@ def record_detection(db: Session, file_entry: SecurityMonitoredFile, change_type
     if not is_legitimate:
         quarantine_path = quarantine_file(Path(file_entry.file_path), detection.id)
         incident = create_incident(db, detection, classification, flags, changed, quarantine_path)
-        if classification["severity_level"] in {"medium", "high", "critical"} or change_type == "file_deleted":
+        if change_type in {"content_modified", "file_deleted"}:
             recovery = restore_from_backup(db, file_entry, detection.id, "automatic", None, quarantine_path)
             incident.response_action = "auto_recovered_pending_review" if recovery.status == "success" else "escalated"
             db.add(incident)
@@ -1029,22 +1254,27 @@ def build_trigger_summary(change_type: str, flags: list[str], changed: dict, is_
 
 
 def scan_all_files(db: Session, context: dict | None = None) -> list[SecurityDetectionEvent]:
-    register_initial_files(db)
+    register_initial_files(db, refresh_existing=False)
     set_setting(db, "last_scan_at", now_utc().isoformat(), "security_scanner")
     detections = []
-    known_paths = {str(path) for _, path in iter_monitorable_files()}
+    hash_index = current_hash_index(db)
     for file_entry in db.query(SecurityMonitoredFile).order_by(SecurityMonitoredFile.relative_path.asc()).all():
-        if file_entry.file_path not in known_paths and not Path(file_entry.file_path).exists():
-            continue
-        detection = scan_single_file(db, file_entry, context=context)
+        if not Path(file_entry.file_path).exists():
+            replacement_path = replacement_path_for(file_entry, hash_index)
+            if replacement_path:
+                detections.append(mark_verified_removal(db, file_entry, "verified_renamed", replacement_path=replacement_path, actor="active_scan"))
+                continue
+        detection = scan_single_file(db, file_entry, context=context, commit_clean=False)
         if detection:
             detections.append(detection)
+    db.commit()
     return detections
 
 
 def create_manual_backup(db: Session, initiated_by: int | None, label: str = "manual") -> SecurityRecoveryEvent:
     seed_settings(db)
     register_count = register_initial_files(db, ensure_backup=False)
+    removal_summary = reconcile_trusted_file_removals(db, actor=f"{label}_backup")
     backup_location = Path(get_setting(db, "backup_location", str(DEFAULT_BACKUP_ROOT)))
     previous_backup_root = latest_backup_root(db)
     timestamp = now_utc().strftime("%Y%m%d_%H%M%S")
@@ -1064,11 +1294,12 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
             target = backup_file_path(backup_root, relative)
             file_hash = sha256_file(path)
             previous_source = backup_file_path(previous_backup_root, relative) if previous_backup_root else None
+            previous_matches = bool(previous_source and previous_source.exists() and sha256_file(previous_source) == file_hash)
             copy_into_backup(
                 path,
                 target,
                 previous_source=previous_source,
-                can_reuse_previous=bool(previous_source and entry.baseline_hash == file_hash),
+                can_reuse_previous=previous_matches,
             )
             entry.baseline_hash = file_hash
             entry.current_hash = file_hash
@@ -1081,7 +1312,12 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
         event.backup_path = str(backup_root)
         event.completed_at = now_utc()
         event.recovery_duration_ms = int((time.time() - started) * 1000)
-        event.summary = f"Local backup completed for WARDS and OCR ({register_count} new files registered)."
+        verified_deleted = removal_summary["verified_deleted"]
+        verified_renamed = removal_summary["verified_renamed"]
+        event.summary = (
+            f"Local backup completed for WARDS and OCR "
+            f"({register_count} new files registered, {verified_deleted + verified_renamed} trusted removal update(s))."
+        )
         set_setting(db, "latest_backup_path", str(backup_root), str(initiated_by) if initiated_by else "system")
         prune_backup_type(backup_location, label, keep=3)
     except Exception as exc:
@@ -1151,27 +1387,33 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int) -> SecurityIn
     return incident
 
 
-def mark_false_positive(db: Session, incident_id: int, admin_id: int) -> SecurityIncident:
+def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_backup: bool = True) -> SecurityIncident:
     incident = db.query(SecurityIncident).filter(SecurityIncident.id == incident_id).first()
     if not incident:
         raise ValueError("Incident not found")
     detection = db.query(SecurityDetectionEvent).filter(SecurityDetectionEvent.id == incident.detection_event_id).first()
     file_entry = db.query(SecurityMonitoredFile).filter(SecurityMonitoredFile.id == detection.file_id).first() if detection else None
     quarantine_paths = json_loads(incident.quarantine_paths_json, [])
-    if file_entry and quarantine_paths:
-        source = Path(quarantine_paths[0])
-        target = Path(file_entry.file_path)
-        if source.exists():
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, target)
-            restored_hash = sha256_file(target)
-            file_entry.baseline_hash = restored_hash
-            file_entry.current_hash = restored_hash
-            file_entry.status = "clean"
-            db.add(file_entry)
+    if not file_entry:
+        raise ValueError("Incident has no monitored file to restore")
+    if not quarantine_paths:
+        raise ValueError("Incident has no quarantined copy to restore")
+    false_positive_recovery = restore_from_quarantine(db, file_entry, incident.detection_event_id, admin_id, quarantine_paths[0])
+    if false_positive_recovery.status != "success":
+        raise RuntimeError(false_positive_recovery.error_message or "Unable to restore the quarantined file")
+    if detection:
+        detection.is_legitimate = True
+        detection.ai_prediction = "normal"
+        detection.ai_score = 0.0
+        detection.confidence = 1.0
+        detection.severity_level = "info"
+        detection.trigger_summary = f"False positive accepted by admin; quarantined copy restored for {detection.target_name}."
+        db.add(detection)
     for recovery in db.query(SecurityRecoveryEvent).filter(SecurityRecoveryEvent.detection_event_id == incident.detection_event_id).all():
-        recovery.status = "reverted"
-        recovery.summary = "Recovery reverted after incident was marked as a false positive."
+        if recovery.id == false_positive_recovery.id:
+            continue
+        recovery.status = "verified_false_positive"
+        recovery.summary = "False positive accepted; quarantined copy restored and trusted backup refreshed."
         db.add(recovery)
     incident.status = "false_positive"
     incident.response_action = "authorized_change_restored"
@@ -1180,20 +1422,23 @@ def mark_false_positive(db: Session, incident_id: int, admin_id: int) -> Securit
     cleanup_quarantine_paths(quarantine_paths)
     db.add(incident)
     db.commit()
-    create_manual_backup(db, initiated_by=admin_id, label="post_false_positive")
+    if refresh_backup:
+        create_manual_backup(db, initiated_by=admin_id, label="post_false_positive")
     db.refresh(incident)
     return incident
 
 
 def bulk_update_incidents(db: Session, action: str, admin_id: int) -> dict:
     updated = 0
+    backup_after_bulk = False
     rows = db.query(SecurityIncident).filter(SecurityIncident.status.in_(["open", "investigating"])).order_by(SecurityIncident.id.asc()).all()
     for incident in rows:
         if action == "resolve":
             resolve_incident(db, incident.id, admin_id)
             updated += 1
         elif action == "false_positive":
-            mark_false_positive(db, incident.id, admin_id)
+            mark_false_positive(db, incident.id, admin_id, refresh_backup=False)
+            backup_after_bulk = True
             updated += 1
         elif action == "investigating":
             incident.status = "investigating"
@@ -1203,6 +1448,8 @@ def bulk_update_incidents(db: Session, action: str, admin_id: int) -> dict:
             updated += 1
         else:
             raise ValueError("Unsupported bulk incident action")
+    if backup_after_bulk:
+        create_manual_backup(db, initiated_by=admin_id, label="post_false_positive_bulk")
     return {"updated": updated, "action": action}
 
 
@@ -1212,7 +1459,7 @@ def dashboard_payload(db: Session) -> dict:
         SecurityMonitoredFile.status.in_(["modified", "missing", "compromised"])
     ).count()
     incidents = db.query(SecurityIncident).filter(SecurityIncident.status.in_(["open", "investigating"])).all()
-    detection_attention_count = db.query(SecurityDetectionEvent).filter(SecurityDetectionEvent.is_legitimate == False).count()  # noqa: E712
+    detection_attention_count = db.query(SecurityDetectionEvent).filter(SecurityDetectionEvent.is_legitimate == False).count()
     recovery_attention_count = db.query(SecurityRecoveryEvent).filter(SecurityRecoveryEvent.status.in_(["failed", "reverted"])).count()
     last_detection = db.query(SecurityDetectionEvent).order_by(SecurityDetectionEvent.detected_at.desc()).first()
     last_scan_at = get_setting(db, "last_scan_at", "")
@@ -1221,12 +1468,12 @@ def dashboard_payload(db: Session) -> dict:
     severity = {key: 0 for key in ["info", "low", "medium", "high", "critical"]}
     attack_types = {}
     behaviors = {}
-    for detection in db.query(SecurityDetectionEvent).all():
-        severity[detection.severity_level or "info"] = severity.get(detection.severity_level or "info", 0) + 1
-        for behavior in json_loads(detection.behavior_flags_json, []):
-            behaviors[behavior] = behaviors.get(behavior, 0) + 1
-    for incident in db.query(SecurityIncident).all():
+    chart_incidents = db.query(SecurityIncident).all()
+    for incident in chart_incidents:
+        severity[incident.severity_level or "info"] = severity.get(incident.severity_level or "info", 0) + 1
         attack_types[incident.incident_type] = attack_types.get(incident.incident_type, 0) + 1
+        for behavior in json_loads(incident.behaviors_json, []):
+            behaviors[behavior] = behaviors.get(behavior, 0) + 1
     schedule = json_loads(get_setting(db, "backup_schedule", "{}"), {})
     next_backup = schedule.get("next_run") or "Not scheduled"
     status = "Protected"
@@ -1429,7 +1676,8 @@ def remove_monitored_folder(db: Session, folder_path: str) -> dict:
     if not root.exists() or not root.is_dir():
         raise ValueError("Folder does not exist")
 
-    backup_root = latest_backup_root(db)
+    backup_location = Path(get_setting(db, "backup_location", str(DEFAULT_BACKUP_ROOT)))
+    backup_roots = [item for item in backup_location.iterdir() if item.is_dir()] if backup_location.exists() else []
     removed = 0
     removed_backups = 0
     entries = db.query(SecurityMonitoredFile).all()
@@ -1449,6 +1697,10 @@ def remove_monitored_folder(db: Session, folder_path: str) -> dict:
 
 
 def serialize_detection(item: SecurityDetectionEvent) -> dict:
+    display_change_type = "trusted_removal_update" if item.change_type in {"verified_deleted", "verified_renamed"} else item.change_type
+    display_summary = item.trigger_summary
+    if item.change_type in {"verified_deleted", "verified_renamed"} or "Verified rename" in str(display_summary or ""):
+        display_summary = "Accepted during trusted baseline reconciliation."
     return {
         "id": item.id,
         "file_id": item.file_id,
@@ -1456,7 +1708,7 @@ def serialize_detection(item: SecurityDetectionEvent) -> dict:
         "target_type": item.target_type,
         "target_name": item.target_name,
         "actor": item.actor,
-        "change_type": item.change_type,
+        "change_type": display_change_type,
         "is_legitimate": item.is_legitimate,
         "ai_score": item.ai_score,
         "ai_prediction": item.ai_prediction,
@@ -1465,7 +1717,7 @@ def serialize_detection(item: SecurityDetectionEvent) -> dict:
         "cvss_score": item.cvss_score,
         "nist_category": item.nist_category,
         "enisa_threat_type": item.enisa_threat_type,
-        "trigger_summary": item.trigger_summary,
+        "trigger_summary": display_summary,
         "accuracy_basis": item.accuracy_basis,
         "behaviors": json_loads(item.behavior_flags_json, []),
         "changed_lines": json_loads(item.changed_lines_json, {}),
@@ -1474,6 +1726,10 @@ def serialize_detection(item: SecurityDetectionEvent) -> dict:
 
 
 def serialize_recovery(item: SecurityRecoveryEvent) -> dict:
+    display_status = "success" if item.status == "verified_removal" else item.status
+    display_summary = item.summary
+    if "Verified rename" in str(display_summary or ""):
+        display_summary = "Trusted baseline accepted; previous automatic recovery is no longer treated as a security incident."
     return {
         "id": item.id,
         "detection_event_id": item.detection_event_id,
@@ -1482,16 +1738,17 @@ def serialize_recovery(item: SecurityRecoveryEvent) -> dict:
         "initiated_by": item.initiated_by,
         "started_at": item.started_at.isoformat() if item.started_at else None,
         "completed_at": item.completed_at.isoformat() if item.completed_at else None,
-        "status": item.status,
+        "status": display_status,
         "backup_path": item.backup_path,
         "quarantine_path": item.quarantine_path,
         "recovery_duration_ms": item.recovery_duration_ms,
         "error_message": item.error_message,
-        "summary": item.summary,
+        "summary": display_summary,
     }
 
 
 def serialize_file(item: SecurityMonitoredFile) -> dict:
+    display_status = "clean" if item.status in {"verified_deleted", "verified_renamed"} else item.status
     return {
         "id": item.id,
         "file_path": item.file_path,
@@ -1499,7 +1756,7 @@ def serialize_file(item: SecurityMonitoredFile) -> dict:
         "folder_root": item.folder_root,
         "baseline_hash": item.baseline_hash,
         "current_hash": item.current_hash,
-        "status": item.status,
+        "status": display_status,
         "file_type": item.file_type,
         "size_bytes": item.size_bytes,
         "last_checked": item.last_checked.isoformat() if item.last_checked else None,

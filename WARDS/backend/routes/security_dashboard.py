@@ -220,6 +220,8 @@ def false_positive(incident_id: int, db: Session = Depends(get_db), admin=Depend
         return serialize_incident(mark_false_positive(db, incident_id, admin.id))
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.post("/scan")

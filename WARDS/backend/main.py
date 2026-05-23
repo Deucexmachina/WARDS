@@ -1337,33 +1337,53 @@ backfill_branch_and_business_registry_security()
 def start_security_monitor_if_enabled():
     enabled = (os.getenv("SECURITY_MONITORING_ENABLED") or "false").strip().lower() == "true"
     deployed = (os.getenv("SECURITY_DEPLOYMENT_MODE") or "development").strip().lower() == "deployed"
-    if not enabled or not deployed:
+    if not deployed:
         return
 
     default_interval = max(5, int(os.getenv("SECURITY_SCAN_INTERVAL_SECONDS", "30")))
 
     def monitor_loop():
-        from SECURITY.security_engine import create_manual_backup, get_setting, set_setting, scan_all_files
+        from SECURITY.security_engine import create_manual_backup, get_setting, seed_settings, set_setting, scan_all_files
 
-        startup_db = SessionLocal()
-        try:
-            set_setting(startup_db, "startup_baseline_status", "in_progress", "system")
-            create_manual_backup(startup_db, initiated_by=None, label="startup_baseline")
-            set_setting(startup_db, "startup_baseline_status", "complete", "system")
-            print("[SECURITY MONITOR] startup baseline backup refreshed before scanning")
-        except Exception as exc:
-            set_setting(startup_db, "startup_baseline_status", "failed", "system")
-            print(f"[SECURITY MONITOR] startup baseline refresh failed: {exc}")
-        finally:
-            startup_db.close()
+        while True:
+            retry_delay = False
+            startup_db = SessionLocal()
+            try:
+                seed_settings(startup_db)
+                set_setting(startup_db, "startup_baseline_status", "in_progress", "system")
+                print("[SECURITY MONITOR] refreshing startup baseline backup before scanning")
+                event = create_manual_backup(startup_db, initiated_by=None, label="startup_baseline")
+                if event.status != "success":
+                    raise RuntimeError(event.error_message or "Startup baseline backup failed")
+                set_setting(startup_db, "monitoring_enabled", "true" if enabled else "false", "system_startup")
+                set_setting(startup_db, "startup_baseline_status", "complete", "system")
+                print("[SECURITY MONITOR] startup baseline backup refreshed before scanning")
+                break
+            except Exception as exc:
+                try:
+                    set_setting(startup_db, "startup_baseline_status", "failed", "system")
+                except Exception:
+                    pass
+                print(f"[SECURITY MONITOR] startup baseline refresh failed: {exc}")
+                retry_delay = True
+            finally:
+                startup_db.close()
+            if retry_delay:
+                time.sleep(default_interval)
+            else:
+                break
 
+        first_scan = True
         while True:
             db = SessionLocal()
             interval = default_interval
             try:
                 monitoring_enabled = (get_setting(db, "monitoring_enabled", "true") or "true").lower() == "true"
                 if monitoring_enabled:
-                    scan_all_files(db, context={"background_monitor": True})
+                    detections = scan_all_files(db, context={"background_monitor": True})
+                    if first_scan:
+                        print(f"[SECURITY MONITOR] first automatic scan complete; {len(detections)} change(s) found")
+                first_scan = False
                 interval = max(5, int(get_setting(db, "scan_interval_seconds", str(default_interval))))
             except Exception as exc:
                 print(f"[SECURITY MONITOR] scan failed: {exc}")
@@ -1373,7 +1393,7 @@ def start_security_monitor_if_enabled():
 
     thread = threading.Thread(target=monitor_loop, daemon=True, name="wards-security-monitor")
     thread.start()
-    print(f"[SECURITY MONITOR] enabled; default scan interval is {default_interval} seconds")
+    print(f"[SECURITY MONITOR] ready; default scan interval is {default_interval} seconds")
 
 
 start_security_monitor_if_enabled()

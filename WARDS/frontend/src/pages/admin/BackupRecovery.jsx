@@ -45,10 +45,11 @@ const badgeClass = (value) => {
 
 const humanize = (value) => String(value || 'n/a').replaceAll('_', ' ');
 const titleize = (value) => humanize(value).replace(/\b\w/g, (letter) => letter.toUpperCase());
+const badgeText = (value) => String(value || '').toLowerCase() === 'false_positive' ? 'False+' : titleize(value);
 
 const Badge = ({ children }) => (
   <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${badgeClass(children)}`}>
-    {titleize(children)}
+    {badgeText(children)}
   </span>
 );
 
@@ -154,6 +155,22 @@ const Filters = ({ filters, setFilters, showType, showStatus }) => (
   </div>
 );
 
+const SortHeader = ({ label, column, sort, setSort }) => {
+  const active = sort.column === column;
+  const direction = active ? sort.direction : 'asc';
+  const arrow = direction === 'asc' ? '↑' : '↓';
+  return (
+    <button
+      className="inline-flex items-center gap-1 font-bold uppercase tracking-[0.16em] text-slate-500 hover:text-primary"
+      onClick={() => setSort({ column, direction: active && direction === 'asc' ? 'desc' : 'asc' })}
+      aria-label={`Sort ${label} ${direction === 'asc' ? 'ascending' : 'descending'}`}
+    >
+      <span>{label}</span>
+      <span className="text-sm leading-none" aria-hidden="true">{arrow}</span>
+    </button>
+  );
+};
+
 const ConfirmModal = ({ confirm, onCancel, onConfirm, busy }) => {
   if (!confirm) return null;
   return (
@@ -245,6 +262,8 @@ const BackupRecovery = () => {
   const [detectionFilters, setDetectionFilters] = useState({ keyword: '', date_from: '', date_to: '', target: '', severity: '', sort: 'newest' });
   const [recoveryFilters, setRecoveryFilters] = useState({ keyword: '', date_from: '', date_to: '', type: '', status: '', sort: 'newest' });
   const [incidentFilters, setIncidentFilters] = useState({ keyword: '', status: '', severity: '', date_from: '', date_to: '', sort: 'newest' });
+  const [fileKeyword, setFileKeyword] = useState('');
+  const [fileSort, setFileSort] = useState({ column: 'folder', direction: 'asc' });
   const [aiRules, setAiRules] = useState({});
   const [aiRuleTemplates, setAiRuleTemplates] = useState([]);
   const [showAiRules, setShowAiRules] = useState(false);
@@ -598,6 +617,32 @@ const BackupRecovery = () => {
     'Manual Controls': 0,
   };
 
+  const visibleFiles = useMemo(() => {
+    const keyword = fileKeyword.trim().toLowerCase();
+    const valueFor = (file) => {
+      if (fileSort.column === 'folder') return String(file.folder_root || '').toLowerCase();
+      if (fileSort.column === 'status') return String(file.status || '').toLowerCase();
+      if (fileSort.column === 'type') return String(file.file_type || '').toLowerCase();
+      if (fileSort.column === 'size') return Number(file.size_bytes || 0);
+      if (fileSort.column === 'last_checked') return file.last_checked ? new Date(file.last_checked).getTime() : 0;
+      return String(file.relative_path || '').toLowerCase();
+    };
+    return files
+      .filter((file) => {
+        if (!keyword) return true;
+        return [file.relative_path, file.folder_root, file.status, file.file_type]
+          .some((value) => String(value || '').toLowerCase().includes(keyword));
+      })
+      .sort((left, right) => {
+        const leftValue = valueFor(left);
+        const rightValue = valueFor(right);
+        const result = typeof leftValue === 'number'
+          ? leftValue - rightValue
+          : String(leftValue).localeCompare(String(rightValue));
+        return fileSort.direction === 'asc' ? result : -result;
+      });
+  }, [files, fileKeyword, fileSort]);
+
   const cardClass = (label, value) => {
     if (label === 'System Status') return String(value).toLowerCase() === 'protected' ? 'bg-green-600 text-white' : 'bg-orange-500 text-white';
     if (label === 'Active Incidents') return Number(value || 0) === 0 ? 'bg-green-400 text-white' : 'bg-orange-300 text-white';
@@ -727,22 +772,32 @@ const BackupRecovery = () => {
           )}
 
           {activeTab === 'File Status' && (
-            <Section title="Monitored Files">
+            <Section
+              title="Monitored Files"
+              actions={(
+                <input
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm md:w-80"
+                  placeholder="Search files by keyword"
+                  value={fileKeyword}
+                  onChange={(e) => setFileKeyword(e.target.value)}
+                />
+              )}
+            >
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm">
                   <thead className="border-b text-xs uppercase tracking-[0.16em] text-slate-500">
                     <tr>
                       <th className="py-3">File</th>
-                      <th>Folder</th>
-                      <th>Status</th>
-                      <th>Type</th>
-                      <th>Size</th>
-                      <th>Last Checked</th>
+                      <th><SortHeader label="Folder" column="folder" sort={fileSort} setSort={setFileSort} /></th>
+                      <th><SortHeader label="Status" column="status" sort={fileSort} setSort={setFileSort} /></th>
+                      <th><SortHeader label="Type" column="type" sort={fileSort} setSort={setFileSort} /></th>
+                      <th><SortHeader label="Size" column="size" sort={fileSort} setSort={setFileSort} /></th>
+                      <th><SortHeader label="Last Checked" column="last_checked" sort={fileSort} setSort={setFileSort} /></th>
                       <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {files.map((file) => (
+                    {visibleFiles.map((file) => (
                       <tr key={file.id}>
                         <td className="max-w-md py-3 font-semibold text-slate-800">{file.relative_path}</td>
                         <td>{file.folder_root}</td>
@@ -756,6 +811,11 @@ const BackupRecovery = () => {
                         </td>
                       </tr>
                     ))}
+                    {!visibleFiles.length && (
+                      <tr>
+                        <td colSpan={7} className="py-6 text-center text-sm font-semibold text-slate-500">No monitored files match your search.</td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -841,7 +901,7 @@ const BackupRecovery = () => {
                   <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" type="date" value={incidentFilters.date_to} onChange={(e) => setIncidentFilters({ ...incidentFilters, date_to: e.target.value })} />
                   <select className="rounded-xl border border-slate-200 px-3 py-2 text-sm" value={incidentFilters.status} onChange={(e) => setIncidentFilters({ ...incidentFilters, status: e.target.value })}>
                     <option value="">All statuses</option>
-                    {['open', 'investigating', 'resolved', 'false_positive'].map((item) => <option key={item} value={item}>{titleize(item)}</option>)}
+                    {['open', 'investigating', 'resolved', 'false_positive', 'verified_deleted', 'verified_renamed'].map((item) => <option key={item} value={item}>{badgeText(item)}</option>)}
                   </select>
                   <select className="rounded-xl border border-slate-200 px-3 py-2 text-sm" value={incidentFilters.severity} onChange={(e) => setIncidentFilters({ ...incidentFilters, severity: e.target.value })}>
                     <option value="">All severities</option>
