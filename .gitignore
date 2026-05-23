@@ -26,10 +26,19 @@
 
 # Security runtime artifacts
 SECURITY/local_backups/
-SECURITY/BACKUPS/
-SECURITY/NEWBACKUPS/
+SECURITY/[Bb][Aa][Cc][Kk][Uu][Pp]*/
+SECURITY/**/[Bb][Aa][Cc][Kk][Uu][Pp]*/
+WARDS/[Bb][Aa][Cc][Kk][Uu][Pp]*/
+WARDS/**/[Bb][Aa][Cc][Kk][Uu][Pp]*/
+OCR/[Bb][Aa][Cc][Kk][Uu][Pp]*/
+OCR/**/[Bb][Aa][Cc][Kk][Uu][Pp]*/
+BACKUP/
+BACKUPS/
+NEWBACKUPS/
+**/*_backup_*/
 QUARANTINE/
 DEFACEMENT/attack_backups/
+DEFACEMENT/**/[Bb][Aa][Cc][Kk][Uu][Pp]*/
 
 # Development-only generated folders
 DEFACEMENT/venv/

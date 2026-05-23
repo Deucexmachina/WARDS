@@ -5,5 +5,8 @@
 **/dist
 **/.env
 SECURITY/local_backups
+SECURITY/*[Bb][Aa][Cc][Kk][Uu][Pp]*
+SECURITY/**/*[Bb][Aa][Cc][Kk][Uu][Pp]*
 QUARANTINE
-
+DEFACEMENT/attack_backups
+DEFACEMENT/**/*[Bb][Aa][Cc][Kk][Uu][Pp]*
