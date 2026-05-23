@@ -7,7 +7,56 @@ on:
     branches: [main]
 
 jobs:
+  repository-hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject committed runtime artifacts
+        run: |
+          python - <<'PY'
+          import re
+          import subprocess
+          import sys
+
+          tracked = subprocess.check_output(["git", "ls-files"], text=True).splitlines()
+          forbidden_patterns = [
+              r"(^|/)QUARANTINE(/|$)",
+              r"(^|/)SECURITY/(.*/)?[^/]*backup[^/]*/",
+              r"(^|/)WARDS/(.*/)?[^/]*backup[^/]*/",
+              r"(^|/)OCR/(.*/)?[^/]*backup[^/]*/",
+              r"(^|/)DEFACEMENT/(.*/)?[^/]*backup[^/]*/",
+              r"(^|/).*_backup_[0-9]{8}_[0-9]{6}(/|$)",
+              r"(^|/)\.env($|\.)",
+              r"\.(db|sqlite|sqlite3|log)$",
+              r"(^|/)(node_modules|venv|\.venv|__pycache__|dist|build)(/|$)",
+          ]
+          allowed_patterns = [
+              r"(^|/)\.env\.example$",
+              r"(^|/)WARDS/backend/README\.md$",
+              r"(^|/)FIRST_TIME_INSTALLATION\.md$",
+              r"(^|/)SECURITY/.*\.md$",
+          ]
+
+          bad = []
+          for path in tracked:
+              normalized = path.replace("\\", "/")
+              if any(re.search(pattern, normalized, re.IGNORECASE) for pattern in allowed_patterns):
+                  continue
+              if any(re.search(pattern, normalized, re.IGNORECASE) for pattern in forbidden_patterns):
+                  bad.append(path)
+
+          if bad:
+              print("Forbidden generated/runtime files are tracked. Remove them from git and keep them ignored:")
+              for path in bad:
+                  print(f" - {path}")
+              print("\nUseful cleanup command:")
+              print("git rm -r --cached <path>")
+              sys.exit(1)
+
+          print("Repository hygiene check passed.")
+
   backend:
+    needs: repository-hygiene
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,6 +73,7 @@ jobs:
           python -m py_compile SECURITY/security_engine.py
 
   frontend:
+    needs: repository-hygiene
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,4 +88,3 @@ jobs:
       - name: Build frontend
         working-directory: WARDS/frontend
         run: npm run build
-
