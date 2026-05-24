@@ -471,7 +471,7 @@ def latest_backup_root(db: Session) -> Path | None:
         path = Path(raw)
         if path.exists():
             return path
-    location = Path(get_setting(db, "backup_location", str(DEFAULT_BACKUP_ROOT)))
+    location = writable_backup_location(db)
     if not location.exists():
         return None
     backups = sorted([item for item in location.iterdir() if item.is_dir()], reverse=True)
@@ -480,6 +480,23 @@ def latest_backup_root(db: Session) -> Path | None:
 
 def backup_file_path(backup_root: Path, relative_path: str) -> Path:
     return backup_root / relative_path.replace("/", os.sep)
+
+
+def writable_backup_location(db: Session, updated_by: str = "system") -> Path:
+    configured = Path(get_setting(db, "backup_location", str(DEFAULT_BACKUP_ROOT))).expanduser()
+    fallback = DEFAULT_BACKUP_ROOT.resolve()
+    for candidate in (configured, fallback):
+        try:
+            target = candidate.resolve()
+            target.mkdir(parents=True, exist_ok=True)
+            if target != configured:
+                set_setting(db, "backup_location", str(target), updated_by)
+            return target
+        except OSError:
+            continue
+    fallback.mkdir(parents=True, exist_ok=True)
+    set_setting(db, "backup_location", str(fallback), updated_by)
+    return fallback
 
 
 def copy_into_backup(source: Path, target: Path, previous_source: Path | None = None, can_reuse_previous: bool = False) -> None:
@@ -1275,7 +1292,7 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
     seed_settings(db)
     register_count = register_initial_files(db, ensure_backup=False)
     removal_summary = reconcile_trusted_file_removals(db, actor=f"{label}_backup")
-    backup_location = Path(get_setting(db, "backup_location", str(DEFAULT_BACKUP_ROOT)))
+    backup_location = writable_backup_location(db)
     previous_backup_root = latest_backup_root(db)
     timestamp = now_utc().strftime("%Y%m%d_%H%M%S")
     backup_root = backup_location / f"{label}_backup_{timestamp}"
