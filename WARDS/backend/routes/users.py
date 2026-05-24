@@ -5,7 +5,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
-from sqlalchemy import func, literal
 
 from database.models import ActivityLog, Admin, Branch, BranchStaff, CitizenUser, get_db
 from middleware.admin_auth import require_main_admin
@@ -87,6 +86,16 @@ def serialize_account_row(row):
     }
 
 
+def account_sort_value(account: dict):
+    created_at = account.get("created_at")
+    if not created_at:
+        return datetime.min
+    try:
+        return datetime.fromisoformat(created_at)
+    except ValueError:
+        return datetime.min
+
+
 def require_accounts_access(current_user):
     require_permission("manage_users")(current_user)
     return current_user
@@ -119,62 +128,21 @@ async def get_all_users(
 ):
     require_accounts_access(current_user)
 
-    admins_query = db.query(
-        Admin.id.label("id"),
-        Admin.username.label("username"),
-        Admin.email.label("email"),
-        Admin.role.label("role"),
-        literal(None).label("full_name"),
-        literal(None).label("branch_id"),
-        literal("All Branches").label("branch_name"),
-        Admin.status.label("status"),
-        Admin.last_login.label("last_login"),
-        Admin.created_at.label("created_at"),
+    accounts = [serialize_account(user, "All Branches") for user in db.query(Admin).all()]
+    accounts.extend(
+        serialize_account(user, branch.name if branch else "Unassigned Branch")
+        for user, branch in db.query(BranchStaff, Branch).outerjoin(Branch, Branch.id == BranchStaff.branch_id).all()
     )
+    accounts.extend(serialize_account(user, "Public Portal") for user in db.query(CitizenUser).all())
+    accounts.sort(key=lambda account: (account_sort_value(account), account.get("id") or 0), reverse=True)
 
-    branch_staff_query = (
-        db.query(
-            BranchStaff.id.label("id"),
-            BranchStaff.username.label("username"),
-            BranchStaff.email.label("email"),
-            BranchStaff.role.label("role"),
-            BranchStaff.full_name.label("full_name"),
-            BranchStaff.branch_id.label("branch_id"),
-            func.coalesce(Branch.name, literal("Unassigned Branch")).label("branch_name"),
-            BranchStaff.status.label("status"),
-            BranchStaff.last_login.label("last_login"),
-            BranchStaff.created_at.label("created_at"),
-        )
-        .outerjoin(Branch, Branch.id == BranchStaff.branch_id)
-    )
-
-    citizen_users_query = db.query(
-        CitizenUser.id.label("id"),
-        literal(None).label("username"),
-        CitizenUser.email.label("email"),
-        CitizenUser.role.label("role"),
-        CitizenUser.full_name.label("full_name"),
-        literal(None).label("branch_id"),
-        literal("Public Portal").label("branch_name"),
-        CitizenUser.status.label("status"),
-        CitizenUser.last_login.label("last_login"),
-        CitizenUser.created_at.label("created_at"),
-    )
-
-    combined_accounts = admins_query.union_all(branch_staff_query, citizen_users_query).subquery()
-    total = db.query(func.count()).select_from(combined_accounts).scalar() or 0
+    total = len(accounts)
     total_pages = max(1, (total + page_size - 1) // page_size)
-
-    rows = (
-        db.query(combined_accounts)
-        .order_by(combined_accounts.c.created_at.desc(), combined_accounts.c.id.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-        .all()
-    )
+    start = (page - 1) * page_size
+    end = start + page_size
 
     return {
-        "items": [serialize_account_row(row) for row in rows],
+        "items": accounts[start:end],
         "page": page,
         "page_size": page_size,
         "total": total,

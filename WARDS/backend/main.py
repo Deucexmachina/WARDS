@@ -569,6 +569,16 @@ def ensure_auth_extensions():
                 conn.execute(text(f"ALTER TABLE services ADD COLUMN {column_name} {column_type}"))
 
         queue_columns = {column["name"] for column in inspector.get_columns("queues")}
+        if "citizen_user_id" not in queue_columns:
+            if engine.dialect.name == "sqlite":
+                conn.execute(text("ALTER TABLE queues ADD COLUMN citizen_user_id INTEGER"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_queues_citizen_user_id ON queues (citizen_user_id)"))
+            else:
+                conn.execute(text("ALTER TABLE queues ADD COLUMN citizen_user_id INTEGER NULL"))
+                queue_indexes = {index["name"] for index in inspect(conn).get_indexes("queues")}
+                if "ix_queues_citizen_user_id" not in queue_indexes:
+                    conn.execute(text("CREATE INDEX ix_queues_citizen_user_id ON queues (citizen_user_id)"))
+            queue_columns.add("citizen_user_id")
         for column_name, column_type in (
             ("queue_number_hash", "VARCHAR(255)"),
             ("queue_number_enc", "TEXT"),
