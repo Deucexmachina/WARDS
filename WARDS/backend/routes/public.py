@@ -28,6 +28,7 @@ from utils.security_validation import normalize_email
 from utils.branch_system_settings import get_branch_setting_value
 from utils.system_settings import SYSTEM_DISABLED_MESSAGE, get_setting_value
 from utils.field_crypto import decrypt_optional_value
+from utils.announcement_attachments import serialize_attachments
 
 router = APIRouter()
 PH_MOBILE_PATTERN = re.compile(r"^(?:\+63|63|0)9\d{9}$")
@@ -44,6 +45,16 @@ def serialize_public_announcement(announcement: Announcement):
     branch_name = (get_decrypted_or_raw(announcement.branch, "name") or announcement.branch.name) if announcement.branch else None
     title = decrypt_optional_value(getattr(announcement, "title_enc", None)) or announcement.title
     content = decrypt_optional_value(getattr(announcement, "content_enc", None)) or announcement.content
+    # Branch-owned announcements expose attachments through /api/branch/announcements/...
+    # Main-admin announcements expose them through /api/announcements/...
+    if announcement.branch_id:
+        attachments_base = f"/api/branch/announcements/{announcement.id}/attachments"
+    else:
+        attachments_base = f"/api/announcements/{announcement.id}/attachments"
+    attachments = serialize_attachments(
+        getattr(announcement, "attachments", None) or [],
+        base_path=attachments_base,
+    )
     return {
         "id": announcement.id,
         "title": title,
@@ -54,7 +65,8 @@ def serialize_public_announcement(announcement: Announcement):
         "branch_name": branch_name,
         "source_label": branch_name if branch_name else "Main Admin",
         "is_branch_announcement": bool(announcement.branch_id),
-        "publish_date": announcement.publish_date.isoformat() if announcement.publish_date else None
+        "publish_date": announcement.publish_date.isoformat() if announcement.publish_date else None,
+        "attachments": attachments,
     }
 
 

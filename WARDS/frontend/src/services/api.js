@@ -212,12 +212,43 @@ export const branchSettingsAPI = {
   setupBranchMfa: () => api.post('/branch/auth/setup-mfa-authenticated'),
 };
 
+const buildAttachmentFormData = (files) => {
+  const formData = new FormData();
+  for (const file of files) {
+    formData.append('files', file);
+  }
+  return formData;
+};
+
 export const announcementAPI = {
   getAll: () => api.get('/announcements/'),
   getById: (id) => api.get(`/announcements/${id}`),
   create: (data) => api.post('/announcements/', data),
   update: (id, data) => api.put(`/announcements/${id}`, data),
   delete: (id) => api.delete(`/announcements/${id}`),
+  listAttachments: (id) => api.get(`/announcements/${id}/attachments`),
+  uploadAttachments: (id, files, onUploadProgress) =>
+    api.post(`/announcements/${id}/attachments`, buildAttachmentFormData(files), {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress,
+    }),
+  deleteAttachment: (id, attachmentId) =>
+    api.delete(`/announcements/${id}/attachments/${attachmentId}`),
+};
+
+export const branchAnnouncementAPI = {
+  getAll: () => api.get('/branch/announcements'),
+  create: (data) => api.post('/branch/announcements', data),
+  update: (id, data) => api.put(`/branch/announcements/${id}`, data),
+  delete: (id) => api.delete(`/branch/announcements/${id}`),
+  listAttachments: (id) => api.get(`/branch/announcements/${id}/attachments`),
+  uploadAttachments: (id, files, onUploadProgress) =>
+    api.post(`/branch/announcements/${id}/attachments`, buildAttachmentFormData(files), {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress,
+    }),
+  deleteAttachment: (id, attachmentId) =>
+    api.delete(`/branch/announcements/${id}/attachments/${attachmentId}`),
 };
 
 export const memoAPI = {

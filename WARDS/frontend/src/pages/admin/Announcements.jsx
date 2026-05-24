@@ -1,12 +1,20 @@
 import { useState, useEffect } from 'react';
-import api from '../../services/api';
+import api, { announcementAPI } from '../../services/api';
 import WardsPageHero from '../../components/WardsPageHero';
+import {
+  AnnouncementAttachmentsField,
+  AnnouncementAttachmentsList,
+} from '../../components/AnnouncementAttachments';
 
 const Announcements = () => {
   const [announcements, setAnnouncements] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [editingAnnouncement, setEditingAnnouncement] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState([]);
+  const [existingAttachments, setExistingAttachments] = useState([]);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
   const [formData, setFormData] = useState({
     title: '',
     content: '',
@@ -35,6 +43,10 @@ const Announcements = () => {
   const handleAddAnnouncement = () => {
     setEditingAnnouncement(null);
     setFormData({ title: '', content: '', icon_type: 'megaphone', icon_color: 'blue', is_active: true });
+    setPendingFiles([]);
+    setExistingAttachments([]);
+    setUploadProgress(0);
+    setIsUploading(false);
     setShowModal(true);
   };
 
@@ -47,7 +59,31 @@ const Announcements = () => {
       icon_color: announcement.icon_color || 'blue',
       is_active: announcement.is_active
     });
+    setPendingFiles([]);
+    setExistingAttachments(announcement.attachments || []);
+    setUploadProgress(0);
+    setIsUploading(false);
     setShowModal(true);
+  };
+
+  const handleAddPendingFiles = (files) => {
+    setPendingFiles((prev) => [...prev, ...files]);
+  };
+
+  const handleRemovePendingFile = (index) => {
+    setPendingFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleDeleteExistingAttachment = async (attachment) => {
+    if (!editingAnnouncement) return;
+    if (!window.confirm(`Remove "${attachment.filename}" from this announcement?`)) return;
+    try {
+      await announcementAPI.deleteAttachment(editingAnnouncement.id, attachment.id);
+      setExistingAttachments((prev) => prev.filter((item) => item.id !== attachment.id));
+    } catch (error) {
+      console.error('Failed to remove attachment:', error);
+      alert('Failed to remove attachment: ' + (error.response?.data?.detail || error.message));
+    }
   };
 
   const handleSaveAnnouncement = async () => {
@@ -58,14 +94,42 @@ const Announcements = () => {
 
     setLoading(true);
     try {
+      let savedAnnouncement;
       if (editingAnnouncement) {
-        await api.put(`/announcements/${editingAnnouncement.id}`, formData);
+        const response = await api.put(`/announcements/${editingAnnouncement.id}`, formData);
+        savedAnnouncement = response.data;
       } else {
-        await api.post('/announcements/', formData);
+        const response = await api.post('/announcements/', formData);
+        savedAnnouncement = response.data;
       }
+
+      if (pendingFiles.length > 0 && savedAnnouncement?.id) {
+        setIsUploading(true);
+        setUploadProgress(0);
+        try {
+          await announcementAPI.uploadAttachments(
+            savedAnnouncement.id,
+            pendingFiles,
+            (event) => {
+              if (event.total) {
+                setUploadProgress(Math.round((event.loaded / event.total) * 100));
+              }
+            }
+          );
+        } catch (uploadError) {
+          console.error('Failed to upload attachments:', uploadError);
+          alert('Announcement saved, but attachments failed to upload: ' + (uploadError.response?.data?.detail || uploadError.message));
+        } finally {
+          setIsUploading(false);
+        }
+      }
+
       await fetchAnnouncements();
       setShowModal(false);
       setFormData({ title: '', content: '', icon_type: 'megaphone', icon_color: 'blue', is_active: true });
+      setPendingFiles([]);
+      setExistingAttachments([]);
+      setUploadProgress(0);
     } catch (error) {
       console.error('Failed to save announcement:', error);
       alert('Failed to save announcement: ' + (error.response?.data?.detail || error.message));
@@ -157,6 +221,7 @@ const Announcements = () => {
                       <span>Published: {formatDate(announcement.publish_date)}</span>
                       <span>Created by: {announcement.created_by || 'Admin'}</span>
                     </div>
+                    <AnnouncementAttachmentsList attachments={announcement.attachments} />
                   </div>
                 </div>
                 <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
@@ -185,92 +250,129 @@ const Announcements = () => {
       </div>
 
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-2xl p-8 max-w-2xl w-full mx-4">
-            <h3 className="text-2xl font-bold text-primary mb-2">
-              {editingAnnouncement ? 'Edit Announcement' : 'Create Announcement'}
-            </h3>
-            <p className="text-gray-600 mb-6">
-              When this announcement is active, the public website will show it using the main admin source label.
-            </p>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-gray-700 font-semibold mb-2">Title</label>
-                <input 
-                  type="text" 
-                  name="title"
-                  value={formData.title}
-                  onChange={handleInputChange}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 sm:p-6">
+          <div className="flex w-full max-w-3xl max-h-[90vh] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            {/* Sticky Header */}
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-6 py-4 sm:px-8 sm:py-5">
+              <div className="min-w-0">
+                <h3 className="text-xl sm:text-2xl font-bold text-primary">
+                  {editingAnnouncement ? 'Edit Announcement' : 'Create Announcement'}
+                </h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  When active, the public website displays this with the main admin source label.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowModal(false)}
+                className="flex-shrink-0 rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition"
+                aria-label="Close modal"
+              >
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+              </button>
+            </div>
+
+            {/* Scrollable Body */}
+            <div className="flex-1 overflow-y-auto px-6 py-5 sm:px-8 sm:py-6">
+              <div className="space-y-5">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">Title</label>
+                  <input
+                    type="text"
+                    name="title"
+                    value={formData.title}
+                    onChange={handleInputChange}
+                    className="w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
+                    placeholder="Enter a clear, concise title"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">Content</label>
+                  <textarea
+                    name="content"
+                    value={formData.content}
+                    onChange={handleInputChange}
+                    rows="5"
+                    className="w-full resize-y rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm leading-6 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
+                    placeholder="Write your announcement..."
+                    required
+                  ></textarea>
+                </div>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 mb-1.5">Icon Type</label>
+                    <select
+                      name="icon_type"
+                      value={formData.icon_type}
+                      onChange={handleInputChange}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
+                    >
+                      <option value="megaphone">Megaphone</option>
+                      <option value="check">Check Mark</option>
+                      <option value="clock">Clock</option>
+                      <option value="info">Info</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 mb-1.5">Icon Color</label>
+                    <select
+                      name="icon_color"
+                      value={formData.icon_color}
+                      onChange={handleInputChange}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
+                    >
+                      <option value="blue">Blue</option>
+                      <option value="green">Green</option>
+                      <option value="yellow">Yellow</option>
+                      <option value="red">Red</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50/60 px-3.5 py-2.5">
+                  <label className="flex items-center gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      name="is_active"
+                      checked={formData.is_active}
+                      onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
+                      className="w-4 h-4 rounded border-slate-300 text-accent focus:ring-accent"
+                    />
+                    <span className="text-sm font-semibold text-slate-700">
+                      Active <span className="font-normal text-slate-500">(visible to public)</span>
+                    </span>
+                  </label>
+                </div>
+                <AnnouncementAttachmentsField
+                  existingAttachments={existingAttachments}
+                  pendingFiles={pendingFiles}
+                  onAddPending={handleAddPendingFiles}
+                  onRemovePending={handleRemovePendingFile}
+                  onDeleteExisting={handleDeleteExistingAttachment}
+                  disabled={loading || isUploading}
+                  uploadProgress={uploadProgress}
+                  isUploading={isUploading}
                 />
               </div>
-              <div>
-                <label className="block text-gray-700 font-semibold mb-2">Content</label>
-                <textarea 
-                  name="content"
-                  value={formData.content}
-                  onChange={handleInputChange}
-                  rows="4"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
-                  required
-                ></textarea>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-gray-700 font-semibold mb-2">Icon Type</label>
-                  <select
-                    name="icon_type"
-                    value={formData.icon_type}
-                    onChange={handleInputChange}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
-                  >
-                    <option value="megaphone">Megaphone</option>
-                    <option value="check">Check Mark</option>
-                    <option value="clock">Clock</option>
-                    <option value="info">Info</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-gray-700 font-semibold mb-2">Icon Color</label>
-                  <select
-                    name="icon_color"
-                    value={formData.icon_color}
-                    onChange={handleInputChange}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
-                  >
-                    <option value="blue">Blue</option>
-                    <option value="green">Green</option>
-                    <option value="yellow">Yellow</option>
-                    <option value="red">Red</option>
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    name="is_active"
-                    checked={formData.is_active}
-                    onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
-                    className="w-5 h-5"
-                  />
-                  <span className="text-gray-700 font-semibold">Active (visible to public with branch label)</span>
-                </label>
-              </div>
             </div>
-            <div className="flex gap-4 mt-6">
-              <button 
+
+            {/* Sticky Footer */}
+            <div className="flex flex-col-reverse gap-2 border-t border-slate-200 bg-white/95 px-6 py-3.5 backdrop-blur sm:flex-row sm:justify-end sm:px-8 sm:py-4">
+              <button
+                type="button"
                 onClick={() => setShowModal(false)}
-                className="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-700 py-3 rounded-lg font-semibold transition duration-300"
+                className="rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 sm:w-auto"
               >
                 Cancel
               </button>
-              <button 
+              <button
+                type="button"
                 onClick={handleSaveAnnouncement}
-                disabled={loading}
-                className="flex-1 bg-primary hover:bg-secondary text-white py-3 rounded-lg font-semibold transition duration-300 disabled:opacity-50"
+                disabled={loading || isUploading}
+                className="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-secondary disabled:opacity-50 sm:min-w-[140px]"
               >
-                {loading ? 'Saving...' : (editingAnnouncement ? 'Update' : 'Publish')}
+                {loading || isUploading ? 'Saving...' : (editingAnnouncement ? 'Update' : 'Publish')}
               </button>
             </div>
           </div>

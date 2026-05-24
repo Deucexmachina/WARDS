@@ -5,13 +5,22 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import List
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 
-from database.models import ActivityLog, Announcement, Branch, BranchStaff, BusinessTaxApplication, Memo, MemoView, Payment, Policy, PolicyView, Queue, QueueHistory, get_db
+from database.models import ActivityLog, Announcement, AnnouncementAttachment, Branch, BranchStaff, BusinessTaxApplication, Memo, MemoView, Payment, Policy, PolicyView, Queue, QueueHistory, get_db
 from middleware.branch_auth import get_current_branch_staff, require_any_branch_staff
+from utils.announcement_attachments import (
+    enforce_attachment_limit,
+    remove_attachment_file,
+    serialize_attachments,
+    store_announcement_attachment,
+)
 from services.email_service import send_payment_receipt_email
 from utils.field_crypto import apply_memo_view_security, apply_queue_security, decrypt_optional_value, find_memo_view, get_decrypted_or_raw, get_memo_viewed_ids, hash_aware_any, hash_aware_match, hash_optional_value, queue_value
 from utils.security_validation import format_tin
@@ -365,6 +374,10 @@ def serialize_branch_announcement(announcement: Announcement, branch_name: Optio
     source_name = branch_name or (announcement.branch.name if announcement.branch else None)
     title = decrypt_optional_value(getattr(announcement, "title_enc", None)) or announcement.title
     content = decrypt_optional_value(getattr(announcement, "content_enc", None)) or announcement.content
+    attachments = serialize_attachments(
+        announcement.attachments or [],
+        base_path=f"/api/branch/announcements/{announcement.id}/attachments",
+    )
     return {
         "id": announcement.id,
         "title": title,
@@ -380,6 +393,7 @@ def serialize_branch_announcement(announcement: Announcement, branch_name: Optio
         "created_by": announcement.created_by,
         "created_at": announcement.created_at.isoformat() if announcement.created_at else None,
         "updated_at": announcement.updated_at.isoformat() if announcement.updated_at else None,
+        "attachments": attachments,
     }
 
 
@@ -1052,11 +1066,178 @@ async def delete_branch_announcement(
         raise HTTPException(status_code=404, detail="Announcement not found")
 
     title = decrypt_optional_value(getattr(announcement, "title_enc", None)) or announcement.title
+    # Clean up attachment files on disk before deleting the record (cascade removes rows).
+    for attachment in list(announcement.attachments or []):
+        remove_attachment_file(attachment)
+    from utils.announcement_attachments import remove_announcement_directory
+    remove_announcement_directory(announcement.id)
     db.delete(announcement)
     log_branch_action(db, current_staff, "Announcement Deleted", f"Deleted branch announcement: {title}")
     db.commit()
 
     return {"message": "Announcement deleted successfully"}
+
+
+# ---------------------------------------------------------------------------
+# Branch announcement attachment endpoints
+# ---------------------------------------------------------------------------
+
+
+def _get_owned_branch_announcement(
+    db: Session, announcement_id: int, current_staff: BranchStaff
+) -> Announcement:
+    announcement = (
+        db.query(Announcement)
+        .filter(
+            Announcement.id == announcement_id,
+            Announcement.branch_id == current_staff.branch_id,
+        )
+        .first()
+    )
+    if not announcement:
+        raise HTTPException(status_code=404, detail="Announcement not found")
+    return announcement
+
+
+@router.get("/announcements/{announcement_id}/attachments")
+async def list_branch_announcement_attachments(
+    announcement_id: int,
+    current_staff: BranchStaff = Depends(get_current_branch_staff),
+    db: Session = Depends(get_db),
+):
+    announcement = _get_owned_branch_announcement(db, announcement_id, current_staff)
+    return serialize_attachments(
+        announcement.attachments or [],
+        base_path=f"/api/branch/announcements/{announcement_id}/attachments",
+    )
+
+
+@router.post("/announcements/{announcement_id}/attachments")
+async def upload_branch_announcement_attachments(
+    announcement_id: int,
+    files: List[UploadFile] = File(...),
+    current_staff: BranchStaff = Depends(get_current_branch_staff),
+    db: Session = Depends(get_db),
+):
+    announcement = _get_owned_branch_announcement(db, announcement_id, current_staff)
+    if not files:
+        raise HTTPException(status_code=400, detail="No files were provided")
+
+    enforce_attachment_limit(len(announcement.attachments or []), len(files))
+
+    saved: list[AnnouncementAttachment] = []
+    try:
+        for upload in files:
+            file_bytes = await upload.read()
+            attachment = store_announcement_attachment(
+                announcement_id,
+                upload,
+                file_bytes,
+                uploaded_by=getattr(current_staff, "username", None),
+            )
+            db.add(attachment)
+            saved.append(attachment)
+        db.flush()
+        log_branch_action(
+            db,
+            current_staff,
+            "Announcement Attachment Uploaded",
+            f"Uploaded {len(saved)} attachment(s) to announcement #{announcement_id}",
+        )
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        for attachment in saved:
+            remove_attachment_file(attachment)
+        raise
+    except Exception:
+        db.rollback()
+        for attachment in saved:
+            remove_attachment_file(attachment)
+        raise HTTPException(status_code=500, detail="Failed to save attachments")
+
+    db.refresh(announcement)
+    return serialize_attachments(
+        announcement.attachments or [],
+        base_path=f"/api/branch/announcements/{announcement_id}/attachments",
+    )
+
+
+def _get_branch_attachment_for_download(
+    db: Session, announcement_id: int, attachment_id: int
+) -> AnnouncementAttachment:
+    """Public download lookup - branch announcements are visible publicly."""
+    attachment = (
+        db.query(AnnouncementAttachment)
+        .filter(
+            AnnouncementAttachment.id == attachment_id,
+            AnnouncementAttachment.announcement_id == announcement_id,
+        )
+        .first()
+    )
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    if not os.path.exists(attachment.file_path):
+        raise HTTPException(status_code=404, detail="Attachment file is missing")
+    return attachment
+
+
+@router.get("/announcements/{announcement_id}/attachments/{attachment_id}/download")
+async def download_branch_announcement_attachment(
+    announcement_id: int,
+    attachment_id: int,
+    db: Session = Depends(get_db),
+):
+    attachment = _get_branch_attachment_for_download(db, announcement_id, attachment_id)
+    return FileResponse(
+        attachment.file_path,
+        media_type=attachment.mime_type or "application/octet-stream",
+        filename=attachment.original_filename,
+    )
+
+
+@router.get("/announcements/{announcement_id}/attachments/{attachment_id}/preview")
+async def preview_branch_announcement_attachment(
+    announcement_id: int,
+    attachment_id: int,
+    db: Session = Depends(get_db),
+):
+    attachment = _get_branch_attachment_for_download(db, announcement_id, attachment_id)
+    return FileResponse(
+        attachment.file_path,
+        media_type=attachment.mime_type or "application/octet-stream",
+    )
+
+
+@router.delete("/announcements/{announcement_id}/attachments/{attachment_id}")
+async def delete_branch_announcement_attachment(
+    announcement_id: int,
+    attachment_id: int,
+    current_staff: BranchStaff = Depends(get_current_branch_staff),
+    db: Session = Depends(get_db),
+):
+    announcement = _get_owned_branch_announcement(db, announcement_id, current_staff)
+    attachment = (
+        db.query(AnnouncementAttachment)
+        .filter(
+            AnnouncementAttachment.id == attachment_id,
+            AnnouncementAttachment.announcement_id == announcement.id,
+        )
+        .first()
+    )
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    filename = attachment.original_filename
+    remove_attachment_file(attachment)
+    db.delete(attachment)
+    log_branch_action(
+        db,
+        current_staff,
+        "Announcement Attachment Removed",
+        f"Removed attachment '{filename}' from announcement #{announcement.id}",
+    )
+    db.commit()
+    return {"message": "Attachment removed successfully"}
 
 
 @router.get("/policies")

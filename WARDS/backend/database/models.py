@@ -716,6 +716,32 @@ class Announcement(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     branch = relationship("Branch", backref="announcements")
+    attachments = relationship(
+        "AnnouncementAttachment",
+        backref="announcement",
+        cascade="all, delete-orphan",
+        order_by="AnnouncementAttachment.created_at",
+    )
+
+
+class AnnouncementAttachment(Base):
+    __tablename__ = "announcement_attachments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    announcement_id = Column(
+        Integer,
+        ForeignKey("announcements.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    file_path = Column(String(500), nullable=False)
+    original_filename = Column(String(255), nullable=False)
+    stored_filename = Column(String(255), nullable=False)
+    mime_type = Column(String(150), nullable=True)
+    file_size = Column(Integer, default=0)
+    uploaded_by = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 
 class Memo(Base):
     __tablename__ = "memos"

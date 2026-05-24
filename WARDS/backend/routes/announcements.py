@@ -1,13 +1,21 @@
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from database.models import ActivityLog, User, get_db
+from database.models import ActivityLog, Announcement, AnnouncementAttachment, User, get_db
 from middleware.admin_auth import get_current_admin_user
+from utils.announcement_attachments import (
+    enforce_attachment_limit,
+    remove_announcement_directory,
+    remove_attachment_file,
+    serialize_attachments,
+    store_announcement_attachment,
+)
 from utils.field_crypto import (
     build_redacted_text,
     decrypt_optional_value,
@@ -17,6 +25,21 @@ from utils.field_crypto import (
 from utils.rbac import require_permission
 
 router = APIRouter()
+
+ADMIN_ATTACHMENT_BASE = "/api/announcements"
+
+
+def _list_attachment_dicts(db: Session, announcement_id: int) -> list[dict]:
+    attachments = (
+        db.query(AnnouncementAttachment)
+        .filter(AnnouncementAttachment.announcement_id == announcement_id)
+        .order_by(AnnouncementAttachment.created_at.asc(), AnnouncementAttachment.id.asc())
+        .all()
+    )
+    return serialize_attachments(
+        attachments,
+        base_path=f"{ADMIN_ATTACHMENT_BASE}/{announcement_id}/attachments",
+    )
 
 
 class AnnouncementCreate(BaseModel):
@@ -65,6 +88,7 @@ def _serialize_announcement(row) -> dict:
         "created_by": created_by,
         "created_at": created_at.isoformat() if created_at else None,
         "updated_at": updated_at.isoformat() if updated_at else None,
+        "attachments": row.get("attachments") or [],
     }
 
 
@@ -157,7 +181,12 @@ async def get_all_announcements(db: Session = Depends(get_db)):
             """
         )
     ).mappings().all()
-    return [_serialize_announcement(announcement) for announcement in announcements]
+    serialized = []
+    for announcement in announcements:
+        data = dict(announcement)
+        data["attachments"] = _list_attachment_dicts(db, announcement["id"])
+        serialized.append(_serialize_announcement(data))
+    return serialized
 
 
 @router.get("/admin/all")
@@ -192,7 +221,12 @@ async def get_all_announcements_admin(
             """
         )
     ).mappings().all()
-    return [_serialize_announcement(announcement) for announcement in announcements]
+    serialized = []
+    for announcement in announcements:
+        data = dict(announcement)
+        data["attachments"] = _list_attachment_dicts(db, announcement["id"])
+        serialized.append(_serialize_announcement(data))
+    return serialized
 
 
 @router.get("/{announcement_id}")
@@ -203,7 +237,9 @@ async def get_announcement(
 ):
     require_permission("manage_announcements")(current_user)
     announcement = get_main_admin_announcement_or_404(db, announcement_id)
-    return _serialize_announcement(announcement)
+    data = dict(announcement)
+    data["attachments"] = _list_attachment_dicts(db, announcement_id)
+    return _serialize_announcement(data)
 
 
 @router.post("/")
@@ -281,7 +317,9 @@ async def create_announcement(
 
     announcement_id = result.lastrowid
     created = _fetch_announcement_row(db, announcement_id)
-    return _serialize_announcement(created)
+    data = dict(created)
+    data["attachments"] = _list_attachment_dicts(db, announcement_id)
+    return _serialize_announcement(data)
 
 
 @router.put("/{announcement_id}")
@@ -346,7 +384,9 @@ async def update_announcement(
     db.commit()
 
     updated = _fetch_announcement_row(db, announcement_id)
-    return _serialize_announcement(updated)
+    data = dict(updated)
+    data["attachments"] = _list_attachment_dicts(db, announcement_id)
+    return _serialize_announcement(data)
 
 
 @router.delete("/{announcement_id}")
@@ -371,6 +411,16 @@ async def delete_announcement(
         details=details,
         type="admin"
     ))
+    # Remove any uploaded files associated with the announcement
+    attachments = (
+        db.query(AnnouncementAttachment)
+        .filter(AnnouncementAttachment.announcement_id == announcement_id)
+        .all()
+    )
+    for attachment in attachments:
+        remove_attachment_file(attachment)
+    remove_announcement_directory(announcement_id)
+
     db.execute(
         text("DELETE FROM announcements WHERE id = :announcement_id"),
         {"announcement_id": announcement_id},
@@ -378,3 +428,172 @@ async def delete_announcement(
     db.commit()
 
     return {"message": "Announcement deleted successfully"}
+
+
+# ---------------------------------------------------------------------------
+# Attachment endpoints (main admin announcements)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{announcement_id}/attachments")
+async def list_announcement_attachments(
+    announcement_id: int,
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    require_permission("manage_announcements")(current_user)
+    get_main_admin_announcement_or_404(db, announcement_id)
+    return _list_attachment_dicts(db, announcement_id)
+
+
+@router.post("/{announcement_id}/attachments")
+async def upload_announcement_attachments(
+    announcement_id: int,
+    files: List[UploadFile] = File(...),
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    require_permission("manage_announcements")(current_user)
+    get_main_admin_announcement_or_404(db, announcement_id)
+
+    if not files:
+        raise HTTPException(status_code=400, detail="No files were provided")
+
+    existing_count = (
+        db.query(AnnouncementAttachment)
+        .filter(AnnouncementAttachment.announcement_id == announcement_id)
+        .count()
+    )
+    enforce_attachment_limit(existing_count, len(files))
+
+    saved: list[AnnouncementAttachment] = []
+    try:
+        for upload in files:
+            file_bytes = await upload.read()
+            attachment = store_announcement_attachment(
+                announcement_id,
+                upload,
+                file_bytes,
+                uploaded_by=current_user.username,
+            )
+            db.add(attachment)
+            saved.append(attachment)
+        db.flush()
+        db.add(
+            ActivityLog(
+                action="Announcement Attachment Uploaded",
+                user=current_user.username,
+                details=(
+                    f"Uploaded {len(saved)} attachment(s) to announcement #{announcement_id}: "
+                    + ", ".join(att.original_filename for att in saved)
+                ),
+                type="admin",
+            )
+        )
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        for attachment in saved:
+            remove_attachment_file(attachment)
+        raise
+    except Exception:
+        db.rollback()
+        for attachment in saved:
+            remove_attachment_file(attachment)
+        raise HTTPException(status_code=500, detail="Failed to save attachments")
+
+    return _list_attachment_dicts(db, announcement_id)
+
+
+def _resolve_admin_attachment(
+    db: Session, announcement_id: int, attachment_id: int
+) -> AnnouncementAttachment:
+    get_main_admin_announcement_or_404(db, announcement_id)
+    attachment = (
+        db.query(AnnouncementAttachment)
+        .filter(
+            AnnouncementAttachment.id == attachment_id,
+            AnnouncementAttachment.announcement_id == announcement_id,
+        )
+        .first()
+    )
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    return attachment
+
+
+@router.get("/{announcement_id}/attachments/{attachment_id}/download")
+async def download_announcement_attachment(
+    announcement_id: int,
+    attachment_id: int,
+    db: Session = Depends(get_db),
+):
+    """Public download endpoint - announcements are public information."""
+    attachment = (
+        db.query(AnnouncementAttachment)
+        .filter(
+            AnnouncementAttachment.id == attachment_id,
+            AnnouncementAttachment.announcement_id == announcement_id,
+        )
+        .first()
+    )
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    import os as _os
+    if not _os.path.exists(attachment.file_path):
+        raise HTTPException(status_code=404, detail="Attachment file is missing")
+    return FileResponse(
+        attachment.file_path,
+        media_type=attachment.mime_type or "application/octet-stream",
+        filename=attachment.original_filename,
+    )
+
+
+@router.get("/{announcement_id}/attachments/{attachment_id}/preview")
+async def preview_announcement_attachment(
+    announcement_id: int,
+    attachment_id: int,
+    db: Session = Depends(get_db),
+):
+    """Inline preview for browser-renderable types (images, PDFs)."""
+    attachment = (
+        db.query(AnnouncementAttachment)
+        .filter(
+            AnnouncementAttachment.id == attachment_id,
+            AnnouncementAttachment.announcement_id == announcement_id,
+        )
+        .first()
+    )
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    import os as _os
+    if not _os.path.exists(attachment.file_path):
+        raise HTTPException(status_code=404, detail="Attachment file is missing")
+    return FileResponse(
+        attachment.file_path,
+        media_type=attachment.mime_type or "application/octet-stream",
+    )
+
+
+@router.delete("/{announcement_id}/attachments/{attachment_id}")
+async def delete_announcement_attachment(
+    announcement_id: int,
+    attachment_id: int,
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    require_permission("manage_announcements")(current_user)
+    attachment = _resolve_admin_attachment(db, announcement_id, attachment_id)
+    filename = attachment.original_filename
+    remove_attachment_file(attachment)
+    db.delete(attachment)
+    db.add(
+        ActivityLog(
+            action="Announcement Attachment Removed",
+            user=current_user.username,
+            details=f"Removed attachment '{filename}' from announcement #{announcement_id}",
+            type="admin",
+        )
+    )
+    db.commit()
+    return {"message": "Attachment removed successfully"}
