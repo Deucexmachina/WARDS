@@ -25,6 +25,7 @@ import BranchDiscrepancies from './pages/branch/BranchDiscrepancies'
 import BranchPolicies from './pages/branch/BranchPolicies'
 import BranchReports from './pages/branch/BranchReports'
 import BranchSettings from './pages/branch/BranchSettings'
+import LiveQueueMonitor from './pages/branch/LiveQueueMonitor'
 import PayTaxes from './pages/public/PayTaxes'
 import PayTaxesRPT from './pages/public/PayTaxesRPT'
 import PayTaxesBT from './pages/public/PayTaxesBT'
@@ -94,6 +95,7 @@ function App() {
         <Route path="/branch-dashboard/:branchSlug" element={<BranchProtectedRoute><BranchLayout /></BranchProtectedRoute>}>
           <Route index element={<BranchDashboard />} />
           <Route path="queue" element={<BranchQueueManagement />} />
+          <Route path="queue/live-monitor" element={<LiveQueueMonitor />} />
           <Route path="receipts" element={<BranchReceiptManagement />} />
           <Route path="payments" element={<BranchPaymentManagement />} />
           <Route path="memos" element={<BranchMemos />} />
@@ -103,6 +105,8 @@ function App() {
           <Route path="policies" element={<BranchPolicies />} />
           <Route path="settings" element={<BranchSettings />} />
         </Route>
+        {/* Dedicated Live Monitor Route - No Layout */}
+        <Route path="/live-monitor/:branchSlug" element={<BranchProtectedRoute><LiveQueueMonitor /></BranchProtectedRoute>} />
         <Route path="/branch" element={<BranchProtectedRoute><BranchPortalRedirect /></BranchProtectedRoute>} />
         
         {/* Admin Portal */}

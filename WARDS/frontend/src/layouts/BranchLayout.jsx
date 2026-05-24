@@ -46,7 +46,7 @@ const BranchLayout = () => {
           : []),
       ];
 
-  if (isQueueWindowAccount && location.pathname !== queueOnlyPath) {
+  if (isQueueWindowAccount && location.pathname !== queueOnlyPath && !location.pathname.includes('/live-monitor')) {
     return <Navigate to={queueOnlyPath} replace />;
   }
 

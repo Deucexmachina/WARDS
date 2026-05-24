@@ -1,4 +1,4 @@
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useEffect, useMemo, useState } from 'react';
 import api from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
@@ -426,6 +426,7 @@ const QueueHistorySection = ({
 
 const QueueManagement = () => {
   const { branchSlug } = useParams();
+  const navigate = useNavigate();
   const branchUser = JSON.parse(localStorage.getItem('branchUser') || '{}');
   const isSuperadminManagedBranch = Boolean(branchUser?.superadmin_managed_branch);
   const isQueueWindowAccount = branchUser?.account_scope === 'queue_window';
@@ -731,6 +732,34 @@ const QueueManagement = () => {
             : 'Manage immediate and appointment queues in separate sections with quick status visibility, search tools, and clean paging.'
         }
       />
+
+      <section className="rounded-2xl border border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50 p-6 shadow-lg">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-4">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-600 shadow-md">
+              <svg className="h-7 w-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+              </svg>
+            </div>
+            <div>
+              <h3 className="text-xl font-bold text-blue-900">Live Queue Monitoring</h3>
+              <p className="mt-1 text-sm text-blue-700">
+                Open a dedicated live monitoring screen optimized for TVs and large displays
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => window.open(`/live-monitor/${branchSlug}`, '_blank')}
+            className="flex items-center gap-3 rounded-xl bg-blue-600 px-6 py-3.5 font-semibold text-white shadow-md transition hover:bg-blue-700 hover:shadow-lg"
+          >
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+            </svg>
+            Open Live Queue Monitoring
+          </button>
+        </div>
+      </section>
 
       {isQueueWindowAccount && assignedWindowLabel ? (
         <div className="rounded-xl border border-blue-200 bg-blue-50 px-5 py-4 text-blue-900 shadow-sm">

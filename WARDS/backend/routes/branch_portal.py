@@ -530,6 +530,69 @@ async def delete_branch_queue_history(
     return {"success": True, "historyId": history_id, "queueNumber": queue_number}
 
 
+@router.get("/queue/live-monitor")
+async def get_live_queue_monitor(
+    current_staff: BranchStaff = Depends(get_current_branch_staff),
+    db: Session = Depends(get_db),
+):
+    branch = db.query(Branch).filter(Branch.id == current_staff.branch_id).first()
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    
+    query = db.query(Queue).filter(Queue.branch_id == current_staff.branch_id)
+    if is_queue_window_staff(current_staff):
+        queues = [
+            queue
+            for queue in query.order_by(Queue.created_at.asc()).all()
+            if normalize_service_window(queue_value(queue, "service_type")) == current_staff.service_window
+        ]
+    else:
+        queues = query.order_by(Queue.created_at.asc()).all()
+    
+    windows_data = {}
+    
+    for queue in queues:
+        status = (queue_value(queue, "status") or "").lower()
+        service_window = normalize_service_window(queue_value(queue, "service_type"))
+        
+        if service_window not in windows_data:
+            windows_data[service_window] = {
+                "serving": [],
+                "waiting": [],
+                "completed": [],
+                "skipped": []
+            }
+        
+        queue_data = {
+            "queue_number": queue_value(queue, "queue_number"),
+            "service_window": service_window,
+            "status": status,
+        }
+        
+        if status in ["called", "serving"]:
+            windows_data[service_window]["serving"].append(queue_data)
+        elif status == "waiting":
+            windows_data[service_window]["waiting"].append(queue_data)
+        elif status == "completed":
+            windows_data[service_window]["completed"].append(queue_data)
+        elif status == "skipped":
+            windows_data[service_window]["skipped"].append(queue_data)
+    
+    for window in windows_data:
+        completed = windows_data[window]["completed"]
+        windows_data[window]["completed"] = completed[-10:] if len(completed) > 10 else completed
+    
+    return {
+        "branch": {
+            "id": branch.id,
+            "name": get_decrypted_or_raw(branch, "name") or branch.name,
+            "counters": branch.counters or 1,
+        },
+        "windows": windows_data,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
 @router.post("/queue/call-next")
 async def call_next_queue(
     current_staff: BranchStaff = Depends(get_current_branch_staff),
