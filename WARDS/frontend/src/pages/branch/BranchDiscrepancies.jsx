@@ -18,6 +18,7 @@ const EMPTY_FORM = {
   report_date: '',
   discrepancy_type: '',
   description: '',
+  other_specification: '',
   supporting_documents: '',
   submitted_offline: false,
 };
@@ -120,11 +121,15 @@ const BranchDiscrepancies = () => {
       if (!formData.title || !formData.title.trim()) {
         throw new Error('Title/Subject is required.');
       }
+      if (formData.discrepancy_type === 'Other' && !formData.other_specification.trim()) {
+        throw new Error('Please provide additional details for the "Other" discrepancy type.');
+      }
       const payload = new FormData();
       payload.append('title', formData.title);
       payload.append('report_date', formData.report_date);
       payload.append('discrepancy_type', formData.discrepancy_type);
       payload.append('description', formData.description);
+      payload.append('other_specification', formData.other_specification || '');
       payload.append('supporting_documents', formData.supporting_documents || '');
       payload.append('submitted_offline', String(formData.submitted_offline));
       if (attachmentFile) {
@@ -307,6 +312,21 @@ const BranchDiscrepancies = () => {
               </select>
             </div>
           </div>
+
+          {formData.discrepancy_type === 'Other' && (
+            <div className="mt-4">
+              <label className="mb-2 block text-sm font-semibold text-gray-700">Specify Other Discrepancy</label>
+              <textarea
+                name="other_specification"
+                value={formData.other_specification}
+                onChange={handleInputChange}
+                rows="3"
+                className="w-full rounded-lg border border-gray-300 px-4 py-3"
+                placeholder="Provide the exact discrepancy category or special circumstance."
+                required
+              ></textarea>
+            </div>
+          )}
 
           <div className="mt-4">
             <label className="mb-2 block text-sm font-semibold text-gray-700">Discrepancy Details</label>

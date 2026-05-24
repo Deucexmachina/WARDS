@@ -2,7 +2,14 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
 
-import { getEmailValidationMessage, validateStrongPassword } from '../../utils/validation';
+import {
+  getEmailValidationMessage,
+  normalizeCitizenFullName,
+  normalizePhilippineContactDigits,
+  validateCitizenFullName,
+  validatePhilippineContactDigits,
+  validateStrongPassword,
+} from '../../utils/validation';
 import PasswordField from '../../components/PasswordField';
 
 const API_BASE_URL = 'http://localhost:8000/api';
@@ -18,6 +25,8 @@ const PublicRegister = () => {
   });
   const [error, setError] = useState('');
   const [emailError, setEmailError] = useState('');
+  const [fullNameError, setFullNameError] = useState('');
+  const [contactError, setContactError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -26,6 +35,15 @@ const PublicRegister = () => {
     setFormData({ ...formData, [name]: value });
     if (name === 'email') {
       setEmailError(getEmailValidationMessage(value));
+    }
+    if (name === 'full_name') {
+      setFullNameError(validateCitizenFullName(value));
+    }
+    if (name === 'contact_number') {
+      const normalizedDigits = normalizePhilippineContactDigits(value);
+      setFormData((current) => ({ ...current, contact_number: normalizedDigits }));
+      setContactError(validatePhilippineContactDigits(normalizedDigits));
+      return;
     }
     setError('');
     setSuccessMessage('');
@@ -48,6 +66,20 @@ const PublicRegister = () => {
       return;
     }
 
+    const nextFullNameError = validateCitizenFullName(formData.full_name);
+    if (nextFullNameError) {
+      setFullNameError(nextFullNameError);
+      setError('Please correct the highlighted full name field.');
+      return;
+    }
+
+    const nextContactError = validatePhilippineContactDigits(formData.contact_number);
+    if (nextContactError) {
+      setContactError(nextContactError);
+      setError('Please correct the highlighted contact number field.');
+      return;
+    }
+
     const passwordError = validateStrongPassword(formData.password);
     if (passwordError) {
       setError(passwordError);
@@ -61,6 +93,8 @@ const PublicRegister = () => {
       const response = await axios.post(`${API_BASE_URL}/public/auth/register`, {
         ...registerData,
         email: registerData.email.trim(),
+        full_name: normalizeCitizenFullName(registerData.full_name),
+        contact_number: `+63${normalizePhilippineContactDigits(registerData.contact_number)}`,
       });
 
       if (response.data.requires_email_verification) {
@@ -118,9 +152,14 @@ const PublicRegister = () => {
                 value={formData.full_name}
                 onChange={handleInputChange}
                 placeholder="Juan Dela Cruz"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                  fullNameError ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                }`}
                 required
               />
+              {fullNameError ? (
+                <p className="mt-2 text-sm font-semibold text-red-600">{fullNameError}</p>
+              ) : null}
             </div>
 
             <div>
@@ -144,15 +183,25 @@ const PublicRegister = () => {
 
             <div>
               <label className="block text-gray-700 font-semibold mb-2">Contact Number *</label>
-              <input
-                type="tel"
-                name="contact_number"
-                value={formData.contact_number}
-                onChange={handleInputChange}
-                placeholder="09XX XXX XXXX"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
-              />
+              <div className={`flex overflow-hidden rounded-lg border ${contactError ? 'border-red-500 bg-red-50' : 'border-gray-300'}`}>
+                <span className="flex items-center bg-gray-100 px-4 font-semibold text-gray-700">+63</span>
+                <input
+                  type="tel"
+                  name="contact_number"
+                  value={formData.contact_number}
+                  onChange={handleInputChange}
+                  inputMode="numeric"
+                  maxLength={10}
+                  placeholder="9202717703"
+                  className="w-full px-4 py-3 focus:outline-none"
+                  required
+                />
+              </div>
+              {contactError ? (
+                <p className="mt-2 text-sm font-semibold text-red-600">{contactError}</p>
+              ) : (
+                <p className="mt-2 text-sm text-gray-500">Enter exactly 10 digits after +63.</p>
+              )}
             </div>
 
             <div>

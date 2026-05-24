@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
@@ -9,9 +11,15 @@ from typing import Optional
 import secrets
 
 from database.models import EmailVerificationToken, PublicUser, get_db
-from services.email_service import send_citizen_verification_email, smtp_is_configured
+from services.email_service import send_citizen_verification_link_email, smtp_is_configured
 from utils.field_crypto import apply_citizen_user_security, apply_email_verification_token_security, find_citizen_by_email, hash_optional_value, serialize_citizen_user
-from utils.security_validation import ensure_email_is_unique, normalize_email, validate_strong_password
+from utils.security_validation import (
+    ensure_email_is_unique,
+    normalize_citizen_full_name,
+    normalize_email,
+    normalize_ph_contact_number,
+    validate_strong_password,
+)
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -52,6 +60,8 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
 async def register_public_user(user_data: PublicUserRegister, db: Session = Depends(get_db)):
     """Register a new public user"""
     normalized_email = normalize_email(user_data.email, check_deliverability=True)
+    normalized_full_name = normalize_citizen_full_name(user_data.full_name)
+    normalized_contact_number = normalize_ph_contact_number(user_data.contact_number)
     ensure_email_is_unique(db, normalized_email)
     validate_strong_password(user_data.password)
     verification_required = smtp_is_configured()
@@ -59,8 +69,8 @@ async def register_public_user(user_data: PublicUserRegister, db: Session = Depe
     hashed_password = pwd_context.hash(user_data.password)
     new_user = PublicUser(
         email=normalized_email,
-        full_name=user_data.full_name,
-        contact_number=user_data.contact_number,
+        full_name=normalized_full_name,
+        contact_number=normalized_contact_number,
         hashed_password=hashed_password,
         is_verified=not verification_required
     )
@@ -81,8 +91,12 @@ async def register_public_user(user_data: PublicUserRegister, db: Session = Depe
         token_record = db.query(EmailVerificationToken).filter(EmailVerificationToken.citizen_user_id == new_user.id).order_by(EmailVerificationToken.id.desc()).first()
         if token_record:
             apply_email_verification_token_security(token_record)
-        verification_url = "http://localhost:8000/api/public/auth/verify-email?token=" + verification_token
-        email_result = send_citizen_verification_email(serialize_citizen_user(new_user)["email"], verification_url)
+        verification_base_url = os.getenv("BACKEND_BASE_URL", "http://localhost:8000").rstrip("/")
+        verification_url = f"{verification_base_url}/api/public/auth/verify-email?token={verification_token}"
+        email_result = send_citizen_verification_link_email(
+            serialize_citizen_user(new_user)["email"],
+            verification_url,
+        )
         if not email_result["sent"]:
             db.rollback()
             raise HTTPException(status_code=500, detail=email_result["message"])

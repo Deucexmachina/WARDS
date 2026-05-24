@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { branchAPI, taxAssessmentAPI } from '../../services/api';
 import WardsPageHero from '../../components/WardsPageHero';
+import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
 
 const EMPTY_ASSESSMENT_FORM = {
   assessment_id: null,
@@ -103,6 +104,7 @@ const TaxAssessment = () => {
   const [reviewingSubmissionId, setReviewingSubmissionId] = useState(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   const loadPageData = async () => {
     try {
@@ -213,14 +215,25 @@ const TaxAssessment = () => {
   };
 
   const handleDeleteSubmission = async (submission) => {
-    if (!window.confirm(`Delete the taxpayer submission for ${submission.full_name}?`)) {
+    if (!deleteTarget) {
+      setDeleteTarget({
+        type: 'submission',
+        title: 'Delete this taxpayer submission?',
+        message: `This will permanently remove the taxpayer submission for ${submission.full_name}.`,
+        details: [
+          { label: 'Submission Type', value: submission.submission_type || 'N/A' },
+          { label: 'Email', value: submission.email || 'N/A' },
+        ],
+        item: submission,
+      });
       return;
     }
 
     try {
-      const response = await taxAssessmentAPI.deleteSubmission(submission.id);
+      const response = await taxAssessmentAPI.deleteSubmission(deleteTarget.item.id);
       setMessage(response.data?.message || 'Taxpayer submission deleted successfully.');
       setError('');
+      setDeleteTarget(null);
       await loadPageData();
     } catch (deleteError) {
       setError(deleteError.response?.data?.detail || 'Failed to delete taxpayer submission.');
@@ -315,19 +328,30 @@ const TaxAssessment = () => {
   };
 
   const handleDeleteAssessment = async (assessment) => {
-    if (!window.confirm(`Delete the ${assessment.tax_type} assessment for ${assessment.taxpayer_name}?`)) {
+    if (!deleteTarget) {
+      setDeleteTarget({
+        type: 'assessment',
+        title: 'Delete this tax assessment?',
+        message: `This will permanently remove the ${assessment.tax_type} assessment for ${assessment.taxpayer_name}.`,
+        details: [
+          { label: 'Tax Type', value: assessment.tax_type || 'N/A' },
+          { label: 'Taxpayer', value: assessment.taxpayer_name || 'N/A' },
+        ],
+        item: assessment,
+      });
       return;
     }
 
     try {
-      const response = await taxAssessmentAPI.deleteAssessment(assessment.id);
+      const response = await taxAssessmentAPI.deleteAssessment(deleteTarget.item.id);
       setMessage(response.data?.message || 'Assessment deleted successfully.');
       setError('');
-      if (assessmentForm.assessment_id === assessment.id) {
+      if (assessmentForm.assessment_id === deleteTarget.item.id) {
         setAssessmentForm(EMPTY_ASSESSMENT_FORM);
         setAssessmentValidationErrors({});
         setShowAssessmentGenerator(false);
       }
+      setDeleteTarget(null);
       await loadPageData();
     } catch (deleteError) {
       setError(deleteError.response?.data?.detail || 'Failed to delete assessment.');
@@ -337,6 +361,15 @@ const TaxAssessment = () => {
   if (loading) {
     return <div className="rounded-[28px] border border-slate-200 bg-white px-6 py-14 text-center text-sm text-slate-500 shadow-sm">Loading tax assessment module...</div>;
   }
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget) return;
+    if (deleteTarget.type === 'submission') {
+      await handleDeleteSubmission(deleteTarget.item);
+      return;
+    }
+    await handleDeleteAssessment(deleteTarget.item);
+  };
 
   return (
     <div className="space-y-8">
@@ -747,6 +780,15 @@ const TaxAssessment = () => {
           {!filteredRejectedSubmissions.length ? <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center text-sm text-slate-500">No rejected taxpayer submissions found.</div> : null}
         </div>
       </section>
+      <DeleteConfirmationModal
+        open={Boolean(deleteTarget)}
+        title={deleteTarget?.title}
+        message={deleteTarget?.message}
+        details={deleteTarget?.details || []}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={handleDeleteConfirm}
+        isLoading={savingAssessment}
+      />
     </div>
   );
 };

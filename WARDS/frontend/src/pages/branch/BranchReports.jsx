@@ -3,6 +3,7 @@ import { branchReportAPI } from '../../services/api';
 import { formatUtc8Date, formatUtc8DateTime } from '../../utils/dateTime';
 import GeneratedReportContent from '../../components/reports/GeneratedReportContent';
 import WardsPageHero from '../../components/WardsPageHero';
+import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
 
 const REPORT_TYPES = ['Operational', 'Daily', 'Weekly', 'Monthly', 'Quarterly', 'Annual'];
 const SERVICE_TYPES = ['All Services', 'Real Property Tax', 'Business Tax', 'Miscellaneous Tax', 'Document Request'];
@@ -68,6 +69,7 @@ const BranchReports = () => {
   const [selectedReport, setSelectedReport] = useState(null);
   const [selectedMetrics, setSelectedMetrics] = useState(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
+  const [reportToDelete, setReportToDelete] = useState(null);
   const branchStaff = JSON.parse(localStorage.getItem('branchUser') || '{}');
 
   const fetchReports = async (page = 1) => {
@@ -142,20 +144,25 @@ const BranchReports = () => {
   };
 
   const handleDelete = async (reportId) => {
-    if (!window.confirm('Delete this submitted branch report?')) {
+    if (!reportToDelete) {
+      const targetReport = reportsState.items.find((report) => report.id === reportId);
+      if (targetReport) {
+        setReportToDelete(targetReport);
+      }
       return;
     }
 
     try {
-      setDeletingId(reportId);
+      setDeletingId(reportToDelete.id);
       setError('');
-      await branchReportAPI.delete(reportId);
+      await branchReportAPI.delete(reportToDelete.id);
       const nextPage = reportsState.items.length === 1 && reportsState.page > 1 ? reportsState.page - 1 : reportsState.page;
       await fetchReports(nextPage);
-      if (selectedReport?.id === reportId) {
+      if (selectedReport?.id === reportToDelete.id) {
         setSelectedReport(null);
         setSelectedMetrics(null);
       }
+      setReportToDelete(null);
     } catch (deleteError) {
       console.error('Failed to delete branch report:', deleteError);
       setError(deleteError.response?.data?.detail || 'Failed to delete the report.');
@@ -386,6 +393,19 @@ const BranchReports = () => {
           }}
         />
       ) : null}
+
+      <DeleteConfirmationModal
+        open={Boolean(reportToDelete)}
+        title="Delete this branch report?"
+        message={`This will permanently remove "${reportToDelete?.title || 'this submitted report'}" from the branch records.`}
+        details={[
+          { label: 'Report Type', value: reportToDelete?.report_type || 'N/A' },
+          { label: 'Submitted', value: reportToDelete?.submitted_at ? formatUtc8DateTime(reportToDelete.submitted_at) : 'N/A' },
+        ]}
+        onCancel={() => setReportToDelete(null)}
+        onConfirm={() => handleDelete()}
+        isLoading={Boolean(deletingId)}
+      />
     </div>
   );
 };

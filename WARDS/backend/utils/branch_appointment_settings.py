@@ -34,6 +34,8 @@ SERVICE_WINDOW_LABELS = {
     "BUSINESS": "BT Window",
     "MISC": "MISC Window",
 }
+WINDOW_MAX_ACTIVE_CLIENTS = 5
+TRANSACTION_DURATION_MINUTES = 30
 
 
 def _current_ph_date() -> date:
@@ -108,8 +110,23 @@ def get_service_window_label(service_window: str) -> str:
 
 
 def get_window_capacity_limit(db: Session, branch_id: int | None = None) -> int:
-    configured_limit = int(get_branch_setting_value(db, "maxQueuePerWindow", branch_id) if branch_id else get_setting_value(db, "maxQueuePerWindow") or 25)
-    return max(1, configured_limit)
+    return WINDOW_MAX_ACTIVE_CLIENTS
+
+
+def get_transaction_duration_minutes() -> int:
+    return TRANSACTION_DURATION_MINUTES
+
+
+def normalize_appointment_service_key(service_type: Optional[str]) -> str:
+    return " ".join((service_type or "").strip().casefold().split())
+
+
+def build_appointment_reservation_key(
+    branch_id: int,
+    appointment_time: datetime,
+    service_type: Optional[str] = None,
+) -> str:
+    return f"{branch_id}|{appointment_time.strftime('%Y-%m-%dT%H:%M')}|{normalize_appointment_service_key(service_type)}"
 
 
 def get_window_active_queue_count(db: Session, *, branch_id: int, service_window: str) -> int:
@@ -179,7 +196,7 @@ def default_branch_schedule_config() -> dict:
             "break_start": "",
             "break_end": "",
             "last_appointment_time": "17:00",
-            "slot_interval_minutes": 30,
+            "slot_interval_minutes": TRANSACTION_DURATION_MINUTES,
         },
     }
 
@@ -218,7 +235,7 @@ def normalize_schedule_config(config: dict) -> dict:
         "break_start": (time_settings.get("break_start") or "").strip(),
         "break_end": (time_settings.get("break_end") or "").strip(),
         "last_appointment_time": (time_settings.get("last_appointment_time") or defaults["time_settings"]["last_appointment_time"]).strip(),
-        "slot_interval_minutes": int(time_settings.get("slot_interval_minutes") or defaults["time_settings"]["slot_interval_minutes"]),
+        "slot_interval_minutes": TRANSACTION_DURATION_MINUTES,
     }
 
     effective_date = (config.get("effective_date") or defaults["effective_date"]).strip()
@@ -274,10 +291,7 @@ def validate_schedule_config(config: dict) -> dict:
         break_start = None
         break_end = None
 
-    slot_interval_minutes = int(normalized["time_settings"]["slot_interval_minutes"] or 30)
-    if slot_interval_minutes < 5 or slot_interval_minutes > 120:
-        raise HTTPException(status_code=400, detail="Slot interval must be between 5 and 120 minutes.")
-    normalized["time_settings"]["slot_interval_minutes"] = slot_interval_minutes
+    normalized["time_settings"]["slot_interval_minutes"] = TRANSACTION_DURATION_MINUTES
 
     seen_dates = set()
     for override in normalized["date_overrides"]:
@@ -903,28 +917,7 @@ def get_branch_appointment_availability(
     slot_cursor = datetime.combine(selected_date, opening_time)
     slot_end_limit = datetime.combine(selected_date, last_appointment_time)
     now = datetime.now()
-    slot_capacity = 1
     window_capacity = get_window_capacity_snapshot(db, branch_id=branch.id, service_type=service_type)
-    if window_capacity and window_capacity["is_full"]:
-        reasons = []
-        _append_reason(
-            reasons,
-            "window_capacity_reached",
-            f"{window_capacity['window_label']} queue capacity reached",
-            f"the {window_capacity['window_label'].lower()} has reached its maximum queue capacity of {window_capacity['max_capacity']}",
-        )
-        return {
-            "is_available": False,
-            "message": _build_unavailable_message(
-                "Appointments",
-                reasons,
-                "Please choose another available branch or try again when this service window has capacity.",
-            ),
-            "available_slots": [],
-            "status": "window_capacity_reached",
-            "reasons": reasons,
-            "window_capacity": window_capacity,
-        }
     available_slots = []
 
     while slot_cursor <= slot_end_limit:
@@ -932,26 +925,30 @@ def get_branch_appointment_availability(
         in_break = break_start and break_end and break_start <= slot_time < break_end
         after_close = slot_time > closing_time
         if not in_break and not after_close and slot_cursor >= now:
-            booked_count = (
+            booked_appointments = (
                 db.query(Queue)
                 .filter(
                     Queue.branch_id == branch.id,
                     hash_aware_match(Queue, "queue_type", "appointment"),
                     Queue.appointment_time == slot_cursor,
-                    ~hash_aware_match(Queue, "status", "Cancelled"),
+                    hash_aware_any(Queue, "status", ACTIVE_WINDOW_QUEUE_STATUSES),
                 )
                 .all()
             )
             if service_type:
-                target_window = normalize_service_window(service_type)
-                booked_count = sum(1 for queue in booked_count if normalize_service_window(queue_value(queue, "service_type")) == target_window)
+                normalized_service_key = normalize_appointment_service_key(service_type)
+                booked_count = sum(
+                    1
+                    for queue in booked_appointments
+                    if normalize_appointment_service_key(queue_value(queue, "service_type")) == normalized_service_key
+                )
             else:
-                booked_count = len(booked_count)
-            if booked_count < slot_capacity:
+                booked_count = len(booked_appointments)
+            if booked_count < 1:
                 available_slots.append({
                     "value": slot_time.strftime("%H:%M"),
                     "label": slot_cursor.strftime("%I:%M %p").lstrip("0"),
-                    "remaining_capacity": slot_capacity - booked_count,
+                    "remaining_capacity": 1 - booked_count,
                 })
         slot_cursor += timedelta(minutes=slot_interval)
 

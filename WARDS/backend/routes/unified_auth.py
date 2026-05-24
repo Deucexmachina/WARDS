@@ -110,8 +110,7 @@ class UnifiedPasswordResetConfirm(BaseModel):
 
 
 def normalize_identifier(identifier: str) -> str:
-    value = identifier.strip()
-    return value.lower() if "@" in value else value
+    return identifier.strip().lower()
 
 
 def slugify_branch_name(name: str) -> str:
@@ -229,24 +228,15 @@ def log_activity(db: Session, action: str, user: str, details: str, log_type: st
 def find_account(db: Session, identifier: str) -> Tuple[Optional[str], Optional[object]]:
     normalized = normalize_identifier(identifier)
 
-    if "@" in normalized:
-        public_user = find_citizen_by_email(db, CitizenUser, normalized)
-        if public_user:
-            return "public", public_user
+    public_user = find_citizen_by_email(db, CitizenUser, normalized)
+    if public_user:
+        return "public", public_user
 
-        admin = db.query(Admin).filter(Admin.email == normalized).first()
-        if admin:
-            return "admin", admin
-
-        branch_staff = db.query(BranchStaff).filter(BranchStaff.email == normalized).first()
-        if branch_staff:
-            return "branch", branch_staff
-
-    admin = db.query(Admin).filter(Admin.username == identifier.strip()).first()
+    admin = db.query(Admin).filter(Admin.email == normalized).first()
     if admin:
         return "admin", admin
 
-    branch_staff = db.query(BranchStaff).filter(BranchStaff.username == identifier.strip()).first()
+    branch_staff = db.query(BranchStaff).filter(BranchStaff.email == normalized).first()
     if branch_staff:
         return "branch", branch_staff
 
@@ -258,23 +248,15 @@ def find_account_for_portal(db: Session, identifier: str, requested_portal: Opti
     portal = (requested_portal or "").strip().lower()
 
     if portal == "public":
-        if "@" not in normalized:
-            return None, None
         public_user = find_citizen_by_email(db, CitizenUser, normalized)
         return ("public", public_user) if public_user else (None, None)
 
     if portal == "admin":
-        if "@" in normalized:
-            admin = db.query(Admin).filter(Admin.email == normalized).first()
-        else:
-            admin = db.query(Admin).filter(Admin.username == identifier.strip()).first()
+        admin = db.query(Admin).filter(Admin.email == normalized).first()
         return ("admin", admin) if admin else (None, None)
 
     if portal == "branch":
-        if "@" in normalized:
-            branch_staff = db.query(BranchStaff).filter(BranchStaff.email == normalized).first()
-        else:
-            branch_staff = db.query(BranchStaff).filter(BranchStaff.username == identifier.strip()).first()
+        branch_staff = db.query(BranchStaff).filter(BranchStaff.email == normalized).first()
         return ("branch", branch_staff) if branch_staff else (None, None)
 
     return find_account(db, identifier)
@@ -412,7 +394,7 @@ def get_account_email(portal: str, account: object) -> str:
 
 
 def get_account_identifier(portal: str, account: object) -> str:
-    return serialize_citizen_user(account)["email"] if portal == "public" else account.username
+    return serialize_citizen_user(account)["email"] if portal == "public" else account.email
 
 
 def get_account_display_name(portal: str, account: object) -> str:
@@ -484,7 +466,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
             headers["X-Requires-Captcha"] = "true"
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials. Please check your email or username and password.",
+            detail="Invalid credentials. Please check your email and password.",
             headers=headers,
         )
 
@@ -523,7 +505,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
 
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials. Please check your email or username and password.",
+            detail="Invalid credentials. Please check your email and password.",
             headers={"X-Auth-Portal": portal},
         )
 
@@ -590,7 +572,6 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
                 "token_type": "bearer",
                 "portal": portal,
                 "user": {
-                    "username": account.username,
                     "email": account.email,
                 },
                 "requires_mfa": True,

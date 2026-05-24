@@ -344,6 +344,7 @@ const ConfirmationModal = ({
   message,
   details,
   warning,
+  errorMessage,
   cancelLabel,
   confirmLabel,
   confirmClassName,
@@ -371,6 +372,11 @@ const ConfirmationModal = ({
         {warning ? (
           <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             {warning}
+          </div>
+        ) : null}
+        {errorMessage ? (
+          <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            {errorMessage}
           </div>
         ) : null}
         <div className="mt-6 flex gap-3">
@@ -410,7 +416,9 @@ const PaymentManagement = () => {
   const [showVerifyModal, setShowVerifyModal] = useState(false);
   const [paymentToVerify, setPaymentToVerify] = useState(null);
   const [verifying, setVerifying] = useState(false);
+  const [verifyError, setVerifyError] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
+  const [feedback, setFeedback] = useState({ type: '', message: '' });
 
   useEffect(() => {
     fetchPayments();
@@ -462,6 +470,7 @@ const PaymentManagement = () => {
     if (!isProcessingPayment(payment)) {
       return;
     }
+    setVerifyError('');
     setPaymentToVerify(payment);
     setShowVerifyModal(true);
   };
@@ -471,14 +480,19 @@ const PaymentManagement = () => {
 
     setVerifying(true);
     try {
+      setVerifyError('');
+      setFeedback({ type: '', message: '' });
       await api.put(`/branch/payments/${paymentToVerify.id}/verify`);
       setShowVerifyModal(false);
       setPaymentToVerify(null);
-      alert('Payment verified successfully');
+      setFeedback({ type: 'success', message: 'Payment verified successfully.' });
+      window.dispatchEvent(new CustomEvent('branch-payment-updated', { detail: { action: 'verified', paymentId: paymentToVerify.id } }));
       fetchPayments();
     } catch (error) {
       console.error('Failed to verify payment:', error);
-      alert(`Failed to verify payment: ${error.response?.data?.detail || error.message}`);
+      const message = error.response?.data?.detail || error.message || 'Failed to verify payment.';
+      setVerifyError(message);
+      setFeedback({ type: 'error', message });
     } finally {
       setVerifying(false);
     }
@@ -487,6 +501,7 @@ const PaymentManagement = () => {
   const handleVerifyCancel = () => {
     setShowVerifyModal(false);
     setPaymentToVerify(null);
+    setVerifyError('');
   };
 
   const handleDeleteClick = (payment) => {
@@ -499,13 +514,15 @@ const PaymentManagement = () => {
 
     setDeleting(true);
     try {
+      setFeedback({ type: '', message: '' });
       await api.delete(`/branch/payments/${paymentToDelete.id}`);
       setShowDeleteModal(false);
       setPaymentToDelete(null);
+      setFeedback({ type: 'success', message: 'Payment deleted successfully.' });
       fetchPayments();
     } catch (error) {
       console.error('Failed to delete payment:', error);
-      alert(`Failed to delete payment: ${error.response?.data?.detail || error.message}`);
+      setFeedback({ type: 'error', message: error.response?.data?.detail || error.message || 'Failed to delete payment.' });
     } finally {
       setDeleting(false);
     }
@@ -529,6 +546,7 @@ const PaymentManagement = () => {
       await api.put(`/branch/payments/${paymentToDecline.id}/decline`);
       setShowDeclineModal(false);
       setPaymentToDecline(null);
+      window.dispatchEvent(new CustomEvent('branch-payment-updated', { detail: { action: 'declined', paymentId: paymentToDecline.id } }));
       fetchPayments();
     } catch (error) {
       console.error('Failed to decline payment:', error);
@@ -790,6 +808,16 @@ const PaymentManagement = () => {
           </>
         )}
       />
+
+      {feedback.message ? (
+        <div className={`rounded-2xl border px-5 py-4 text-sm ${
+          feedback.type === 'error'
+            ? 'border-rose-200 bg-rose-50 text-rose-700'
+            : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+        }`}>
+          {feedback.message}
+        </div>
+      ) : null}
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <KpiCard icon="wallet" label="Total Payments" value={stats.total} helper="Unique transactions in the current filtered view" />
@@ -1141,6 +1169,7 @@ const PaymentManagement = () => {
             { label: 'Payment Proof', value: paymentToVerify.proof_file_name || 'No uploaded proof found' },
           ]}
           warning="Verify this payment only after confirming that the underlying transaction was successfully completed and reviewing any uploaded taxpayer proof."
+          errorMessage={verifyError}
           cancelLabel="Cancel"
           confirmLabel="Confirm Verify"
           confirmClassName="bg-emerald-600 hover:bg-emerald-700"

@@ -4,7 +4,7 @@ import wardsLogo from '../assets/branding/wards_logo.png';
 import qcLogo from '../assets/branding/qclogo_main.png';
 import galasLogo from '../assets/branding/galas_logo.png';
 import api from '../services/api';
-import { discrepancyAPI } from '../services/api';
+import { branchAnnouncementAPI, discrepancyAPI } from '../services/api';
 import { getBranchPortalPath } from '../utils/auth';
 
 const BranchLayout = () => {
@@ -64,13 +64,8 @@ const BranchLayout = () => {
 
     const fetchUnreadMemoCount = async () => {
       try {
-        const [unreadResponse, memosResponse] = await Promise.all([
-          api.get('/branch/memos/unread-count'),
-          api.get('/branch/memos'),
-        ]);
-        const unreadCount = Number(unreadResponse.data.unread_count || 0);
-        const totalMemoCount = Array.isArray(memosResponse.data) ? memosResponse.data.length : 0;
-        setUnreadMemoCount(Math.max(unreadCount, totalMemoCount));
+        const unreadResponse = await api.get('/branch/memos/unread-count');
+        setUnreadMemoCount(Number(unreadResponse.data.unread_count || 0));
       } catch (error) {
         console.error('Failed to fetch branch unread memo count:', error);
       }
@@ -96,8 +91,8 @@ const BranchLayout = () => {
 
     const fetchAnnouncementCount = async () => {
       try {
-        const response = await api.get('/branch/announcements');
-        setAnnouncementCount((response.data || []).length);
+        const response = await branchAnnouncementAPI.getUnreadCount();
+        setAnnouncementCount(Number(response.data?.unread_count || 0));
       } catch (error) {
         console.error('Failed to fetch branch announcement count:', error);
       }
@@ -169,11 +164,18 @@ const BranchLayout = () => {
     const handlePolicyRead = () => fetchUnreadPolicyCount();
     const handlePolicyUpdated = () => fetchUnreadPolicyCount();
     const handleDiscrepancyViewed = () => fetchUnreadDiscrepancyCount();
+    const handleAnnouncementViewed = () => fetchAnnouncementCount();
+    const handleBranchPaymentUpdated = () => {
+      fetchPaymentCount();
+      fetchReceiptCount();
+    };
 
     window.addEventListener('branch-memo-read', handleMemoRead);
     window.addEventListener('branch-policy-read', handlePolicyRead);
     window.addEventListener('branch-policy-updated', handlePolicyUpdated);
     window.addEventListener('branch-discrepancy-viewed', handleDiscrepancyViewed);
+    window.addEventListener('branch-announcement-viewed', handleAnnouncementViewed);
+    window.addEventListener('branch-payment-updated', handleBranchPaymentUpdated);
 
     return () => {
       clearInterval(interval);
@@ -181,6 +183,8 @@ const BranchLayout = () => {
       window.removeEventListener('branch-policy-read', handlePolicyRead);
       window.removeEventListener('branch-policy-updated', handlePolicyUpdated);
       window.removeEventListener('branch-discrepancy-viewed', handleDiscrepancyViewed);
+      window.removeEventListener('branch-announcement-viewed', handleAnnouncementViewed);
+      window.removeEventListener('branch-payment-updated', handleBranchPaymentUpdated);
     };
   }, [isQueueWindowAccount]);
 

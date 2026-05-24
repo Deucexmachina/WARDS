@@ -743,6 +743,22 @@ class AnnouncementAttachment(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class AnnouncementView(Base):
+    __tablename__ = "announcement_views"
+
+    id = Column(Integer, primary_key=True, index=True)
+    announcement_id = Column(Integer, ForeignKey("announcements.id"), nullable=False, index=True)
+    viewer_username = Column(String, nullable=False, index=True)
+    viewer_username_hash = Column(String, nullable=True, index=True)
+    viewer_username_enc = Column(Text, nullable=True)
+    viewer_type = Column(String, default="admin")
+    viewer_type_hash = Column(String, nullable=True, index=True)
+    viewer_type_enc = Column(Text, nullable=True)
+    viewed_at = Column(DateTime, default=datetime.utcnow)
+
+    announcement = relationship("Announcement", backref="views")
+
+
 class Memo(Base):
     __tablename__ = "memos"
     
@@ -1037,6 +1053,7 @@ class Queue(Base):
     queue_type_hash = Column(String, nullable=True)
     queue_type_enc = Column(Text, nullable=True)
     appointment_time = Column(DateTime, nullable=True)
+    appointment_reservation_key = Column(String, nullable=True, unique=True, index=True)
     estimated_wait_time = Column(Integer, nullable=True)  # in minutes
     recommended_arrival = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import api, { memoAPI } from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
+import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
 
 const EMPTY_FORM = {
   title: '',
@@ -30,6 +31,7 @@ const Memos = () => {
   const [showViewModal, setShowViewModal] = useState(false);
   const [viewingMemo, setViewingMemo] = useState(null);
   const [editingMemo, setEditingMemo] = useState(null);
+  const [memoToDelete, setMemoToDelete] = useState(null);
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedContent, setExpandedContent] = useState(false);
@@ -186,13 +188,20 @@ const Memos = () => {
   };
 
   const handleDeleteMemo = async (memoId) => {
-    if (!window.confirm('Delete this internal memo?')) {
+    if (!memoToDelete && memoId && typeof memoId === 'object') {
+      setMemoToDelete(memoId);
+      return;
+    }
+
+    const targetMemo = memoToDelete || memos.find((memo) => memo.id === memoId);
+    if (!targetMemo) {
       return;
     }
 
     try {
-      await memoAPI.delete(memoId);
+      await memoAPI.delete(targetMemo.id);
       await fetchMemoModule();
+      setMemoToDelete(null);
     } catch (deleteError) {
       console.error('Failed to delete memo:', deleteError);
       setError(deleteError.response?.data?.detail || 'Failed to delete memo.');
@@ -283,7 +292,7 @@ const Memos = () => {
             Edit
           </button>
           <button
-            onClick={() => handleDeleteMemo(memo.id)}
+            onClick={() => handleDeleteMemo(memo)}
             className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition duration-300"
           >
             Delete
@@ -607,6 +616,19 @@ const Memos = () => {
           </div>
         </div>
       )}
+
+      <DeleteConfirmationModal
+        open={Boolean(memoToDelete)}
+        title="Delete this internal memo?"
+        message={`This will permanently remove "${memoToDelete?.title || 'this memo'}" from the Internal Memos module.`}
+        details={[
+          { label: 'Author', value: memoToDelete?.author || 'Admin' },
+          { label: 'Created', value: memoToDelete?.created_at ? formatDateTime(memoToDelete.created_at) : 'N/A' },
+        ]}
+        onCancel={() => setMemoToDelete(null)}
+        onConfirm={() => handleDeleteMemo()}
+        isLoading={saving}
+      />
     </div>
   );
 };

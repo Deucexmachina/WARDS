@@ -499,6 +499,85 @@ def send_citizen_verification_email(recipient_email: str, verification_code: str
         }
 
 
+def send_citizen_verification_link_email(recipient_email: str, verification_url: str) -> dict:
+    if not smtp_is_configured():
+        return {
+            "sent": False,
+            "status": "skipped",
+            "message": "SMTP is not configured. Verification email was not sent.",
+        }
+
+    smtp_from_email = os.getenv("SMTP_FROM_EMAIL")
+    smtp_from_name = os.getenv("SMTP_FROM_NAME", "WARDS Admin")
+
+    message = EmailMessage()
+    message["Subject"] = "Verify Your WARDS Account"
+    message["From"] = f"{smtp_from_name} <{smtp_from_email}>"
+    message["To"] = recipient_email
+    message.set_content(
+        "\n".join(
+            [
+                "Welcome to WARDS",
+                "",
+                "Your citizen account registration was received successfully.",
+                "Use the verification link below to activate your account:",
+                verification_url,
+                "",
+                "If you did not create this account, you can ignore this message.",
+                "",
+                "City Treasurer's Office",
+                "WARDS Admin",
+            ]
+        )
+    )
+    message.add_alternative(
+        f"""
+<!DOCTYPE html>
+<html lang="en">
+  <body style="margin:0;padding:0;background:#f3f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;">
+    <div style="max-width:640px;margin:0 auto;padding:32px 20px;">
+      {_build_email_shell_header("Welcome to WARDS", "Your citizen account has been created successfully. Complete the email verification step below to activate it and continue using WARDS services.", [])}
+      <div style="background:#ffffff;border-radius:0 0 24px 24px;padding:30px 30px 32px;box-shadow:0 18px 40px rgba(15,39,68,.10);border:1px solid #dbe3ef;border-top:none;">
+        <div style="background:#f8fbff;border:1px solid #dbe7f3;border-radius:18px;padding:20px 22px;margin:0 0 22px;">
+          <h2 style="margin:0 0 10px;font-size:17px;color:#0f2744;">Verify and Activate Your Account</h2>
+          <p style="margin:0;font-size:14px;line-height:1.7;color:#546273;">
+            Select the button below to verify your email address and activate your WARDS account.
+          </p>
+        </div>
+        <div style="text-align:center;margin:0 0 22px;">
+          <a href="{verification_url}" style="display:inline-block;background:#166534;color:#ffffff;text-decoration:none;padding:14px 24px;border-radius:10px;font-weight:700;">
+            Verify My Account
+          </a>
+        </div>
+        <p style="margin:0;font-size:14px;line-height:1.7;color:#546273;word-break:break-word;">
+          If the button does not open, use this link:<br>
+          <a href="{verification_url}" style="color:#166534;">{verification_url}</a>
+        </p>
+        <p style="margin:22px 0 0;font-size:14px;line-height:1.7;color:#5b6471;">
+          If you did not create this account, you can safely ignore this message.
+        </p>
+        <p style="margin:24px 0 0;font-size:14px;line-height:1.7;color:#1f2937;">
+          City Treasurer's Office<br><strong>WARDS Admin</strong>
+        </p>
+      </div>
+    </div>
+  </body>
+</html>
+""",
+        subtype="html",
+    )
+
+    try:
+        result = _send_email_message(message)
+        return {**result, "message": f"Verification email sent to {recipient_email}."}
+    except Exception as exc:
+        return {
+            "sent": False,
+            "status": "failed",
+            "message": f"Verification email could not be sent: {exc}",
+        }
+
+
 def send_receipt_release_email(
     recipient_email: str,
     taxpayer_name: str,

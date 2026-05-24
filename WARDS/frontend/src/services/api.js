@@ -223,6 +223,8 @@ const buildAttachmentFormData = (files) => {
 export const announcementAPI = {
   getAll: () => api.get('/announcements/'),
   getById: (id) => api.get(`/announcements/${id}`),
+  getUnreadCount: () => api.get('/announcements/unread-count'),
+  markViewed: (id) => api.post(`/announcements/${id}/mark-viewed`),
   create: (data) => api.post('/announcements/', data),
   update: (id, data) => api.put(`/announcements/${id}`, data),
   delete: (id) => api.delete(`/announcements/${id}`),
@@ -238,6 +240,8 @@ export const announcementAPI = {
 
 export const branchAnnouncementAPI = {
   getAll: () => api.get('/branch/announcements'),
+  getUnreadCount: () => api.get('/branch/announcements/unread-count'),
+  markViewed: (id) => api.post(`/branch/announcements/${id}/mark-viewed`),
   create: (data) => api.post('/branch/announcements', data),
   update: (id, data) => api.put(`/branch/announcements/${id}`, data),
   delete: (id) => api.delete(`/branch/announcements/${id}`),

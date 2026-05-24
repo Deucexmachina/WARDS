@@ -10,7 +10,7 @@ const RECAPTCHA_SITE_KEY = '6LdOdsAsAAAAAKW-mZvEfaesLvdAwCm_SnZoiirK';
 
 const BranchLoginV2 = () => {
   const [step, setStep] = useState('credentials');
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [totpCode, setTotpCode] = useState('');
   const [recaptchaToken, setRecaptchaToken] = useState('');
@@ -33,8 +33,8 @@ const BranchLoginV2 = () => {
     setError('');
 
     try {
-      const response = await axios.post(`${API_URL}/api/branch/auth/login`, {
-        username,
+        const response = await axios.post(`${API_URL}/api/branch/auth/login`, {
+        email,
         password,
         recaptcha_token: recaptchaToken || undefined,
       });
@@ -73,7 +73,7 @@ const BranchLoginV2 = () => {
 
     try {
       const response = await axios.post(`${API_URL}/api/branch/auth/login`, {
-        username,
+        email,
         password,
         totp_code: totpCode,
         recaptcha_token: recaptchaToken || undefined,
@@ -93,7 +93,7 @@ const BranchLoginV2 = () => {
 
     try {
       const response = await axios.post(`${API_URL}/api/branch/auth/setup-mfa`, {
-        username,
+        email,
         password,
       });
       setMfaSetupData(response.data);
@@ -122,14 +122,14 @@ const BranchLoginV2 = () => {
         {step === 'credentials' && (
           <form onSubmit={handleCredentialsSubmit} className="space-y-6">
             <div>
-              <label className="block text-gray-700 font-semibold mb-2">Username</label>
+              <label className="block text-gray-700 font-semibold mb-2">Email Address</label>
               <input
-                type="text"
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
                 className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                 required
-                autoComplete="username"
+                autoComplete="email"
               />
             </div>
 

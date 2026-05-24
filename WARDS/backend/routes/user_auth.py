@@ -11,7 +11,7 @@ import secrets
 import time
 
 from database.models import CitizenUser, ActivityLog, EmailVerificationToken, get_db
-from services.email_service import send_citizen_verification_email, smtp_is_configured
+from services.email_service import send_citizen_verification_link_email, smtp_is_configured
 from utils.field_crypto import apply_citizen_user_security, apply_email_verification_token_security, find_citizen_by_email, hash_optional_value, serialize_citizen_user
 from utils.security_validation import ensure_email_is_unique, normalize_email, validate_strong_password
 
@@ -174,7 +174,10 @@ async def register_user(request: Request, user_data: UserRegisterRequest, db: Se
         if token_record:
             apply_email_verification_token_security(token_record)
         verification_url = f"{str(request.base_url).rstrip('/')}/api/auth/user/verify-email?token={verification_token}"
-        email_result = send_citizen_verification_email(serialize_citizen_user(new_user)["email"], verification_url)
+        email_result = send_citizen_verification_link_email(
+            serialize_citizen_user(new_user)["email"],
+            verification_url,
+        )
         if not email_result["sent"]:
             db.rollback()
             raise HTTPException(status_code=500, detail=email_result["message"])

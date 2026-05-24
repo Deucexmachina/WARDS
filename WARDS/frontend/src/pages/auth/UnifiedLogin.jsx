@@ -477,15 +477,15 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
         {step === 'credentials' && (
           <form onSubmit={handleCredentialsSubmit} className="space-y-5">
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">Email or Username</label>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Email Address</label>
               <input
                 type="text"
                 value={identifier}
                 onChange={(event) => setIdentifier(event.target.value)}
                 className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="name@example.com or staff username"
+                placeholder="name@example.com"
                 required
-                autoComplete="username"
+                autoComplete="email"
               />
             </div>
 

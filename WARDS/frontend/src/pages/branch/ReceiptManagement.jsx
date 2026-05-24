@@ -116,6 +116,17 @@ const ReceiptManagement = () => {
     refreshData();
   }, []);
 
+  useEffect(() => {
+    const handleBranchPaymentUpdated = () => {
+      refreshData();
+    };
+
+    window.addEventListener('branch-payment-updated', handleBranchPaymentUpdated);
+    return () => {
+      window.removeEventListener('branch-payment-updated', handleBranchPaymentUpdated);
+    };
+  }, []);
+
   const pendingRequests = useMemo(
     () => requests.filter((request) => !['Released', 'Completed'].includes(request.status)),
     [requests]

@@ -7,7 +7,7 @@ from sqlalchemy import func, and_, or_
 from sqlalchemy.exc import IntegrityError
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import random
 import re
 
@@ -18,27 +18,37 @@ from database.models import (
 )
 from utils.field_crypto import apply_queue_security, find_citizen_by_email, find_payment_by_ref_number, find_queue_by_queue_number, get_decrypted_or_raw, hash_aware_any, hash_aware_match, hash_optional_value, queue_value, service_value, taxpayer_guide_value
 from utils.branch_appointment_settings import (
+    build_appointment_reservation_key,
     get_branch_immediate_queue_availability,
     get_branch_appointment_availability,
+    get_transaction_duration_minutes,
+    normalize_appointment_service_key,
     normalize_service_window,
     get_window_capacity_snapshot,
     validate_branch_appointment_datetime,
 )
-from utils.security_validation import normalize_email
+from utils.security_validation import normalize_citizen_full_name, normalize_email, normalize_ph_contact_number
 from utils.branch_system_settings import get_branch_setting_value
 from utils.system_settings import SYSTEM_DISABLED_MESSAGE, get_setting_value
 from utils.field_crypto import decrypt_optional_value
 from utils.announcement_attachments import serialize_attachments
 
 router = APIRouter()
-PH_MOBILE_PATTERN = re.compile(r"^(?:\+63|63|0)9\d{9}$")
-NAME_PATTERN = re.compile(r"^[A-Za-z.\-' ]+$")
 USER_SECRET_KEY = os.getenv("USER_SECRET_KEY", "your-user-secret-key-change-in-production")
 UNIFIED_SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "your-unified-auth-secret-change-in-production")
 ALGORITHM = "HS256"
 ACTIVE_PUBLIC_QUEUE_STATUSES = ("Pending", "Waiting", "Called", "Serving")
 ACTIVE_QUEUE_MESSAGE = "You already have an active queue request. Please complete or cancel your current queue before registering for another one."
 optional_user_security = HTTPBearer(auto_error=False)
+MANILA_TIMEZONE = timezone(timedelta(hours=8))
+
+
+def serialize_manila_datetime(value: Optional[datetime]) -> Optional[str]:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=MANILA_TIMEZONE).isoformat()
+    return value.astimezone(MANILA_TIMEZONE).isoformat()
 
 
 def serialize_public_announcement(announcement: Announcement):
@@ -70,34 +80,28 @@ def serialize_public_announcement(announcement: Announcement):
     }
 
 
-def normalize_contact_number(value: Optional[str]) -> Optional[str]:
-    if value is None:
-        return None
-    return re.sub(r"[\s()-]", "", value.strip())
-
-
 def validate_ph_mobile_number(value: Optional[str]) -> str:
-    normalized = normalize_contact_number(value)
-    if not normalized:
-        raise HTTPException(status_code=400, detail="Contact number is required")
-    if not PH_MOBILE_PATTERN.match(normalized):
-        raise HTTPException(
-            status_code=400,
-            detail="Please enter a valid Philippine mobile number (e.g. 09XXXXXXXXX)"
-        )
-    return normalized
+    return normalize_ph_contact_number(value or "")
 
 
 def validate_taxpayer_name(value: Optional[str]) -> str:
-    normalized = (value or "").strip()
-    if not normalized:
-        raise HTTPException(status_code=400, detail="Name is required")
-    if not NAME_PATTERN.match(normalized):
-        raise HTTPException(
-            status_code=400,
-            detail="Name must contain letters only"
-        )
-    return normalized
+    return normalize_citizen_full_name(value or "")
+
+
+def compute_recommended_arrival(
+    *,
+    queue_type: str,
+    estimated_wait: int,
+    appointment_time: Optional[datetime] = None,
+) -> datetime:
+    if queue_type == "appointment" and appointment_time is not None:
+        return appointment_time - timedelta(minutes=5)
+    return datetime.now() + timedelta(minutes=max(0, estimated_wait - 5))
+
+
+def should_release_appointment_reservation(status_value: Optional[str]) -> bool:
+    normalized_status = (status_value or "").strip()
+    return bool(normalized_status) and normalized_status not in ACTIVE_PUBLIC_QUEUE_STATUSES
 
 
 def resolve_public_branch_by_name(db: Session, branch_name: str | None) -> Branch | None:
@@ -283,7 +287,7 @@ async def get_all_public_branches(db: Session = Depends(get_db)):
         hours = db.query(BranchOperatingHours).filter(
             BranchOperatingHours.branch_id == branch.id
         ).all()
-        queue_time_slot = get_branch_setting_value(db, "queueTimeSlot", branch.id)
+        queue_time_slot = get_transaction_duration_minutes()
         
         result.append({
             "id": branch.id,
@@ -309,7 +313,7 @@ async def get_all_public_branches(db: Session = Depends(get_db)):
 @router.get("/branches/{branch_id}")
 async def get_branch_details(branch_id: int, db: Session = Depends(get_db)):
     """Get detailed branch information"""
-    queue_time_slot = get_branch_setting_value(db, "queueTimeSlot", branch_id)
+    queue_time_slot = get_transaction_duration_minutes()
     enabled_service_names = get_enabled_service_names(db, branch_id)
     branch = db.query(Branch).filter(Branch.id == branch_id).first()
     if not branch:
@@ -386,7 +390,7 @@ async def get_all_queue_status(db: Session = Depends(get_db)):
     
     result = []
     for branch in branches:
-        queue_time_slot = get_branch_setting_value(db, "queueTimeSlot", branch.id)
+        queue_time_slot = get_transaction_duration_minutes()
         waiting = db.query(Queue).filter(
             and_(Queue.branch_id == branch.id, hash_aware_match(Queue, "status", "Waiting"))
         ).count()
@@ -520,7 +524,7 @@ async def analyze_queue(branch_id: int, service_type: str, db: Session = Depends
     
     # Get service processing time
     service = db.query(Service).filter(hash_aware_match(Service, "name", service_type)).first()
-    avg_processing_time = service.average_processing_time if service else get_branch_setting_value(db, "queueTimeSlot", branch.id)
+    avg_processing_time = get_transaction_duration_minutes()
     
     # Get current queue
     waiting = db.query(Queue).filter(
@@ -548,7 +552,7 @@ async def analyze_queue(branch_id: int, service_type: str, db: Session = Depends
     estimated_wait = int(time_for_serving + time_for_waiting)
     
     # Calculate recommended arrival time (arrive 5 minutes before your turn)
-    recommended_arrival = datetime.now() + timedelta(minutes=max(0, estimated_wait - 5))
+    recommended_arrival = compute_recommended_arrival(queue_type="immediate", estimated_wait=estimated_wait)
     
     return {
         "branch_name": get_decrypted_or_raw(branch, "name") or branch.name,
@@ -556,7 +560,7 @@ async def analyze_queue(branch_id: int, service_type: str, db: Session = Depends
         "current_serving": serving,
         "average_processing_time": avg_processing_time,
         "estimated_wait_time": int(estimated_wait),
-        "recommended_arrival": recommended_arrival.isoformat(),
+        "recommended_arrival": serialize_manila_datetime(recommended_arrival),
         "queue_level": "low" if waiting < 5 else "moderate" if waiting < 15 else "high",
         "can_register": True,
         "window_capacity": window_capacity,
@@ -634,6 +638,8 @@ async def update_queue_status(queue_id: int, status_update: dict, db: Session = 
         raise HTTPException(status_code=404, detail="Queue not found")
     
     queue.status = status_update.get("status", queue_value(queue, "status"))
+    if should_release_appointment_reservation(queue_value(queue, "status")):
+        queue.appointment_reservation_key = None
     apply_queue_security(queue)
     db.commit()
     db.refresh(queue)
@@ -682,13 +688,6 @@ async def register_queue(
     if existing_active_queue:
         raise HTTPException(status_code=409, detail=ACTIVE_QUEUE_MESSAGE)
 
-    window_capacity = get_window_capacity_snapshot(db, branch_id=registration.branch_id, service_type=registration.service_type)
-    if window_capacity and window_capacity["is_full"]:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Queue registration failed: The {window_capacity['window_label']} has reached its maximum capacity of {window_capacity['max_capacity']}. Queueing for this window is temporarily closed.",
-        )
-    
     active_queue_count = db.query(Queue).filter(
         Queue.branch_id == registration.branch_id,
         hash_aware_any(Queue, "status", ACTIVE_PUBLIC_QUEUE_STATUSES)
@@ -701,7 +700,7 @@ async def register_queue(
     queue_number = generate_next_queue_number(db, branch_name)
     
     # Get service processing time
-    avg_processing_time = service.average_processing_time if service else get_branch_setting_value(db, "queueTimeSlot", registration.branch_id)
+    avg_processing_time = get_transaction_duration_minutes()
     
     # Calculate estimated wait time based on number of counters
     waiting = db.query(Queue).filter(
@@ -721,6 +720,7 @@ async def register_queue(
     
     # Create queue entry
     appointment_time = None
+    appointment_reservation_key = None
     if queue_type == "appointment":
         appointment_time = validate_branch_appointment_datetime(
             db,
@@ -728,33 +728,39 @@ async def register_queue(
             raw_value=registration.appointment_time,
             service_type=registration.service_type,
         )
-        appointment_window_capacity = get_window_capacity_snapshot(
-            db,
-            branch_id=registration.branch_id,
-            service_type=registration.service_type,
+        appointment_reservation_key = build_appointment_reservation_key(
+            registration.branch_id,
+            appointment_time,
+            registration.service_type,
         )
-        if appointment_window_capacity and appointment_window_capacity["is_full"]:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Queue registration failed: The {appointment_window_capacity['window_label']} has reached its maximum capacity of {appointment_window_capacity['max_capacity']}. Queueing for this window is temporarily closed.",
-            )
-        overlapping_appointments = (
+        conflicting_appointment = (
             db.query(Queue)
             .filter(
                 Queue.branch_id == registration.branch_id,
                 hash_aware_match(Queue, "queue_type", "appointment"),
                 Queue.appointment_time == appointment_time,
-                ~hash_aware_match(Queue, "status", "Cancelled"),
+                hash_aware_any(Queue, "status", ACTIVE_PUBLIC_QUEUE_STATUSES),
             )
             .all()
         )
-        requested_window = normalize_service_window(registration.service_type)
-        if any(normalize_service_window(queue_value(queue, "service_type")) == requested_window for queue in overlapping_appointments):
+        normalized_service_key = normalize_appointment_service_key(registration.service_type)
+        has_conflict = any(
+            queue.appointment_reservation_key == appointment_reservation_key
+            or normalize_appointment_service_key(queue_value(queue, "service_type")) == normalized_service_key
+            for queue in conflicting_appointment
+        )
+        if has_conflict:
             raise HTTPException(
                 status_code=409,
                 detail="The selected appointment slot is no longer available. Please choose another available time.",
             )
     else:
+        window_capacity = get_window_capacity_snapshot(db, branch_id=registration.branch_id, service_type=registration.service_type)
+        if window_capacity and window_capacity["is_full"]:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Queue registration failed: The {window_capacity['window_label']} has reached its maximum capacity of {window_capacity['max_capacity']}. Queueing for this window is temporarily closed.",
+            )
         immediate_availability = get_branch_immediate_queue_availability(db, branch=branch, service_type=registration.service_type)
         if not immediate_availability.get("is_available"):
             raise HTTPException(
@@ -762,7 +768,11 @@ async def register_queue(
                 detail=immediate_availability.get("message") or "This branch is currently unavailable for the selected queue service based on its published operating schedule. Please choose another branch, service, or available schedule.",
             )
     
-    recommended_arrival = datetime.now() + timedelta(minutes=max(0, estimated_wait - 5))
+    recommended_arrival = compute_recommended_arrival(
+        queue_type=queue_type,
+        estimated_wait=estimated_wait,
+        appointment_time=appointment_time,
+    )
     
     new_queue = Queue(
         queue_number=queue_number,
@@ -774,30 +784,49 @@ async def register_queue(
         email=effective_email,
         queue_type=queue_type,
         appointment_time=appointment_time,
+        appointment_reservation_key=appointment_reservation_key,
         estimated_wait_time=estimated_wait,
         recommended_arrival=recommended_arrival
     )
     apply_queue_security(new_queue)
-    
-    db.add(new_queue)
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        new_queue.queue_number = generate_next_queue_number(db, branch_name)
-        apply_queue_security(new_queue)
+
+    persisted = False
+    for attempt in range(2):
         db.add(new_queue)
-        db.commit()
-    db.refresh(new_queue)
+        try:
+            db.commit()
+            db.refresh(new_queue)
+            persisted = bool(new_queue.id)
+            if persisted:
+                break
+        except IntegrityError as exc:
+            db.rollback()
+            integrity_message = str(getattr(exc, "orig", exc)).lower()
+            if appointment_reservation_key and "appointment_reservation_key" in integrity_message:
+                raise HTTPException(
+                    status_code=409,
+                    detail="The selected appointment slot is no longer available. Please choose another available time.",
+                )
+            if attempt == 0:
+                new_queue.queue_number = generate_next_queue_number(db, branch_name)
+                apply_queue_security(new_queue)
+                continue
+            raise HTTPException(status_code=409, detail="Queue registration failed. Please try again.")
+        except Exception as exc:
+            db.rollback()
+            raise HTTPException(status_code=500, detail="Queue registration failed. Please try again.") from exc
+
+    if not persisted:
+        raise HTTPException(status_code=500, detail="Queue registration failed. Please try again.")
     
     return {
-        "queue_number": queue_number,
+        "queue_number": queue_value(new_queue, "queue_number"),
         "branch_name": branch_name,
         "service_type": registration.service_type,
         "queue_type": queue_type,
-        "estimated_wait_time": estimated_wait,
-        "recommended_arrival": recommended_arrival.isoformat(),
-        "appointment_time": appointment_time.isoformat() if appointment_time else None,
+        "estimated_wait_time": new_queue.estimated_wait_time,
+        "recommended_arrival": serialize_manila_datetime(new_queue.recommended_arrival),
+        "appointment_time": serialize_manila_datetime(new_queue.appointment_time),
         "status": "Registered",
         "message": "Queue registration successful. Please arrive at the recommended time."
     }
@@ -882,10 +911,10 @@ async def get_my_active_ticket(
             "status": queue_value(active_queue, "status"),
             "position": position,
             "estimated_wait_time": active_queue.estimated_wait_time,
-            "recommended_arrival": active_queue.recommended_arrival.isoformat() if active_queue.recommended_arrival else None,
-            "appointment_time": active_queue.appointment_time.isoformat() if active_queue.appointment_time else None,
-            "created_at": active_queue.created_at.isoformat(),
-            "served_at": active_queue.served_at.isoformat() if active_queue.served_at else None,
+            "recommended_arrival": serialize_manila_datetime(active_queue.recommended_arrival),
+            "appointment_time": serialize_manila_datetime(active_queue.appointment_time),
+            "created_at": serialize_manila_datetime(active_queue.created_at),
+            "served_at": serialize_manila_datetime(active_queue.served_at),
         }
     }
 
@@ -923,9 +952,9 @@ async def get_my_queue_history(
             "service_type": queue_value(queue, "service_type"),
             "queue_type": queue_value(queue, "queue_type"),
             "status": queue_value(queue, "status"),
-            "created_at": queue.created_at.isoformat(),
-            "completed_at": queue.completed_at.isoformat() if queue.completed_at else None,
-            "served_at": queue.served_at.isoformat() if queue.served_at else None,
+            "created_at": serialize_manila_datetime(queue.created_at),
+            "completed_at": serialize_manila_datetime(queue.completed_at),
+            "served_at": serialize_manila_datetime(queue.served_at),
         })
     
     return {

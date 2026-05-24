@@ -3,6 +3,7 @@ import api from '../../services/api';
 import { discrepancyAPI } from '../../services/api';
 import { formatUtc8DateTime, formatUtc8Time } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
+import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
 
 const getPaymentStatusClasses = (status) => {
   const normalizedStatus = String(status || '').trim().toLowerCase();
@@ -35,6 +36,7 @@ const Dashboard = () => {
   const [verificationStatus, setVerificationStatus] = useState('Verified');
   const [verificationNotes, setVerificationNotes] = useState('');
   const [savingVerification, setSavingVerification] = useState(false);
+  const [paymentToDelete, setPaymentToDelete] = useState(null);
 
   useEffect(() => {
     fetchCurrentUser();
@@ -151,21 +153,19 @@ const Dashboard = () => {
   };
 
   const handleDeletePendingPayment = async (payment) => {
-    const confirmed = window.confirm(
-      `Remove pending payment ${payment.transaction_id}? This cannot be undone.`,
-    );
-
-    if (!confirmed) {
+    if (!paymentToDelete) {
+      setPaymentToDelete(payment);
       return;
     }
 
     try {
-      setDeletingPaymentId(payment.id);
-      await api.delete(`/payments/${payment.id}`);
+      setDeletingPaymentId(paymentToDelete.id);
+      await api.delete(`/payments/${paymentToDelete.id}`);
       await fetchDashboardData();
+      setPaymentToDelete(null);
     } catch (error) {
       console.error('Failed to delete payment:', error);
-      alert(error.response?.data?.detail || 'Failed to remove pending payment.');
+      setDiscrepancyError(error.response?.data?.detail || 'Failed to remove pending payment.');
     } finally {
       setDeletingPaymentId(null);
     }
@@ -853,6 +853,18 @@ const Dashboard = () => {
           </div>
         </div>
       )}
+      <DeleteConfirmationModal
+        open={Boolean(paymentToDelete)}
+        title="Delete this pending payment?"
+        message={`This will permanently remove pending payment ${paymentToDelete?.transaction_id || paymentToDelete?.ref_number || ''}.`}
+        details={[
+          { label: 'Reference', value: paymentToDelete?.ref_number || paymentToDelete?.transaction_id || 'N/A' },
+          { label: 'Taxpayer', value: paymentToDelete?.taxpayer_name || 'N/A' },
+        ]}
+        onCancel={() => setPaymentToDelete(null)}
+        onConfirm={() => handleDeletePendingPayment()}
+        isLoading={Boolean(deletingPaymentId)}
+      />
     </div>
   );
 };

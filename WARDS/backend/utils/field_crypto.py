@@ -622,6 +622,46 @@ def apply_memo_view_security(memo_view):
     return memo_view
 
 
+def apply_announcement_view_security(announcement_view):
+    username_value = get_decrypted_or_raw(announcement_view, "viewer_username") or announcement_view.viewer_username
+    viewer_type_value = get_decrypted_or_raw(announcement_view, "viewer_type") or announcement_view.viewer_type
+    set_encrypted_hash_companions(announcement_view, "viewer_username", username_value)
+    set_encrypted_hash_companions(announcement_view, "viewer_type", viewer_type_value)
+    announcement_view.viewer_username = build_redacted_text("ANNOUNCEMENT_VIEWER", username_value, 255)
+    announcement_view.viewer_type = build_redacted_text("ANNOUNCEMENT_VIEW_TYPE", viewer_type_value, 255)
+    return announcement_view
+
+
+def find_announcement_view(db, AnnouncementView, announcement_id: int, viewer_username: Optional[str], viewer_type: Optional[str]):
+    normalized_username = (viewer_username or "").strip()
+    normalized_type = (viewer_type or "").strip()
+    if not normalized_username or not normalized_type:
+        return None
+    return (
+        db.query(AnnouncementView)
+        .filter(
+            AnnouncementView.announcement_id == announcement_id,
+            AnnouncementView.viewer_username_hash == hash_optional_value(normalized_username),
+            AnnouncementView.viewer_type_hash == hash_optional_value(normalized_type),
+        )
+        .first()
+    )
+
+
+def get_announcement_viewed_ids(db, AnnouncementView, viewer_username: Optional[str], viewer_type: Optional[str]):
+    normalized_username = (viewer_username or "").strip()
+    normalized_type = (viewer_type or "").strip()
+    if not normalized_username or not normalized_type:
+        return []
+    return [
+        view.announcement_id
+        for view in db.query(AnnouncementView).filter(
+            AnnouncementView.viewer_username_hash == hash_optional_value(normalized_username),
+            AnnouncementView.viewer_type_hash == hash_optional_value(normalized_type),
+        ).all()
+    ]
+
+
 def find_memo_view(db, MemoView, memo_id: int, viewer_username: Optional[str], viewer_type: Optional[str]):
     normalized_username = (viewer_username or "").strip()
     normalized_type = (viewer_type or "").strip()

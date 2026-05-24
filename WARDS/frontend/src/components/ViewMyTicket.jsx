@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { queueAPI } from '../services/api';
+import { formatUtc8DateTime } from '../utils/dateTime';
 
 const ViewMyTicket = ({ onClose }) => {
   const [ticket, setTicket] = useState(null);
@@ -34,13 +35,12 @@ const ViewMyTicket = ({ onClose }) => {
 
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
-    const date = new Date(dateString);
-    return date.toLocaleString('en-US', {
-      year: 'numeric',
+    return formatUtc8DateTime(dateString, 'en-US', {
       month: 'short',
       day: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
+      second: undefined,
     });
   };
 

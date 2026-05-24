@@ -29,7 +29,7 @@ from middleware.user_auth import get_current_user
 from services.email_service import send_payment_receipt_email
 from services.paymongo import paymongo_service
 from utils.branch_system_settings import get_branch_setting_value
-from utils.field_crypto import apply_citizen_user_security, apply_payment_security, build_redacted_text, find_payment_by_field, find_payment_by_ref_number, get_decrypted_or_raw, hash_aware_match, hash_optional_value, set_encrypted_hash_companions, tax_assessment_value
+from utils.field_crypto import apply_citizen_user_security, apply_payment_security, apply_receipt_request_security, build_redacted_text, find_payment_by_field, find_payment_by_ref_number, get_decrypted_or_raw, hash_aware_match, hash_optional_value, receipt_request_value, set_encrypted_hash_companions, tax_assessment_value
 from utils.security_validation import format_tin, normalize_email, normalize_identity_name, normalize_tin, ensure_tin_is_unique
 from utils.system_settings import SYSTEM_DISABLED_MESSAGE, get_setting_value
 
@@ -1560,20 +1560,43 @@ def update_linked_request_status(db: Session, payment: Payment):
     if payment.source_module != "receipt_request" or not payment.related_request_id:
         return
 
-    receipt_request = db.query(ReceiptRequest).filter(ReceiptRequest.request_id == payment.related_request_id).first()
+    receipt_request = db.query(ReceiptRequest).filter(
+        hash_aware_match(ReceiptRequest, "request_id", payment.related_request_id)
+    ).first()
     if not receipt_request:
         return
 
     receipt_request.fee_paid = True
     receipt_request.payment_ref_number = payment_value(payment, "ref_number")
-    request_type = (receipt_request.request_type or "").strip().lower()
+    request_type = (receipt_request_value(receipt_request, "request_type") or "").strip().lower()
     if request_type == "appointment":
         receipt_request.status = "Ready for Completion"
-    elif receipt_request.release_copy_path:
+    elif receipt_request_value(receipt_request, "release_copy_path"):
         receipt_request.status = "Ready for Release"
     else:
         receipt_request.status = "Pending Branch Review"
     receipt_request.processed_at = datetime.utcnow()
+    apply_receipt_request_security(receipt_request)
+
+
+def revert_linked_request_status_for_declined_payment(db: Session, payment: Payment):
+    if payment.source_module != "receipt_request" or not payment.related_request_id:
+        return
+
+    receipt_request = db.query(ReceiptRequest).filter(
+        hash_aware_match(ReceiptRequest, "request_id", payment.related_request_id)
+    ).first()
+    if not receipt_request:
+        return
+
+    if receipt_request_value(receipt_request, "status") in {"Released", "Completed"}:
+        return
+
+    receipt_request.fee_paid = False
+    receipt_request.payment_ref_number = None
+    receipt_request.status = "Payment Required"
+    receipt_request.processed_at = datetime.utcnow()
+    apply_receipt_request_security(receipt_request)
 
 
 def is_confirmed_payment(payment: Payment) -> bool:
@@ -2556,6 +2579,7 @@ async def decline_payment(payment_id: int, db: Session = Depends(get_db)):
     
     payment.status = "PAYMENT_REJECTED" if payment.source_module == "rpt_online_payment" else "Failed"
     payment.treasury_updated_at = datetime.utcnow()
+    revert_linked_request_status_for_declined_payment(db, payment)
     if payment.source_module == "business_tax_online_payment" and payment.related_request_id:
         application = db.query(BusinessTaxApplication).filter(
             BusinessTaxApplication.tracking_number == payment.related_request_id

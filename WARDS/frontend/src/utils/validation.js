@@ -1,5 +1,9 @@
 export const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const CITIZEN_NAME_PATTERN = /^[A-Za-z ]+$/;
+export const PH_CONTACT_DIGITS_PATTERN = /^9\d{9}$/;
 export const REAL_EMAIL_RULE_MESSAGE = 'Please enter a real email address, like name@example.com.';
+export const CITIZEN_NAME_RULE_MESSAGE = 'Full name must contain letters and spaces only.';
+export const PH_CONTACT_RULE_MESSAGE = 'Contact number must use +63 followed by exactly 10 digits.';
 
 export const PASSWORD_RULE_MESSAGE =
   'Password must be more than 12 characters long and include at least one uppercase letter, one lowercase letter, and at least one number or special character.';
@@ -64,6 +68,41 @@ export const validateStrongPassword = (password) => {
 
   if (!/[\d\W]/.test(password)) {
     return PASSWORD_RULE_MESSAGE;
+  }
+
+  return '';
+};
+
+export const normalizeCitizenFullName = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+
+export const validateCitizenFullName = (value) => {
+  const normalized = normalizeCitizenFullName(value);
+  if (!normalized) {
+    return 'Full name is required.';
+  }
+
+  if (!CITIZEN_NAME_PATTERN.test(normalized)) {
+    return CITIZEN_NAME_RULE_MESSAGE;
+  }
+
+  return '';
+};
+
+export const normalizePhilippineContactDigits = (value) => String(value || '').replace(/\D/g, '').slice(0, 10);
+
+export const formatPhilippineContactNumber = (digits) => {
+  const normalizedDigits = normalizePhilippineContactDigits(digits);
+  return normalizedDigits ? `+63 ${normalizedDigits}` : '+63';
+};
+
+export const validatePhilippineContactDigits = (value) => {
+  const normalizedDigits = normalizePhilippineContactDigits(value);
+  if (!normalizedDigits) {
+    return 'Contact number is required.';
+  }
+
+  if (!PH_CONTACT_DIGITS_PATTERN.test(normalizedDigits)) {
+    return PH_CONTACT_RULE_MESSAGE;
   }
 
   return '';

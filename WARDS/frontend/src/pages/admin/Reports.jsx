@@ -3,6 +3,7 @@ import { branchAPI, reportAPI } from '../../services/api';
 import { formatUtc8Date, formatUtc8DateTime } from '../../utils/dateTime';
 import GeneratedReportContent from '../../components/reports/GeneratedReportContent';
 import WardsPageHero from '../../components/WardsPageHero';
+import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
 
 const PAGE_SIZE = 5;
 const SERVICE_TYPE_OPTIONS = ['All Services', 'Real Property Tax', 'Business Tax', 'Miscellaneous Tax', 'Document Request'];
@@ -114,6 +115,7 @@ const Reports = () => {
   const [error, setError] = useState('');
   const [selectedReport, setSelectedReport] = useState(null);
   const [selectedMetrics, setSelectedMetrics] = useState(null);
+  const [reportToDelete, setReportToDelete] = useState(null);
 
   const fetchBranches = async () => {
     try {
@@ -212,15 +214,19 @@ const Reports = () => {
   };
 
   const handleDelete = async (reportId) => {
-    if (!window.confirm('Delete this submitted branch report from the main admin records?')) {
+    if (!reportToDelete) {
+      const targetReport = reportsState.items.find((report) => report.id === reportId);
+      if (targetReport) {
+        setReportToDelete(targetReport);
+      }
       return;
     }
 
     try {
-      setDeletingId(reportId);
+      setDeletingId(reportToDelete.id);
       setError('');
-      await reportAPI.delete(reportId);
-      if (selectedReport?.id === reportId) {
+      await reportAPI.delete(reportToDelete.id);
+      if (selectedReport?.id === reportToDelete.id) {
         setSelectedReport(null);
         setSelectedMetrics(null);
       }
@@ -229,6 +235,7 @@ const Reports = () => {
       if (nextPage === currentPage) {
         fetchReports(nextPage, appliedFilters);
       }
+      setReportToDelete(null);
     } catch (deleteError) {
       console.error('Failed to delete report:', deleteError);
       setError(deleteError.response?.data?.detail || 'Failed to delete the report.');
@@ -465,6 +472,19 @@ const Reports = () => {
           exportingFormat={exportingKey === `${selectedReport.id}-pdf` ? 'pdf' : exportingKey === `${selectedReport.id}-excel` ? 'excel' : ''}
         />
       ) : null}
+
+      <DeleteConfirmationModal
+        open={Boolean(reportToDelete)}
+        title="Delete this submitted report?"
+        message={`This will permanently remove "${reportToDelete?.title || 'this branch report'}" from the main admin records.`}
+        details={[
+          { label: 'Branch', value: reportToDelete?.branch || 'N/A' },
+          { label: 'Submitted', value: reportToDelete?.submitted_at ? formatUtc8DateTime(reportToDelete.submitted_at) : 'N/A' },
+        ]}
+        onCancel={() => setReportToDelete(null)}
+        onConfirm={() => handleDelete()}
+        isLoading={Boolean(deletingId)}
+      />
     </div>
   );
 };

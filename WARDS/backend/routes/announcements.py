@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from database.models import ActivityLog, Announcement, AnnouncementAttachment, User, get_db
+from database.models import ActivityLog, Announcement, AnnouncementAttachment, AnnouncementView, User, get_db
 from middleware.admin_auth import get_current_admin_user
 from utils.announcement_attachments import (
     enforce_attachment_limit,
@@ -17,9 +17,12 @@ from utils.announcement_attachments import (
     store_announcement_attachment,
 )
 from utils.field_crypto import (
+    apply_announcement_view_security,
     build_redacted_text,
     decrypt_optional_value,
     encrypt_optional_value,
+    find_announcement_view,
+    get_announcement_viewed_ids,
     hash_optional_value,
 )
 from utils.rbac import require_permission
@@ -89,6 +92,7 @@ def _serialize_announcement(row) -> dict:
         "created_at": created_at.isoformat() if created_at else None,
         "updated_at": updated_at.isoformat() if updated_at else None,
         "attachments": row.get("attachments") or [],
+        "is_viewed": bool(row.get("is_viewed")),
     }
 
 
@@ -153,6 +157,33 @@ def get_main_admin_announcement_or_404(db: Session, announcement_id: int):
     return announcement
 
 
+def _mark_announcement_viewed(
+    db: Session,
+    announcement_id: int,
+    viewer_username: str,
+    viewer_type: str = "admin",
+):
+    existing_view = find_announcement_view(
+        db,
+        AnnouncementView,
+        announcement_id,
+        viewer_username,
+        viewer_type,
+    )
+    if existing_view:
+        return existing_view
+
+    view = AnnouncementView(
+        announcement_id=announcement_id,
+        viewer_username=viewer_username,
+        viewer_type=viewer_type,
+    )
+    db.add(view)
+    db.flush()
+    apply_announcement_view_security(view)
+    return view
+
+
 @router.get("/")
 async def get_all_announcements(db: Session = Depends(get_db)):
     announcements = db.execute(
@@ -195,6 +226,7 @@ async def get_all_announcements_admin(
     db: Session = Depends(get_db)
 ):
     require_permission("manage_announcements")(current_user)
+    viewed_ids = set(get_announcement_viewed_ids(db, AnnouncementView, current_user.username, "admin"))
     announcements = db.execute(
         text(
             """
@@ -225,8 +257,26 @@ async def get_all_announcements_admin(
     for announcement in announcements:
         data = dict(announcement)
         data["attachments"] = _list_attachment_dicts(db, announcement["id"])
+        data["is_viewed"] = announcement["id"] in viewed_ids
         serialized.append(_serialize_announcement(data))
     return serialized
+
+
+@router.get("/unread-count")
+async def get_admin_announcement_unread_count(
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    require_permission("manage_announcements")(current_user)
+    all_ids = [
+        row[0]
+        for row in db.execute(
+            text("SELECT id FROM announcements WHERE branch_id IS NULL")
+        ).fetchall()
+    ]
+    viewed_ids = set(get_announcement_viewed_ids(db, AnnouncementView, current_user.username, "admin"))
+    unread_count = len([announcement_id for announcement_id in all_ids if announcement_id not in viewed_ids])
+    return {"unread_count": unread_count}
 
 
 @router.get("/{announcement_id}")
@@ -239,7 +289,28 @@ async def get_announcement(
     announcement = get_main_admin_announcement_or_404(db, announcement_id)
     data = dict(announcement)
     data["attachments"] = _list_attachment_dicts(db, announcement_id)
+    data["is_viewed"] = find_announcement_view(db, AnnouncementView, announcement_id, current_user.username, "admin") is not None
     return _serialize_announcement(data)
+
+
+@router.post("/{announcement_id}/mark-viewed")
+async def mark_announcement_viewed(
+    announcement_id: int,
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    require_permission("manage_announcements")(current_user)
+    get_main_admin_announcement_or_404(db, announcement_id)
+    try:
+        _mark_announcement_viewed(db, announcement_id, current_user.username, "admin")
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as error:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to update announcement status") from error
+    return {"message": "Announcement marked as viewed"}
 
 
 @router.post("/")
@@ -259,66 +330,74 @@ async def create_announcement(
     )
     is_active = _bool_to_db(announcement.is_active, default=True)
     publish_date = datetime.utcnow() if is_active else None
+    try:
+        result = db.execute(
+            text(
+                """
+                INSERT INTO announcements (
+                    title,
+                    content,
+                    icon_type,
+                    icon_color,
+                    publish_date,
+                    is_active,
+                    created_by,
+                    created_at,
+                    updated_at,
+                    title_hash,
+                    content_hash,
+                    created_by_hash,
+                    title_enc,
+                    content_enc,
+                    created_by_enc
+                ) VALUES (
+                    :title,
+                    :content,
+                    :icon_type,
+                    :icon_color,
+                    :publish_date,
+                    :is_active,
+                    :created_by,
+                    :created_at,
+                    :updated_at,
+                    :title_hash,
+                    :content_hash,
+                    :created_by_hash,
+                    :title_enc,
+                    :content_enc,
+                    :created_by_enc
+                )
+                """
+            ),
+            {
+                **values,
+                "publish_date": publish_date,
+                "is_active": is_active,
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+            },
+        )
 
-    result = db.execute(
-        text(
-            """
-            INSERT INTO announcements (
-                title,
-                content,
-                icon_type,
-                icon_color,
-                publish_date,
-                is_active,
-                created_by,
-                created_at,
-                updated_at,
-                title_hash,
-                content_hash,
-                created_by_hash,
-                title_enc,
-                content_enc,
-                created_by_enc
-            ) VALUES (
-                :title,
-                :content,
-                :icon_type,
-                :icon_color,
-                :publish_date,
-                :is_active,
-                :created_by,
-                :created_at,
-                :updated_at,
-                :title_hash,
-                :content_hash,
-                :created_by_hash,
-                :title_enc,
-                :content_enc,
-                :created_by_enc
-            )
-            """
-        ),
-        {
-            **values,
-            "publish_date": publish_date,
-            "is_active": is_active,
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow(),
-        },
-    )
+        announcement_id = result.lastrowid
+        _mark_announcement_viewed(db, announcement_id, current_user.username, "admin")
+        db.add(ActivityLog(
+            action="Announcement Created",
+            user=current_user.username,
+            details=f"Created announcement: {announcement.title}",
+            type="admin"
+        ))
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as error:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to create announcement") from error
 
-    db.add(ActivityLog(
-        action="Announcement Created",
-        user=current_user.username,
-        details=f"Created announcement: {announcement.title}",
-        type="admin"
-    ))
-    db.commit()
-
-    announcement_id = result.lastrowid
     created = _fetch_announcement_row(db, announcement_id)
     data = dict(created)
     data["attachments"] = _list_attachment_dicts(db, announcement_id)
+    data["is_viewed"] = True
     return _serialize_announcement(data)
 
 
@@ -344,48 +423,57 @@ async def update_announcement(
     if is_active and not publish_date:
         publish_date = datetime.utcnow()
 
-    db.execute(
-        text(
-            """
-            UPDATE announcements
-            SET
-                title = :title,
-                content = :content,
-                icon_type = :icon_type,
-                icon_color = :icon_color,
-                publish_date = :publish_date,
-                is_active = :is_active,
-                updated_at = :updated_at,
-                title_hash = :title_hash,
-                content_hash = :content_hash,
-                created_by_hash = :created_by_hash,
-                title_enc = :title_enc,
-                content_enc = :content_enc,
-                created_by = :created_by,
-                created_by_enc = :created_by_enc
-            WHERE id = :announcement_id
-            """
-        ),
-        {
-            **values,
-            "publish_date": publish_date,
-            "is_active": is_active,
-            "updated_at": datetime.utcnow(),
-            "announcement_id": announcement_id,
-        },
-    )
+    try:
+        db.execute(
+            text(
+                """
+                UPDATE announcements
+                SET
+                    title = :title,
+                    content = :content,
+                    icon_type = :icon_type,
+                    icon_color = :icon_color,
+                    publish_date = :publish_date,
+                    is_active = :is_active,
+                    updated_at = :updated_at,
+                    title_hash = :title_hash,
+                    content_hash = :content_hash,
+                    created_by_hash = :created_by_hash,
+                    title_enc = :title_enc,
+                    content_enc = :content_enc,
+                    created_by = :created_by,
+                    created_by_enc = :created_by_enc
+                WHERE id = :announcement_id
+                """
+            ),
+            {
+                **values,
+                "publish_date": publish_date,
+                "is_active": is_active,
+                "updated_at": datetime.utcnow(),
+                "announcement_id": announcement_id,
+            },
+        )
 
-    db.add(ActivityLog(
-        action="Announcement Updated",
-        user=current_user.username,
-        details=f"Updated announcement: {announcement.title}",
-        type="admin"
-    ))
-    db.commit()
+        _mark_announcement_viewed(db, announcement_id, current_user.username, "admin")
+        db.add(ActivityLog(
+            action="Announcement Updated",
+            user=current_user.username,
+            details=f"Updated announcement: {announcement.title}",
+            type="admin"
+        ))
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as error:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to update announcement") from error
 
     updated = _fetch_announcement_row(db, announcement_id)
     data = dict(updated)
     data["attachments"] = _list_attachment_dicts(db, announcement_id)
+    data["is_viewed"] = True
     return _serialize_announcement(data)
 
 
@@ -405,27 +493,33 @@ async def delete_announcement(
     if branch_name:
         details = f"{details} ({branch_name})"
 
-    db.add(ActivityLog(
-        action="Announcement Deleted",
-        user=current_user.username,
-        details=details,
-        type="admin"
-    ))
-    # Remove any uploaded files associated with the announcement
-    attachments = (
-        db.query(AnnouncementAttachment)
-        .filter(AnnouncementAttachment.announcement_id == announcement_id)
-        .all()
-    )
-    for attachment in attachments:
-        remove_attachment_file(attachment)
-    remove_announcement_directory(announcement_id)
-
-    db.execute(
-        text("DELETE FROM announcements WHERE id = :announcement_id"),
-        {"announcement_id": announcement_id},
-    )
-    db.commit()
+    try:
+        db.add(ActivityLog(
+            action="Announcement Deleted",
+            user=current_user.username,
+            details=details,
+            type="admin"
+        ))
+        attachments = (
+            db.query(AnnouncementAttachment)
+            .filter(AnnouncementAttachment.announcement_id == announcement_id)
+            .all()
+        )
+        for attachment in attachments:
+            remove_attachment_file(attachment)
+        remove_announcement_directory(announcement_id)
+        db.query(AnnouncementView).filter(AnnouncementView.announcement_id == announcement_id).delete()
+        db.execute(
+            text("DELETE FROM announcements WHERE id = :announcement_id"),
+            {"announcement_id": announcement_id},
+        )
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as error:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to delete announcement") from error
 
     return {"message": "Announcement deleted successfully"}
 

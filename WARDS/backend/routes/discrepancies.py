@@ -270,6 +270,7 @@ async def create_branch_discrepancy(
     system_amount: float | None = Form(None),
     actual_amount: float | None = Form(None),
     description: str = Form(...),
+    other_specification: str | None = Form(None),
     supporting_documents: str | None = Form(None),
     submitted_offline: bool = Form(False),
     attachment: UploadFile | None = File(None),
@@ -293,6 +294,14 @@ async def create_branch_discrepancy(
     normalized_discrepancy_type = discrepancy_type.strip()
     if not normalized_discrepancy_type:
         raise HTTPException(status_code=400, detail="Discrepancy type is required")
+    normalized_other_specification = (other_specification or "").strip()
+    if normalized_discrepancy_type.lower() == "other" and not normalized_other_specification:
+        raise HTTPException(
+            status_code=400,
+            detail="Please provide additional details when discrepancy type is set to Other",
+        )
+    if normalized_other_specification:
+        description = f"{description}\n\nOther specification: {normalized_other_specification}"
 
     attachment_path, attachment_filename = await save_attachment(attachment)
     actor_label = clean_display_value(current_staff.username, "Branch Staff")

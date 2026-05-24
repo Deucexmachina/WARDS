@@ -594,9 +594,17 @@ def ensure_auth_extensions():
             ("status_enc", "TEXT"),
             ("queue_type_hash", "VARCHAR(255)"),
             ("queue_type_enc", "TEXT"),
+            ("appointment_reservation_key", "VARCHAR(255)"),
         ):
             if column_name not in queue_columns:
                 conn.execute(text(f"ALTER TABLE queues ADD COLUMN {column_name} {column_type}"))
+
+        if engine.dialect.name == "sqlite":
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_queues_appointment_reservation_key_unique ON queues (appointment_reservation_key)"))
+        else:
+            queue_indexes = {index["name"] for index in inspect(conn).get_indexes("queues")}
+            if "ix_queues_appointment_reservation_key_unique" not in queue_indexes:
+                conn.execute(text("CREATE UNIQUE INDEX ix_queues_appointment_reservation_key_unique ON queues (appointment_reservation_key)"))
 
         business_registry_columns = {column["name"] for column in inspector.get_columns("business_registry")}
         for column_name, column_type in (
@@ -697,6 +705,17 @@ def ensure_auth_extensions():
         ):
             if column_name not in memo_view_columns:
                 conn.execute(text(f"ALTER TABLE memo_views ADD COLUMN {column_name} {column_type}"))
+
+        if "announcement_views" in inspector.get_table_names():
+            announcement_view_columns = {column["name"] for column in inspector.get_columns("announcement_views")}
+            for column_name, column_type in (
+                ("viewer_username_hash", "VARCHAR(255)"),
+                ("viewer_username_enc", "TEXT"),
+                ("viewer_type_hash", "VARCHAR(255)"),
+                ("viewer_type_enc", "TEXT"),
+            ):
+                if column_name not in announcement_view_columns:
+                    conn.execute(text(f"ALTER TABLE announcement_views ADD COLUMN {column_name} {column_type}"))
 
         if "email_verification_tokens" in inspector.get_table_names():
             verification_columns = {column["name"] for column in inspector.get_columns("email_verification_tokens")}

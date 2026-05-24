@@ -34,7 +34,9 @@ from utils.security_validation import (
     ensure_email_is_unique,
     ensure_tin_is_unique,
     format_tin,
+    normalize_citizen_full_name,
     normalize_email,
+    normalize_ph_contact_number,
     normalize_tin,
     validate_strong_password,
 )
@@ -321,6 +323,8 @@ async def register_user(request: Request, user_data: UserRegisterRequest, db: Se
             )
     
     normalized_email = normalize_email(user_data.email, check_deliverability=True)
+    normalized_full_name = normalize_citizen_full_name(user_data.full_name)
+    normalized_contact_number = normalize_ph_contact_number(user_data.contact_number)
     ensure_email_is_unique(db, normalized_email)
     normalized_tin = None
     if user_data.tin and user_data.tin.strip():
@@ -333,9 +337,9 @@ async def register_user(request: Request, user_data: UserRegisterRequest, db: Se
     hashed_password = pwd_context.hash(user_data.password)
     new_user = CitizenUser(
         email=normalized_email,
-        full_name=user_data.full_name,
+        full_name=normalized_full_name,
         tin=normalized_tin,
-        contact_number=user_data.contact_number,
+        contact_number=normalized_contact_number,
         address=user_data.address,
         hashed_password=hashed_password,
         role="public",

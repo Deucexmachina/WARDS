@@ -22,6 +22,8 @@ TIN_INVALID_MESSAGE = "Invalid TIN. Please enter a valid 9–12 digit Tax Identi
 USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{3,32}$")
 TIN_ALLOWED_PATTERN = re.compile(r"^[\d\s-]+$")
 TIN_DIGITS_PATTERN = re.compile(r"^\d{9,12}$")
+CITIZEN_FULL_NAME_PATTERN = re.compile(r"^[A-Za-z ]+$")
+PH_CONTACT_DIGITS_PATTERN = re.compile(r"^9\d{9}$")
 
 QUICK_EMAIL_VERIFICATION_URL = "https://api.quickemailverification.com/v1/verify"
 QUICK_EMAIL_VERIFICATION_TIMEOUT_SECONDS = float(
@@ -66,17 +68,12 @@ def verify_with_quickemailverification(email: str):
         )
         response.raise_for_status()
         payload = response.json()
-    except requests.RequestException as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Email verification service is temporarily unavailable. Please try again in a moment.",
-        ) from exc
+    except requests.RequestException:
+        # Keep citizen registration available even if the external verifier is down.
+        return
 
     if not _coerce_qev_bool(payload.get("success", False)):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=payload.get("message") or "Unable to verify this email address right now.",
-        )
+        return
 
     result = str(payload.get("result") or "").strip().lower()
     reason = str(payload.get("reason") or "").strip().lower()
@@ -105,14 +102,10 @@ def verify_with_quickemailverification(email: str):
             detail="Please enter a real, deliverable email address.",
         )
 
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail=(
-            "We could not confirm this email address is safe to use."
-            if not reason
-            else f"We could not confirm this email address is safe to use ({reason.replace('_', ' ')})."
-        ),
-    )
+    # Allow registration to continue for inconclusive results such as accept-all,
+    # unknown, or temporary third-party uncertainty. The email verification OTP
+    # step still protects account activation.
+    return
 
 
 def normalize_branch_name(name: str) -> str:
@@ -120,6 +113,41 @@ def normalize_branch_name(name: str) -> str:
     if not cleaned:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch name is required.")
     return cleaned
+
+
+def normalize_citizen_full_name(full_name: str) -> str:
+    cleaned = re.sub(r"\s+", " ", (full_name or "").strip())
+    if not cleaned:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Full name is required.")
+    if not CITIZEN_FULL_NAME_PATTERN.fullmatch(cleaned):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Full name must contain letters and spaces only.",
+        )
+    return cleaned
+
+
+def normalize_ph_contact_number(contact_number: str) -> str:
+    raw_value = (contact_number or "").strip()
+    if not raw_value:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Contact number is required.")
+
+    normalized = re.sub(r"[^\d+]", "", raw_value)
+    if normalized.startswith("+63"):
+        subscriber_number = normalized[3:]
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Contact number must start with +63 followed by exactly 10 digits.",
+        )
+
+    if not PH_CONTACT_DIGITS_PATTERN.fullmatch(subscriber_number):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Contact number must start with +63 followed by exactly 10 digits.",
+        )
+
+    return f"+63{subscriber_number}"
 
 
 def normalize_username(username: str) -> str:

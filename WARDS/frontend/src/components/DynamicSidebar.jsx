@@ -1,7 +1,7 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import api from '../services/api';
-import { discrepancyAPI } from '../services/api';
+import { announcementAPI, branchAnnouncementAPI, discrepancyAPI } from '../services/api';
 
 const DynamicSidebar = () => {
   const location = useLocation();
@@ -41,12 +41,17 @@ const DynamicSidebar = () => {
     const handleBranchDiscrepancyViewed = () => fetchUnreadDiscrepancyCount();
     const handleAdminDiscrepancyReviewed = () => fetchUnreadDiscrepancyCount();
     const handleAdminDiscrepancyViewed = () => fetchUnreadDiscrepancyCount();
+    const handleAnnouncementViewed = () => fetchSidebarModuleCounts();
+    const handleBranchPaymentUpdated = () => fetchSidebarModuleCounts();
     window.addEventListener('admin-memo-read', handleAdminMemoRead);
     window.addEventListener('admin-policy-read', handleAdminPolicyRead);
     window.addEventListener('admin-policy-updated', handleAdminPolicyUpdated);
     window.addEventListener('branch-discrepancy-viewed', handleBranchDiscrepancyViewed);
     window.addEventListener('admin-discrepancy-reviewed', handleAdminDiscrepancyReviewed);
     window.addEventListener('admin-discrepancy-viewed', handleAdminDiscrepancyViewed);
+    window.addEventListener('admin-announcement-viewed', handleAnnouncementViewed);
+    window.addEventListener('branch-announcement-viewed', handleAnnouncementViewed);
+    window.addEventListener('branch-payment-updated', handleBranchPaymentUpdated);
     return () => {
       clearInterval(interval);
       window.removeEventListener('admin-memo-read', handleAdminMemoRead);
@@ -55,6 +60,9 @@ const DynamicSidebar = () => {
       window.removeEventListener('branch-discrepancy-viewed', handleBranchDiscrepancyViewed);
       window.removeEventListener('admin-discrepancy-reviewed', handleAdminDiscrepancyReviewed);
       window.removeEventListener('admin-discrepancy-viewed', handleAdminDiscrepancyViewed);
+      window.removeEventListener('admin-announcement-viewed', handleAnnouncementViewed);
+      window.removeEventListener('branch-announcement-viewed', handleAnnouncementViewed);
+      window.removeEventListener('branch-payment-updated', handleBranchPaymentUpdated);
     };
   }, []);
 
@@ -62,13 +70,8 @@ const DynamicSidebar = () => {
     try {
       const storedRole = getStoredRole();
       if (storedRole === 'branch_admin' || storedRole === 'branch_staff') {
-        const [unreadResponse, memosResponse] = await Promise.all([
-          api.get('/branch/memos/unread-count'),
-          api.get('/branch/memos'),
-        ]);
-        const unreadCount = Number(unreadResponse.data.unread_count || 0);
-        const totalMemoCount = Array.isArray(memosResponse.data) ? memosResponse.data.length : 0;
-        setUnreadMemoCount(Math.max(unreadCount, totalMemoCount));
+        const unreadResponse = await api.get('/branch/memos/unread-count');
+        setUnreadMemoCount(Number(unreadResponse.data.unread_count || 0));
       } else if (storedRole === 'main_admin' || storedRole === 'superadmin') {
         const response = await api.get('/memos/unread-count');
         setUnreadMemoCount(response.data.unread_count || 0);
@@ -129,7 +132,7 @@ const DynamicSidebar = () => {
           backupResult,
           logsResult,
         ] = await Promise.allSettled([
-          api.get('/announcements/admin/all'),
+          announcementAPI.getUnreadCount(),
           api.get('/alerts'),
           api.get('/reports', { params: { page: 1, page_size: 1 } }),
           api.get('/accounts', { params: { page: 1, page_size: 1 } }),
@@ -138,7 +141,7 @@ const DynamicSidebar = () => {
         ]);
 
         setModuleCounts({
-          announcements: announcementsResult.status === 'fulfilled' ? (announcementsResult.value.data || []).length : 0,
+          announcements: announcementsResult.status === 'fulfilled' ? Number(announcementsResult.value.data?.unread_count || 0) : 0,
           alerts: alertsResult.status === 'fulfilled' ? (alertsResult.value.data || []).length : 0,
           receipts: 0,
           payments: 0,
@@ -159,7 +162,7 @@ const DynamicSidebar = () => {
           paymentsResult,
           reportsResult,
         ] = await Promise.allSettled([
-          api.get('/branch/announcements'),
+          branchAnnouncementAPI.getUnreadCount(),
           api.get('/branch/queue'),
           api.get('/receipts/requests'),
           api.get('/branch/payments'),
@@ -171,7 +174,7 @@ const DynamicSidebar = () => {
         const paymentItems = paymentsResult.status === 'fulfilled' ? (paymentsResult.value.data || []) : [];
 
         setModuleCounts({
-          announcements: announcementsResult.status === 'fulfilled' ? (announcementsResult.value.data || []).length : 0,
+          announcements: announcementsResult.status === 'fulfilled' ? Number(announcementsResult.value.data?.unread_count || 0) : 0,
           alerts: 0,
           receipts: receiptItems.filter((item) => !['Released', 'Completed'].includes(item.status)).length,
           payments: paymentItems.filter((item) => normalizePaymentStatus(item.status) === 'pending').length,

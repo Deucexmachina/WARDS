@@ -10,7 +10,7 @@ Security Level: HIGH
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
@@ -48,13 +48,13 @@ RATE_LIMIT_WINDOW = 60
 MAX_REQUESTS_PER_WINDOW = 30
 
 class BranchLoginRequest(BaseModel):
-    username: str
+    email: EmailStr
     password: str
     totp_code: Optional[str] = None
     recaptcha_token: Optional[str] = None
 
 class BranchSetupMFARequest(BaseModel):
-    username: str
+    email: EmailStr
     password: str
 
 class Token(BaseModel):
@@ -185,24 +185,29 @@ def get_branch_dashboard_url(staff: BranchStaff) -> str:
 
     return f"{base_url}/branch-dashboard/branch-{staff.branch_id or 'portal'}"
 
+
+def normalize_branch_email(email: str) -> str:
+    return str(email).strip().lower()
+
 @router.post("/setup-mfa")
 async def setup_mfa(request: Request, credentials: BranchSetupMFARequest, db: Session = Depends(get_db)):
     """Setup TOTP-based MFA for branch staff"""
     client_ip = request.client.host
+    normalized_email = normalize_branch_email(credentials.email)
     
-    staff = db.query(BranchStaff).filter(BranchStaff.username == credentials.username).first()
+    staff = db.query(BranchStaff).filter(BranchStaff.email == normalized_email).first()
     if not staff or not pwd_context.verify(credentials.password, staff.hashed_password):
-        log_activity(db, "Failed MFA Setup", credentials.username, f"Invalid credentials from IP: {client_ip}", "security")
+        log_activity(db, "Failed MFA Setup", normalized_email, f"Invalid credentials from IP: {client_ip}", "security")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password"
+            detail="Invalid email or password"
         )
     
     totp_secret = pyotp.random_base32()
-    save_mfa_secret(db, credentials.username, totp_secret)
+    save_mfa_secret(db, staff.username, totp_secret)
     
     totp_uri = pyotp.totp.TOTP(totp_secret).provisioning_uri(
-        name=credentials.username,
+        name=staff.username,
         issuer_name="WARDS Branch Portal"
     )
     
@@ -215,7 +220,7 @@ async def setup_mfa(request: Request, credentials: BranchSetupMFARequest, db: Se
     img.save(buffer, format='PNG')
     qr_code_base64 = base64.b64encode(buffer.getvalue()).decode()
     
-    log_activity(db, "MFA Setup Initiated", credentials.username, f"TOTP setup from IP: {client_ip}", "security")
+    log_activity(db, "MFA Setup Initiated", normalized_email, f"TOTP setup from IP: {client_ip}", "security")
     
     return {
         "message": "MFA setup successful",
@@ -264,33 +269,34 @@ async def setup_mfa_authenticated(
 async def branch_login(request: Request, credentials: BranchLoginRequest, db: Session = Depends(get_db)):
     """Branch login with TOTP MFA and reCAPTCHA"""
     client_ip = request.client.host
+    normalized_email = normalize_branch_email(credentials.email)
     
     if not check_rate_limit(client_ip):
-        log_activity(db, "Login Rate Limited", credentials.username, f"IP: {client_ip}", "security")
+        log_activity(db, "Login Rate Limited", normalized_email, f"IP: {client_ip}", "security")
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many login attempts. Please try again later."
         )
     
-    if is_account_locked(credentials.username):
-        remaining_time = int(LOCKOUT_DURATION - (time.time() - locked_accounts[credentials.username]["locked_at"]))
-        log_activity(db, "Login Attempt on Locked Account", credentials.username, f"IP: {client_ip}", "security")
+    if is_account_locked(normalized_email):
+        remaining_time = int(LOCKOUT_DURATION - (time.time() - locked_accounts[normalized_email]["locked_at"]))
+        log_activity(db, "Login Attempt on Locked Account", normalized_email, f"IP: {client_ip}", "security")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Account is locked. Please try again in {remaining_time} seconds."
         )
     
-    staff = db.query(BranchStaff).filter(BranchStaff.username == credentials.username).first()
+    staff = db.query(BranchStaff).filter(BranchStaff.email == normalized_email).first()
     
-    print(f"[BRANCH AUTH] Login attempt for username: {credentials.username}")
+    print(f"[BRANCH AUTH] Login attempt for email: {normalized_email}")
     print(f"[BRANCH AUTH] Staff found: {staff is not None}")
     
     if not staff:
-        record_failed_attempt(credentials.username, db)
-        log_activity(db, "Failed Login", credentials.username, f"Staff not found, IP: {client_ip}", "security")
+        record_failed_attempt(normalized_email, db)
+        log_activity(db, "Failed Login", normalized_email, f"Staff not found, IP: {client_ip}", "security")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password"
+            detail="Invalid email or password"
         )
     
     print(f"[BRANCH AUTH] Verifying password...")
@@ -298,10 +304,10 @@ async def branch_login(request: Request, credentials: BranchLoginRequest, db: Se
     print(f"[BRANCH AUTH] Password valid: {password_valid}")
     
     if not password_valid:
-        record_failed_attempt(credentials.username, db)
-        log_activity(db, "Failed Login", credentials.username, f"Invalid password, IP: {client_ip}", "security")
+        record_failed_attempt(normalized_email, db)
+        log_activity(db, "Failed Login", normalized_email, f"Invalid password, IP: {client_ip}", "security")
         
-        needs_captcha = requires_captcha(credentials.username)
+        needs_captcha = requires_captcha(normalized_email)
         if needs_captcha:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -311,10 +317,10 @@ async def branch_login(request: Request, credentials: BranchLoginRequest, db: Se
         
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password"
+            detail="Invalid email or password"
         )
     
-    if requires_captcha(credentials.username):
+    if requires_captcha(normalized_email):
         if not credentials.recaptcha_token:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -323,7 +329,7 @@ async def branch_login(request: Request, credentials: BranchLoginRequest, db: Se
             )
         
         if not verify_recaptcha(credentials.recaptcha_token, client_ip):
-            log_activity(db, "Failed reCAPTCHA", credentials.username, f"IP: {client_ip}", "security")
+            log_activity(db, "Failed reCAPTCHA", normalized_email, f"IP: {client_ip}", "security")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="reCAPTCHA verification failed"
@@ -336,15 +342,15 @@ async def branch_login(request: Request, credentials: BranchLoginRequest, db: Se
         )
 
     if staff.status != "Active":
-        log_activity(db, "Login Attempt for Inactive Account", credentials.username, f"Status: {staff.status}, IP: {client_ip}", "security")
+        log_activity(db, "Login Attempt for Inactive Account", normalized_email, f"Status: {staff.status}, IP: {client_ip}", "security")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is not active"
         )
     
-    totp_secret = get_mfa_secret(db, credentials.username)
+    totp_secret = get_mfa_secret(db, staff.username)
     if not totp_secret:
-        log_activity(db, "Login Without MFA Setup", credentials.username, f"IP: {client_ip}", "security")
+        log_activity(db, "Login Without MFA Setup", normalized_email, f"IP: {client_ip}", "security")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="MFA not configured. Please setup MFA first.",
@@ -357,19 +363,19 @@ async def branch_login(request: Request, credentials: BranchLoginRequest, db: Se
             "token_type": "bearer",
             "user": {},
             "requires_mfa": True,
-            "requires_captcha": requires_captcha(credentials.username)
+            "requires_captcha": requires_captcha(normalized_email)
         }
     
     totp = pyotp.TOTP(totp_secret)
     if not totp.verify(credentials.totp_code, valid_window=1):
-        record_failed_attempt(credentials.username, db)
-        log_activity(db, "Failed TOTP Verification", credentials.username, f"IP: {client_ip}", "security")
+        record_failed_attempt(normalized_email, db)
+        log_activity(db, "Failed TOTP Verification", normalized_email, f"IP: {client_ip}", "security")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid TOTP code"
         )
     
-    reset_failed_attempts(credentials.username)
+    reset_failed_attempts(normalized_email)
     
     access_token_expires = timedelta(minutes=get_session_timeout_minutes(db))
     access_token = create_access_token(
@@ -389,9 +395,9 @@ async def branch_login(request: Request, credentials: BranchLoginRequest, db: Se
     staff.last_login = datetime.utcnow()
     db.commit()
     
-    log_activity(db, "Successful Branch Login", credentials.username, f"Role: {staff.role}, Branch: {staff.branch_id}, IP: {client_ip}", "security")
+    log_activity(db, "Successful Branch Login", normalized_email, f"Role: {staff.role}, Branch: {staff.branch_id}, IP: {client_ip}", "security")
     
-    print(f"[BRANCH AUTH] Login successful for {credentials.username}")
+    print(f"[BRANCH AUTH] Login successful for {normalized_email}")
     
     return {
         "access_token": access_token,

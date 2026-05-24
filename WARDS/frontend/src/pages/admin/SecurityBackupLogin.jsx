@@ -41,9 +41,8 @@ const SecurityBackupLogin = () => {
 
     try {
       const normalizedIdentifier = identifier.trim().toLowerCase();
-      const currentUsername = String(currentAdmin?.username || '').toLowerCase();
       const currentEmail = String(currentAdmin?.email || '').toLowerCase();
-      if (normalizedIdentifier && currentUsername && currentEmail && normalizedIdentifier !== currentUsername && normalizedIdentifier !== currentEmail) {
+      if (normalizedIdentifier && currentEmail && normalizedIdentifier !== currentEmail) {
         setError('Use the same admin account that is already signed in to the main dashboard.');
         return;
       }
@@ -117,13 +116,13 @@ const SecurityBackupLogin = () => {
         {step === 'credentials' && (
           <form onSubmit={submit} className="space-y-5">
             <div>
-              <label className="mb-2 block text-sm font-semibold text-gray-700">Email or Username</label>
+              <label className="mb-2 block text-sm font-semibold text-gray-700">Email Address</label>
               <input
                 value={identifier}
                 onChange={(event) => setIdentifier(event.target.value)}
                 className="w-full rounded-xl border-2 border-gray-200 px-4 py-3 outline-none transition focus:border-transparent focus:ring-2 focus:ring-blue-500"
-                placeholder="Admin email or username"
-                autoComplete="username"
+                placeholder="admin@example.com"
+                autoComplete="email"
                 required
               />
             </div>

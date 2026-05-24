@@ -9,7 +9,7 @@ const RECAPTCHA_SITE_KEY = '6LdOdsAsAAAAAKW-mZvEfaesLvdAwCm_SnZoiirK';
 
 const AdminLoginV2 = () => {
   const [step, setStep] = useState('credentials');
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [totpCode, setTotpCode] = useState('');
   const [recaptchaToken, setRecaptchaToken] = useState('');
@@ -38,7 +38,7 @@ const AdminLoginV2 = () => {
 
     try {
       const response = await axios.post(`${API_URL}/api/admin/auth/login`, {
-        username,
+        email,
         password,
         recaptcha_token: recaptchaToken || undefined,
       });
@@ -77,7 +77,7 @@ const AdminLoginV2 = () => {
 
     try {
       const response = await axios.post(`${API_URL}/api/admin/auth/login`, {
-        username,
+        email,
         password,
         totp_code: totpCode,
         recaptcha_token: recaptchaToken || undefined,
@@ -97,7 +97,7 @@ const AdminLoginV2 = () => {
 
     try {
       const response = await axios.post(`${API_URL}/api/admin/auth/setup-mfa`, {
-        username,
+        email,
         password,
       });
       setMfaSetupData(response.data);
@@ -126,14 +126,14 @@ const AdminLoginV2 = () => {
         {step === 'credentials' && (
           <form onSubmit={handleCredentialsSubmit} className="space-y-6">
             <div>
-              <label className="block text-gray-700 font-semibold mb-2">Username</label>
+              <label className="block text-gray-700 font-semibold mb-2">Email Address</label>
               <input
-                type="text"
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
                 className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 required
-                autoComplete="username"
+                autoComplete="email"
               />
             </div>
 

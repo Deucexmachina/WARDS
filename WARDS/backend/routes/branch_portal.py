@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 
-from database.models import ActivityLog, Announcement, AnnouncementAttachment, Branch, BranchStaff, BusinessTaxApplication, Memo, MemoView, Payment, Policy, PolicyView, Queue, QueueHistory, get_db
+from database.models import ActivityLog, Announcement, AnnouncementAttachment, AnnouncementView, Branch, BranchStaff, BusinessTaxApplication, Memo, MemoView, Payment, Policy, PolicyView, Queue, QueueHistory, get_db
 from middleware.branch_auth import get_current_branch_staff, require_any_branch_staff
 from utils.announcement_attachments import (
     enforce_attachment_limit,
@@ -22,7 +22,8 @@ from utils.announcement_attachments import (
     store_announcement_attachment,
 )
 from services.email_service import send_payment_receipt_email
-from utils.field_crypto import apply_memo_view_security, apply_queue_security, decrypt_optional_value, find_memo_view, get_decrypted_or_raw, get_memo_viewed_ids, hash_aware_any, hash_aware_match, hash_optional_value, queue_value
+from routes.payments import revert_linked_request_status_for_declined_payment, update_linked_request_status
+from utils.field_crypto import apply_announcement_view_security, apply_memo_view_security, apply_queue_security, decrypt_optional_value, find_announcement_view, find_memo_view, get_announcement_viewed_ids, get_decrypted_or_raw, get_memo_viewed_ids, hash_aware_any, hash_aware_match, hash_optional_value, queue_value
 from utils.security_validation import format_tin
 from utils.branch_system_settings import get_branch_setting_value
 from utils.system_settings import SYSTEM_DISABLED_MESSAGE, get_setting_value
@@ -30,10 +31,19 @@ from utils.system_settings import SYSTEM_DISABLED_MESSAGE, get_setting_value
 router = APIRouter()
 OUTPUT_DIR = Path(__file__).resolve().parents[1] / "output" / "payments" / "business-tax"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+MANILA_TIMEZONE = timezone(timedelta(hours=8))
 SERVICE_WINDOW_RULES = {
     "RPT": ("rpt", "real property", "amilyar", "property tax", "assessment"),
     "BUSINESS": ("business", "mayor", "permit", "bt", "city tax", "garbage fee", "sanitary", "zoning", "occupancy"),
 }
+
+
+def serialize_manila_datetime(value: Optional[datetime]) -> Optional[str]:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=MANILA_TIMEZONE).isoformat()
+    return value.astimezone(MANILA_TIMEZONE).isoformat()
 
 
 class BranchAnnouncementPayload(BaseModel):
@@ -104,12 +114,12 @@ def serialize_queue(queue: Queue):
         "status": (queue_value(queue, "status") or "").lower(),
         "status_label": get_queue_display_status(queue),
         "queue_type": (queue_value(queue, "queue_type") or "immediate").lower(),
-        "appointment_time": queue.appointment_time.isoformat() if queue.appointment_time else None,
+        "appointment_time": serialize_manila_datetime(queue.appointment_time),
         "estimated_wait_time": queue.estimated_wait_time,
-        "recommended_arrival": queue.recommended_arrival.isoformat() if queue.recommended_arrival else None,
-        "created_at": queue.created_at.isoformat() if queue.created_at else None,
-        "served_at": queue.served_at.isoformat() if queue.served_at else None,
-        "completed_at": queue.completed_at.isoformat() if queue.completed_at else None,
+        "recommended_arrival": serialize_manila_datetime(queue.recommended_arrival),
+        "created_at": serialize_manila_datetime(queue.created_at),
+        "served_at": serialize_manila_datetime(queue.served_at),
+        "completed_at": serialize_manila_datetime(queue.completed_at),
     }
 
 
@@ -126,14 +136,14 @@ def serialize_queue_history(queue: QueueHistory):
         "status": (queue.final_status or "").lower(),
         "status_label": status_label(queue.final_status or "Completed"),
         "queue_type": (queue.queue_type or "immediate").lower(),
-        "appointment_time": queue.appointment_time.isoformat() if queue.appointment_time else None,
+        "appointment_time": serialize_manila_datetime(queue.appointment_time),
         "estimated_wait_time": queue.estimated_wait_time,
-        "recommended_arrival": queue.recommended_arrival.isoformat() if queue.recommended_arrival else None,
-        "created_at": queue.created_at.isoformat() if queue.created_at else None,
-        "served_at": queue.served_at.isoformat() if queue.served_at else None,
-        "completed_at": queue.completed_at.isoformat() if queue.completed_at else None,
+        "recommended_arrival": serialize_manila_datetime(queue.recommended_arrival),
+        "created_at": serialize_manila_datetime(queue.created_at),
+        "served_at": serialize_manila_datetime(queue.served_at),
+        "completed_at": serialize_manila_datetime(queue.completed_at),
         "completed_by": queue.completed_by,
-        "archived_at": queue.archived_at.isoformat() if queue.archived_at else None,
+        "archived_at": serialize_manila_datetime(queue.archived_at),
     }
 
 
@@ -370,7 +380,7 @@ def serialize_branch_policy(policy: Policy, current_username: str | None = None,
     }
 
 
-def serialize_branch_announcement(announcement: Announcement, branch_name: Optional[str] = None):
+def serialize_branch_announcement(announcement: Announcement, branch_name: Optional[str] = None, is_viewed: bool = False):
     source_name = branch_name or (announcement.branch.name if announcement.branch else None)
     title = decrypt_optional_value(getattr(announcement, "title_enc", None)) or announcement.title
     content = decrypt_optional_value(getattr(announcement, "content_enc", None)) or announcement.content
@@ -394,7 +404,35 @@ def serialize_branch_announcement(announcement: Announcement, branch_name: Optio
         "created_at": announcement.created_at.isoformat() if announcement.created_at else None,
         "updated_at": announcement.updated_at.isoformat() if announcement.updated_at else None,
         "attachments": attachments,
+        "is_viewed": bool(is_viewed),
     }
+
+
+def mark_branch_announcement_viewed(
+    db: Session,
+    announcement_id: int,
+    viewer_username: str,
+    viewer_type: str = "branch_staff",
+):
+    existing_view = find_announcement_view(
+        db,
+        AnnouncementView,
+        announcement_id,
+        viewer_username,
+        viewer_type,
+    )
+    if existing_view:
+        return existing_view
+
+    view = AnnouncementView(
+        announcement_id=announcement_id,
+        viewer_username=viewer_username,
+        viewer_type=viewer_type,
+    )
+    db.add(view)
+    db.flush()
+    apply_announcement_view_security(view)
+    return view
 
 
 def get_branch_payment_query(current_staff: BranchStaff, branch: Branch, db: Session):
@@ -868,6 +906,7 @@ async def verify_branch_payment(
     payment.status = "PAYMENT_VERIFIED" if payment.source_module == "rpt_online_payment" else "Verified"
     payment.verified_at = datetime.utcnow()
     payment.treasury_updated_at = datetime.utcnow()
+    update_linked_request_status(db, payment)
     if payment.source_module == "business_tax_online_payment" and payment.related_request_id:
         bt_application = db.query(BusinessTaxApplication).filter(
             BusinessTaxApplication.tracking_number == payment.related_request_id
@@ -939,6 +978,7 @@ async def decline_branch_payment(
 
     payment.status = "Failed"
     payment.treasury_updated_at = datetime.utcnow()
+    revert_linked_request_status_for_declined_payment(db, payment)
     if payment.source_module == "business_tax_online_payment" and payment.related_request_id:
         bt_application = db.query(BusinessTaxApplication).filter(
             BusinessTaxApplication.tracking_number == payment.related_request_id
@@ -1039,10 +1079,46 @@ async def list_branch_announcements(
         .all()
     )
 
-    log_branch_action(db, current_staff, "Announcements Viewed", f"Viewed {len(announcements)} announcement(s)")
-    db.commit()
+    viewed_ids = set(get_announcement_viewed_ids(db, AnnouncementView, current_staff.username, "branch_staff"))
+    return [
+        serialize_branch_announcement(announcement, branch_name, announcement.id in viewed_ids)
+        for announcement in announcements
+    ]
 
-    return [serialize_branch_announcement(announcement, branch_name) for announcement in announcements]
+
+@router.get("/announcements/unread-count")
+async def get_branch_announcement_unread_count(
+    current_staff: BranchStaff = Depends(get_current_branch_staff),
+    db: Session = Depends(get_db),
+):
+    announcement_ids = [
+        row[0]
+        for row in db.query(Announcement.id).filter(Announcement.branch_id == current_staff.branch_id).all()
+    ]
+    viewed_ids = set(get_announcement_viewed_ids(db, AnnouncementView, current_staff.username, "branch_staff"))
+    unread_count = len([announcement_id for announcement_id in announcement_ids if announcement_id not in viewed_ids])
+    return {"unread_count": unread_count}
+
+
+@router.post("/announcements/{announcement_id}/mark-viewed")
+async def mark_branch_announcement_as_viewed(
+    announcement_id: int,
+    current_staff: BranchStaff = Depends(get_current_branch_staff),
+    db: Session = Depends(get_db),
+):
+    announcement = _get_owned_branch_announcement(db, announcement_id, current_staff)
+    title = decrypt_optional_value(getattr(announcement, "title_enc", None)) or announcement.title
+    try:
+        mark_branch_announcement_viewed(db, announcement.id, current_staff.username, "branch_staff")
+        log_branch_action(db, current_staff, "Announcement Viewed", f"Viewed announcement: {title}")
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as error:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to update announcement status") from error
+    return {"message": "Announcement marked as viewed"}
 
 
 @router.post("/announcements")
@@ -1055,22 +1131,31 @@ async def create_branch_announcement(
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
 
-    announcement = Announcement(
-        title=payload.title,
-        content=payload.content,
-        icon_type=payload.icon_type,
-        icon_color=payload.icon_color,
-        branch_id=current_staff.branch_id,
-        created_by=current_staff.username,
-        is_active=bool(payload.is_active),
-        publish_date=datetime.utcnow(),
-    )
-    db.add(announcement)
-    log_branch_action(db, current_staff, "Announcement Created", f"Created branch announcement: {payload.title}")
-    db.commit()
-    db.refresh(announcement)
+    try:
+        announcement = Announcement(
+            title=payload.title,
+            content=payload.content,
+            icon_type=payload.icon_type,
+            icon_color=payload.icon_color,
+            branch_id=current_staff.branch_id,
+            created_by=current_staff.username,
+            is_active=bool(payload.is_active),
+            publish_date=datetime.utcnow() if payload.is_active else None,
+        )
+        db.add(announcement)
+        db.flush()
+        mark_branch_announcement_viewed(db, announcement.id, current_staff.username, "branch_staff")
+        log_branch_action(db, current_staff, "Announcement Created", f"Created branch announcement: {payload.title}")
+        db.commit()
+        db.refresh(announcement)
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as error:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to create branch announcement") from error
 
-    return serialize_branch_announcement(announcement, branch.name)
+    return serialize_branch_announcement(announcement, branch.name, True)
 
 
 @router.put("/announcements/{announcement_id}")
@@ -1095,20 +1180,28 @@ async def update_branch_announcement(
     if not announcement:
         raise HTTPException(status_code=404, detail="Announcement not found")
 
-    announcement.title = payload.title
-    announcement.content = payload.content
-    announcement.icon_type = payload.icon_type
-    announcement.icon_color = payload.icon_color
-    announcement.is_active = bool(payload.is_active)
-    announcement.updated_at = datetime.utcnow()
-    if announcement.is_active and not announcement.publish_date:
-        announcement.publish_date = datetime.utcnow()
+    try:
+        announcement.title = payload.title
+        announcement.content = payload.content
+        announcement.icon_type = payload.icon_type
+        announcement.icon_color = payload.icon_color
+        announcement.is_active = bool(payload.is_active)
+        announcement.updated_at = datetime.utcnow()
+        if announcement.is_active and not announcement.publish_date:
+            announcement.publish_date = datetime.utcnow()
 
-    log_branch_action(db, current_staff, "Announcement Updated", f"Updated branch announcement: {payload.title}")
-    db.commit()
-    db.refresh(announcement)
+        mark_branch_announcement_viewed(db, announcement.id, current_staff.username, "branch_staff")
+        log_branch_action(db, current_staff, "Announcement Updated", f"Updated branch announcement: {payload.title}")
+        db.commit()
+        db.refresh(announcement)
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as error:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to update branch announcement") from error
 
-    return serialize_branch_announcement(announcement, branch.name)
+    return serialize_branch_announcement(announcement, branch.name, True)
 
 
 @router.delete("/announcements/{announcement_id}")
@@ -1129,14 +1222,21 @@ async def delete_branch_announcement(
         raise HTTPException(status_code=404, detail="Announcement not found")
 
     title = decrypt_optional_value(getattr(announcement, "title_enc", None)) or announcement.title
-    # Clean up attachment files on disk before deleting the record (cascade removes rows).
-    for attachment in list(announcement.attachments or []):
-        remove_attachment_file(attachment)
-    from utils.announcement_attachments import remove_announcement_directory
-    remove_announcement_directory(announcement.id)
-    db.delete(announcement)
-    log_branch_action(db, current_staff, "Announcement Deleted", f"Deleted branch announcement: {title}")
-    db.commit()
+    try:
+        for attachment in list(announcement.attachments or []):
+            remove_attachment_file(attachment)
+        from utils.announcement_attachments import remove_announcement_directory
+        remove_announcement_directory(announcement.id)
+        db.query(AnnouncementView).filter(AnnouncementView.announcement_id == announcement.id).delete()
+        db.delete(announcement)
+        log_branch_action(db, current_staff, "Announcement Deleted", f"Deleted branch announcement: {title}")
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as error:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to delete branch announcement") from error
 
     return {"message": "Announcement deleted successfully"}
 

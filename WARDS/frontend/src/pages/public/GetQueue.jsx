@@ -2,10 +2,13 @@ import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
-import { getEmailValidationMessage } from '../../utils/validation';
-
-const PH_MOBILE_PATTERN = /^(?:\+63|63|0)9\d{9}$/;
-const NAME_PATTERN = /^[A-Za-z.\-' ]+$/;
+import {
+  getEmailValidationMessage,
+  normalizeCitizenFullName,
+  normalizePhilippineContactDigits,
+  validateCitizenFullName,
+  validatePhilippineContactDigits,
+} from '../../utils/validation';
 const DEFAULT_DISABLED_MESSAGE = 'This service is currently unavailable because it has been disabled by system administration.';
 const ACTIVE_QUEUE_MESSAGE = 'You already have an active queue request. Please complete or cancel your current queue before registering for another one.';
 
@@ -43,30 +46,11 @@ const serviceIcons = {
 };
 
 const validateTaxpayerName = (value) => {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return 'Please enter your name';
-  }
-
-  if (!NAME_PATTERN.test(trimmed)) {
-    return 'Name must contain letters only';
-  }
-
-  return '';
+  return validateCitizenFullName(value).replace('Full name', 'Name');
 };
 
 const validatePhilippineMobile = (value) => {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return 'Please enter your contact number';
-  }
-
-  const normalized = trimmed.replace(/[\s()-]/g, '');
-  if (!PH_MOBILE_PATTERN.test(normalized)) {
-    return 'Please enter a valid Philippine mobile number';
-  }
-
-  return '';
+  return validatePhilippineContactDigits(value).replace('Contact number is required.', 'Please enter your contact number');
 };
 
 const getUtc8TodayDate = () => {
@@ -160,6 +144,7 @@ const GetQueue = () => {
   const [loadError, setLoadError] = useState('');
   const [appointmentAvailability, setAppointmentAvailability] = useState(null);
   const [appointmentAvailabilityLoading, setAppointmentAvailabilityLoading] = useState(false);
+  const [appointmentAvailabilityRefreshKey, setAppointmentAvailabilityRefreshKey] = useState(0);
   const [immediateAvailability, setImmediateAvailability] = useState(null);
   const todayDate = useMemo(() => getUtc8TodayDate(), []);
   const preselectedService = searchParams.get('service') || '';
@@ -190,7 +175,7 @@ const GetQueue = () => {
         setFormData((current) => ({
           ...current,
           taxpayer_name: current.taxpayer_name || storedUser.full_name || '',
-          contact_number: current.contact_number || storedUser.contact_number || '',
+          contact_number: current.contact_number || normalizePhilippineContactDigits(storedUser.contact_number || ''),
           email: current.email || storedUser.email || '',
         }));
       }
@@ -277,7 +262,7 @@ const GetQueue = () => {
     return () => {
       isActive = false;
     };
-  }, [selectedBranch, formData.queue_type, formData.appointment_date, formData.service_type]);
+  }, [selectedBranch, formData.queue_type, formData.appointment_date, formData.service_type, appointmentAvailabilityRefreshKey]);
 
   useEffect(() => {
     if (!selectedBranch) {
@@ -368,7 +353,14 @@ const GetQueue = () => {
     }
 
     if (name === 'contact_number') {
-      setContactError(validatePhilippineMobile(value));
+      const normalizedDigits = normalizePhilippineContactDigits(value);
+      setFormData((current) => ({
+        ...current,
+        contact_number: normalizedDigits,
+        ...(name === 'appointment_date' ? { appointment_slot: '' } : {}),
+      }));
+      setContactError(validatePhilippineMobile(normalizedDigits));
+      return;
     }
 
     if (name === 'appointment_date') {
@@ -517,19 +509,42 @@ const GetQueue = () => {
       const response = await api.post('/public/queue/register', {
         branch_id: selectedBranch.id,
         service_type: formData.service_type,
-        taxpayer_name: formData.taxpayer_name,
-        contact_number: formData.contact_number,
+        taxpayer_name: normalizeCitizenFullName(formData.taxpayer_name),
+        contact_number: `+63${normalizePhilippineContactDigits(formData.contact_number)}`,
         email: formData.email,
         queue_type: formData.queue_type,
         appointment_time: appointmentDateTime,
       });
+      if (formData.queue_type === 'appointment' && formData.appointment_slot) {
+        setAppointmentAvailability((current) => (
+          current
+            ? {
+                ...current,
+                available_slots: (current.available_slots || []).filter((slot) => slot.value !== formData.appointment_slot),
+              }
+            : current
+        ));
+      }
       setQueueResult(response.data);
     } catch (error) {
       console.error('Failed to register queue:', error);
+      const errorDetail = error.response?.data?.detail || '';
+      if (
+        formData.queue_type === 'appointment'
+        && (
+          errorDetail.includes('appointment slot')
+          || errorDetail.includes('no longer available')
+          || errorDetail.includes('choose another available time')
+        )
+      ) {
+        setFormData((current) => ({ ...current, appointment_slot: '' }));
+        setAppointmentError(errorDetail);
+        setAppointmentAvailabilityRefreshKey((current) => current + 1);
+      }
       setFormError(
-        error.response?.data?.detail === ACTIVE_QUEUE_MESSAGE
+        errorDetail === ACTIVE_QUEUE_MESSAGE
           ? ACTIVE_QUEUE_MESSAGE
-          : error.response?.data?.detail || (language === 'en' ? 'Failed to register. Please try again.' : 'Nabigo ang pagpaparehistro. Subukan muli.')
+          : errorDetail || (language === 'en' ? 'Failed to register. Please try again.' : 'Nabigo ang pagpaparehistro. Subukan muli.')
       );
     } finally {
       setRegistering(false);
@@ -615,8 +630,8 @@ const GetQueue = () => {
               <div class="field"><div class="label">Estimated Wait Time</div><div class="value">${queueResult.estimated_wait_time} min</div></div>
               <div class="field"><div class="label">Recommended Arrival</div><div class="value">${recommendedArrival}</div></div>
               <div class="field"><div class="label">Appointment Time</div><div class="value">${appointmentLabel}</div></div>
-              <div class="field"><div class="label">Name</div><div class="value">${formData.taxpayer_name}</div></div>
-              <div class="field"><div class="label">Contact Number</div><div class="value">${formData.contact_number}</div></div>
+              <div class="field"><div class="label">Name</div><div class="value">${normalizeCitizenFullName(formData.taxpayer_name)}</div></div>
+              <div class="field"><div class="label">Contact Number</div><div class="value">+63 ${normalizePhilippineContactDigits(formData.contact_number)}</div></div>
             </div>
             <div class="note">${queueResult.message}</div>
           </div>
@@ -1003,21 +1018,31 @@ const GetQueue = () => {
                   <label className="block text-gray-700 font-semibold mb-2">
                     {language === 'en' ? 'Contact Number *' : 'Numero ng Kontak *'}
                   </label>
-                  <input
-                    type="tel"
-                    name="contact_number"
-                    value={formData.contact_number}
-                    onChange={handleInputChange}
-                    disabled={queueUnavailable}
-                    placeholder="09XXXXXXXXX"
-                    className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 ${
-                      contactError ? 'border-red-400' : 'border-gray-300'
-                    }`}
-                    required
-                  />
+                  <div className={`flex overflow-hidden rounded-lg border ${
+                    contactError ? 'border-red-400 bg-red-50' : 'border-gray-300'
+                  } ${queueUnavailable ? 'bg-gray-100' : ''}`}>
+                    <span className="flex items-center bg-gray-100 px-4 font-semibold text-gray-700">+63</span>
+                    <input
+                      type="tel"
+                      name="contact_number"
+                      value={formData.contact_number}
+                      onChange={handleInputChange}
+                      disabled={queueUnavailable}
+                      inputMode="numeric"
+                      maxLength={10}
+                      placeholder="9202717703"
+                      className="w-full px-4 py-3 focus:outline-none"
+                      required
+                    />
+                  </div>
                   {contactError && (
                     <p className="mt-2 text-sm text-red-600">
                       {language === 'en' ? contactError : 'Mangyaring maglagay ng wastong Philippine mobile number'}
+                    </p>
+                  )}
+                  {!contactError && (
+                    <p className="mt-2 text-sm text-gray-500">
+                      {language === 'en' ? 'Enter exactly 10 digits after +63.' : 'Maglagay ng eksaktong 10 digit pagkatapos ng +63.'}
                     </p>
                   )}
                 </div>

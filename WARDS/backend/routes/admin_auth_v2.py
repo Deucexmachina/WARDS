@@ -9,7 +9,7 @@ Security Level: HIGH
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
@@ -46,13 +46,13 @@ RATE_LIMIT_WINDOW = 60
 MAX_REQUESTS_PER_WINDOW = 30
 
 class AdminLoginRequest(BaseModel):
-    username: str
+    email: EmailStr
     password: str
     totp_code: Optional[str] = None
     recaptcha_token: Optional[str] = None
 
 class AdminSetupMFARequest(BaseModel):
-    username: str
+    email: EmailStr
     password: str
 
 class Token(BaseModel):
@@ -176,6 +176,10 @@ def save_mfa_secret(db: Session, username: str, secret: str):
         db.add(mfa)
     db.commit()
 
+
+def normalize_admin_email(email: str) -> str:
+    return str(email).strip().lower()
+
 def public_role(role: str) -> str:
     return "admin" if role in {"admin", "main_admin", "superadmin"} else role
 
@@ -223,21 +227,22 @@ async def setup_mfa(request: Request, credentials: AdminSetupMFARequest, db: Ses
     client_ip = request.client.host
     
     # Verify credentials
-    admin = db.query(Admin).filter(Admin.username == credentials.username).first()
+    normalized_email = normalize_admin_email(credentials.email)
+    admin = db.query(Admin).filter(Admin.email == normalized_email).first()
     if not admin or not pwd_context.verify(credentials.password, admin.hashed_password):
-        log_activity(db, "Failed MFA Setup", credentials.username, f"Invalid credentials from IP: {client_ip}", "security")
+        log_activity(db, "Failed MFA Setup", normalized_email, f"Invalid credentials from IP: {client_ip}", "security")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password"
+            detail="Invalid email or password"
         )
     
     # Generate TOTP secret
     totp_secret = pyotp.random_base32()
-    save_mfa_secret(db, credentials.username, totp_secret)
+    save_mfa_secret(db, admin.username, totp_secret)
     
     # Generate QR code
     totp_uri = pyotp.totp.TOTP(totp_secret).provisioning_uri(
-        name=credentials.username,
+        name=admin.username,
         issuer_name="WARDS Admin Portal"
     )
     
@@ -250,7 +255,7 @@ async def setup_mfa(request: Request, credentials: AdminSetupMFARequest, db: Ses
     img.save(buffer, format='PNG')
     qr_code_base64 = base64.b64encode(buffer.getvalue()).decode()
     
-    log_activity(db, "MFA Setup Initiated", credentials.username, f"TOTP setup from IP: {client_ip}", "security")
+    log_activity(db, "MFA Setup Initiated", normalized_email, f"TOTP setup from IP: {client_ip}", "security")
     
     return {
         "message": "MFA setup successful",
@@ -296,36 +301,37 @@ async def admin_login(request: Request, credentials: AdminLoginRequest, db: Sess
     Admin login with TOTP MFA and reCAPTCHA
     """
     client_ip = request.client.host
+    normalized_email = normalize_admin_email(credentials.email)
     
     # Rate limiting
     if not check_rate_limit(client_ip):
-        log_activity(db, "Login Rate Limited", credentials.username, f"IP: {client_ip}", "security")
+        log_activity(db, "Login Rate Limited", normalized_email, f"IP: {client_ip}", "security")
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many login attempts. Please try again later."
         )
     
     # Check account lockout
-    if is_account_locked(credentials.username):
-        remaining_time = int(LOCKOUT_DURATION - (time.time() - locked_accounts[credentials.username]["locked_at"]))
-        log_activity(db, "Login Attempt on Locked Account", credentials.username, f"IP: {client_ip}", "security")
+    if is_account_locked(normalized_email):
+        remaining_time = int(LOCKOUT_DURATION - (time.time() - locked_accounts[normalized_email]["locked_at"]))
+        log_activity(db, "Login Attempt on Locked Account", normalized_email, f"IP: {client_ip}", "security")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Account is locked. Please try again in {remaining_time} seconds."
         )
     
     # Verify admin exists
-    admin = db.query(Admin).filter(Admin.username == credentials.username).first()
+    admin = db.query(Admin).filter(Admin.email == normalized_email).first()
     
-    print(f"[ADMIN AUTH] Login attempt for username: {credentials.username}")
+    print(f"[ADMIN AUTH] Login attempt for email: {normalized_email}")
     print(f"[ADMIN AUTH] Admin found: {admin is not None}")
     
     if not admin:
-        record_failed_attempt(credentials.username, db)
-        log_activity(db, "Failed Login", credentials.username, f"Admin not found, IP: {client_ip}", "security")
+        record_failed_attempt(normalized_email, db)
+        log_activity(db, "Failed Login", normalized_email, f"Admin not found, IP: {client_ip}", "security")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password"
+            detail="Invalid email or password"
         )
     
     # Verify password
@@ -334,11 +340,11 @@ async def admin_login(request: Request, credentials: AdminLoginRequest, db: Sess
     print(f"[ADMIN AUTH] Password valid: {password_valid}")
     
     if not password_valid:
-        record_failed_attempt(credentials.username, db)
-        log_activity(db, "Failed Login", credentials.username, f"Invalid password, IP: {client_ip}", "security")
+        record_failed_attempt(normalized_email, db)
+        log_activity(db, "Failed Login", normalized_email, f"Invalid password, IP: {client_ip}", "security")
         
         # Check if captcha is now required
-        needs_captcha = requires_captcha(credentials.username)
+        needs_captcha = requires_captcha(normalized_email)
         if needs_captcha:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -348,11 +354,11 @@ async def admin_login(request: Request, credentials: AdminLoginRequest, db: Sess
         
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password"
+            detail="Invalid email or password"
         )
     
     # Verify reCAPTCHA if required
-    if requires_captcha(credentials.username):
+    if requires_captcha(normalized_email):
         if not credentials.recaptcha_token:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -361,7 +367,7 @@ async def admin_login(request: Request, credentials: AdminLoginRequest, db: Sess
             )
         
         if not verify_recaptcha(credentials.recaptcha_token, client_ip):
-            log_activity(db, "Failed reCAPTCHA", credentials.username, f"IP: {client_ip}", "security")
+            log_activity(db, "Failed reCAPTCHA", normalized_email, f"IP: {client_ip}", "security")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="reCAPTCHA verification failed"
@@ -369,17 +375,17 @@ async def admin_login(request: Request, credentials: AdminLoginRequest, db: Sess
     
     # Check account status
     if admin.status != "Active":
-        log_activity(db, "Login Attempt for Inactive Account", credentials.username, f"Status: {admin.status}, IP: {client_ip}", "security")
+        log_activity(db, "Login Attempt for Inactive Account", normalized_email, f"Status: {admin.status}, IP: {client_ip}", "security")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is not active"
         )
     
     # Verify TOTP code
-    totp_secret = get_mfa_secret(db, credentials.username)
+    totp_secret = get_mfa_secret(db, admin.username)
     if not totp_secret:
         # MFA not set up yet
-        log_activity(db, "Login Without MFA Setup", credentials.username, f"IP: {client_ip}", "security")
+        log_activity(db, "Login Without MFA Setup", normalized_email, f"IP: {client_ip}", "security")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="MFA not configured. Please setup MFA first.",
@@ -393,21 +399,21 @@ async def admin_login(request: Request, credentials: AdminLoginRequest, db: Sess
             "token_type": "bearer",
             "user": {},
             "requires_mfa": True,
-            "requires_captcha": requires_captcha(credentials.username)
+            "requires_captcha": requires_captcha(normalized_email)
         }
     
     # Verify TOTP code
     totp = pyotp.TOTP(totp_secret)
     if not totp.verify(credentials.totp_code, valid_window=1):
-        record_failed_attempt(credentials.username, db)
-        log_activity(db, "Failed TOTP Verification", credentials.username, f"IP: {client_ip}", "security")
+        record_failed_attempt(normalized_email, db)
+        log_activity(db, "Failed TOTP Verification", normalized_email, f"IP: {client_ip}", "security")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid TOTP code"
         )
     
     # All checks passed - create token
-    reset_failed_attempts(credentials.username)
+    reset_failed_attempts(normalized_email)
     
     access_token_expires = timedelta(minutes=get_session_timeout_minutes(db))
     access_token = create_access_token(
@@ -424,9 +430,9 @@ async def admin_login(request: Request, credentials: AdminLoginRequest, db: Sess
     admin.last_login = datetime.utcnow()
     db.commit()
     
-    log_activity(db, "Successful Admin Login", credentials.username, f"Role: {admin.role}, IP: {client_ip}", "security")
+    log_activity(db, "Successful Admin Login", normalized_email, f"Role: {admin.role}, IP: {client_ip}", "security")
     
-    print(f"[ADMIN AUTH] Login successful for {credentials.username}")
+    print(f"[ADMIN AUTH] Login successful for {normalized_email}")
     
     return {
         "access_token": access_token,
