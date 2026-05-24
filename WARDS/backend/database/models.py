@@ -1016,6 +1016,7 @@ class Queue(Base):
     queue_number = Column(String, unique=True, index=True)
     queue_number_hash = Column(String, nullable=True, index=True)
     queue_number_enc = Column(Text, nullable=True)
+    citizen_user_id = Column(Integer, ForeignKey("citizen_users.id"), nullable=True, index=True)
     branch_id = Column(Integer, ForeignKey("branches.id"))
     service_type = Column(String)
     service_type_hash = Column(String, nullable=True)

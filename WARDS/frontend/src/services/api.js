@@ -338,4 +338,10 @@ export const rbacAPI = {
   getPermissions: () => api.get('/rbac/permissions'),
 };
 
+export const queueAPI = {
+  getMyActiveTicket: () => api.get('/public/queue/my-ticket'),
+  getMyHistory: () => api.get('/public/queue/history'),
+  checkStatus: (queueNumber) => api.get(`/public/queue/${queueNumber}`),
+};
+
 export default api;

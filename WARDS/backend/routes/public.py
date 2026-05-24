@@ -766,6 +766,7 @@ async def register_queue(
     
     new_queue = Queue(
         queue_number=queue_number,
+        citizen_user_id=current_citizen.id if current_citizen else None,
         branch_id=registration.branch_id,
         service_type=registration.service_type,
         taxpayer_name=validated_taxpayer_name,
@@ -827,6 +828,109 @@ async def check_queue_status(queue_number: str, db: Session = Depends(get_db)):
         "position": position,
         "estimated_wait_time": queue.estimated_wait_time,
         "created_at": queue.created_at.isoformat()
+    }
+
+@router.get("/queue/my-ticket")
+async def get_my_active_ticket(
+    db: Session = Depends(get_db),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_user_security),
+):
+    """Get the authenticated citizen's active queue ticket"""
+    current_citizen = resolve_authenticated_citizen(credentials, db)
+    if not current_citizen:
+        raise HTTPException(status_code=401, detail="Authentication required to view your ticket")
+    
+    # Find active queue for this citizen
+    active_queue = (
+        db.query(Queue)
+        .filter(
+            Queue.citizen_user_id == current_citizen.id,
+            hash_aware_any(Queue, "status", ACTIVE_PUBLIC_QUEUE_STATUSES)
+        )
+        .order_by(Queue.created_at.desc())
+        .first()
+    )
+    
+    if not active_queue:
+        return {"has_active_ticket": False, "ticket": None}
+    
+    branch = db.query(Branch).filter(Branch.id == active_queue.branch_id).first()
+    
+    # Calculate position in queue
+    position = 0
+    if queue_value(active_queue, "status") == "Waiting":
+        position = db.query(Queue).filter(
+            and_(
+                Queue.branch_id == active_queue.branch_id,
+                hash_aware_match(Queue, "status", "Waiting"),
+                Queue.created_at < active_queue.created_at
+            )
+        ).count() + 1
+    
+    return {
+        "has_active_ticket": True,
+        "ticket": {
+            "id": active_queue.id,
+            "queue_number": queue_value(active_queue, "queue_number"),
+            "branch_name": (get_decrypted_or_raw(branch, "name") or branch.name) if branch else "Unknown",
+            "branch_address": (get_decrypted_or_raw(branch, "address") or branch.address) if branch else None,
+            "service_type": queue_value(active_queue, "service_type"),
+            "queue_type": queue_value(active_queue, "queue_type"),
+            "taxpayer_name": queue_value(active_queue, "taxpayer_name"),
+            "contact_number": queue_value(active_queue, "contact_number"),
+            "email": queue_value(active_queue, "email"),
+            "status": queue_value(active_queue, "status"),
+            "position": position,
+            "estimated_wait_time": active_queue.estimated_wait_time,
+            "recommended_arrival": active_queue.recommended_arrival.isoformat() if active_queue.recommended_arrival else None,
+            "appointment_time": active_queue.appointment_time.isoformat() if active_queue.appointment_time else None,
+            "created_at": active_queue.created_at.isoformat(),
+            "served_at": active_queue.served_at.isoformat() if active_queue.served_at else None,
+        }
+    }
+
+@router.get("/queue/history")
+async def get_my_queue_history(
+    db: Session = Depends(get_db),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_user_security),
+):
+    """Get the authenticated citizen's queue history (completed, expired, cancelled)"""
+    current_citizen = resolve_authenticated_citizen(credentials, db)
+    if not current_citizen:
+        raise HTTPException(status_code=401, detail="Authentication required to view your history")
+    
+    # Statuses that should be in history (not active)
+    history_statuses = ["Completed", "Cancelled", "Expired", "Missed", "No Show"]
+    
+    history_queues = (
+        db.query(Queue)
+        .filter(
+            Queue.citizen_user_id == current_citizen.id,
+            hash_aware_any(Queue, "status", history_statuses)
+        )
+        .order_by(Queue.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    
+    history_items = []
+    for queue in history_queues:
+        branch = db.query(Branch).filter(Branch.id == queue.branch_id).first()
+        history_items.append({
+            "id": queue.id,
+            "queue_number": queue_value(queue, "queue_number"),
+            "branch_name": (get_decrypted_or_raw(branch, "name") or branch.name) if branch else "Unknown",
+            "service_type": queue_value(queue, "service_type"),
+            "queue_type": queue_value(queue, "queue_type"),
+            "status": queue_value(queue, "status"),
+            "created_at": queue.created_at.isoformat(),
+            "completed_at": queue.completed_at.isoformat() if queue.completed_at else None,
+            "served_at": queue.served_at.isoformat() if queue.served_at else None,
+        })
+    
+    return {
+        "history": history_items,
+        "total": len(history_items)
     }
 
 # ============= Receipt Requisition Module =============

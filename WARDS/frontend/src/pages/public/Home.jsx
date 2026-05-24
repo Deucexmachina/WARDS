@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { useEffect, useMemo, useState } from 'react';
 import api from '../../services/api';
 import { buildAttachmentUrl } from '../../components/AnnouncementAttachments';
+import ViewMyTicket from '../../components/ViewMyTicket';
 
 const announcementsPerPage = 5;
 
@@ -233,6 +234,7 @@ const Home = () => {
   const [announcements, setAnnouncements] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedAnnouncement, setSelectedAnnouncement] = useState(null);
+  const [showTicketModal, setShowTicketModal] = useState(false);
 
   useEffect(() => {
     fetchAnnouncements();
@@ -317,6 +319,15 @@ const Home = () => {
               </svg>
               Get Queue Number
             </Link>
+            <button
+              onClick={() => setShowTicketModal(true)}
+              className="bg-yellow-500 text-white hover:bg-yellow-600 px-8 py-4 rounded-lg font-semibold shadow-lg transition duration-300 inline-flex items-center"
+            >
+              <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z"></path>
+              </svg>
+              View My Ticket
+            </button>
             <Link
               to="/pay-taxes"
               className="bg-green-500 text-white hover:bg-green-600 px-8 py-4 rounded-lg font-semibold shadow-lg transition duration-300 inline-flex items-center"
@@ -572,6 +583,10 @@ const Home = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {showTicketModal && (
+        <ViewMyTicket onClose={() => setShowTicketModal(false)} />
       )}
     </>
   );

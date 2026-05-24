@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { taxpayerAccountAPI } from '../../services/api';
+import { taxpayerAccountAPI, queueAPI } from '../../services/api';
 import { getEmailValidationMessage } from '../../utils/validation';
 
 const DEFAULT_PROFILE = {
@@ -48,6 +48,7 @@ const AccountManagement = () => {
   const [identifierForm, setIdentifierForm] = useState(DEFAULT_IDENTIFIER_FORM);
   const [submissions, setSubmissions] = useState([]);
   const [assessments, setAssessments] = useState([]);
+  const [queueHistory, setQueueHistory] = useState([]);
   const [isProfileLocked, setIsProfileLocked] = useState(false);
   const [loading, setLoading] = useState(true);
   const [savingProfile, setSavingProfile] = useState(false);
@@ -74,6 +75,16 @@ const AccountManagement = () => {
       }));
       setSubmissions(response.data?.submissions || []);
       setAssessments(response.data?.assessments || []);
+      
+      // Load queue history
+      try {
+        const queueResponse = await queueAPI.getMyHistory();
+        setQueueHistory(queueResponse.data?.history || []);
+      } catch (queueError) {
+        console.error('Failed to load queue history:', queueError);
+        setQueueHistory([]);
+      }
+      
       setError('');
     } catch (fetchError) {
       setError(fetchError.response?.data?.detail || 'Failed to load taxpayer account management data.');
@@ -462,6 +473,43 @@ const AccountManagement = () => {
                     )) : (
                       <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center text-sm text-slate-500">
                         No Business Tax assessments linked to this account yet.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Queue History Section */}
+                <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
+                  <div className="mb-5 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Transaction History</p>
+                      <h2 className="mt-2 text-2xl font-bold text-slate-900">Queue History</h2>
+                    </div>
+                    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{queueHistory.length} record{queueHistory.length === 1 ? '' : 's'}</span>
+                  </div>
+                  <div className="space-y-4">
+                    {queueHistory.length ? queueHistory.map((queue) => (
+                      <div key={queue.id} className="rounded-2xl border border-slate-200 bg-[#fbfdff] p-5">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <h3 className="text-lg font-semibold text-slate-900">{queue.queue_number}</h3>
+                            <p className="mt-1 text-sm text-slate-600">{queue.branch_name}</p>
+                            <p className="mt-0.5 text-sm text-slate-500">{queue.service_type}</p>
+                          </div>
+                          <span className={`rounded-full border px-3 py-1 text-xs font-bold ${statusTone[queue.status] || 'bg-slate-100 text-slate-700 border-slate-200'}`}>
+                            {queue.status}
+                          </span>
+                        </div>
+                        <div className="mt-4 grid gap-3 text-sm text-slate-600 md:grid-cols-2">
+                          <p><strong>Queue Type:</strong> {queue.queue_type}</p>
+                          <p><strong>Created:</strong> {formatTimestamp(queue.created_at)}</p>
+                          {queue.completed_at && <p><strong>Completed:</strong> {formatTimestamp(queue.completed_at)}</p>}
+                          {queue.served_at && <p><strong>Served:</strong> {formatTimestamp(queue.served_at)}</p>}
+                        </div>
+                      </div>
+                    )) : (
+                      <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center text-sm text-slate-500">
+                        No queue history available yet.
                       </div>
                     )}
                   </div>
