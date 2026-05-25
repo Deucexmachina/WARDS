@@ -444,6 +444,7 @@ async def create_branch(
             "service_window": window_account["service_window"],
             "window_label": SERVICE_WINDOW_LABELS.get(window_account["service_window"], window_account["service_window"]),
             "username": generated_username,
+            "email": generated_email,
             "full_name": staff_full_name,
             "status": "Active",
             "account_scope": "queue_window",
@@ -472,7 +473,7 @@ async def create_branch(
         email_delivery = send_branch_access_email(
             recipient_email=branch.admin_email,
             branch_name=new_branch.name,
-            username=branch.admin_username,
+            login_email=branch.admin_email,
             password=branch.admin_password,
             dashboard_url=new_branch.dashboard_url,
             verification_url=verification_url,
@@ -649,7 +650,7 @@ async def resend_branch_verification(
     email_delivery = send_branch_access_email(
         recipient_email=branch_admin.email,
         branch_name=get_decrypted_or_raw(branch, "name") or branch.name,
-        username=branch_admin.username,
+        login_email=branch_admin.email,
         password=None,
         dashboard_url=build_branch_dashboard_url(get_decrypted_or_raw(branch, "name") or branch.name),
         verification_url=verification_url,

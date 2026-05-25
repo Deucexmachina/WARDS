@@ -388,7 +388,7 @@ const Branches = () => {
         const deliveryMessage = response?.data?.email_delivery?.message || 'Verification email sent to the branch admin address.';
         const windowAccountCount = response?.data?.window_accounts_created?.length || 0;
         const windowMessage = windowAccountCount > 0
-          ? ` ${windowAccountCount} queue window account${windowAccountCount > 1 ? 's were' : ' was'} also generated automatically, included in the branch admin verification email, and set with Microsoft Authenticator MFA required on first login.`
+          ? ` ${windowAccountCount} queue window account${windowAccountCount > 1 ? 's were' : ' was'} also generated automatically, included in the branch admin verification email with login email addresses and temporary passwords, and set with Microsoft Authenticator MFA required on first login.`
           : '';
         setPendingNotice(`${deliveryMessage} Branch admin access will remain pending until the recipient verifies the email.${windowMessage}`);
       } else if (!editingBranch && response?.data?.email_delivery?.message) {
@@ -932,7 +932,7 @@ const Branches = () => {
                   <div className="md:col-span-2 mt-2 border-t pt-5">
                     <h4 className="text-lg font-bold text-gray-700 mb-3">Service Counters / Queue Window Staff Accounts</h4>
                     <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-                      Service counters and queue window staff accounts are the same setup here. If you set {getNormalizedCounterCount(formData.counters)} service counter{getNormalizedCounterCount(formData.counters) > 1 ? 's' : ''}, the system will generate {getNormalizedCounterCount(formData.counters)} queue-only branch staff account{getNormalizedCounterCount(formData.counters) > 1 ? 's' : ''}. The system automatically generates the usernames, passwords, and staff names, then includes those credentials in the same branch admin email verification message. Every generated queue account uses Microsoft Authenticator MFA on first login.
+                      Service counters and queue window staff accounts are the same setup here. If you set {getNormalizedCounterCount(formData.counters)} service counter{getNormalizedCounterCount(formData.counters) > 1 ? 's' : ''}, the system will generate {getNormalizedCounterCount(formData.counters)} queue-only branch staff account{getNormalizedCounterCount(formData.counters) > 1 ? 's' : ''}. The system automatically generates the login email addresses, passwords, and staff names, then includes those credentials in the same branch admin email verification message. Every generated queue account uses Microsoft Authenticator MFA on first login.
                     </div>
                   </div>
                   {getActiveWindowOptions().map((option, index) => {
@@ -949,7 +949,7 @@ const Branches = () => {
                         </div>
 
                         <div className="mt-4 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                          Username, temporary password, staff full name, queue-only access scope, and Microsoft Authenticator MFA setup requirement will be generated automatically by the system and sent in the branch admin verification email.
+                          Login email address, temporary password, staff full name, queue-only access scope, and Microsoft Authenticator MFA setup requirement will be generated automatically by the system and sent in the branch admin verification email.
                         </div>
                       </div>
                     );

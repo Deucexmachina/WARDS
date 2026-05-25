@@ -191,7 +191,7 @@ def _attach_inline_logos(message: EmailMessage, logos: list[dict]):
 def _build_branch_access_text(
     branch_name: str,
     dashboard_url: str,
-    username: str,
+    login_email: str,
     password: str | None,
     verification_url: str | None = None,
     queue_accounts: list[dict] | None = None,
@@ -216,7 +216,7 @@ def _build_branch_access_text(
             "",
             "Step 2: Use your branch access details",
             f"- Branch dashboard: {dashboard_url}",
-            f"- Username: {username}",
+            f"- Login email: {login_email}",
             f"- {'Temporary password' if password else 'Password'}: {password or 'Use your existing branch password'}",
             "",
             "Important notes",
@@ -240,7 +240,7 @@ def _build_branch_access_text(
                 [
                     "",
                     f"{account.get('window_label') or account.get('service_window')} ",
-                    f"- Username: {account['username']}",
+                    f"- Login email: {account['email']}",
                     f"- Temporary password: {account['temporary_password']}",
                     f"- Access scope: {account.get('account_scope', 'queue_window')}",
                 ]
@@ -262,7 +262,7 @@ def _build_branch_access_text(
 def _build_branch_access_html(
     branch_name: str,
     dashboard_url: str,
-    username: str,
+    login_email: str,
     password: str | None,
     verification_url: str | None = None,
     queue_accounts: list[dict] | None = None,
@@ -276,7 +276,7 @@ def _build_branch_access_html(
             Before you can sign in, verify this email address by opening the link below.
           </p>
           <p style="margin:0 0 14px;font-size:14px;line-height:1.7;color:#7c4a03;">
-            Do not use the dashboard username and password until this verification step is complete.
+            Do not use the dashboard email and password until this verification step is complete.
           </p>
           <p style="margin:0;">
             <a href="{verification_url}" style="display:inline-block;background:#d97706;color:#ffffff;text-decoration:none;padding:14px 22px;border-radius:10px;font-weight:700;">
@@ -293,7 +293,7 @@ def _build_branch_access_html(
             <tr>
               <td style="padding:12px 0;border-bottom:1px solid #e5e7eb;vertical-align:top;">
                 <div style="font-weight:700;color:#0f2744;">{account.get('window_label') or account.get('service_window')}</div>
-                <div style="margin-top:4px;font-size:14px;color:#475569;">Username: <strong>{account['username']}</strong></div>
+                <div style="margin-top:4px;font-size:14px;color:#475569;">Login Email: <strong>{account['email']}</strong></div>
                 <div style="margin-top:4px;font-size:14px;color:#475569;">Temporary Password: <strong>{account['temporary_password']}</strong></div>
                 <div style="margin-top:4px;font-size:13px;color:#6b7280;">Queue-only access with Microsoft Authenticator MFA required on first login.</div>
               </td>
@@ -333,7 +333,7 @@ def _build_branch_access_html(
         <div style="background:#f8fbff;border:1px solid #d7e5f5;border-radius:14px;padding:18px 20px;margin:20px 0;">
           <h2 style="margin:0 0 14px;font-size:17px;color:#0f2744;">Step 2: Branch Access Details</h2>
           <p style="margin:0 0 10px;font-size:15px;"><strong>Branch dashboard:</strong> <a href="{dashboard_url}" style="color:#1d4ed8;text-decoration:none;">{dashboard_url}</a></p>
-          <p style="margin:0 0 10px;font-size:15px;"><strong>Username:</strong> {username}</p>
+          <p style="margin:0 0 10px;font-size:15px;"><strong>Login email:</strong> {login_email}</p>
           <p style="margin:0;font-size:15px;"><strong>{"Temporary password" if password else "Password"}:</strong> {password or "Use your existing branch password"}</p>
         </div>
 
@@ -427,7 +427,7 @@ def _build_citizen_verification_html(verification_code: str, expires_minutes: in
 def send_branch_access_email(
     recipient_email: str,
     branch_name: str,
-    username: str,
+    login_email: str,
     password: str | None,
     dashboard_url: str | None = None,
     verification_url: str | None = None,
@@ -453,9 +453,9 @@ def send_branch_access_email(
     message["Subject"] = f"Branch Dashboard Access for {branch_name} | WARDS"
     message["From"] = f"{smtp_from_name} <{smtp_from_email}>"
     message["To"] = recipient_email
-    message.set_content(_build_branch_access_text(branch_name, dashboard_url, username, password, verification_url, queue_accounts))
+    message.set_content(_build_branch_access_text(branch_name, dashboard_url, login_email, password, verification_url, queue_accounts))
     message.add_alternative(
-        _build_branch_access_html(branch_name, dashboard_url, username, password, verification_url, queue_accounts),
+        _build_branch_access_html(branch_name, dashboard_url, login_email, password, verification_url, queue_accounts),
         subtype="html",
     )
 

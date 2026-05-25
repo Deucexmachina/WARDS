@@ -481,11 +481,27 @@ async def get_public_system_status(db: Session = Depends(get_db)):
 
 # ============= Queueing Module =============
 
-QUEUE_NUMBER_SUFFIX_PATTERN = re.compile(r"^(?P<prefix>[A-Z]{3}-)(?P<sequence>\d{3})$")
+QUEUE_NUMBER_SUFFIX_PATTERN = re.compile(r"^(?P<prefix>[A-Z]{2}-)(?P<sequence>\d{3})$")
+APPOINTMENT_QUEUE_NUMBER_SUFFIX_PATTERN = re.compile(r"^(?P<prefix>[A-Z]{2}A-)(?P<sequence>\d{3})$")
 
 
-def generate_next_queue_number(db: Session, branch_name: str) -> str:
-    prefix = f"{branch_name[:3].upper()}-"
+def build_branch_queue_identifier(branch_name: str) -> str:
+    normalized_name = re.sub(r"\bBRANCH\b", "", (branch_name or "").upper())
+    compact = re.sub(r"[^A-Z0-9]", "", normalized_name)
+    if len(compact) >= 2:
+        return compact[:2]
+    return compact.ljust(2, "X") or "XX"
+
+
+def build_queue_prefix(branch_name: str, queue_type: str) -> tuple[str, re.Pattern[str]]:
+    branch_identifier = build_branch_queue_identifier(branch_name)
+    if queue_type == "appointment":
+        return f"{branch_identifier}A-", APPOINTMENT_QUEUE_NUMBER_SUFFIX_PATTERN
+    return f"{branch_identifier}-", QUEUE_NUMBER_SUFFIX_PATTERN
+
+
+def generate_next_queue_number(db: Session, branch_name: str, queue_type: str = "immediate") -> str:
+    prefix, pattern = build_queue_prefix(branch_name, queue_type)
     next_sequence = 1
     candidate_numbers = []
     for queue in db.query(Queue).all():
@@ -495,7 +511,7 @@ def generate_next_queue_number(db: Session, branch_name: str) -> str:
 
     if candidate_numbers:
         latest_number = sorted(candidate_numbers)[-1]
-        match = QUEUE_NUMBER_SUFFIX_PATTERN.match(latest_number)
+        match = pattern.match(latest_number)
         if match and match.group("prefix") == prefix:
             next_sequence = int(match.group("sequence")) + 1
 
@@ -697,7 +713,7 @@ async def register_queue(
         raise HTTPException(status_code=403, detail="This branch has reached the current queue capacity limit.")
 
     branch_name = get_decrypted_or_raw(branch, "name") or branch.name
-    queue_number = generate_next_queue_number(db, branch_name)
+    queue_number = generate_next_queue_number(db, branch_name, queue_type)
     
     # Get service processing time
     avg_processing_time = get_transaction_duration_minutes()
@@ -808,7 +824,7 @@ async def register_queue(
                     detail="The selected appointment slot is no longer available. Please choose another available time.",
                 )
             if attempt == 0:
-                new_queue.queue_number = generate_next_queue_number(db, branch_name)
+                new_queue.queue_number = generate_next_queue_number(db, branch_name, queue_type)
                 apply_queue_security(new_queue)
                 continue
             raise HTTPException(status_code=409, detail="Queue registration failed. Please try again.")

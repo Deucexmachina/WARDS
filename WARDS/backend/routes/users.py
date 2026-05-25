@@ -3,12 +3,12 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from passlib.context import CryptContext
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database.models import ActivityLog, Admin, Branch, BranchStaff, CitizenUser, get_db
 from middleware.admin_auth import require_main_admin
-from utils.field_crypto import apply_citizen_user_security, serialize_citizen_user
+from utils.field_crypto import apply_citizen_user_security, get_decrypted_or_raw, serialize_citizen_user
 from utils.security_validation import (
     ensure_email_is_unique,
     ensure_username_is_unique,
@@ -24,21 +24,23 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 class UserCreate(BaseModel):
     username: Optional[str] = None
-    email: EmailStr
+    email: str
     password: str
     role: str
     full_name: Optional[str] = None
     branch_id: Optional[int] = None
+    service_window: Optional[str] = None
     status: str = "Active"
 
 
 class UserUpdate(BaseModel):
     username: Optional[str] = None
-    email: EmailStr
+    email: str
     password: Optional[str] = None
     role: str
     full_name: Optional[str] = None
     branch_id: Optional[int] = None
+    service_window: Optional[str] = None
     status: str
     current_admin_password: str
 
@@ -55,8 +57,52 @@ def is_branch_role(role: str) -> bool:
     return role in {"branch_admin", "branch_staff"}
 
 
+SERVICE_WINDOW_ALIASES = {
+    "RPT": "RPT",
+    "REAL_PROPERTY_TAX": "RPT",
+    "BT": "BUSINESS",
+    "BUSINESS": "BUSINESS",
+    "BUSINESS_TAX": "BUSINESS",
+    "MISC": "MISC",
+    "MISCELLANEOUS": "MISC",
+}
+
+SERVICE_WINDOW_LABELS = {
+    "RPT": "RPT",
+    "BUSINESS": "BT",
+    "MISC": "MISC",
+}
+
+
+def is_internal_branch_email(email: str) -> bool:
+    normalized = (email or "").strip().lower()
+    local_part, separator, domain = normalized.partition("@")
+    if not separator or domain != "branch.local" or not local_part:
+        return False
+    return all(character.isalnum() or character in "._-" for character in local_part)
+
+
+def normalize_account_email(role: str, email: str) -> str:
+    normalized = (email or "").strip().lower()
+    if is_branch_role(role) and is_internal_branch_email(normalized):
+        return normalized
+    return normalize_email(normalized, check_deliverability=True)
+
+
+def normalize_branch_service_window(value: Optional[str]) -> str:
+    normalized = (value or "").strip().upper().replace(" ", "_")
+    service_window = SERVICE_WINDOW_ALIASES.get(normalized)
+    if not service_window:
+        raise HTTPException(
+            status_code=400,
+            detail="Branch staff accounts require an assigned queue/service role: RPT, BT, or MISC.",
+        )
+    return service_window
+
+
 def serialize_account(user, branch_name: Optional[str] = None):
     citizen_profile = serialize_citizen_user(user) if isinstance(user, CitizenUser) else None
+    service_window = getattr(user, "service_window", None)
     return {
         "id": user.id,
         "username": getattr(user, "username", None),
@@ -65,6 +111,9 @@ def serialize_account(user, branch_name: Optional[str] = None):
         "full_name": citizen_profile["full_name"] if citizen_profile else getattr(user, "full_name", None),
         "branch_id": getattr(user, "branch_id", None),
         "branch_name": branch_name or "All Branches",
+        "account_scope": getattr(user, "account_scope", None),
+        "service_window": service_window,
+        "service_window_label": SERVICE_WINDOW_LABELS.get(service_window, service_window),
         "status": user.status,
         "last_login": user.last_login.isoformat() if user.last_login else None,
         "created_at": user.created_at.isoformat() if user.created_at else None,
@@ -101,6 +150,18 @@ def require_accounts_access(current_user):
     return current_user
 
 
+def protected_admin_label(current_user: Admin) -> str:
+    return "super admin" if current_user.role == "superadmin" else "main admin"
+
+
+def verify_protected_account_password(current_user: Admin, password: str):
+    if not password or not pwd_context.verify(password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=401,
+            detail=f"Incorrect {protected_admin_label(current_user)} password",
+        )
+
+
 def find_account(db: Session, user_id: int, role: Optional[str] = None):
     if role:
         if is_admin_role(role):
@@ -130,7 +191,10 @@ async def get_all_users(
 
     accounts = [serialize_account(user, "All Branches") for user in db.query(Admin).all()]
     accounts.extend(
-        serialize_account(user, branch.name if branch else "Unassigned Branch")
+        serialize_account(
+            user,
+            (get_decrypted_or_raw(branch, "name") or branch.name) if branch else "Unassigned Branch",
+        )
         for user, branch in db.query(BranchStaff, Branch).outerjoin(Branch, Branch.id == BranchStaff.branch_id).all()
     )
     accounts.extend(serialize_account(user, "Public Portal") for user in db.query(CitizenUser).all())
@@ -158,7 +222,7 @@ async def create_user(
 ):
     require_accounts_access(current_user)
 
-    email = normalize_email(user.email, check_deliverability=True)
+    email = normalize_account_email(user.role, user.email)
     ensure_email_is_unique(db, email)
     validate_strong_password(user.password)
     username = normalize_username(user.username) if user.username else None
@@ -183,6 +247,11 @@ async def create_user(
         if not username:
             raise HTTPException(status_code=400, detail="Username is required for branch accounts")
         ensure_username_is_unique(db, username)
+        service_window = None
+        account_scope = "full_branch"
+        if user.role == "branch_staff":
+            service_window = normalize_branch_service_window(user.service_window)
+            account_scope = "queue_window"
         account = BranchStaff(
             username=username,
             email=email,
@@ -190,11 +259,13 @@ async def create_user(
             hashed_password=pwd_context.hash(user.password),
             branch_id=user.branch_id,
             role=user.role,
+            account_scope=account_scope,
+            service_window=service_window,
             status=user.status,
             is_verified=True,
         )
         branch = db.query(Branch).filter(Branch.id == user.branch_id).first()
-        branch_name = branch.name if branch else "Unassigned Branch"
+        branch_name = (get_decrypted_or_raw(branch, "name") or branch.name) if branch else "Unassigned Branch"
     elif user.role == "public":
         account = CitizenUser(
             email=email,
@@ -233,17 +304,23 @@ async def update_user(
 ):
     require_accounts_access(current_user)
 
-    if not user.current_admin_password or not pwd_context.verify(user.current_admin_password, current_user.hashed_password):
-        raise HTTPException(status_code=401, detail="Incorrect main admin password")
+    verify_protected_account_password(current_user, user.current_admin_password)
 
     account = find_account(db, user_id, user.role)
     if not account:
         raise HTTPException(status_code=404, detail="User not found")
 
-    email = normalize_email(user.email, check_deliverability=True)
+    email = normalize_account_email(user.role, user.email)
     exclude_admin_id = account.id if isinstance(account, Admin) else None
     exclude_branch_staff_id = account.id if isinstance(account, BranchStaff) else None
-    ensure_email_is_unique(db, email, exclude_admin_id=exclude_admin_id, exclude_branch_staff_id=exclude_branch_staff_id)
+    exclude_citizen_id = account.id if isinstance(account, CitizenUser) else None
+    ensure_email_is_unique(
+        db,
+        email,
+        exclude_admin_id=exclude_admin_id,
+        exclude_branch_staff_id=exclude_branch_staff_id,
+        exclude_citizen_id=exclude_citizen_id,
+    )
 
     account.email = email
     account.status = user.status
@@ -275,8 +352,14 @@ async def update_user(
         account.role = user.role
         account.branch_id = user.branch_id
         account.full_name = user.full_name or account.full_name or username
+        if user.role == "branch_staff":
+            account.service_window = normalize_branch_service_window(user.service_window)
+            account.account_scope = "queue_window"
+        else:
+            account.service_window = None
+            account.account_scope = "full_branch"
         branch = db.query(Branch).filter(Branch.id == user.branch_id).first()
-        branch_name = branch.name if branch else "Unassigned Branch"
+        branch_name = (get_decrypted_or_raw(branch, "name") or branch.name) if branch else "Unassigned Branch"
     else:
         if user.role != "public":
             raise HTTPException(status_code=400, detail="Citizen accounts must keep a public role")
@@ -306,8 +389,9 @@ async def deactivate_user(
 ):
     require_accounts_access(current_user)
 
-    if payload is None or not payload.current_admin_password or not pwd_context.verify(payload.current_admin_password, current_user.hashed_password):
-        raise HTTPException(status_code=401, detail="Incorrect main admin password")
+    if payload is None:
+        raise HTTPException(status_code=401, detail=f"Incorrect {protected_admin_label(current_user)} password")
+    verify_protected_account_password(current_user, payload.current_admin_password)
 
     account = find_account(db, user_id, role)
     if not account:
@@ -335,8 +419,9 @@ async def delete_user(
 ):
     require_accounts_access(current_user)
 
-    if payload is None or not payload.current_admin_password or not pwd_context.verify(payload.current_admin_password, current_user.hashed_password):
-        raise HTTPException(status_code=401, detail="Incorrect main admin password")
+    if payload is None:
+        raise HTTPException(status_code=401, detail=f"Incorrect {protected_admin_label(current_user)} password")
+    verify_protected_account_password(current_user, payload.current_admin_password)
 
     account = find_account(db, user_id, role)
     if not account:

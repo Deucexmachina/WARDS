@@ -14,6 +14,7 @@ const EMPTY_FORM = {
   full_name: '',
   role: 'branch_staff',
   branch_id: null,
+  service_window: '',
   status: 'Active',
 };
 
@@ -22,7 +23,24 @@ const BRANCH_ACCOUNT_ROLE_ORDER = {
   branch_staff: 1,
 };
 
+const SERVICE_WINDOW_OPTIONS = [
+  { value: 'RPT', label: 'RPT' },
+  { value: 'BUSINESS', label: 'BT' },
+  { value: 'MISC', label: 'MISC' },
+];
+
+const INTERNAL_BRANCH_EMAIL_PATTERN = /^[A-Za-z0-9._-]+@branch\.local$/i;
+
 const Accounts = () => {
+  const adminUser = (() => {
+    try {
+      return JSON.parse(localStorage.getItem('adminUser') || '{}');
+    } catch {
+      return {};
+    }
+  })();
+  const verifierLabel = adminUser?.internal_role === 'superadmin' ? 'Super Admin' : 'Main Admin';
+  const verifierLabelLower = verifierLabel.toLowerCase();
   const [accounts, setAccounts] = useState([]);
   const [branches, setBranches] = useState([]);
   const [showModal, setShowModal] = useState(false);
@@ -44,6 +62,19 @@ const Accounts = () => {
   });
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [emailError, setEmailError] = useState('');
+
+  const getServiceWindowLabel = (value) => {
+    if (value === 'BUSINESS') return 'BT';
+    return value || 'Not Assigned';
+  };
+
+  const getAccountEmailValidationMessage = (email, role) => {
+    const trimmedEmail = String(email || '').trim();
+    if (role === 'branch_staff' && INTERNAL_BRANCH_EMAIL_PATTERN.test(trimmedEmail)) {
+      return '';
+    }
+    return getEmailValidationMessage(trimmedEmail);
+  };
 
   useEffect(() => {
     fetchAccounts(1);
@@ -91,6 +122,18 @@ const Accounts = () => {
     }
   };
 
+  const updateAccountInState = (updatedAccount) => {
+    if (!updatedAccount?.id || !updatedAccount?.role) {
+      return;
+    }
+
+    setAccounts((current) => current.map((account) => (
+      account.id === updatedAccount.id && account.role === updatedAccount.role
+        ? { ...account, ...updatedAccount }
+        : account
+    )));
+  };
+
   const handlePageChange = (nextPage) => {
     if (nextPage < 1 || nextPage > pagination.total_pages || nextPage === pagination.page) {
       return;
@@ -101,9 +144,22 @@ const Accounts = () => {
 
   const handleInputChange = (event) => {
     const { name, value } = event.target;
-    setFormData({ ...formData, [name]: value });
+    if (name === 'role') {
+      const nextState = { ...formData, role: value };
+      if (value !== 'branch_staff') {
+        nextState.service_window = '';
+      }
+      setFormData(nextState);
+      setEmailError(getAccountEmailValidationMessage(nextState.email, value));
+      if (error) {
+        setError('');
+      }
+      return;
+    }
+    const nextState = { ...formData, [name]: value };
+    setFormData(nextState);
     if (name === 'email') {
-      setEmailError(getEmailValidationMessage(value));
+      setEmailError(getAccountEmailValidationMessage(value, formData.role));
     }
     if (error) {
       setError('');
@@ -128,6 +184,7 @@ const Accounts = () => {
       full_name: account.full_name || '',
       role: account.role,
       branch_id: account.branch_id,
+      service_window: account.service_window || '',
       status: account.status,
     });
     setError('');
@@ -145,7 +202,7 @@ const Accounts = () => {
       return;
     }
 
-    const nextEmailError = getEmailValidationMessage(formData.email);
+    const nextEmailError = getAccountEmailValidationMessage(formData.email, formData.role);
     if (nextEmailError) {
       setEmailError(nextEmailError);
       setError('Please correct the highlighted email field.');
@@ -167,6 +224,11 @@ const Accounts = () => {
 
     if ((formData.role === 'branch_admin' || formData.role === 'branch_staff') && !formData.branch_id) {
       setError('Please assign a branch for branch accounts.');
+      return;
+    }
+
+    if (formData.role === 'branch_staff' && !formData.service_window) {
+      setError('Please select the assigned queue/service role for this branch staff account.');
       return;
     }
 
@@ -226,13 +288,14 @@ const Accounts = () => {
   };
 
   const closeAuthModal = () => {
+    setError('');
     setAuthModal({ mode: null, account: null, password: '' });
     setPendingAccountSave(null);
   };
 
   const handleConfirmProtectedAction = async () => {
     if (!authModal.password) {
-      setError('Please enter your main admin password to continue.');
+      setError(`Please enter your ${verifierLabelLower} password to continue.`);
       return;
     }
 
@@ -242,10 +305,11 @@ const Accounts = () => {
       setSuccessMessage('');
 
       if (authModal.mode === 'edit' && pendingAccountSave) {
-        await accountAPI.update(pendingAccountSave.id, {
+        const response = await accountAPI.update(pendingAccountSave.id, {
           ...pendingAccountSave.payload,
           current_admin_password: authModal.password,
         });
+        updateAccountInState(response.data);
         await fetchAccounts(pagination.page);
         setShowModal(false);
         setFormData(EMPTY_FORM);
@@ -284,7 +348,7 @@ const Accounts = () => {
   const getRoleDisplay = (role) => {
     const roleMap = {
       main_admin: 'Main Admin',
-      superadmin: 'Superadmin',
+      superadmin: 'Super Admin',
       branch_admin: 'Branch Admin',
       branch_staff: 'Branch Staff',
       admin: 'Admin',
@@ -337,6 +401,7 @@ const Accounts = () => {
             <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Email</th>
             <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Branch</th>
             <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Role</th>
+            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Queue Role</th>
             <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
             <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Last Login</th>
             <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
@@ -345,7 +410,7 @@ const Accounts = () => {
         <tbody className="bg-white divide-y divide-gray-200">
           {rows.length === 0 ? (
             <tr>
-              <td colSpan="7" className="px-6 py-6 text-sm text-center text-gray-500">No accounts found.</td>
+              <td colSpan="8" className="px-6 py-6 text-sm text-center text-gray-500">No accounts found.</td>
             </tr>
           ) : (
             rows.map((account) => (
@@ -359,6 +424,13 @@ const Accounts = () => {
                   <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getRoleColor(account.role)}`}>
                     {getRoleDisplay(account.role)}
                   </span>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                  {account.role === 'branch_staff'
+                    ? getServiceWindowLabel(account.service_window_label || account.service_window)
+                    : account.role === 'branch_admin'
+                    ? 'Full Branch'
+                    : 'N/A'}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
@@ -597,11 +669,11 @@ const Accounts = () => {
                     <div>
                       <label className="block text-sm font-semibold text-slate-700 mb-2">Email Address</label>
                       <input
-                        type="email"
+                        type="text"
+                        inputMode="email"
                         name="email"
                         value={formData.email}
                         onChange={handleInputChange}
-                        pattern="^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$"
                         className={`w-full rounded-xl border px-4 py-3 text-sm font-medium placeholder-slate-400 shadow-sm transition-colors focus:ring-2 focus:outline-none ${
                           emailError 
                             ? 'border-red-300 bg-red-50 text-red-900 placeholder-red-300 focus:border-red-500 focus:ring-red-500/20' 
@@ -660,7 +732,7 @@ const Accounts = () => {
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                             </svg>
                             <p className="text-xs font-medium text-amber-800">
-                              Saving changes will require your main admin password for verification.
+                              Saving changes will require your {verifierLabelLower} password for verification.
                             </p>
                           </div>
                         )}
@@ -704,7 +776,7 @@ const Accounts = () => {
                   </div>
 
                   {(formData.role === 'branch_admin' || formData.role === 'branch_staff') && (
-                    <div className="mt-4">
+                    <div className="mt-4 space-y-4">
                       <label className="block text-sm font-semibold text-slate-700 mb-2">Branch Assignment</label>
                       <select
                         name="branch_id"
@@ -718,6 +790,27 @@ const Accounts = () => {
                           <option key={branch.id} value={branch.id}>{branch.name}</option>
                         ))}
                       </select>
+
+                      {formData.role === 'branch_staff' && (
+                        <div>
+                          <label className="block text-sm font-semibold text-slate-700 mb-2">Assigned Queue / Service Role</label>
+                          <select
+                            name="service_window"
+                            value={formData.service_window}
+                            onChange={handleInputChange}
+                            className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm font-medium text-slate-900 shadow-sm transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:outline-none"
+                            required
+                          >
+                            <option value="">Select Queue / Service Role</option>
+                            {SERVICE_WINDOW_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                          <p className="mt-2 text-xs text-slate-500">
+                            Branch staff accounts must be assigned to exactly one queue/service role: RPT, BT, or MISC.
+                          </p>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -768,7 +861,7 @@ const Accounts = () => {
                      'Verify Account Deletion'}
                   </h3>
                   <p className="mt-1 text-sm text-slate-500">
-                    Confirm your identity to proceed with this action
+                    Review the change, then confirm your identity to proceed
                   </p>
                 </div>
                 <button
@@ -787,7 +880,7 @@ const Accounts = () => {
             <div className="flex-1 overflow-y-auto px-6 py-6 min-h-0">
               <div className="mb-6">
                 <p className="text-sm text-slate-600">
-                  Enter your main admin password to {authModal.mode} the account
+                  Enter your {verifierLabelLower} password to {authModal.mode} the account
                   {authModal.account?.username
                     ? ` "${authModal.account.username}"`
                     : authModal.account?.full_name
@@ -797,8 +890,33 @@ const Accounts = () => {
                 </p>
               </div>
 
+              {authModal.mode === 'edit' && pendingAccountSave && (
+                <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
+                  <p className="text-sm font-semibold text-blue-900">Update Summary</p>
+                  <div className="mt-2 space-y-1 text-sm text-blue-900">
+                    <p><span className="font-semibold">Role:</span> {getRoleDisplay(pendingAccountSave.payload.role)}</p>
+                    {pendingAccountSave.payload.role === 'branch_staff' ? (
+                      <p><span className="font-semibold">Assigned queue role:</span> {getServiceWindowLabel(pendingAccountSave.payload.service_window)}</p>
+                    ) : null}
+                    <p><span className="font-semibold">Email login:</span> {pendingAccountSave.payload.email}</p>
+                    {pendingAccountSave.payload.username ? (
+                      <p><span className="font-semibold">Username:</span> {pendingAccountSave.payload.username}</p>
+                    ) : null}
+                    {pendingAccountSave.payload.full_name ? (
+                      <p><span className="font-semibold">Full name:</span> {pendingAccountSave.payload.full_name}</p>
+                    ) : null}
+                    <p><span className="font-semibold">Status:</span> {pendingAccountSave.payload.status}</p>
+                    {pendingAccountSave.payload.password ? (
+                      <p><span className="font-semibold">Password:</span> Will be replaced with the new value you entered.</p>
+                    ) : (
+                      <p><span className="font-semibold">Password:</span> No password change.</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">Main Admin Password</label>
+                <label className="block text-sm font-semibold text-slate-700 mb-2">{verifierLabel} Password</label>
                 <PasswordField
                   value={authModal.password}
                   onChange={(event) => setAuthModal((previous) => ({ ...previous, password: event.target.value }))}
