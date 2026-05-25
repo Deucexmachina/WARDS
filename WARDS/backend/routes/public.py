@@ -481,11 +481,11 @@ async def get_public_system_status(db: Session = Depends(get_db)):
 
 # ============= Queueing Module =============
 
-QUEUE_NUMBER_SUFFIX_PATTERN = re.compile(r"^(?P<prefix>[A-Z]{3}-\d{8}-)(?P<sequence>\d+)$")
+QUEUE_NUMBER_SUFFIX_PATTERN = re.compile(r"^(?P<prefix>[A-Z]{3}-)(?P<sequence>\d{3})$")
 
 
 def generate_next_queue_number(db: Session, branch_name: str) -> str:
-    prefix = f"{branch_name[:3].upper()}-{datetime.now().strftime('%Y%m%d')}-"
+    prefix = f"{branch_name[:3].upper()}-"
     next_sequence = 1
     candidate_numbers = []
     for queue in db.query(Queue).all():
@@ -499,10 +499,10 @@ def generate_next_queue_number(db: Session, branch_name: str) -> str:
         if match and match.group("prefix") == prefix:
             next_sequence = int(match.group("sequence")) + 1
 
-    candidate = f"{prefix}{next_sequence:04d}"
+    candidate = f"{prefix}{next_sequence:03d}"
     while find_queue_by_queue_number(db, Queue, candidate):
         next_sequence += 1
-        candidate = f"{prefix}{next_sequence:04d}"
+        candidate = f"{prefix}{next_sequence:03d}"
 
     return candidate
 
