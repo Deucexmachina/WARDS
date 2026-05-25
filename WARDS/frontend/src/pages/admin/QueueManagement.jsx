@@ -75,7 +75,7 @@ const QueueManagement = () => {
 
   const filteredQueues = queues.filter(q => {
     if (filter === 'all') return true;
-    return q.status === filter;
+    return (q.status || '').toLowerCase() === filter.toLowerCase();
   });
 
   if (loading) {
@@ -167,9 +167,9 @@ const QueueManagement = () => {
                   <td className="px-6 py-4 whitespace-nowrap">{queue.service_type}</td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                      queue.status === 'Waiting' ? 'bg-yellow-100 text-yellow-800' :
-                      queue.status === 'Serving' ? 'bg-green-100 text-green-800' :
-                      queue.status === 'Completed' ? 'bg-gray-100 text-gray-800' :
+                      (queue.status || '').toLowerCase() === 'waiting' ? 'bg-yellow-100 text-yellow-800' :
+                      (queue.status || '').toLowerCase() === 'serving' ? 'bg-green-100 text-green-800' :
+                      (queue.status || '').toLowerCase() === 'completed' ? 'bg-gray-100 text-gray-800' :
                       'bg-red-100 text-red-800'
                     }`}>
                       {queue.status}
@@ -179,7 +179,7 @@ const QueueManagement = () => {
                     {formatUtc8Time(queue.created_at)}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    {queue.status === 'Waiting' && (
+                    {(queue.status || '').toLowerCase() === 'waiting' && (
                       <button
                         onClick={() => handleCallQueue(queue.id)}
                         disabled={queueUnavailable}
@@ -188,7 +188,7 @@ const QueueManagement = () => {
                         Call
                       </button>
                     )}
-                    {queue.status === 'Serving' && (
+                    {(queue.status || '').toLowerCase() === 'serving' && (
                       <button
                         onClick={() => handleCompleteQueue(queue.id)}
                         disabled={queueUnavailable}
@@ -197,7 +197,7 @@ const QueueManagement = () => {
                         Complete
                       </button>
                     )}
-                    {queue.status === 'Waiting' && (
+                    {(queue.status || '').toLowerCase() === 'waiting' && (
                       <button
                         onClick={() => handleSkipQueue(queue.id)}
                         disabled={queueUnavailable}

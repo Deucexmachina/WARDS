@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import api from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
+import { announceQueue, isAnnouncementActive } from '../../utils/queueAnnouncement';
 
 const PAGE_SIZE = 10;
 const DEFAULT_DISABLED_MESSAGE = 'This service is currently unavailable because it has been disabled by system administration.';
@@ -266,21 +267,21 @@ const QueueSection = ({
                             <>
                               <button
                                 onClick={() => onAction('serve', queue)}
-                                disabled={queue.status !== 'called' || queueUnavailable}
+                                disabled={(queue.status || '').toLowerCase() !== 'called' || queueUnavailable}
                                 className="rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white transition hover:bg-blue-700 disabled:opacity-40"
                               >
                                 Serve
                               </button>
                               <button
                                 onClick={() => onAction('skip', queue)}
-                                disabled={!['called', 'serving'].includes(queue.status) || queueUnavailable}
+                                disabled={!['called', 'serving'].includes((queue.status || '').toLowerCase()) || queueUnavailable}
                                 className="rounded-lg bg-slate-600 px-3 py-1.5 font-semibold text-white transition hover:bg-slate-700 disabled:opacity-40"
                               >
                                 Skip
                               </button>
                               <button
                                 onClick={() => onAction('complete', queue)}
-                                disabled={queue.status !== 'serving' || queueUnavailable}
+                                disabled={(queue.status || '').toLowerCase() !== 'serving' || queueUnavailable}
                                 className="rounded-lg bg-emerald-600 px-3 py-1.5 font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-40"
                               >
                                 Complete
@@ -451,6 +452,7 @@ const QueueManagement = () => {
   const [serviceTypeFilter, setServiceTypeFilter] = useState('all');
   const [windowFilter, setWindowFilter] = useState('all');
   const [queueNumberFilter, setQueueNumberFilter] = useState('');
+  const [isAnnouncementPlaying, setIsAnnouncementPlaying] = useState(false);
   const [searchFilter, setSearchFilter] = useState('');
   const [historySearch, setHistorySearch] = useState({
     RPT: '',
@@ -538,7 +540,20 @@ const QueueManagement = () => {
 
     try {
       if (action === 'call-next') {
-        await api.post('/branch/queue/call-next');
+        const response = await api.post('/branch/queue/call-next');
+        const calledQueue = response.data;
+        
+        // Trigger voice announcement
+        if (calledQueue && calledQueue.queue_number) {
+          setIsAnnouncementPlaying(true);
+          try {
+            await announceQueue(calledQueue.queue_number, calledQueue.service_type);
+          } catch (announcementError) {
+            console.error('Voice announcement failed:', announcementError);
+          } finally {
+            setIsAnnouncementPlaying(false);
+          }
+        }
       } else if (action === 'delete-skipped') {
         await api.delete('/branch/queue/skipped');
       } else if (action === 'delete') {
@@ -849,10 +864,10 @@ const QueueManagement = () => {
           <div className="flex flex-col gap-3 sm:flex-row">
             <button
               onClick={() => performAction('call-next')}
-              disabled={queueUnavailable || Boolean(activeQueue) || isBranchAdmin}
+              disabled={queueUnavailable || Boolean(activeQueue) || isBranchAdmin || isAnnouncementPlaying}
               className="rounded-xl bg-primary px-6 py-3 font-semibold text-white transition hover:bg-secondary disabled:opacity-50"
             >
-              Call Next
+              {isAnnouncementPlaying ? 'Announcing...' : 'Call Next'}
             </button>
             <button
               onClick={() => performAction('delete-skipped')}
