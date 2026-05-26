@@ -52,6 +52,15 @@ def serialize_manila_datetime(value: Optional[datetime]) -> Optional[str]:
         return utc_time.astimezone(MANILA_TIMEZONE).isoformat()
     return value.astimezone(MANILA_TIMEZONE).isoformat()
 
+def serialize_manila_native_datetime(value: Optional[datetime]) -> Optional[str]:
+    """Serialize datetime that is already in Manila time (not UTC)"""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        # This datetime is already in Manila time, just add timezone info
+        return value.replace(tzinfo=MANILA_TIMEZONE).isoformat()
+    return value.astimezone(MANILA_TIMEZONE).isoformat()
+
 
 def serialize_public_announcement(announcement: Announcement):
     branch_name = (get_decrypted_or_raw(announcement.branch, "name") or announcement.branch.name) if announcement.branch else None
@@ -901,8 +910,8 @@ async def get_my_active_ticket(
             "status": queue_value(active_queue, "status"),
             "position": position,
             "estimated_wait_time": active_queue.estimated_wait_time,
-            "recommended_arrival": serialize_manila_datetime(active_queue.recommended_arrival),
-            "appointment_time": serialize_manila_datetime(active_queue.appointment_time),
+            "recommended_arrival": serialize_manila_native_datetime(active_queue.recommended_arrival),
+            "appointment_time": serialize_manila_native_datetime(active_queue.appointment_time),
             "created_at": serialize_manila_datetime(active_queue.created_at),
             "served_at": serialize_manila_datetime(active_queue.served_at),
         }
