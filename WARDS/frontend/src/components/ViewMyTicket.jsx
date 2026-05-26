@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { queueAPI } from '../services/api';
+import api from '../services/api';
 import { formatUtc8DateTime } from '../utils/dateTime';
 
 const ViewMyTicket = ({ onClose }) => {
@@ -9,13 +9,17 @@ const ViewMyTicket = ({ onClose }) => {
 
   useEffect(() => {
     fetchTicket();
+    
+    // Set up polling for real-time updates every 10 seconds
+    const interval = setInterval(fetchTicket, 10000);
+    return () => clearInterval(interval);
   }, []);
 
   const fetchTicket = async () => {
     try {
-      setLoading(true);
+      setLoading(loading && !ticket); // Only show loading on first load
       setError(null);
-      const response = await queueAPI.getMyActiveTicket();
+      const response = await api.get('/public/queue/my-ticket');
       if (response.data.has_active_ticket) {
         setTicket(response.data.ticket);
       } else {
@@ -23,7 +27,11 @@ const ViewMyTicket = ({ onClose }) => {
       }
     } catch (err) {
       console.error('Failed to fetch ticket:', err);
-      setError(err.response?.data?.detail || 'Failed to load your ticket. Please try again.');
+      if (err.response?.status === 401) {
+        setError('Please log in to view your ticket.');
+      } else {
+        setError(err.response?.data?.detail || 'Failed to load your ticket. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -36,22 +44,27 @@ const ViewMyTicket = ({ onClose }) => {
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
     return formatUtc8DateTime(dateString, 'en-US', {
+      year: 'numeric',
       month: 'short',
       day: 'numeric',
-      hour: '2-digit',
+      hour: 'numeric',
       minute: '2-digit',
-      second: undefined,
+      hour12: true,
     });
   };
 
   const getStatusColor = (status) => {
+    const statusLower = (status || '').toLowerCase();
     const colors = {
-      'Waiting': 'bg-yellow-100 text-yellow-800 border-yellow-200',
-      'Called': 'bg-blue-100 text-blue-800 border-blue-200',
-      'Serving': 'bg-green-100 text-green-800 border-green-200',
-      'Pending': 'bg-gray-100 text-gray-800 border-gray-200',
+      'waiting': 'bg-yellow-100 text-yellow-800 border-yellow-200',
+      'pending': 'bg-gray-100 text-gray-800 border-gray-200',
+      'called': 'bg-blue-100 text-blue-800 border-blue-200',
+      'serving': 'bg-green-100 text-green-800 border-green-200',
+      'completed': 'bg-emerald-100 text-emerald-800 border-emerald-200',
+      'skipped': 'bg-orange-100 text-orange-800 border-orange-200',
+      'cancelled': 'bg-red-100 text-red-800 border-red-200',
     };
-    return colors[status] || 'bg-gray-100 text-gray-800 border-gray-200';
+    return colors[statusLower] || 'bg-gray-100 text-gray-800 border-gray-200';
   };
 
   if (loading) {
@@ -143,7 +156,7 @@ const ViewMyTicket = ({ onClose }) => {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white shadow-2xl">
         {/* Header */}
-        <div className="border-b border-slate-200 bg-white px-6 py-4 print:hidden">
+        <div className="border-b border-slate-200 bg-white px-6 py-4 print:hidden sticky top-0 z-10">
           <div className="flex items-center justify-between">
             <h3 className="text-xl font-bold text-primary">My Queue Ticket</h3>
             <button
@@ -165,7 +178,7 @@ const ViewMyTicket = ({ onClose }) => {
             <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">Queue Number</p>
             <p className="mt-2 text-5xl font-bold text-primary">{ticket.queue_number}</p>
             <div className={`mt-4 inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-sm font-semibold ${getStatusColor(ticket.status)}`}>
-              <span className="h-2 w-2 rounded-full bg-current"></span>
+              <span className="h-2 w-2 rounded-full bg-current animate-pulse"></span>
               {ticket.status}
             </div>
           </div>

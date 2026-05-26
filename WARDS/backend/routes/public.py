@@ -847,34 +847,6 @@ async def register_queue(
         "message": "Queue registration successful. Please arrive at the recommended time."
     }
 
-@router.get("/queue/{queue_number}")
-async def check_queue_status(queue_number: str, db: Session = Depends(get_db)):
-    """Check queue status by queue number"""
-    queue = find_queue_by_queue_number(db, Queue, queue_number)
-    if not queue:
-        raise HTTPException(status_code=404, detail="Queue not found")
-    
-    branch = db.query(Branch).filter(Branch.id == queue.branch_id).first()
-    
-    # Calculate position in queue
-    position = db.query(Queue).filter(
-        and_(
-            Queue.branch_id == queue.branch_id,
-            hash_aware_match(Queue, "status", "Waiting"),
-            Queue.created_at < queue.created_at
-        )
-    ).count() + 1 if queue_value(queue, "status") == "Waiting" else 0
-    
-    return {
-        "queue_number": queue_value(queue, "queue_number"),
-        "branch_name": (get_decrypted_or_raw(branch, "name") or branch.name) if branch else "Unknown",
-        "service_type": queue_value(queue, "service_type"),
-        "status": queue_value(queue, "status"),
-        "position": position,
-        "estimated_wait_time": queue.estimated_wait_time,
-        "created_at": queue.created_at.isoformat()
-    }
-
 @router.get("/queue/my-ticket")
 async def get_my_active_ticket(
     db: Session = Depends(get_db),
@@ -918,7 +890,7 @@ async def get_my_active_ticket(
             "id": active_queue.id,
             "queue_number": queue_value(active_queue, "queue_number"),
             "branch_name": (get_decrypted_or_raw(branch, "name") or branch.name) if branch else "Unknown",
-            "branch_address": (get_decrypted_or_raw(branch, "address") or branch.address) if branch else None,
+            "branch_address": (get_decrypted_or_raw(branch, "location") or branch.location) if branch else None,
             "service_type": queue_value(active_queue, "service_type"),
             "queue_type": queue_value(active_queue, "queue_type"),
             "taxpayer_name": queue_value(active_queue, "taxpayer_name"),
@@ -932,6 +904,34 @@ async def get_my_active_ticket(
             "created_at": serialize_manila_datetime(active_queue.created_at),
             "served_at": serialize_manila_datetime(active_queue.served_at),
         }
+    }
+
+@router.get("/queue/{queue_number}")
+async def check_queue_status(queue_number: str, db: Session = Depends(get_db)):
+    """Check queue status by queue number"""
+    queue = find_queue_by_queue_number(db, Queue, queue_number)
+    if not queue:
+        raise HTTPException(status_code=404, detail="Queue not found")
+    
+    branch = db.query(Branch).filter(Branch.id == queue.branch_id).first()
+    
+    # Calculate position in queue
+    position = db.query(Queue).filter(
+        and_(
+            Queue.branch_id == queue.branch_id,
+            hash_aware_match(Queue, "status", "Waiting"),
+            Queue.created_at < queue.created_at
+        )
+    ).count() + 1 if queue_value(queue, "status") == "Waiting" else 0
+    
+    return {
+        "queue_number": queue_value(queue, "queue_number"),
+        "branch_name": (get_decrypted_or_raw(branch, "name") or branch.name) if branch else "Unknown",
+        "service_type": queue_value(queue, "service_type"),
+        "status": queue_value(queue, "status"),
+        "position": position,
+        "estimated_wait_time": queue.estimated_wait_time,
+        "created_at": queue.created_at.isoformat()
     }
 
 @router.get("/queue/history")
