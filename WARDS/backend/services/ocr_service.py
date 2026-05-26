@@ -249,7 +249,7 @@ class OCRService:
     def _parse_receipt_text(self, text: str, filename: str, category: str) -> Dict[str, Any]:
         fallback_source = f"{filename}\n{text}".strip()
 
-        ref_number = self._extract_reference_value(fallback_source, category)
+        ref_number = self._clean_reference_value(self._extract_reference_value(fallback_source, category))
         taxpayer_name = self._extract_taxpayer_name(fallback_source, category)
         transaction_date = self._normalize_transaction_date(self._extract_transaction_date(fallback_source))
         amount = self._extract_amount(fallback_source, category)
@@ -372,6 +372,8 @@ class OCRService:
 
         return self._match(
             [
+                r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\s+([0-9]{5,}\s*[A-Z]?)\b",
+                r"(?:official\s*receipt\s*)?(?:no\.?|number|n[o0]?)\s*[:#\s-]*([0-9]{5,}\s*[A-Z]?)\b",
                 r"(?:machine\s*validation\s*no\.?)[:#\s-]*([A-Z0-9-]{10,})",
                 r"(?:reference\s*(?:no\.?|number)?)[:#\s-]*([A-Z0-9-]{6,})",
                 r"\b([A-Z]-\d{3}-\d{5})\b",
@@ -380,9 +382,6 @@ class OCRService:
         )
 
     def _extract_taxpayer_name(self, text: str, category: str) -> str:
-        if category == "MISC":
-            return ""
-
         lines = [line.strip() for line in text.splitlines() if line.strip()]
         stop_words = (
             "NATURE OF COLLECTION",
@@ -393,12 +392,16 @@ class OCRService:
             "TOTAL",
             "DATE",
         )
+        name_labels = r"payor|payor'?s?|payer|pavor|payr|taxpayer|received\s*from|name"
 
         for index, line in enumerate(lines):
-            if re.search(r"\b(payor|payer|taxpayer|received\s*from|name)\b", line, re.IGNORECASE):
-                candidate = re.sub(r"(?i).*\b(payor|payer|taxpayer|received\s*from|name)\b[:#\s-]*", "", line).strip()
-                if not candidate and index + 1 < len(lines):
-                    candidate = lines[index + 1].strip()
+            if re.search(rf"\b({name_labels})\b", line, re.IGNORECASE):
+                candidate = re.sub(rf"(?i).*\b({name_labels})\b[:#\s-]*", "", line).strip()
+                if not self._looks_like_person_name(candidate):
+                    for next_line in lines[index + 1:index + 4]:
+                        candidate = next_line.strip()
+                        if self._looks_like_person_name(candidate):
+                            break
 
                 candidate = re.sub(r"\s{2,}", " ", candidate).strip(" -:")
                 upper_candidate = candidate.upper()
@@ -411,6 +414,7 @@ class OCRService:
                 if category == "BUSINESS":
                     candidate = re.sub(r"^\d{2}-\d{6}\s+", "", candidate).strip()
 
+                candidate = self._clean_name_candidate(candidate)
                 if candidate:
                     return candidate.title()
 
@@ -420,13 +424,16 @@ class OCRService:
             ],
             text.upper(),
         )
+        fallback = self._clean_name_candidate(fallback)
         return fallback.title() if fallback else ""
 
     def _extract_transaction_date(self, text: str) -> str:
         return self._match(
             [
                 r"\b(\d{1,2}/\d{1,2}/\d{4})\b",
+                r"\b(\d{1,2}/\d{1,2}/\d{2})\b",
                 r"\b(\d{1,2}-\d{1,2}-\d{4})\b",
+                r"\b(\d{1,2}-\d{1,2}-\d{2})\b",
                 r"\b(\d{4}/\d{1,2}/\d{1,2})\b",
                 r"\b(\d{4}-\d{1,2}-\d{1,2})\b",
             ],
@@ -462,6 +469,11 @@ class OCRService:
             if line_item_amounts:
                 return round(sum(line_item_amounts), 2)
 
+        if category == "MISC":
+            misc_amounts = self._extract_misc_amounts(text)
+            if misc_amounts:
+                return max(misc_amounts)
+
         generic_amounts = [
             self._safe_float(match)
             for match in re.findall(r"\b([0-9][0-9,]*\.[0-9]{2})\b", text)
@@ -471,6 +483,64 @@ class OCRService:
             return max(generic_amounts)
         return None
 
+    def _extract_misc_amounts(self, text: str) -> list[float]:
+        amounts: list[float] = []
+        for line in text.splitlines():
+            upper_line = line.upper()
+            if re.search(r"\b(DATE|NO\.?|NUMBER|FORM|REVISED|ACCOUNTABLE)\b", upper_line):
+                continue
+            if not re.search(r"(AMOUNT|TOTAL|PESO|PHP|₱|\bP\s*[0-9])", upper_line):
+                continue
+            for match in re.findall(r"(?:PHP|P|₱)?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*-?", line, re.IGNORECASE):
+                value = self._safe_float(match)
+                if value is not None and 0 < value < 1000000:
+                    amounts.append(round(value, 2))
+
+        if amounts:
+            return amounts
+
+        return [
+            round(value, 2)
+            for value in (
+                self._safe_float(match)
+                for match in re.findall(r"(?:PHP|P|₱)\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)", text, re.IGNORECASE)
+            )
+            if value is not None and 0 < value < 1000000
+        ]
+
+    def _clean_name_candidate(self, value: str | None) -> str:
+        candidate = re.sub(r"[^A-Za-zÀ-ÿ,.' -]", " ", value or "")
+        candidate = re.sub(r"\s{2,}", " ", candidate).strip(" ,.-:")
+        if not self._looks_like_person_name(candidate):
+            return ""
+        return candidate
+
+    def _looks_like_person_name(self, value: str | None) -> bool:
+        candidate = re.sub(r"\s{2,}", " ", value or "").strip(" -:")
+        if len(candidate) < 4 or not re.search(r"[A-Za-z]", candidate):
+            return False
+        upper_candidate = candidate.upper()
+        blocked_fragments = (
+            "OFFICIAL RECEIPT",
+            "REPUBLIC",
+            "QUEZON CITY",
+            "OFFICE OF THE TREASURER",
+            "NATURE OF COLLECTION",
+            "AMOUNT",
+            "FUND",
+            "ACCOUNT",
+            "CODE",
+            "TRIPLICATE",
+            "ACCOUNTABLE FORM",
+            "REVISED",
+            "PAYOR",
+            "PAYER",
+        )
+        if any(fragment in upper_candidate for fragment in blocked_fragments):
+            return False
+        letters = re.sub(r"[^A-Za-zÀ-ÿ]", "", candidate)
+        return len(letters) >= 4
+
     def _safe_float(self, value: str | None) -> float | None:
         if not value:
             return None
@@ -478,6 +548,13 @@ class OCRService:
             return float(value.replace(",", ""))
         except ValueError:
             return None
+
+    def _clean_reference_value(self, value: str | None) -> str:
+        candidate = re.sub(r"\s+", " ", value or "").strip()
+        match = re.fullmatch(r"([0-9]{5,})\s+([A-Z])", candidate, re.IGNORECASE)
+        if match:
+            return f"{match.group(1)} {match.group(2).upper()}"
+        return candidate
 
     def _normalize_transaction_date(self, value: str) -> str:
         if not value:
