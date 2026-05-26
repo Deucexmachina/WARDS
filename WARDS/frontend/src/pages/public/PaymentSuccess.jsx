@@ -34,6 +34,15 @@ const PaymentSuccess = () => {
   };
 
   useEffect(() => {
+    if (refNumber) {
+      navigate(`/payment/status?ref=${encodeURIComponent(refNumber)}${isMerchantReturn ? '&merchant_return=1' : ''}`, { replace: true });
+      return undefined;
+    }
+
+    return undefined;
+  }, [isMerchantReturn, navigate, refNumber]);
+
+  useEffect(() => {
     let intervalId;
 
     const checkPaymentStatus = async () => {

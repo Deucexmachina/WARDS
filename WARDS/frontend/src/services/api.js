@@ -199,6 +199,8 @@ export const branchReportAPI = {
   getAll: (params) => api.get('/branch/reports', { params }),
   getDetails: (reportId) => api.get(`/branch/reports/${reportId}`),
   delete: (reportId) => api.delete(`/branch/reports/${reportId}`),
+  getAutomation: () => api.get('/branch/reports/automation'),
+  updateAutomation: (data) => api.put('/branch/reports/automation', data),
 };
 
 export const branchSettingsAPI = {

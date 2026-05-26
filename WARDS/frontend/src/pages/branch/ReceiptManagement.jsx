@@ -3,6 +3,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { receiptAPI } from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
+import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
+import ProcessingModal from '../../components/ProcessingModal';
+
+const SECTION_PAGE_SIZE = 5;
+const MAX_RELEASE_IMAGE_SIZE = 5 * 1024 * 1024;
+const ALLOWED_RELEASE_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
 const normalizeReceiptCategory = (value) => {
   const normalized = (value || '').trim().toUpperCase();
@@ -67,6 +73,36 @@ const detectReceiptCategoryFromDraft = (draft, fallbackCategory) => {
   return normalizeReceiptCategory(draft?.detected_category || fallbackCategory || draft?.tax_type || 'RPT');
 };
 
+const paginateRows = (rows, page) => rows.slice((page - 1) * SECTION_PAGE_SIZE, page * SECTION_PAGE_SIZE);
+
+const PaginationControls = ({ page, totalPages, totalItems, onPageChange }) => {
+  if (totalItems <= SECTION_PAGE_SIZE) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-slate-100 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-sm text-slate-500">Page {page} of {totalPages}</p>
+      <div className="flex gap-3">
+        <button
+          onClick={() => onPageChange(page - 1)}
+          disabled={page <= 1}
+          className="rounded-xl bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-300 disabled:opacity-50"
+        >
+          Previous
+        </button>
+        <button
+          onClick={() => onPageChange(page + 1)}
+          disabled={page >= totalPages}
+          className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-secondary disabled:opacity-50"
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const ReceiptManagement = () => {
   const [selectedFile, setSelectedFile] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState('RPT');
@@ -84,6 +120,22 @@ const ReceiptManagement = () => {
   const [uploadingReleaseId, setUploadingReleaseId] = useState(null);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [selectedCompletedRequest, setSelectedCompletedRequest] = useState(null);
+  const [selectedReleaseCopyPreview, setSelectedReleaseCopyPreview] = useState(null);
+  const [releaseTarget, setReleaseTarget] = useState(null);
+  const [releasing, setReleasing] = useState(false);
+  const [releaseUploadDrafts, setReleaseUploadDrafts] = useState({});
+  const [sectionPages, setSectionPages] = useState({
+    immediate: 1,
+    appointment: 1,
+    completedRPT: 1,
+    completedBUSINESS: 1,
+    completedMISC: 1,
+    recordsRPT: 1,
+    recordsBUSINESS: 1,
+    recordsMISC: 1,
+  });
   const [recordSearch, setRecordSearch] = useState({
     RPT: '',
     BUSINESS: '',
@@ -116,6 +168,28 @@ const ReceiptManagement = () => {
     refreshData();
   }, []);
 
+  useEffect(() => () => {
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+    }
+  }, [previewUrl]);
+
+  useEffect(() => {
+    const previewUrls = Object.values(releaseUploadDrafts)
+      .map((draft) => draft?.previewUrl)
+      .filter(Boolean);
+
+    return () => {
+      previewUrls.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [releaseUploadDrafts]);
+
+  useEffect(() => () => {
+    if (selectedReleaseCopyPreview?.imageUrl) {
+      URL.revokeObjectURL(selectedReleaseCopyPreview.imageUrl);
+    }
+  }, [selectedReleaseCopyPreview]);
+
   useEffect(() => {
     const handleBranchPaymentUpdated = () => {
       refreshData();
@@ -141,6 +215,18 @@ const ReceiptManagement = () => {
     () => pendingRequests.filter((request) => (request.requestType || '') === 'Appointment'),
     [pendingRequests]
   );
+
+  const getPaymentStatusTone = (status) => {
+    if (status === 'Verified') return 'bg-emerald-50 text-emerald-700 ring-emerald-200';
+    if (status === 'Declined') return 'bg-rose-50 text-rose-700 ring-rose-200';
+    return 'bg-amber-50 text-amber-700 ring-amber-200';
+  };
+
+  const getReleaseStatusTone = (status) => {
+    if (status === 'Released') return 'bg-emerald-50 text-emerald-700 ring-emerald-200';
+    if (status === 'Ready for Release') return 'bg-blue-50 text-blue-700 ring-blue-200';
+    return 'bg-slate-100 text-slate-700 ring-slate-200';
+  };
 
   const referenceLabel = useMemo(() => {
     if ((ocrDraft?.category || selectedCategory) === 'RPT') {
@@ -272,6 +358,29 @@ const ReceiptManagement = () => {
     [normalizedRequestHistory, historySearch.MISC]
   );
 
+  useEffect(() => {
+    setSectionPages((current) => ({
+      ...current,
+      immediate: Math.min(current.immediate, Math.max(1, Math.ceil(immediateRequests.length / SECTION_PAGE_SIZE))),
+      appointment: Math.min(current.appointment, Math.max(1, Math.ceil(appointmentRequests.length / SECTION_PAGE_SIZE))),
+      completedRPT: Math.min(current.completedRPT, Math.max(1, Math.ceil(releasedRptRequests.length / SECTION_PAGE_SIZE))),
+      completedBUSINESS: Math.min(current.completedBUSINESS, Math.max(1, Math.ceil(releasedBusinessRequests.length / SECTION_PAGE_SIZE))),
+      completedMISC: Math.min(current.completedMISC, Math.max(1, Math.ceil(releasedMiscRequests.length / SECTION_PAGE_SIZE))),
+      recordsRPT: Math.min(current.recordsRPT, Math.max(1, Math.ceil(rptRecords.length / SECTION_PAGE_SIZE))),
+      recordsBUSINESS: Math.min(current.recordsBUSINESS, Math.max(1, Math.ceil(businessTaxRecords.length / SECTION_PAGE_SIZE))),
+      recordsMISC: Math.min(current.recordsMISC, Math.max(1, Math.ceil(miscRecords.length / SECTION_PAGE_SIZE))),
+    }));
+  }, [
+    immediateRequests.length,
+    appointmentRequests.length,
+    releasedRptRequests.length,
+    releasedBusinessRequests.length,
+    releasedMiscRequests.length,
+    rptRecords.length,
+    businessTaxRecords.length,
+    miscRecords.length,
+  ]);
+
   const formatAppointmentSchedule = (appointmentTime) => {
     if (!appointmentTime) {
       return 'N/A';
@@ -289,6 +398,23 @@ const ReceiptManagement = () => {
     const file = event.target.files[0];
     if (!file) {
       return;
+    }
+
+    if (!file.type.startsWith('image/')) {
+      setSelectedFile(null);
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+      }
+      setPreviewUrl(null);
+      setOcrDraft(null);
+      setError('Please select a valid receipt image file.');
+      setSuccessMessage('');
+      event.target.value = '';
+      return;
+    }
+
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
     }
 
     setSelectedFile(file);
@@ -339,6 +465,9 @@ const ReceiptManagement = () => {
 
     try {
       await receiptAPI.saveRecord(ocrDraft);
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+      }
       setSelectedFile(null);
       setPreviewUrl(null);
       setOcrDraft(null);
@@ -351,6 +480,7 @@ const ReceiptManagement = () => {
   };
 
   const handleRelease = async (requestId) => {
+    setReleasing(true);
     try {
       setError('');
       setSuccessMessage('');
@@ -365,7 +495,23 @@ const ReceiptManagement = () => {
       await refreshData();
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to release receipt request.');
+    } finally {
+      setReleasing(false);
     }
+  };
+
+  const handleReleaseClick = (request) => {
+    setReleaseTarget(request);
+  };
+
+  const handleReleaseConfirm = async () => {
+    if (!releaseTarget) {
+      return;
+    }
+
+    const requestToRelease = releaseTarget;
+    setReleaseTarget(null);
+    await handleRelease(requestToRelease.requestId);
   };
 
   const handleCompleteAppointment = async (requestId) => {
@@ -490,9 +636,64 @@ const ReceiptManagement = () => {
     }
   };
 
-  const handleUploadReleaseCopy = async (requestId, event) => {
+  const clearReleaseUploadDraft = (requestId) => {
+    setReleaseUploadDrafts((current) => {
+      const draft = current[requestId];
+      if (draft?.previewUrl) {
+        URL.revokeObjectURL(draft.previewUrl);
+      }
+
+      const nextDrafts = { ...current };
+      delete nextDrafts[requestId];
+      return nextDrafts;
+    });
+  };
+
+  const handleSelectReleaseCopy = (requestId, event) => {
     const file = event.target.files?.[0];
+    event.target.value = '';
+
     if (!file) {
+      return;
+    }
+
+    if (!ALLOWED_RELEASE_IMAGE_TYPES.includes(file.type)) {
+      setError('Only JPG, JPEG, PNG, and WEBP files are allowed for the release copy.');
+      setSuccessMessage('');
+      return;
+    }
+
+    if (file.size > MAX_RELEASE_IMAGE_SIZE) {
+      setError('Release copy image must not exceed 5 MB.');
+      setSuccessMessage('');
+      return;
+    }
+
+    setError('');
+    setSuccessMessage('');
+
+    setReleaseUploadDrafts((current) => {
+      const existingDraft = current[requestId];
+      if (existingDraft?.previewUrl) {
+        URL.revokeObjectURL(existingDraft.previewUrl);
+      }
+
+      return {
+        ...current,
+        [requestId]: {
+          file,
+          fileName: file.name,
+          previewUrl: URL.createObjectURL(file),
+        },
+      };
+    });
+  };
+
+  const handleSubmitReleaseCopy = async (requestId) => {
+    const draft = releaseUploadDrafts[requestId];
+    if (!draft?.file) {
+      setError('Please choose an image before uploading.');
+      setSuccessMessage('');
       return;
     }
 
@@ -502,15 +703,47 @@ const ReceiptManagement = () => {
 
     try {
       const formData = new FormData();
-      formData.append('file', file);
-      await receiptAPI.uploadReleaseCopy(requestId, formData);
+      formData.append('file', draft.file);
+      const response = await receiptAPI.uploadReleaseCopy(requestId, formData);
+      clearReleaseUploadDraft(requestId);
+      setSuccessMessage(
+        response.data?.releaseCopyFilename
+          ? `Release copy uploaded successfully: ${response.data.releaseCopyFilename}`
+          : 'Release copy uploaded successfully.'
+      );
       await refreshData();
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to upload finished receipt copy.');
     } finally {
       setUploadingReleaseId(null);
-      event.target.value = '';
     }
+  };
+
+  const handlePreviewUploadedReleaseCopy = async (requestId) => {
+    try {
+      setError('');
+      const response = await receiptAPI.downloadReleaseCopy(requestId);
+      const contentType = response.headers?.['content-type'] || 'image/png';
+      const blob = response.data instanceof Blob ? response.data : new Blob([response.data], { type: contentType });
+      if (selectedReleaseCopyPreview?.imageUrl) {
+        URL.revokeObjectURL(selectedReleaseCopyPreview.imageUrl);
+      }
+
+      const blobUrl = window.URL.createObjectURL(blob);
+      setSelectedReleaseCopyPreview({
+        requestId,
+        imageUrl: blobUrl,
+      });
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to open uploaded release copy.');
+    }
+  };
+
+  const closeReleaseCopyPreview = () => {
+    if (selectedReleaseCopyPreview?.imageUrl) {
+      URL.revokeObjectURL(selectedReleaseCopyPreview.imageUrl);
+    }
+    setSelectedReleaseCopyPreview(null);
   };
 
   const handleDeleteRecord = async (recordId) => {
@@ -526,6 +759,26 @@ const ReceiptManagement = () => {
     } finally {
       setDeletingRecordId(null);
     }
+  };
+
+  const requestDeleteConfirmation = (target) => {
+    setDeleteTarget(target);
+  };
+
+  const handleDeleteTarget = async () => {
+    if (!deleteTarget) {
+      return;
+    }
+
+    if (deleteTarget.type === 'record') {
+      await handleDeleteRecord(deleteTarget.id);
+    } else if (deleteTarget.type === 'request') {
+      await handleDeleteRequest(deleteTarget.id);
+    } else if (deleteTarget.type === 'history') {
+      await handleDeleteHistoryRequest(deleteTarget.id);
+    }
+
+    setDeleteTarget(null);
   };
 
   const renderVerifiedRecordSection = ({
@@ -556,6 +809,12 @@ const ReceiptManagement = () => {
           />
         </div>
       </div>
+      {(() => {
+        const pageKey = `records${categoryKey}`;
+        const totalPages = Math.max(1, Math.ceil(rows.length / SECTION_PAGE_SIZE));
+        const visibleRows = paginateRows(rows, sectionPages[pageKey]);
+        return (
+          <>
       <div className="overflow-hidden rounded-2xl border border-slate-200">
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm text-slate-700">
@@ -572,7 +831,7 @@ const ReceiptManagement = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 bg-white">
-              {rows.map((record) => (
+              {visibleRows.map((record) => (
                 <tr key={record.id} className="transition hover:bg-slate-50">
                   {showReferenceColumn ? (
                     <td className="px-4 py-4 font-mono text-xs text-slate-600">{record.ref_number || 'N/A'}</td>
@@ -590,7 +849,16 @@ const ReceiptManagement = () => {
                         Print
                       </button>
                       <button
-                        onClick={() => handleDeleteRecord(record.id)}
+                        onClick={() => requestDeleteConfirmation({
+                          type: 'record',
+                          id: record.id,
+                          title: 'Delete this receipt record?',
+                          message: 'This will permanently remove the verified receipt record from the branch receipt list.',
+                          details: [
+                            { label: 'Taxpayer', value: record.taxpayer_name || 'N/A' },
+                            { label: referenceLabelText || 'Reference', value: record.ref_number || 'N/A' },
+                          ],
+                        })}
                         disabled={deletingRecordId === record.id}
                         className="rounded-lg bg-red-600 px-3 py-1.5 font-semibold text-white transition hover:bg-red-700 disabled:opacity-40"
                       >
@@ -609,6 +877,15 @@ const ReceiptManagement = () => {
           </div>
         )}
       </div>
+      <PaginationControls
+        page={sectionPages[pageKey]}
+        totalPages={totalPages}
+        totalItems={rows.length}
+        onPageChange={(nextPage) => setSectionPages((current) => ({ ...current, [pageKey]: nextPage }))}
+      />
+          </>
+        );
+      })()}
     </div>
   );
 
@@ -670,6 +947,12 @@ const ReceiptManagement = () => {
           />
         </div>
       </div>
+      {(() => {
+        const pageKey = `completed${categoryKey}`;
+        const totalPages = Math.max(1, Math.ceil(rows.length / SECTION_PAGE_SIZE));
+        const visibleRows = paginateRows(rows, sectionPages[pageKey]);
+        return (
+          <>
       <div className="overflow-hidden rounded-2xl border border-slate-200">
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm text-slate-700">
@@ -686,7 +969,7 @@ const ReceiptManagement = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 bg-white">
-              {rows.map((request) => (
+              {visibleRows.map((request) => (
                 <tr key={request.requestId} className="transition hover:bg-slate-50">
                   <td className="px-4 py-4 font-semibold text-slate-900">{request.requestId}</td>
                   <td className="px-4 py-4 font-medium text-slate-900">{request.taxpayerName || 'N/A'}</td>
@@ -700,13 +983,30 @@ const ReceiptManagement = () => {
                   <td className="px-4 py-4 text-slate-500">{request.processedAt ? formatUtc8DateTime(request.processedAt) : 'N/A'}</td>
                   <td className="px-4 py-4">{request.completedBy || 'N/A'}</td>
                   <td className="px-4 py-4">
-                    <button
-                      onClick={() => handleDeleteHistoryRequest(request.requestId)}
-                      disabled={deletingHistoryId === request.requestId}
-                      className="rounded-lg bg-red-600 px-3 py-1.5 font-semibold text-white transition hover:bg-red-700 disabled:opacity-40"
-                    >
-                      {deletingHistoryId === request.requestId ? 'Deleting...' : 'Delete'}
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => setSelectedCompletedRequest(request)}
+                        className="rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white transition hover:bg-blue-700"
+                      >
+                        View
+                      </button>
+                      <button
+                        onClick={() => requestDeleteConfirmation({
+                          type: 'history',
+                          id: request.requestId,
+                          title: 'Delete this completed receipt request?',
+                          message: 'This will permanently remove the completed receipt request from branch history.',
+                          details: [
+                            { label: 'Request ID', value: request.requestId },
+                            { label: 'Taxpayer', value: request.taxpayerName || 'N/A' },
+                          ],
+                        })}
+                        disabled={deletingHistoryId === request.requestId}
+                        className="rounded-lg bg-red-600 px-3 py-1.5 font-semibold text-white transition hover:bg-red-700 disabled:opacity-40"
+                      >
+                        {deletingHistoryId === request.requestId ? 'Deleting...' : 'Delete'}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -719,10 +1019,22 @@ const ReceiptManagement = () => {
           </div>
         )}
       </div>
+      <PaginationControls
+        page={sectionPages[pageKey]}
+        totalPages={totalPages}
+        totalItems={rows.length}
+        onPageChange={(nextPage) => setSectionPages((current) => ({ ...current, [pageKey]: nextPage }))}
+      />
+          </>
+        );
+      })()}
     </div>
   );
 
   const handleCancelScan = () => {
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+    }
     setSelectedFile(null);
     setPreviewUrl(null);
     setOcrDraft(null);
@@ -876,6 +1188,11 @@ const ReceiptManagement = () => {
             <p className="text-sm text-slate-500">{immediateRequests.length} active request{immediateRequests.length === 1 ? '' : 's'}</p>
           </div>
         </div>
+        {(() => {
+          const totalPages = Math.max(1, Math.ceil(immediateRequests.length / SECTION_PAGE_SIZE));
+          const visibleRows = paginateRows(immediateRequests, sectionPages.immediate);
+          return (
+            <>
         <div className="overflow-hidden rounded-2xl border border-slate-200">
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm text-slate-700">
@@ -887,13 +1204,14 @@ const ReceiptManagement = () => {
                   <th className="px-4 py-3.5 text-left">Request Type</th>
                   <th className="px-4 py-3.5 text-left">Transaction Date</th>
                   <th className="px-4 py-3.5 text-left">Reference</th>
-                  <th className="px-4 py-3.5 text-left">Status</th>
+                  <th className="px-4 py-3.5 text-left">Payment Status</th>
+                  <th className="px-4 py-3.5 text-left">Release Status</th>
                   <th className="px-4 py-3.5 text-left">Matched Record</th>
                   <th className="px-4 py-3.5 text-left">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
-                {immediateRequests.map((request) => (
+                {visibleRows.map((request) => (
                   <tr key={request.requestId} className="align-top transition hover:bg-slate-50">
                     <td className="px-4 py-4 font-semibold text-slate-900">{request.requestId}</td>
                     <td className="px-4 py-4 font-medium text-slate-900">{request.taxpayerName}</td>
@@ -902,8 +1220,13 @@ const ReceiptManagement = () => {
                     <td className="px-4 py-4">{request.transactionDate || 'N/A'}</td>
                     <td className="px-4 py-4 font-mono text-xs text-slate-600">{request.refNumber}</td>
                     <td className="px-4 py-4">
-                      <span className="inline-flex rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 ring-1 ring-amber-200">
-                        {request.status}
+                      <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${getPaymentStatusTone(request.paymentStatus)}`}>
+                        {request.paymentStatus || 'Pending'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4">
+                      <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${getReleaseStatusTone(request.releaseStatus)}`}>
+                        {request.releaseStatus || 'Not Ready for Release'}
                       </span>
                     </td>
                     <td className="px-4 py-4 text-slate-600">
@@ -914,50 +1237,110 @@ const ReceiptManagement = () => {
                           : 'Waiting for receipt upload'}
                     </td>
                     <td className="px-4 py-4">
-                      <div className="flex flex-wrap gap-2">
-                        <label className="cursor-pointer rounded-lg bg-slate-700 px-3 py-1.5 font-semibold text-white transition hover:bg-slate-800">
-                          {uploadingReleaseId === request.requestId
-                            ? 'Uploading...'
-                            : request.hasReleaseCopy
-                              ? 'Replace Image'
-                              : 'Upload Image'}
-                          <input
-                            type="file"
-                            accept=".jpg,.jpeg,.png,.webp"
-                            className="hidden"
-                            onChange={(event) => handleUploadReleaseCopy(request.requestId, event)}
-                          />
-                        </label>
-                        <button
-                          onClick={() => handleRelease(request.requestId)}
-                          disabled={!request.hasReleaseCopy}
-                          className="rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white transition hover:bg-blue-700 disabled:opacity-40"
-                        >
-                          Release Copy
-                        </button>
-                        <button
-                          onClick={() => handleDeleteRequest(request.requestId)}
-                          disabled={deletingRequestId === request.requestId}
-                          className="rounded-lg bg-red-600 px-3 py-1.5 font-semibold text-white transition hover:bg-red-700 disabled:opacity-40"
-                        >
-                          {deletingRequestId === request.requestId ? 'Deleting...' : 'Delete'}
-                        </button>
-                        <div className="basis-full rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-                          Send to: {request.email || 'No requester email'}
-                        </div>
-                        <div className="basis-full text-xs text-slate-500">
-                          {request.status === 'Payment Required'
-                            ? 'Citizen payment is still pending. Releasing now will show the payment-required message.'
-                            : request.status === 'Pending Branch Review'
-                              ? 'Citizen payment is complete. Upload the finished copy, then release it.'
-                              : request.status === 'Ready for Release'
-                                ? 'Ready to email the finished receipt copy to the citizen.'
-                                : null}
-                        </div>
-                        <div className="basis-full text-xs text-slate-500">
-                          After release, this request is marked done and transferred to its completed table.
-                        </div>
-                      </div>
+                      {(() => {
+                        const releaseDraft = releaseUploadDrafts[request.requestId];
+
+                        return (
+                          <div className="space-y-3">
+                            <div className="flex flex-wrap gap-2">
+                              <label className="cursor-pointer rounded-lg bg-slate-700 px-3 py-1.5 font-semibold text-white transition hover:bg-slate-800">
+                                {releaseDraft
+                                  ? 'Choose Different Image'
+                                  : request.hasReleaseCopy
+                                    ? 'Replace Image'
+                                    : 'Upload Image'}
+                                <input
+                                  type="file"
+                                  accept=".jpg,.jpeg,.png,.webp"
+                                  className="hidden"
+                                  onChange={(event) => handleSelectReleaseCopy(request.requestId, event)}
+                                />
+                              </label>
+                              {request.hasReleaseCopy ? (
+                                <button
+                                  onClick={() => handlePreviewUploadedReleaseCopy(request.requestId)}
+                                  className="rounded-lg bg-white px-3 py-1.5 font-semibold text-slate-700 ring-1 ring-slate-200 transition hover:bg-slate-50"
+                                >
+                                  View Image
+                                </button>
+                              ) : null}
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {releaseDraft ? (
+                                <>
+                                  <button
+                                    onClick={() => handleSubmitReleaseCopy(request.requestId)}
+                                    disabled={uploadingReleaseId === request.requestId}
+                                    className="rounded-lg bg-emerald-600 px-3 py-1.5 font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-40"
+                                  >
+                                    {uploadingReleaseId === request.requestId ? 'Uploading...' : 'Submit Image'}
+                                  </button>
+                                  <button
+                                    onClick={() => clearReleaseUploadDraft(request.requestId)}
+                                    disabled={uploadingReleaseId === request.requestId}
+                                    className="rounded-lg bg-slate-200 px-3 py-1.5 font-semibold text-slate-700 transition hover:bg-slate-300 disabled:opacity-40"
+                                  >
+                                    Cancel
+                                  </button>
+                                </>
+                              ) : null}
+                              <button
+                                onClick={() => handleReleaseClick(request)}
+                                disabled={!request.hasReleaseCopy || request.paymentStatus !== 'Verified' || releasing}
+                                className="rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white transition hover:bg-blue-700 disabled:opacity-40"
+                              >
+                                Release Copy
+                              </button>
+                              <button
+                                onClick={() => requestDeleteConfirmation({
+                                  type: 'request',
+                                  id: request.requestId,
+                                  title: 'Delete this active receipt request?',
+                                  message: 'This will permanently remove the active receipt request and its temporary branch-side workflow record.',
+                                  details: [
+                                    { label: 'Request ID', value: request.requestId },
+                                    { label: 'Taxpayer', value: request.taxpayerName || 'N/A' },
+                                  ],
+                                })}
+                                disabled={deletingRequestId === request.requestId}
+                                className="rounded-lg bg-red-600 px-3 py-1.5 font-semibold text-white transition hover:bg-red-700 disabled:opacity-40"
+                              >
+                                {deletingRequestId === request.requestId ? 'Deleting...' : 'Delete'}
+                              </button>
+                            </div>
+                            <div className="basis-full rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                              Send to: {request.email || 'No requester email'}
+                            </div>
+                            {releaseDraft ? (
+                              <div className="basis-full rounded-xl border border-slate-200 bg-white p-3">
+                                <div className="mb-2 flex items-center justify-between gap-3">
+                                  <p className="truncate text-xs font-semibold text-slate-700">{releaseDraft.fileName}</p>
+                                  <span className="text-[11px] text-slate-500">Ready to upload</span>
+                                </div>
+                                <div className="overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+                                  <img
+                                    src={releaseDraft.previewUrl}
+                                    alt={`Release copy preview for ${request.requestId}`}
+                                    className="h-40 w-full object-contain"
+                                  />
+                                </div>
+                              </div>
+                            ) : null}
+                            <div className="basis-full text-xs text-slate-500">
+                              {request.paymentStatus === 'Pending'
+                                ? 'Citizen payment is still pending.'
+                                : request.paymentStatus === 'Declined'
+                                  ? 'The latest payment attempt was declined. The request stays active until a new verified payment is received.'
+                                  : request.releaseStatus === 'Ready for Release'
+                                    ? 'Payment is verified and the request is ready for branch release.'
+                                    : 'Payment is verified. Upload the finished copy to continue the release flow.'}
+                            </div>
+                            <div className="basis-full text-xs text-slate-500">
+                              After release, this request is marked done and transferred to its completed table.
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </td>
                   </tr>
                 ))}
@@ -968,6 +1351,15 @@ const ReceiptManagement = () => {
             <div className="border-t border-slate-100 bg-slate-50 px-6 py-8 text-center text-sm text-slate-500">No immediate receipt requests for this branch.</div>
           )}
         </div>
+        <PaginationControls
+          page={sectionPages.immediate}
+          totalPages={totalPages}
+          totalItems={immediateRequests.length}
+          onPageChange={(nextPage) => setSectionPages((current) => ({ ...current, immediate: nextPage }))}
+        />
+            </>
+          );
+        })()}
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -977,6 +1369,11 @@ const ReceiptManagement = () => {
             <p className="text-sm text-slate-500">{appointmentRequests.length} scheduled request{appointmentRequests.length === 1 ? '' : 's'}</p>
           </div>
         </div>
+        {(() => {
+          const totalPages = Math.max(1, Math.ceil(appointmentRequests.length / SECTION_PAGE_SIZE));
+          const visibleRows = paginateRows(appointmentRequests, sectionPages.appointment);
+          return (
+            <>
         <div className="overflow-hidden rounded-2xl border border-slate-200">
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm text-slate-700">
@@ -988,13 +1385,13 @@ const ReceiptManagement = () => {
                   <th className="px-4 py-3.5 text-left">Transaction Date</th>
                   <th className="px-4 py-3.5 text-left">Appointment Time</th>
                   <th className="px-4 py-3.5 text-left">Reference</th>
-                  <th className="px-4 py-3.5 text-left">Status</th>
-                  <th className="px-4 py-3.5 text-left">Payment</th>
+                  <th className="px-4 py-3.5 text-left">Payment Status</th>
+                  <th className="px-4 py-3.5 text-left">Release Status</th>
                   <th className="px-4 py-3.5 text-left">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
-                {appointmentRequests.map((request) => (
+                {visibleRows.map((request) => (
                   <tr key={request.requestId} className="align-top transition hover:bg-slate-50">
                     <td className="px-4 py-4 font-semibold text-slate-900">{request.requestId}</td>
                     <td className="px-4 py-4 font-medium text-slate-900">{request.taxpayerName}</td>
@@ -1003,16 +1400,20 @@ const ReceiptManagement = () => {
                     <td className="px-4 py-4">{formatAppointmentSchedule(request.appointmentTime)}</td>
                     <td className="px-4 py-4 font-mono text-xs text-slate-600">{request.refNumber}</td>
                     <td className="px-4 py-4">
-                      <span className="inline-flex rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 ring-1 ring-amber-200">
-                        {request.status}
+                      <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${getPaymentStatusTone(request.paymentStatus)}`}>
+                        {request.paymentStatus || 'Pending'}
                       </span>
                     </td>
-                    <td className="px-4 py-4">{request.feePaid ? 'Paid' : 'Waiting for payment'}</td>
+                    <td className="px-4 py-4">
+                      <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${getReleaseStatusTone(request.releaseStatus)}`}>
+                        {request.releaseStatus || 'Not Ready for Release'}
+                      </span>
+                    </td>
                     <td className="px-4 py-4">
                       <div className="flex flex-wrap gap-2">
                         <button
                           onClick={() => handleCompleteAppointment(request.requestId)}
-                          disabled={!request.feePaid}
+                          disabled={request.paymentStatus !== 'Verified'}
                           className="rounded-lg bg-green-600 px-3 py-1.5 font-semibold text-white transition hover:bg-green-700 disabled:opacity-40"
                         >
                           Complete
@@ -1034,6 +1435,15 @@ const ReceiptManagement = () => {
             <div className="border-t border-slate-100 bg-slate-50 px-6 py-8 text-center text-sm text-slate-500">No appointment receipt requests for this branch.</div>
           )}
         </div>
+        <PaginationControls
+          page={sectionPages.appointment}
+          totalPages={totalPages}
+          totalItems={appointmentRequests.length}
+          onPageChange={(nextPage) => setSectionPages((current) => ({ ...current, appointment: nextPage }))}
+        />
+            </>
+          );
+        })()}
       </div>
 
       {renderCompletedRequestSection({
@@ -1077,6 +1487,114 @@ const ReceiptManagement = () => {
         rows: miscRecords,
         showReferenceColumn: false,
       })}
+
+      <DeleteConfirmationModal
+        open={Boolean(deleteTarget)}
+        title={deleteTarget?.title || 'Delete this item?'}
+        message={deleteTarget?.message || 'This action cannot be undone.'}
+        details={deleteTarget?.details || []}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={handleDeleteTarget}
+        isLoading={Boolean(deletingRecordId || deletingRequestId || deletingHistoryId)}
+      />
+
+      <DeleteConfirmationModal
+        open={Boolean(releaseTarget)}
+        title="Release this receipt copy?"
+        message="This will send the finished receipt copy to the requester and move the request to the completed receipt table."
+        details={releaseTarget ? [
+          { label: 'Request ID', value: releaseTarget.requestId },
+          { label: 'Taxpayer', value: releaseTarget.taxpayerName || 'N/A' },
+          { label: 'Release Copy', value: releaseTarget.releaseCopyFilename || 'Uploaded copy' },
+        ] : []}
+        confirmLabel="Confirm Release"
+        loadingLabel="Releasing..."
+        cancelLabel="Cancel"
+        onCancel={() => setReleaseTarget(null)}
+        onConfirm={handleReleaseConfirm}
+        isLoading={releasing}
+      />
+
+      <ProcessingModal
+        show={releasing}
+        title="Releasing Receipt Copy"
+        message="Please wait while WARDS sends the receipt copy and completes the branch release process."
+      />
+
+      {selectedReleaseCopyPreview ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-4xl overflow-hidden rounded-3xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between bg-[#0f2f5f] px-6 py-5 text-white">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-200">Release Copy Preview</p>
+                <h2 className="mt-1 text-2xl font-bold">{selectedReleaseCopyPreview.requestId}</h2>
+              </div>
+              <button
+                onClick={closeReleaseCopyPreview}
+                className="rounded-2xl bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/20"
+              >
+                Close
+              </button>
+            </div>
+            <div className="bg-slate-100 p-6">
+              <div className="flex min-h-[420px] items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-white p-4">
+                <img
+                  src={selectedReleaseCopyPreview.imageUrl}
+                  alt={`Release copy for ${selectedReleaseCopyPreview.requestId}`}
+                  className="max-h-[70vh] w-full object-contain"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {selectedCompletedRequest ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+          <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
+            <div className="sticky top-0 z-10 flex items-center justify-between bg-[#0f2f5f] px-6 py-5 text-white">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-200">Completed Receipt Request</p>
+                <h2 className="mt-1 text-2xl font-bold">{selectedCompletedRequest.requestId}</h2>
+              </div>
+              <button
+                onClick={() => setSelectedCompletedRequest(null)}
+                className="rounded-2xl bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/20"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="grid gap-6 px-6 py-6 md:grid-cols-2">
+              {[
+                ['Taxpayer', selectedCompletedRequest.taxpayerName],
+                ['Tax Type', selectedCompletedRequest.taxType],
+                ['Request Type', selectedCompletedRequest.requestType],
+                ['Reference Number', selectedCompletedRequest.refNumber],
+                ['Status', selectedCompletedRequest.status],
+                ['Branch', selectedCompletedRequest.branchName],
+                ['Payment Reference', selectedCompletedRequest.paymentRefNumber],
+                ['Release Copy', selectedCompletedRequest.releaseCopyFilename],
+                ['Created At', selectedCompletedRequest.createdAt ? formatUtc8DateTime(selectedCompletedRequest.createdAt) : 'N/A'],
+                ['Processed At', selectedCompletedRequest.processedAt ? formatUtc8DateTime(selectedCompletedRequest.processedAt) : 'N/A'],
+                ['Archived At', selectedCompletedRequest.archivedAt ? formatUtc8DateTime(selectedCompletedRequest.archivedAt) : 'N/A'],
+                ['Completed By', selectedCompletedRequest.completedBy],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">{label}</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">{value || 'N/A'}</p>
+                </div>
+              ))}
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 md:col-span-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Matched Receipt</p>
+                <p className="mt-2 text-sm font-semibold text-slate-900">
+                  {selectedCompletedRequest.matchedReceipt?.receipt_number || selectedCompletedRequest.matchedReceipt?.ref_number || 'No matched receipt attached'}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };

@@ -1,6 +1,7 @@
 from datetime import datetime, date
 from io import BytesIO
 import hashlib
+import mimetypes
 import os
 import re
 
@@ -26,6 +27,7 @@ UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads",
 RELEASE_UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads", "released_receipts")
 NAME_PATTERN = re.compile(r"^[A-Za-z.\-' ]+$")
 ALLOWED_RELEASE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+ALLOWED_RELEASE_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MAX_RELEASE_FILE_SIZE = 5 * 1024 * 1024
 RECEIPT_REQUEST_FEE = 200.0
 
@@ -127,14 +129,16 @@ def serialize_receipt_request(request: ReceiptRequest, db: Session):
         branch = db.query(Branch).filter(Branch.id == request.branch_id).first()
         branch_name = branch.name if branch else None
 
-    payment = None
-    payment_ref_number = receipt_request_value(request, "payment_ref_number")
-    if payment_ref_number:
-        payment = find_payment_by_ref_number(db, Payment, payment_ref_number)
+    payment = get_latest_receipt_request_payment(db, receipt_request_value(request, "request_id"))
 
     matched_receipt = None
     if request.matched_receipt_id:
         matched_receipt = db.query(ReceiptRecord).filter(ReceiptRecord.id == request.matched_receipt_id).first()
+
+    payment_status = get_receipt_request_payment_status(request, payment)
+    release_status = get_receipt_request_release_status(request)
+    overall_status = get_receipt_request_overall_status(request, payment)
+    next_action = get_receipt_request_next_action(request, payment)
 
     return {
         "requestId": receipt_request_value(request, "request_id"),
@@ -145,12 +149,16 @@ def serialize_receipt_request(request: ReceiptRequest, db: Session):
         "appointmentTime": request.appointment_time.isoformat() if request.appointment_time else None,
         "refNumber": receipt_request_value(request, "ref_number"),
         "email": receipt_request_value(request, "email"),
-        "status": receipt_request_value(request, "status"),
+        "status": overall_status,
+        "overallStatus": overall_status,
+        "paymentStatus": payment_status,
+        "releaseStatus": release_status,
+        "nextAction": next_action,
         "feePaid": request.fee_paid,
         "branchId": request.branch_id,
         "branchName": branch_name,
         "matchedReceiptId": request.matched_receipt_id,
-        "paymentRefNumber": receipt_request_value(request, "payment_ref_number"),
+        "paymentRefNumber": payment.ref_number if payment else receipt_request_value(request, "payment_ref_number"),
         "releaseCopyFilename": receipt_request_value(request, "release_copy_filename"),
         "hasReleaseCopy": bool(receipt_request_value(request, "release_copy_path")),
         "processedAt": request.processed_at.isoformat() if request.processed_at else None,
@@ -190,6 +198,9 @@ def serialize_receipt_request_history(history: ReceiptRequestHistory, db: Sessio
         "refNumber": receipt_request_history_value(history, "ref_number"),
         "email": receipt_request_history_value(history, "email"),
         "status": receipt_request_history_value(history, "final_status"),
+        "overallStatus": receipt_request_history_value(history, "final_status"),
+        "paymentStatus": "Verified" if history.fee_paid else "Pending",
+        "releaseStatus": "Released" if receipt_request_history_value(history, "final_status") in {"Released", "Completed"} else "Not Ready for Release",
         "feePaid": history.fee_paid,
         "branchId": history.branch_id,
         "branchName": branch_name,
@@ -266,6 +277,87 @@ def normalize_reference_number(value: str | None) -> str | None:
     return normalized or None
 
 
+def get_latest_receipt_request_payment(db: Session, request_id: str | None) -> Payment | None:
+    if not request_id:
+        return None
+    return (
+        db.query(Payment)
+        .filter(Payment.related_request_id == request_id)
+        .order_by(Payment.created_at.desc(), Payment.id.desc())
+        .first()
+    )
+
+
+def is_declined_receipt_payment(payment: Payment | None) -> bool:
+    if not payment:
+        return False
+    normalized_status = (payment.status or "").strip().lower()
+    normalized_paymongo_status = (payment.paymongo_status or "").strip().lower()
+    return normalized_status in {"failed", "declined", "payment_rejected", "expired", "cancelled", "canceled"} or normalized_paymongo_status in {
+        "failed",
+        "declined",
+        "expired",
+        "cancelled",
+        "canceled",
+    }
+
+
+def is_verified_receipt_payment(payment: Payment | None) -> bool:
+    if not payment:
+        return False
+    normalized_status = (payment.status or "").strip().lower()
+    normalized_paymongo_status = (payment.paymongo_status or "").strip().lower()
+    return (
+        normalized_status in {"verified", "payment verified", "payment_submitted", "payment_verified", "or_generated", "completed", "confirmed"}
+        or normalized_paymongo_status in {"paid", "succeeded"}
+        or payment.verified_at is not None
+    )
+
+
+def get_receipt_request_payment_status(request: ReceiptRequest, payment: Payment | None) -> str:
+    if request.fee_paid or is_verified_receipt_payment(payment):
+        return "Verified"
+    if is_declined_receipt_payment(payment):
+        return "Declined"
+    return "Pending"
+
+
+def get_receipt_request_release_status(request: ReceiptRequest) -> str:
+    current_status = receipt_request_value(request, "status")
+    if current_status in {"Released", "Completed"}:
+        return "Released"
+    if is_appointment_request(request):
+        return "Ready for Release" if request.fee_paid else "Not Ready for Release"
+    if request.fee_paid and receipt_request_value(request, "release_copy_path"):
+        return "Ready for Release"
+    return "Not Ready for Release"
+
+
+def get_receipt_request_overall_status(request: ReceiptRequest, payment: Payment | None) -> str:
+    current_status = receipt_request_value(request, "status")
+    if current_status in {"Released", "Completed"}:
+        return current_status
+    payment_status = get_receipt_request_payment_status(request, payment)
+    release_status = get_receipt_request_release_status(request)
+    if payment_status == "Declined":
+        return "Payment Declined"
+    if payment_status == "Pending":
+        return "Payment Pending"
+    if release_status == "Ready for Release":
+        return "Ready for Release"
+    return "Not Ready for Release"
+
+
+def get_receipt_request_next_action(request: ReceiptRequest, payment: Payment | None) -> str:
+    payment_status = get_receipt_request_payment_status(request, payment)
+    release_status = get_receipt_request_release_status(request)
+    if payment_status in {"Pending", "Declined"}:
+        return "Pay Request Fee"
+    if release_status == "Ready for Release":
+        return "Wait for Branch Release"
+    return "Request Receipt"
+
+
 def archive_receipt_request(
     db: Session,
     receipt_request: ReceiptRequest,
@@ -327,6 +419,17 @@ def compute_image_ahash(image_bytes: bytes) -> str:
     average = sum(pixels) / len(pixels)
     bits = "".join("1" if pixel >= average else "0" for pixel in pixels)
     return f"{int(bits, 2):016x}"
+
+
+def ensure_valid_image_upload(image_bytes: bytes):
+    if not image_bytes:
+        raise HTTPException(status_code=400, detail="Uploaded image is empty")
+
+    try:
+        with Image.open(BytesIO(image_bytes)) as image:
+            image.verify()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Uploaded file is not a valid image") from exc
 
 
 def ahash_distance(hash_a: str | None, hash_b: str | None) -> int:
@@ -473,6 +576,7 @@ async def upload_receipt_for_ocr(
     normalized_category = normalize_receipt_category(category)
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     image_data = await file.read()
+    ensure_valid_image_upload(image_data)
     image_sha256 = compute_image_sha256(image_data)
     image_ahash = compute_image_ahash(image_data)
     duplicate_record, duplicate_type = find_duplicate_receipt_record(db, image_sha256, image_ahash)
@@ -746,8 +850,14 @@ async def delete_receipt_request(
         raise HTTPException(status_code=403, detail="Request belongs to another branch")
 
     linked_payments = db.query(Payment).filter(Payment.related_request_id == request_id).all()
+    removed_pending_payments = 0
+    preserved_terminal_payments = 0
     for payment in linked_payments:
+        if is_verified_receipt_payment(payment) or is_declined_receipt_payment(payment):
+            preserved_terminal_payments += 1
+            continue
         db.delete(payment)
+        removed_pending_payments += 1
 
     release_copy_path = receipt_request_value(receipt_request, "release_copy_path")
     if release_copy_path and os.path.exists(release_copy_path):
@@ -760,7 +870,11 @@ async def delete_receipt_request(
     db.add(ActivityLog(
         action="Receipt Request Deleted",
         user=current_staff.username,
-        details=f"Deleted receipt request {request_id}",
+        details=(
+            f"Deleted receipt request {request_id}; "
+            f"removed {removed_pending_payments} pending payment record(s) and preserved "
+            f"{preserved_terminal_payments} verified/declined payment record(s)"
+        ),
         type="branch_receipts",
     ))
     db.commit()
@@ -795,8 +909,8 @@ async def release_receipt_request(request_id: str, current_staff=Depends(get_cur
     branch = db.query(Branch).filter(Branch.id == current_staff.branch_id).first()
     branch_name = branch.name if branch else f"Branch {current_staff.branch_id}"
     email_result = send_receipt_release_email(
-        recipient_email=receipt_request.email,
-        taxpayer_name=receipt_request.taxpayer_name,
+        recipient_email=receipt_request_value(receipt_request, "email"),
+        taxpayer_name=receipt_request_value(receipt_request, "taxpayer_name"),
         request_id=request_id,
         branch_name=branch_name,
         attachment_path=current_release_copy_path,
@@ -809,10 +923,6 @@ async def release_receipt_request(request_id: str, current_staff=Depends(get_cur
             detail=email_result["message"] or "Failed to send receipt release email.",
         )
 
-    linked_payments = db.query(Payment).filter(Payment.related_request_id == request_id).all()
-    for payment in linked_payments:
-        db.delete(payment)
-
     release_copy_path = current_release_copy_path
     request_email = receipt_request_value(receipt_request, "email")
     taxpayer_name = receipt_request_value(receipt_request, "taxpayer_name")
@@ -821,7 +931,7 @@ async def release_receipt_request(request_id: str, current_staff=Depends(get_cur
     db.add(ActivityLog(
         action="Receipt Request Released",
         user=current_staff.username,
-        details=f"Released and cleared receipt request {request_id}",
+        details=f"Released and cleared receipt request {request_id} while preserving the linked payment history",
         type="branch_receipts",
     ))
     db.commit()
@@ -893,10 +1003,13 @@ async def upload_release_copy(
     extension = os.path.splitext(file.filename or "")[1].lower()
     if extension not in ALLOWED_RELEASE_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Only JPG, JPEG, PNG, and WEBP files are allowed")
+    if file.content_type and file.content_type.lower() not in ALLOWED_RELEASE_MIME_TYPES:
+        raise HTTPException(status_code=400, detail="Unsupported image format uploaded")
 
     file_bytes = await file.read()
     if len(file_bytes) > MAX_RELEASE_FILE_SIZE:
         raise HTTPException(status_code=400, detail="Image must not exceed 5 MB")
+    ensure_valid_image_upload(file_bytes)
 
     os.makedirs(RELEASE_UPLOAD_DIR, exist_ok=True)
     safe_name = f"{request_id}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}{extension}"
@@ -904,6 +1017,7 @@ async def upload_release_copy(
     with open(file_path, "wb") as output_file:
         output_file.write(file_bytes)
 
+    previous_release_copy_path = receipt_request_value(receipt_request, "release_copy_path")
     receipt_request.release_copy_path = file_path
     receipt_request.release_copy_filename = file.filename or safe_name
     sync_request_status(receipt_request)
@@ -915,6 +1029,13 @@ async def upload_release_copy(
         type="branch_receipts",
     ))
     db.commit()
+
+    if previous_release_copy_path and previous_release_copy_path != file_path and os.path.exists(previous_release_copy_path):
+        try:
+            os.remove(previous_release_copy_path)
+        except OSError:
+            pass
+
     return serialize_receipt_request(receipt_request, db)
 
 
@@ -924,7 +1045,7 @@ async def download_release_copy(
     current_staff=Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
-    receipt_request = db.query(ReceiptRequest).filter(ReceiptRequest.request_id == request_id).first()
+    receipt_request = db.query(ReceiptRequest).filter(hash_aware_match(ReceiptRequest, "request_id", request_id)).first()
     if not receipt_request:
         raise HTTPException(status_code=404, detail="Receipt request not found")
     if receipt_request.branch_id != current_staff.branch_id:
@@ -936,7 +1057,7 @@ async def download_release_copy(
 
     return FileResponse(
         release_copy_path,
-        media_type="application/octet-stream",
+        media_type=mimetypes.guess_type(release_copy_filename or release_copy_path)[0] or "application/octet-stream",
         filename=release_copy_filename or os.path.basename(release_copy_path),
     )
 

@@ -9,6 +9,11 @@ const REPORT_TYPES = ['Operational', 'Daily', 'Weekly', 'Monthly', 'Quarterly', 
 const SERVICE_TYPES = ['All Services', 'Real Property Tax', 'Business Tax', 'Miscellaneous Tax', 'Document Request'];
 const TRANSACTION_CATEGORIES = ['All Categories', 'Real Property Tax', 'Business Tax', 'Miscellaneous Tax', 'Receipt Request Fee'];
 const PAGE_SIZE = 5;
+const AUTO_FREQUENCIES = [
+  { value: 'daily', label: 'Daily' },
+  { value: 'weekly', label: 'Weekly' },
+  { value: 'monthly', label: 'Monthly' },
+];
 
 const initialFilters = {
   reportType: 'Operational',
@@ -70,6 +75,17 @@ const BranchReports = () => {
   const [selectedMetrics, setSelectedMetrics] = useState(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [reportToDelete, setReportToDelete] = useState(null);
+  const [automation, setAutomation] = useState({
+    enabled: false,
+    frequency: 'daily',
+    dispatch_time: '17:00',
+    weekday: 0,
+    month_day: 1,
+    reportType: 'Daily',
+    service_type: 'All Services',
+    transaction_category: 'All Categories',
+  });
+  const [savingAutomation, setSavingAutomation] = useState(false);
   const branchStaff = JSON.parse(localStorage.getItem('branchUser') || '{}');
 
   const fetchReports = async (page = 1) => {
@@ -87,6 +103,11 @@ const BranchReports = () => {
 
   useEffect(() => {
     fetchReports();
+    branchReportAPI.getAutomation()
+      .then((response) => setAutomation((current) => ({ ...current, ...response.data })))
+      .catch((fetchError) => {
+        console.error('Failed to fetch report automation settings:', fetchError);
+      });
   }, []);
 
   const summary = useMemo(() => ({
@@ -168,6 +189,20 @@ const BranchReports = () => {
       setError(deleteError.response?.data?.detail || 'Failed to delete the report.');
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const handleSaveAutomation = async () => {
+    try {
+      setSavingAutomation(true);
+      setError('');
+      const response = await branchReportAPI.updateAutomation(automation);
+      setAutomation((current) => ({ ...current, ...response.data }));
+    } catch (saveError) {
+      console.error('Failed to save report automation settings:', saveError);
+      setError(saveError.response?.data?.detail || 'Failed to save automatic report sending settings.');
+    } finally {
+      setSavingAutomation(false);
     }
   };
 
@@ -292,6 +327,131 @@ const BranchReports = () => {
             className="rounded-xl bg-slate-200 px-6 py-3 font-semibold text-slate-700 transition hover:bg-slate-300"
           >
             Reset Filters
+          </button>
+        </div>
+      </section>
+
+      <section className="rounded-2xl bg-white p-6 shadow">
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-bold text-primary">Automatic Scheduled Sending</h2>
+            <p className="mt-2 text-sm text-slate-500">
+              Save a branch-level schedule so WARDS can generate and send due reports to Main Branch automatically when this module is accessed.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
+          <label className="flex items-center gap-3 rounded-xl border border-slate-200 px-4 py-3">
+            <input
+              type="checkbox"
+              checked={automation.enabled}
+              onChange={(event) => setAutomation((current) => ({ ...current, enabled: event.target.checked }))}
+            />
+            <span className="text-sm font-semibold text-slate-700">Enable automatic sending</span>
+          </label>
+
+          <div>
+            <label className="mb-2 block text-sm font-semibold text-slate-700">Frequency</label>
+            <select
+              value={automation.frequency}
+              onChange={(event) => setAutomation((current) => ({ ...current, frequency: event.target.value }))}
+              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
+            >
+              {AUTO_FREQUENCIES.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-2 block text-sm font-semibold text-slate-700">Dispatch Time</label>
+            <input
+              type="time"
+              value={automation.dispatch_time}
+              onChange={(event) => setAutomation((current) => ({ ...current, dispatch_time: event.target.value }))}
+              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
+            />
+          </div>
+
+          <div>
+            <label className="mb-2 block text-sm font-semibold text-slate-700">Scheduled Report Type</label>
+            <select
+              value={automation.reportType}
+              onChange={(event) => setAutomation((current) => ({ ...current, reportType: event.target.value }))}
+              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
+            >
+              {REPORT_TYPES.map((type) => (
+                <option key={type} value={type}>{type}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="mt-5 grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
+          <div>
+            <label className="mb-2 block text-sm font-semibold text-slate-700">Service Type</label>
+            <select
+              value={automation.service_type}
+              onChange={(event) => setAutomation((current) => ({ ...current, service_type: event.target.value }))}
+              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
+            >
+              {SERVICE_TYPES.map((type) => (
+                <option key={type} value={type}>{type}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-2 block text-sm font-semibold text-slate-700">Transaction Category</label>
+            <select
+              value={automation.transaction_category}
+              onChange={(event) => setAutomation((current) => ({ ...current, transaction_category: event.target.value }))}
+              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
+            >
+              {TRANSACTION_CATEGORIES.map((type) => (
+                <option key={type} value={type}>{type}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-2 block text-sm font-semibold text-slate-700">Weekly Day</label>
+            <select
+              value={automation.weekday}
+              onChange={(event) => setAutomation((current) => ({ ...current, weekday: Number(event.target.value) }))}
+              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
+            >
+              <option value={0}>Monday</option>
+              <option value={1}>Tuesday</option>
+              <option value={2}>Wednesday</option>
+              <option value={3}>Thursday</option>
+              <option value={4}>Friday</option>
+              <option value={5}>Saturday</option>
+              <option value={6}>Sunday</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-2 block text-sm font-semibold text-slate-700">Monthly Day</label>
+            <input
+              type="number"
+              min="1"
+              max="28"
+              value={automation.month_day}
+              onChange={(event) => setAutomation((current) => ({ ...current, month_day: Number(event.target.value) }))}
+              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
+            />
+          </div>
+        </div>
+
+        <div className="mt-6">
+          <button
+            onClick={handleSaveAutomation}
+            disabled={savingAutomation}
+            className="rounded-xl bg-primary px-6 py-3 font-semibold text-white transition hover:bg-secondary disabled:opacity-60"
+          >
+            {savingAutomation ? 'Saving Schedule...' : 'Save Automatic Sending'}
           </button>
         </div>
       </section>

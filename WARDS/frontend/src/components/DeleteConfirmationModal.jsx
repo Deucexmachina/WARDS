@@ -4,6 +4,7 @@ const DeleteConfirmationModal = ({
   message = 'This action cannot be undone.',
   details = [],
   confirmLabel = 'Confirm Delete',
+  loadingLabel = 'Deleting...',
   cancelLabel = 'Cancel',
   isLoading = false,
   onConfirm,
@@ -55,7 +56,7 @@ const DeleteConfirmationModal = ({
             disabled={isLoading}
             className="rounded-2xl bg-red-600 px-5 py-3 font-semibold text-white transition duration-300 hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-70"
           >
-            {isLoading ? 'Deleting...' : confirmLabel}
+            {isLoading ? loadingLabel : confirmLabel}
           </button>
         </div>
       </div>

@@ -181,7 +181,7 @@ const PayTaxesRPT = () => {
   const [searchedProperty, setSearchedProperty] = useState(emptyPropertySearch);
   const [cartItems, setCartItems] = useState([]);
   const [formData, setFormData] = useState({
-    taxpayerName: publicUser?.full_name || '',
+    taxpayerName: '',
     tin: formatTin(publicUser?.tin || ''),
     email: publicUser?.email || '',
     contactNumber: publicUser?.contact_number || '',
@@ -1101,10 +1101,10 @@ const PayTaxesRPT = () => {
                           name="taxpayerName"
                           value={formData.taxpayerName}
                           onChange={handleFieldChange}
-                          readOnly={Boolean(publicUser?.full_name)}
+                          placeholder="Enter your full name"
                           className={`w-full rounded-2xl border px-4 py-3 text-sm ${
                             validationErrors.taxpayerName ? 'border-red-500' : 'border-slate-300'
-                          } ${publicUser?.full_name ? 'bg-slate-50 text-slate-700' : 'text-slate-900'}`}
+                          } text-slate-900`}
                         />
                         {validationErrors.taxpayerName ? <p className="mt-2 text-sm text-red-500">{validationErrors.taxpayerName}</p> : null}
                       </div>

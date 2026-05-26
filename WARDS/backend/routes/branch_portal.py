@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 
-from database.models import ActivityLog, Announcement, AnnouncementAttachment, AnnouncementView, Branch, BranchStaff, BusinessTaxApplication, Memo, MemoView, Payment, Policy, PolicyView, Queue, QueueHistory, get_db
+from database.models import ActivityLog, Announcement, AnnouncementAttachment, AnnouncementView, Branch, BranchStaff, BusinessTaxApplication, Memo, MemoView, Payment, Policy, PolicyView, Queue, QueueHistory, ReceiptRequest, ReceiptRequestHistory, get_db
 from middleware.branch_auth import get_current_branch_staff, require_any_branch_staff
 from utils.announcement_attachments import (
     enforce_attachment_limit,
@@ -56,6 +56,29 @@ class BranchAnnouncementPayload(BaseModel):
 
 def normalize_payment_status(status_value: Optional[str]) -> str:
     status_text = (status_value or "pending").strip().lower()
+    status_workflow = (status_value or "").strip().upper()
+    if status_workflow in {
+        "PAYMENT_VERIFIED",
+        "OR_GENERATED",
+        "COMPLETED",
+    }:
+        return "confirmed"
+    if status_workflow in {
+        "PAYMENT_REJECTED",
+        "RETURNED_FOR_CORRECTION",
+    }:
+        return "failed"
+    if status_workflow in {
+        "PROPERTY_SEARCHED",
+        "PROPERTY_FOUND",
+        "ADDED_TO_CART",
+        "PAYMENT_INITIATED",
+        "PAYMENT_SUBMITTED",
+        "PENDING_TREASURY_VALIDATION",
+        "CLARIFICATION_REQUESTED",
+        "VALIDATED",
+    }:
+        return "pending"
     if status_text in {
         "verified",
         "payment verified",
@@ -69,8 +92,21 @@ def normalize_payment_status(status_value: Optional[str]) -> str:
         return "confirmed"
     if status_text == "expired":
         return "expired"
-    if status_text in {"failed", "declined", "cancelled", "canceled"}:
+    if status_text in {"failed", "declined", "cancelled", "canceled", "payment_rejected", "returned_for_correction"}:
         return "failed"
+    return "pending"
+
+
+def get_effective_payment_status(payment: Payment) -> str:
+    raw_status = normalize_payment_status(payment.status)
+    paymongo_status = normalize_payment_status(payment.paymongo_status)
+
+    if raw_status in {"failed", "expired"}:
+        return raw_status
+    if paymongo_status in {"failed", "expired"}:
+        return paymongo_status
+    if payment.verified_at is not None or raw_status == "confirmed" or paymongo_status == "confirmed":
+        return "confirmed"
     return "pending"
 
 
@@ -328,11 +364,11 @@ def get_payment_deduplication_key(payment: Payment) -> str:
 
 
 def get_payment_preference_rank(payment: Payment) -> tuple[int, datetime, int]:
-    normalized_status = normalize_payment_status(payment.status)
+    normalized_status = get_effective_payment_status(payment)
     status_rank = {
         "confirmed": 3,
-        "pending": 2,
-        "failed": 1,
+        "failed": 2,
+        "pending": 1,
         "expired": 0,
     }.get(normalized_status, 0)
     event_time = payment.verified_at or payment.created_at or datetime.min
@@ -352,6 +388,76 @@ def deduplicate_branch_payments(payments: list[Payment]) -> list[Payment]:
         key=lambda payment: payment.created_at or datetime.min,
         reverse=True,
     )
+
+
+def payment_belongs_to_branch(payment: Payment, branch: Branch, current_staff: BranchStaff, db: Session) -> bool:
+    branch_id = current_staff.branch_id
+    branch_name = get_decrypted_or_raw(branch, "name") or branch.name
+    payment_branch_name = get_decrypted_or_raw(payment, "branch") or payment.branch
+    metadata = parse_payment_metadata(payment)
+
+    if payment.branch_id == branch_id:
+        return True
+
+    if payment_branch_name and payment_branch_name == branch_name:
+        return True
+
+    if payment.branch_hash and payment.branch_hash == hash_optional_value(branch_name):
+        return True
+
+    selected_branch_id = metadata.get("selected_branch_id")
+    if selected_branch_id is not None:
+        try:
+            if int(selected_branch_id) == int(branch_id):
+                return True
+        except (TypeError, ValueError):
+            pass
+
+    selected_branch_name = (metadata.get("selected_branch_name") or "").strip()
+    if selected_branch_name and selected_branch_name == branch_name:
+        return True
+
+    if payment.source_module == "business_tax_online_payment" and payment.related_request_id:
+        application = (
+            db.query(BusinessTaxApplication)
+            .filter(BusinessTaxApplication.tracking_number == payment.related_request_id)
+            .first()
+        )
+        if application and application.branch_id == branch_id:
+            return True
+
+    if payment.source_module == "receipt_request" and payment.related_request_id:
+        receipt_request = (
+            db.query(ReceiptRequest)
+            .filter(hash_aware_match(ReceiptRequest, "request_id", payment.related_request_id))
+            .first()
+        )
+        if receipt_request and receipt_request.branch_id == branch_id:
+            return True
+
+        receipt_request_history = (
+            db.query(ReceiptRequestHistory)
+            .filter(hash_aware_match(ReceiptRequestHistory, "request_id", payment.related_request_id))
+            .first()
+        )
+        if receipt_request_history and receipt_request_history.branch_id == branch_id:
+            return True
+
+    return False
+
+
+def get_branch_payments(current_staff: BranchStaff, branch: Branch, db: Session) -> list[Payment]:
+    candidate_payments = (
+        db.query(Payment)
+        .order_by(Payment.created_at.desc(), Payment.id.desc())
+        .all()
+    )
+    matched_payments = [
+        payment
+        for payment in candidate_payments
+        if payment_belongs_to_branch(payment, branch, current_staff, db)
+    ]
+    return deduplicate_branch_payments(matched_payments)
 
 
 def serialize_branch_policy(policy: Policy, current_username: str | None = None, db: Session | None = None):
@@ -464,7 +570,7 @@ async def get_branch_dashboard(
         raise HTTPException(status_code=404, detail="Branch not found")
 
     queues = db.query(Queue).filter(Queue.branch_id == current_staff.branch_id).all()
-    payments = get_branch_payment_query(current_staff, branch, db).order_by(Payment.created_at.desc()).all()
+    payments = get_branch_payments(current_staff, branch, db)
 
     today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     recent_cutoff = datetime.utcnow() - timedelta(hours=12)
@@ -500,9 +606,9 @@ async def get_branch_dashboard(
         },
         "transactions": {
             "today_completed": len([q for q in queues if queue_value(q, "status") == "Completed" and q.completed_at and q.completed_at >= today]),
-            "payments_pending": len([p for p in payments if normalize_payment_status(p.status) == "pending"]),
-            "payments_confirmed": len([p for p in payments if normalize_payment_status(p.status) == "confirmed"]),
-            "payments_failed": len([p for p in payments if normalize_payment_status(p.status) == "failed"]),
+            "payments_pending": len([p for p in payments if get_effective_payment_status(p) == "pending"]),
+            "payments_confirmed": len([p for p in payments if get_effective_payment_status(p) == "confirmed"]),
+            "payments_failed": len([p for p in payments if get_effective_payment_status(p) == "failed"]),
         },
         "activity_trend": buckets,
         "recent_queue": [serialize_queue(queue) for queue in sorted(recent_queues, key=lambda item: item.created_at, reverse=True)[:10]],
@@ -822,8 +928,7 @@ async def list_branch_payments(
     branch = db.query(Branch).filter(Branch.id == current_staff.branch_id).first()
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
-    payments = get_branch_payment_query(current_staff, branch, db).order_by(Payment.created_at.desc()).all()
-    payments = deduplicate_branch_payments(payments)
+    payments = get_branch_payments(current_staff, branch, db)
     log_branch_action(db, current_staff, "Payments Viewed", f"Viewed {branch.name} payments")
     db.commit()
     serialized = []
@@ -844,7 +949,7 @@ async def list_branch_payments(
             "amount": float(payment.amount or 0),
             "payment_method": get_decrypted_or_raw(payment, "payment_method") or payment.payment_method,
             "branch": get_decrypted_or_raw(payment, "branch") or payment.branch,
-            "status": normalize_payment_status(payment.status),
+            "status": get_effective_payment_status(payment),
             "workflow_status": payment.status,
             "tin": get_decrypted_or_raw(payment, "tin") or payment.tin,
             "email": get_decrypted_or_raw(payment, "email") or payment.email,
@@ -897,10 +1002,10 @@ async def verify_branch_payment(
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
 
-    payment = get_branch_payment_query(current_staff, branch, db).filter(Payment.id == payment_id).first()
-    if not payment:
+    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+    if not payment or not payment_belongs_to_branch(payment, branch, current_staff, db):
         raise HTTPException(status_code=404, detail="Payment not found")
-    if normalize_payment_status(payment.status) != "pending":
+    if get_effective_payment_status(payment) != "pending":
         raise HTTPException(status_code=409, detail="Only pending payments can be verified.")
 
     payment.status = "PAYMENT_VERIFIED" if payment.source_module == "rpt_online_payment" else "Verified"
@@ -970,10 +1075,10 @@ async def decline_branch_payment(
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
 
-    payment = get_branch_payment_query(current_staff, branch, db).filter(Payment.id == payment_id).first()
-    if not payment:
+    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+    if not payment or not payment_belongs_to_branch(payment, branch, current_staff, db):
         raise HTTPException(status_code=404, detail="Payment not found")
-    if normalize_payment_status(payment.status) != "pending":
+    if get_effective_payment_status(payment) != "pending":
         raise HTTPException(status_code=409, detail="Only pending payments can be declined.")
 
     payment.status = "Failed"
@@ -1004,8 +1109,8 @@ async def delete_branch_payment(
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
 
-    payment = get_branch_payment_query(current_staff, branch, db).filter(Payment.id == payment_id).first()
-    if not payment:
+    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+    if not payment or not payment_belongs_to_branch(payment, branch, current_staff, db):
         raise HTTPException(status_code=404, detail="Payment not found")
 
     ref_number = payment.ref_number

@@ -9,10 +9,11 @@ from collections import Counter
 from io import BytesIO
 from textwrap import wrap
 from xml.sax.saxutils import escape
+import json
 
 from database.models import (
-    Report, get_db, ActivityLog, Branch, Queue, Payment, 
-    ReceiptRequest, QueueActivity, Service, DiscrepancyReport
+    Report, get_db, ActivityLog, Branch, Queue, Payment,
+    ReceiptRequest, QueueActivity, Service, DiscrepancyReport, BranchSystemSetting
 )
 from middleware.admin_auth import get_current_admin_user
 from middleware.branch_auth import get_current_branch_staff, require_any_branch_staff
@@ -31,11 +32,23 @@ class ReportGenerateRequest(BaseModel):
     transaction_category: Optional[str] = None
 
 
+class ReportAutomationSettingsPayload(BaseModel):
+    enabled: bool = False
+    frequency: str = "daily"
+    dispatch_time: str = "17:00"
+    weekday: int = 0
+    month_day: int = 1
+    reportType: str = "Daily"
+    service_type: str = "All Services"
+    transaction_category: str = "All Categories"
+
+
 DEFAULT_REPORT_PAGE_SIZE = 5
 MAX_REPORT_PAGE_SIZE = 5
 DOCUMENT_REQUEST_SERVICE = "Document Request"
 RECEIPT_REQUEST_FEE_CATEGORY = "Receipt Request Fee"
 RECEIPT_REQUEST_FEE_AMOUNT = 50.0
+REPORT_AUTOMATION_KEY = "branchReportAutomation"
 
 
 def normalize_service_type(service_type: Optional[str]) -> Optional[str]:
@@ -146,6 +159,129 @@ def serialize_report_summary(report: Report) -> Dict[str, Any]:
     }
 
 
+def get_branch_report_now() -> datetime:
+    return datetime.utcnow() + timedelta(hours=8)
+
+
+def get_default_report_automation_settings() -> Dict[str, Any]:
+    return {
+        "enabled": False,
+        "frequency": "daily",
+        "dispatch_time": "17:00",
+        "weekday": 0,
+        "month_day": 1,
+        "reportType": "Daily",
+        "service_type": "All Services",
+        "transaction_category": "All Categories",
+        "last_sent_at": None,
+    }
+
+
+def get_branch_report_automation_row(db: Session, branch_id: int) -> BranchSystemSetting | None:
+    return (
+        db.query(BranchSystemSetting)
+        .filter(
+            BranchSystemSetting.branch_id == branch_id,
+            BranchSystemSetting.key == REPORT_AUTOMATION_KEY,
+        )
+        .first()
+    )
+
+
+def get_branch_report_automation_settings(db: Session, branch_id: int) -> Dict[str, Any]:
+    defaults = get_default_report_automation_settings()
+    row = get_branch_report_automation_row(db, branch_id)
+    if not row or not row.value:
+        return defaults
+
+    try:
+        parsed = json.loads(row.value)
+    except json.JSONDecodeError:
+        return defaults
+
+    if not isinstance(parsed, dict):
+        return defaults
+    defaults.update(parsed)
+    return defaults
+
+
+def validate_report_automation_settings(payload: Dict[str, Any]) -> Dict[str, Any]:
+    settings = get_default_report_automation_settings()
+    settings.update(payload)
+
+    frequency = str(settings.get("frequency") or "daily").strip().lower()
+    if frequency not in {"daily", "weekly", "monthly"}:
+        raise HTTPException(status_code=400, detail="Automatic sending frequency must be daily, weekly, or monthly.")
+    settings["frequency"] = frequency
+
+    dispatch_time = str(settings.get("dispatch_time") or "17:00").strip()
+    try:
+        datetime.strptime(dispatch_time, "%H:%M")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Automatic dispatch time must use 24-hour HH:MM format.") from exc
+    settings["dispatch_time"] = dispatch_time
+
+    weekday = int(settings.get("weekday", 0))
+    if weekday < 0 or weekday > 6:
+        raise HTTPException(status_code=400, detail="Weekly automatic sending day must be between 0 (Monday) and 6 (Sunday).")
+    settings["weekday"] = weekday
+
+    month_day = int(settings.get("month_day", 1))
+    if month_day < 1 or month_day > 28:
+        raise HTTPException(status_code=400, detail="Monthly automatic sending day must be between 1 and 28.")
+    settings["month_day"] = month_day
+
+    settings["reportType"] = (settings.get("reportType") or "Daily").strip() or "Daily"
+    settings["service_type"] = (settings.get("service_type") or "All Services").strip() or "All Services"
+    settings["transaction_category"] = (settings.get("transaction_category") or "All Categories").strip() or "All Categories"
+    settings["enabled"] = bool(settings.get("enabled"))
+    return settings
+
+
+def save_branch_report_automation_settings(
+    db: Session,
+    *,
+    branch: Branch,
+    payload: Dict[str, Any],
+    updated_by: str,
+) -> Dict[str, Any]:
+    settings = validate_report_automation_settings(payload)
+    existing = get_branch_report_automation_row(db, branch.id)
+    serialized_value = json.dumps(settings)
+
+    if existing:
+        existing.label = "Branch Report Automation"
+        existing.category = "reporting"
+        existing.value = serialized_value
+        existing.value_json = serialized_value
+        existing.value_type = "json"
+        existing.description = "Automatic branch report dispatch settings."
+        existing.updated_by = updated_by
+        existing.updated_at = datetime.utcnow()
+    else:
+        db.add(BranchSystemSetting(
+            branch_id=branch.id,
+            key=REPORT_AUTOMATION_KEY,
+            label="Branch Report Automation",
+            category="reporting",
+            value=serialized_value,
+            value_json=serialized_value,
+            value_type="json",
+            description="Automatic branch report dispatch settings.",
+            updated_by=updated_by,
+            updated_at=datetime.utcnow(),
+        ))
+
+    db.add(ActivityLog(
+        action="Branch Report Automation Updated",
+        user=updated_by,
+        details=f"Updated automatic report sending for {branch.name}",
+        type="report",
+    ))
+    db.commit()
+    return get_branch_report_automation_settings(db, branch.id)
+
+
 def get_report_branch_id(db: Session, report: Report) -> Optional[int]:
     if report.branch_id:
         return report.branch_id
@@ -196,6 +332,50 @@ def build_report_record(
         submitted_by=actor_username,
         submitted_at=datetime.utcnow(),
     )
+
+
+def create_branch_report_entry(
+    *,
+    db: Session,
+    request: ReportGenerateRequest,
+    branch_id: int,
+    branch_name: str,
+    actor_username: str,
+    dispatch_mode: str,
+) -> Dict[str, Any]:
+    _, _, date_from, date_to = parse_report_date_range(request.dateFrom, request.dateTo)
+    request.dateFrom = date_from
+    request.dateTo = date_to
+
+    metrics = calculate_report_metrics_sync(
+        db=db,
+        branch_id=branch_id,
+        date_from=date_from,
+        date_to=date_to,
+        service_type=normalize_service_type(request.service_type),
+        transaction_category=normalize_transaction_category(request.transaction_category),
+    )
+
+    report = build_report_record(
+        request=request,
+        branch_id=branch_id,
+        branch_name=branch_name,
+        actor_username=actor_username,
+    )
+    db.add(report)
+    db.add(ActivityLog(
+        action="Branch Report Submitted",
+        user=actor_username,
+        details=f"{dispatch_mode.title()} send: submitted {request.reportType or 'Operational'} report for {branch_name}",
+        type="report",
+    ))
+    db.commit()
+    db.refresh(report)
+
+    return {
+        "report": serialize_report_summary(report),
+        "metrics": metrics,
+    }
 
 
 def validate_report_request(request: ReportGenerateRequest) -> None:
@@ -252,6 +432,7 @@ TABULAR_EXPORT_SECTIONS = {
     "Service Utilization",
     "Transaction Categories",
     "Receipt Request Status Breakdown",
+    "Receipt And Transaction Summary",
 }
 
 
@@ -330,6 +511,16 @@ def build_export_sections(report: Report, metrics: Dict[str, Any]) -> List[tuple
     for status, count in metrics.get("receipt_requests", {}).get("by_status", {}).items():
         receipt_status_rows.append([status, count])
     sections.append(("Receipt Request Status Breakdown", receipt_status_rows))
+
+    receipt_transaction_rows = [["Summary Item", "Count", "Amount", "Status"]]
+    for item in metrics.get("receipt_transaction_summary", []):
+        receipt_transaction_rows.append([
+            item.get("label", "N/A"),
+            item.get("count", 0),
+            item.get("amount", 0),
+            item.get("status", "N/A"),
+        ])
+    sections.append(("Receipt And Transaction Summary", receipt_transaction_rows))
 
     operational = metrics.get("operational_problems", {})
     sections.append(
@@ -837,6 +1028,82 @@ def validate_report_filter_date_range(date_from: Optional[str], date_to: Optiona
     if date_from and date_to:
         parse_report_date_range(date_from, date_to)
 
+
+def build_scheduled_report_request(settings: Dict[str, Any], *, now: datetime) -> ReportGenerateRequest:
+    frequency = settings.get("frequency", "daily")
+    if frequency == "daily":
+        start_date = now.date()
+        report_type = settings.get("reportType") or "Daily"
+    elif frequency == "weekly":
+        start_date = (now - timedelta(days=6)).date()
+        report_type = settings.get("reportType") or "Weekly"
+    else:
+        start_date = now.replace(day=1).date()
+        report_type = settings.get("reportType") or "Monthly"
+
+    return ReportGenerateRequest(
+        reportType=report_type,
+        dateFrom=start_date.isoformat(),
+        dateTo=now.date().isoformat(),
+        service_type=settings.get("service_type") or "All Services",
+        transaction_category=settings.get("transaction_category") or "All Categories",
+    )
+
+
+def should_dispatch_automatic_report(settings: Dict[str, Any], now: datetime) -> bool:
+    if not settings.get("enabled"):
+        return False
+
+    dispatch_time = datetime.strptime(settings.get("dispatch_time", "17:00"), "%H:%M").time()
+    if now.time() < dispatch_time:
+        return False
+
+    last_sent_at_raw = settings.get("last_sent_at")
+    last_sent_at = datetime.fromisoformat(last_sent_at_raw) if last_sent_at_raw else None
+    if last_sent_at and last_sent_at.date() == now.date():
+        return False
+
+    frequency = settings.get("frequency", "daily")
+    if frequency == "weekly":
+        return now.weekday() == int(settings.get("weekday", 0))
+    if frequency == "monthly":
+        return now.day == int(settings.get("month_day", 1))
+    return True
+
+
+def dispatch_due_automatic_branch_report(
+    db: Session,
+    *,
+    current_staff,
+) -> Dict[str, Any] | None:
+    branch = db.query(Branch).filter(Branch.id == current_staff.branch_id).first()
+    if not branch:
+        raise HTTPException(status_code=404, detail="Assigned branch not found.")
+
+    settings = get_branch_report_automation_settings(db, branch.id)
+    now = get_branch_report_now()
+    if not should_dispatch_automatic_report(settings, now):
+        return None
+
+    report_request = build_scheduled_report_request(settings, now=now)
+    result = create_branch_report_entry(
+        db=db,
+        request=report_request,
+        branch_id=branch.id,
+        branch_name=branch.name,
+        actor_username=current_staff.username,
+        dispatch_mode="automatic",
+    )
+
+    settings["last_sent_at"] = now.isoformat()
+    save_branch_report_automation_settings(
+        db,
+        branch=branch,
+        payload=settings,
+        updated_by=current_staff.username,
+    )
+    return result
+
 @router.post("/generate")
 async def generate_report(
     request: ReportGenerateRequest,
@@ -862,41 +1129,41 @@ async def generate_branch_report(
         enforced_branch_id=current_staff.branch_id,
     )
 
-    _, _, date_from, date_to = parse_report_date_range(request.dateFrom, request.dateTo)
-    request.dateFrom = date_from
-    request.dateTo = date_to
-
-    metrics = await calculate_report_metrics(
+    return create_branch_report_entry(
         db=db,
-        branch_id=branch_id,
-        date_from=date_from,
-        date_to=date_to,
-        service_type=normalize_service_type(request.service_type),
-        transaction_category=normalize_transaction_category(request.transaction_category),
-    )
-
-    report = build_report_record(
         request=request,
         branch_id=branch_id,
         branch_name=branch_name,
         actor_username=current_staff.username,
+        dispatch_mode="manual",
     )
-    db.add(report)
-    db.add(ActivityLog(
-        action="Branch Report Submitted",
-        user=current_staff.username,
-        details=f"Submitted {request.reportType or 'Operational'} report for {branch_name}",
-        type="report",
-    ))
-    db.commit()
-    db.refresh(report)
 
-    return {
-        "report": serialize_report_summary(report),
-        "metrics": metrics,
-    }
 
-async def calculate_report_metrics(
+@branch_router.get("/automation")
+async def get_branch_report_automation(
+    db: Session = Depends(get_db),
+    current_staff = Depends(get_current_branch_staff),
+):
+    return get_branch_report_automation_settings(db, current_staff.branch_id)
+
+
+@branch_router.put("/automation")
+async def update_branch_report_automation(
+    payload: ReportAutomationSettingsPayload,
+    db: Session = Depends(get_db),
+    current_staff = Depends(get_current_branch_staff),
+):
+    branch = db.query(Branch).filter(Branch.id == current_staff.branch_id).first()
+    if not branch:
+        raise HTTPException(status_code=404, detail="Assigned branch not found.")
+    return save_branch_report_automation_settings(
+        db,
+        branch=branch,
+        payload=payload.model_dump(),
+        updated_by=current_staff.username,
+    )
+
+def calculate_report_metrics_sync(
     db: Session,
     branch_id: Optional[int] = None,
     date_from: Optional[str] = None,
@@ -1072,7 +1339,7 @@ async def calculate_report_metrics(
     peak_days = calculate_peak_days(receipts if is_document_request_report else queues)
     
     # Calculate operational problems by branch
-    operational_problems = await calculate_operational_problems(db, branch_id, start_date, end_date)
+    operational_problems = calculate_operational_problems(db, branch_id, start_date, end_date)
     
     # Get branch-specific data if filtering by branch
     branch_data = None
@@ -1125,7 +1392,39 @@ async def calculate_report_metrics(
         total_amount=float(total_amount),
     )
     most_used_service = insights.get("most_used_service")
-    
+    receipt_transaction_summary = [
+        {
+            "label": "Verified Transactions",
+            "count": verified_transactions,
+            "amount": float(total_amount),
+            "status": "Verified",
+        },
+        {
+            "label": "Pending Transactions",
+            "count": pending_transactions,
+            "amount": 0.0,
+            "status": "Pending",
+        },
+        {
+            "label": "Declined / Failed Transactions",
+            "count": failed_transactions,
+            "amount": 0.0,
+            "status": "Declined",
+        },
+        {
+            "label": "Receipt Requests Ready for Release",
+            "count": receipt_status_breakdown.get("Ready for Release", 0),
+            "amount": 0.0,
+            "status": "Ready for Release",
+        },
+        {
+            "label": "Receipt Requests Released / Completed",
+            "count": completed_receipts,
+            "amount": 0.0,
+            "status": "Released",
+        },
+    ]
+
     return {
         "summary": {
             "total_clients_served": total_clients,
@@ -1156,6 +1455,7 @@ async def calculate_report_metrics(
             "by_status": receipt_status_breakdown,
             "by_type": receipt_type_breakdown,
         },
+        "receipt_transaction_summary": receipt_transaction_summary,
         "daily_averages": {
             "clients_per_day": round(avg_clients_per_day, 2),
             "transactions_per_day": round(avg_transactions_per_day, 2)
@@ -1344,7 +1644,7 @@ def calculate_historical_comparison(
         },
     }
 
-async def calculate_operational_problems(
+def calculate_operational_problems(
     db: Session,
     branch_id: Optional[int] = None,
     start_date: datetime = None,
@@ -1486,6 +1786,7 @@ async def get_branch_reports(
     db: Session = Depends(get_db),
     current_staff = Depends(get_current_branch_staff),
 ):
+    dispatch_due_automatic_branch_report(db, current_staff=current_staff)
     query = db.query(Report).filter(Report.branch_id == current_staff.branch_id)
     validate_report_filter_date_range(date_from, date_to)
 
@@ -1525,7 +1826,7 @@ async def get_report_details(
     branch_id = get_report_branch_id(db, report)
     
     # Recalculate metrics fresh from database for current, accurate data
-    metrics = await calculate_report_metrics(
+    metrics = calculate_report_metrics_sync(
         db=db,
         branch_id=branch_id,
         date_from=report.date_from,
@@ -1554,7 +1855,7 @@ async def get_branch_report_details(
         raise HTTPException(status_code=404, detail="Report not found")
 
     branch_id = get_report_branch_id(db, report)
-    metrics = await calculate_report_metrics(
+    metrics = calculate_report_metrics_sync(
         db=db,
         branch_id=branch_id,
         date_from=report.date_from,
@@ -1590,7 +1891,7 @@ async def export_report(
     branch_id = get_report_branch_id(db, report)
     
     # Recalculate metrics fresh from database for current, accurate export data
-    metrics = await calculate_report_metrics(
+    metrics = calculate_report_metrics_sync(
         db=db,
         branch_id=branch_id,
         date_from=report.date_from,

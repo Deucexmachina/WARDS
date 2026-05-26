@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { paymentAPI } from '../../services/api';
-import { formatTin } from '../../utils/validation';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 const SUCCESS_STATUSES = new Set(['confirmed', 'verified', 'paid', 'succeeded', 'successful', 'success']);
@@ -66,9 +65,13 @@ const PaymentStatus = () => {
   const intervalIdRef = useRef(null);
 
   const refNumber = searchParams.get('ref');
+  const isMerchantReturn = searchParams.get('merchant_return') === '1';
+  const hasOpenerWindow = typeof window !== 'undefined' && window.opener && !window.opener.closed;
+  const shouldHandOffMerchantReturn = isMerchantReturn && hasOpenerWindow;
   const rawStatus = payment?.workflow_status || '';
   const isRptPayment = payment?.source_module === 'rpt_online_payment' || payment?.metadata?.is_rpt_workflow;
   const isBusinessTaxPayment = payment?.source_module === 'business_tax_online_payment' || payment?.metadata?.is_business_tax_workflow;
+  const isReceiptRequestPayment = payment?.source_module === 'receipt_request';
   const paymongoStatus = normalizeStatus(payment?.paymongo_status);
   const status = normalizeStatus(payment?.status);
   const isVerified = SUCCESS_STATUSES.has(status) || SUCCESS_STATUSES.has(paymongoStatus) || Boolean(payment?.verified_at);
@@ -82,6 +85,28 @@ const PaymentStatus = () => {
     (SUCCESS_STATUSES.has(paymongoStatus) || SUCCESS_STATUSES.has(status) || rawStatus === 'PAYMENT_SUBMITTED');
 
   useEffect(() => {
+    if (shouldHandOffMerchantReturn) {
+      setLoading(false);
+
+      try {
+        window.opener.postMessage(
+          {
+            type: 'wards-payment-merchant-return',
+            refNumber,
+          },
+          window.location.origin
+        );
+      } catch {
+        // Ignore cross-window messaging errors and fall back to polling in the opener.
+      }
+
+      const closeTimer = window.setTimeout(() => {
+        window.close();
+      }, 400);
+
+      return () => window.clearTimeout(closeTimer);
+    }
+
     const resolvePaymentStatus = async () => {
       if (!refNumber) {
         setError('No payment reference found.');
@@ -123,19 +148,68 @@ const PaymentStatus = () => {
     return () => {
       if (intervalIdRef.current) clearInterval(intervalIdRef.current);
     };
-  }, [refNumber]);
+  }, [refNumber, shouldHandOffMerchantReturn]);
 
   useEffect(() => {
+    if (shouldHandOffMerchantReturn) {
+      return;
+    }
+
     if (isFailed || isExpired) {
       navigate(`/payment/failed?ref=${encodeURIComponent(refNumber || '')}`, { replace: true });
     }
-  }, [isExpired, isFailed, navigate, refNumber]);
+  }, [isExpired, isFailed, navigate, refNumber, shouldHandOffMerchantReturn]);
 
   useEffect(() => {
+    if (shouldHandOffMerchantReturn) {
+      return;
+    }
+
     if (shouldPromptPostPaymentInstructions) {
       setShowPostPaymentInstructions(true);
     }
-  }, [shouldPromptPostPaymentInstructions, refNumber]);
+  }, [shouldPromptPostPaymentInstructions, refNumber, shouldHandOffMerchantReturn]);
+
+  useEffect(() => {
+    if (shouldHandOffMerchantReturn || typeof window === 'undefined' || !refNumber) {
+      return undefined;
+    }
+
+    const handleMerchantReturn = async (event) => {
+      if (event.origin !== window.location.origin) {
+        return;
+      }
+
+      if (event.data?.type !== 'wards-payment-merchant-return' || event.data?.refNumber !== refNumber) {
+        return;
+      }
+
+      try {
+        const response = await axios.get(`${API_BASE_URL}/payments/paymongo/status/${refNumber}`);
+        setPayment(response.data);
+        setError('');
+      } catch (err) {
+        setError(err.response?.data?.detail || 'Failed to refresh payment status.');
+      }
+    };
+
+    window.addEventListener('message', handleMerchantReturn);
+    return () => window.removeEventListener('message', handleMerchantReturn);
+  }, [refNumber, shouldHandOffMerchantReturn]);
+
+  if (shouldHandOffMerchantReturn) {
+    return (
+      <section className="py-16 bg-lightbg min-h-screen flex items-center justify-center">
+        <div className="text-center max-w-lg px-6">
+          <div className="mx-auto mb-6 h-16 w-16 animate-spin rounded-full border-b-4 border-accent"></div>
+          <h2 className="text-2xl font-bold text-primary mb-2">Returning to Payment Processing</h2>
+          <p className="text-gray-600">
+            This window will close automatically so you can continue on the original payment processing page.
+          </p>
+        </div>
+      </section>
+    );
+  }
 
   const handleUploadProof = async () => {
     if (!selectedProofFile || !payment?.ref_number) {
@@ -215,7 +289,7 @@ const PaymentStatus = () => {
             <h2 className="text-3xl font-bold text-gray-900 mb-3">Unable to Track Payment</h2>
             <p className="text-gray-600 mb-8 text-lg">{error}</p>
             <button
-              onClick={() => navigate('/pay-taxes')}
+              onClick={() => navigate(isReceiptRequestPayment ? '/request-receipt' : '/pay-taxes')}
               className="w-full bg-accent hover:bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold transition-all duration-300 shadow-md hover:shadow-lg"
             >
               Retry from Payment Page
@@ -266,7 +340,6 @@ const PaymentStatus = () => {
               <div className="flex justify-between items-center"><span className="text-gray-700 font-medium">Reference Number:</span><span className="text-accent font-bold text-lg">{payment?.ref_number || refNumber}</span></div>
               <div className="flex justify-between items-center"><span className="text-gray-700 font-medium">WARDS Transaction Number:</span><span className="text-gray-900 font-semibold">{payment?.transaction_id || 'Pending assignment'}</span></div>
               <div className="flex justify-between items-center"><span className="text-gray-700 font-medium">Taxpayer Name:</span><span className="text-gray-900 font-semibold">{payment?.taxpayer_name || 'Processing'}</span></div>
-              <div className="flex justify-between items-center"><span className="text-gray-700 font-medium">TIN:</span><span className="text-gray-900 font-semibold">{formatTin(payment?.tin || '') || 'Processing'}</span></div>
               <div className="flex justify-between items-center"><span className="text-gray-700 font-medium">Tax Type:</span><span className="text-gray-900 font-semibold">{payment?.tax_type || 'Processing'}</span></div>
               <div className="flex justify-between items-center"><span className="text-gray-700 font-medium">Payment Method:</span><span className="text-gray-900 font-semibold capitalize">{payment?.payment_method || 'Processing'}</span></div>
               <div className="flex justify-between items-center"><span className="text-gray-700 font-medium">Branch:</span><span className="text-gray-900 font-semibold">{payment?.branch || 'Processing'}</span></div>
@@ -445,7 +518,9 @@ const PaymentStatus = () => {
                   ? `/pay-taxes/rpt${shouldResetRptWorkflowOnReturn ? '?reset=1' : ''}`
                   : isBusinessTaxPayment
                     ? `/pay-taxes/bt/online${payment?.metadata?.tracking_number ? `?tracking=${encodeURIComponent(payment.metadata.tracking_number)}` : ''}`
-                  : '/pay-taxes'
+                    : isReceiptRequestPayment
+                      ? '/request-receipt'
+                      : '/pay-taxes'
               )}
               className="w-full bg-accent hover:bg-blue-600 text-white py-3 rounded-lg font-semibold transition-all duration-300 shadow-md hover:shadow-lg"
             >

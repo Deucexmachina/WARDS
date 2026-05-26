@@ -268,6 +268,7 @@ export default function GeneratedReportContent({ report, metrics, contextLabel =
     { label: 'Collections', current: historical.total_amount?.current, previous: historical.total_amount?.previous, delta: historical.total_amount?.delta, currency: true },
   ];
   const detailRows = metrics?.detailed_rows || [];
+  const receiptTransactionRows = metrics?.receipt_transaction_summary || [];
   const insights = metrics?.insights || {};
 
   return (
@@ -344,6 +345,25 @@ export default function GeneratedReportContent({ report, metrics, contextLabel =
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+        <ReportSection title="Receipt And Transaction Summary" subtitle="Condensed totals for payment verification and receipt-release activity.">
+          <div className="space-y-3">
+            {receiptTransactionRows.length ? receiptTransactionRows.map((row) => (
+              <div key={row.label} className="flex items-center justify-between gap-4 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">{row.label}</p>
+                  <p className="text-xs text-slate-500">{row.status}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm font-bold text-slate-900">{formatNumber(row.count)}</p>
+                  <p className="text-xs text-slate-500">{Number(row.amount || 0) > 0 ? formatCurrency(row.amount) : 'No amount'}</p>
+                </div>
+              </div>
+            )) : (
+              <EmptyChartState message="No summarized receipt or transaction records are available for this report scope." />
+            )}
+          </div>
+        </ReportSection>
+
         <ReportSection title="Activity Trend Over Time" subtitle="Line graph of daily service volume and transaction activity across the selected date range.">
           <TrendLineChart points={trendPoints} />
         </ReportSection>

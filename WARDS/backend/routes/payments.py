@@ -1227,7 +1227,7 @@ def build_payment_confirmation_pdf(payment: Payment) -> bytes:
     add_rect(margin_x, 54, content_width, 708, stroke_rgb=(0.83, 0.88, 0.94), line_width=1.1)
 
     add_text(margin_x + 20, 736, "CITY TREASURER'S OFFICE", "F2", 9, (0.84, 0.91, 0.98))
-    add_text(margin_x + 20, 708, "PAYMENT CONFIRMATION RECEIPT", "F2", 24, (1, 1, 1))
+    add_text(margin_x + 20, 708, "OFFICIAL E-RECEIPT SUMMARY", "F2", 24, (1, 1, 1))
     add_text(
         margin_x + 20,
         653,
@@ -1260,8 +1260,8 @@ def build_payment_confirmation_pdf(payment: Payment) -> bytes:
 
     detail_rows = [
         ("Reference Number", payment.ref_number or "N/A", "Transaction Number", payment.txn_id or "N/A"),
-        ("Taxpayer Name", payment.taxpayer_name or "N/A", "TIN", format_tin(payment.tin) or "N/A"),
-        ("Tax Type", payment.tax_type or "N/A", "Payment Method", (payment.payment_method or "N/A").upper()),
+        ("Taxpayer Name", payment.taxpayer_name or "N/A", "Tax Type", payment.tax_type or "N/A"),
+        ("Amount Paid", format_currency(payment.amount), "Payment Method", (payment.payment_method or "N/A").upper()),
         ("Branch", payment.branch or "N/A", "Payment Timestamp", format_receipt_timestamp(payment.verified_at or payment.created_at)),
         ("Receipt Email", payment.email or "N/A", "Current Stage", stage_text.title()),
     ]
@@ -1274,7 +1274,14 @@ def build_payment_confirmation_pdf(payment: Payment) -> bytes:
     cart_box_y = 156
     cart_box_height = 154
     add_rect(margin_x + 18, cart_box_y, content_width - 36, cart_box_height, stroke_rgb=(0.83, 0.88, 0.94))
-    add_text(margin_x + 32, cart_box_y + cart_box_height - 22, "RPT PAYMENT ITEMS", "F2", 13, (0.07, 0.20, 0.39))
+    add_text(
+        margin_x + 32,
+        cart_box_y + cart_box_height - 22,
+        "RPT PAYMENT ITEMS" if cart_items else "PAYMENT NOTES",
+        "F2",
+        13,
+        (0.07, 0.20, 0.39),
+    )
 
     items_y = cart_box_y + cart_box_height - 48
     if cart_items:
@@ -1310,7 +1317,14 @@ def build_payment_confirmation_pdf(payment: Payment) -> bytes:
         if len(cart_items) > 3:
             add_text(margin_x + 32, cart_box_y + 18, f"Additional items: {len(cart_items) - 3}", "F1", 9, (0.55, 0.61, 0.70))
     else:
-        add_text(margin_x + 32, items_y, "No cart entries available.", "F1", 10, (0.35, 0.42, 0.51))
+        notes = [
+            f"Payment type: {payment.tax_type or 'N/A'}",
+            f"Processed through: {(payment.payment_method or 'N/A').upper()}",
+            "This document serves as a clean payment summary while branch validation is in progress.",
+        ]
+        line_y = items_y
+        for note in notes:
+            line_y = add_wrapped_text(margin_x + 32, line_y, note, 64, "F1", 10, (0.35, 0.42, 0.51), 13) - 6
 
     total_box_width = 168
     total_box_height = 72
@@ -2444,7 +2458,7 @@ async def process_payment(request: PaymentProcessRequest, http_request: Request,
             item_name=payment_value(payment, "tax_type"),
             reference_number=payment_value(payment, "ref_number"),
             payment_method_types=checkout_payment_methods,
-            success_url=f"{frontend_url}/payment/success?ref={payment.ref_number}&merchant_return=1",
+            success_url=f"{frontend_url}/payment/status?ref={payment.ref_number}&merchant_return=1",
             cancel_url=f"{frontend_url}/payment/failed?ref={payment.ref_number}",
             description=description,
             billing={

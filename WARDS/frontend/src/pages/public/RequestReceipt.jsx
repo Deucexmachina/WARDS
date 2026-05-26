@@ -6,6 +6,7 @@ import { paymentAPI, receiptAPI } from '../../services/api';
 import { getEmailValidationMessage } from '../../utils/validation';
 
 const DEFAULT_DISABLED_MESSAGE = 'This service is currently unavailable because it has been disabled by system administration.';
+const ACTIVE_RECEIPT_REQUEST_STORAGE_KEY = 'activeReceiptRequestId';
 const getTodayDateValue = () =>
   new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Manila',
@@ -134,6 +135,24 @@ const RequestReceipt = () => {
     }
 
     fetchBranches();
+  }, []);
+
+  useEffect(() => {
+    const activeRequestId = localStorage.getItem(ACTIVE_RECEIPT_REQUEST_STORAGE_KEY);
+    if (!activeRequestId) {
+      return;
+    }
+
+    receiptAPI.getRequestStatus(activeRequestId)
+      .then((response) => {
+        setRequestStatus(response.data);
+        if (['Released', 'Completed'].includes(response.data?.overallStatus || response.data?.status)) {
+          localStorage.removeItem(ACTIVE_RECEIPT_REQUEST_STORAGE_KEY);
+        }
+      })
+      .catch(() => {
+        localStorage.removeItem(ACTIVE_RECEIPT_REQUEST_STORAGE_KEY);
+      });
   }, []);
 
   useEffect(() => {
@@ -302,6 +321,7 @@ const RequestReceipt = () => {
         appointmentSlot: formData.requestType === 'Appointment' ? formData.appointmentSlot : null,
       });
       setRequestStatus(response.data);
+      localStorage.setItem(ACTIVE_RECEIPT_REQUEST_STORAGE_KEY, response.data.requestId);
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to submit receipt request.');
     } finally {
@@ -372,6 +392,8 @@ const RequestReceipt = () => {
       setPaying(false);
     }
   };
+
+  const assignedBranchLabel = requestStatus?.branchName || selectedBranch?.name || 'Not yet assigned';
 
   return (
     <section className="py-16 bg-white min-h-screen">
@@ -585,7 +607,7 @@ const RequestReceipt = () => {
                 <div className="flex justify-between items-center">
                   <span className="text-gray-700 font-medium">Status:</span>
                   <span className="px-3 py-1 rounded-full text-sm font-semibold bg-yellow-100 text-yellow-800">
-                    {requestStatus.status}
+                    {requestStatus.overallStatus || requestStatus.status}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
@@ -594,12 +616,18 @@ const RequestReceipt = () => {
                     {requestStatus.matchedReceipt ? 'Found in branch records' : 'Not yet matched'}
                   </span>
                 </div>
-                {requestStatus.branchName && (
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-700 font-medium">Assigned Branch:</span>
-                    <span className="font-semibold text-gray-900">{requestStatus.branchName}</span>
-                  </div>
-                )}
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-700 font-medium">Assigned Branch:</span>
+                  <span className="font-semibold text-gray-900">{assignedBranchLabel}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-700 font-medium">Payment Status:</span>
+                  <span className="font-semibold text-gray-900">{requestStatus.paymentStatus || 'Pending'}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-700 font-medium">Release Status:</span>
+                  <span className="font-semibold text-gray-900">{requestStatus.releaseStatus || 'Not Ready for Release'}</span>
+                </div>
                 <div className="flex justify-between items-center">
                   <span className="text-gray-700 font-medium">Tax Type:</span>
                   <span className="font-semibold text-gray-900">{requestStatus.taxType}</span>
@@ -639,10 +667,6 @@ const RequestReceipt = () => {
                     </select>
                   </div>
 
-                  <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
-                    Placeholder payment step: this is temporarily using the local payment flow until PayMongo is integrated.
-                  </div>
-
                   <button
                     onClick={handlePayFee}
                     disabled={paying || (systemStatus && (!systemStatus.paymentGatewayEnabled || systemStatus.maintenanceMode))}
@@ -663,6 +687,24 @@ const RequestReceipt = () => {
                   Payment recorded. The request is now connected to the selected branch workflow.
                 </div>
               )}
+
+              {!requestStatus.feePaid ? (
+                <button
+                  onClick={() => navigate('/request-receipt')}
+                  className="mt-6 w-full bg-blue-50 hover:bg-blue-100 text-blue-900 py-3 rounded-lg font-semibold transition duration-300 border border-blue-200"
+                >
+                  Continue Request Receipt
+                </button>
+              ) : null}
+
+              {requestStatus.nextAction === 'Wait for Branch Release' ? (
+                <button
+                  onClick={() => navigate('/pay-taxes')}
+                  className="mt-3 w-full bg-slate-100 hover:bg-slate-200 text-slate-800 py-3 rounded-lg font-semibold transition duration-300 border border-slate-300"
+                >
+                  Go to Pay Taxes Online
+                </button>
+              ) : null}
 
               <button
                 onClick={resetForAnotherRequest}

@@ -3,7 +3,7 @@ import api from '../../services/api';
 import WardsPageHero from '../../components/WardsPageHero';
 
 const PAYMENT_TIME_ZONE = 'Asia/Manila';
-const TRANSACTIONS_PER_PAGE = 10;
+const TRANSACTIONS_PER_PAGE = 5;
 const TREND_DAYS = 7;
 
 const createEmptyFilters = () => ({
@@ -72,35 +72,51 @@ const normalizeStatus = (status) => {
     'official_receipt_generated',
     'receipt_generated',
     'completed',
+    'payment_verified',
   ].includes(normalized)) {
     return 'confirmed';
   }
   if (normalized === 'expired') return 'expired';
-  if (['failed', 'declined', 'cancelled', 'canceled'].includes(normalized)) return 'failed';
+  if ([
+    'failed',
+    'declined',
+    'cancelled',
+    'canceled',
+    'payment_rejected',
+    'returned_for_correction',
+  ].includes(normalized)) return 'failed';
   return 'pending';
 };
 
-const isProcessingPayment = (payment) => normalizeStatus(payment?.status) === 'pending';
+const getPaymentBucket = (payment) => {
+  const normalizedStatus = normalizeStatus(payment?.status);
+  const normalizedPaymongoStatus = normalizeStatus(payment?.paymongo_status);
+  const normalizedWorkflowStatus = normalizeStatus(payment?.workflow_status);
 
-const getPaymentKey = (payment) =>
-  payment.paymongo_payment_id ||
-  payment.paymongo_payment_intent_id ||
-  payment.paymongo_checkout_session_id ||
-  payment.ref_number ||
-  payment.transaction_id ||
-  `payment-${payment.id}`;
+  if (
+    payment?.verified_at ||
+    normalizedStatus === 'confirmed' ||
+    normalizedPaymongoStatus === 'confirmed' ||
+    normalizedWorkflowStatus === 'confirmed'
+  ) {
+    return 'confirmed';
+  }
 
-const getPaymentPreferenceScore = (payment) => {
-  const status = normalizeStatus(payment.status);
-  const statusScore = {
-    confirmed: 3,
-    pending: 2,
-    failed: 1,
-    expired: 0,
-  }[status] ?? 0;
-  const timestamp = parsePaymentDate(payment.verified_at || payment.created_at)?.getTime() || 0;
-  return (statusScore * 1_000_000_000_000) + timestamp;
+  if (
+    normalizedStatus === 'failed' ||
+    normalizedStatus === 'expired' ||
+    normalizedPaymongoStatus === 'failed' ||
+    normalizedPaymongoStatus === 'expired' ||
+    normalizedWorkflowStatus === 'failed' ||
+    normalizedWorkflowStatus === 'expired'
+  ) {
+    return 'failed';
+  }
+
+  return 'pending';
 };
+
+const isProcessingPayment = (payment) => getPaymentBucket(payment) === 'pending';
 
 const STATUS_CONFIG = {
   confirmed: { bg: 'bg-emerald-100', text: 'text-emerald-800', label: 'Verified' },
@@ -123,6 +139,34 @@ const SectionCard = ({ title, subtitle, action, children }) => (
     <div className="px-6 py-6">{children}</div>
   </section>
 );
+
+const PaginationControls = ({ page, totalPages, totalItems, onPageChange }) => {
+  if (totalItems <= TRANSACTIONS_PER_PAGE) {
+    return null;
+  }
+
+  return (
+    <div className="mt-5 flex flex-col gap-4 border-t border-slate-100 pt-5 md:flex-row md:items-center md:justify-between">
+      <div className="text-sm text-slate-500">Page {page} of {totalPages}</div>
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => onPageChange(page - 1)}
+          disabled={page <= 1}
+          className="rounded-2xl border border-slate-300 px-4 py-2 font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Previous
+        </button>
+        <button
+          onClick={() => onPageChange(page + 1)}
+          disabled={page >= totalPages}
+          className="rounded-2xl border border-slate-300 px-4 py-2 font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  );
+};
 
 const DashboardIcon = ({ type }) => {
   const commonProps = { className: 'h-5 w-5', fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' };
@@ -417,7 +461,11 @@ const PaymentManagement = () => {
   const [paymentToVerify, setPaymentToVerify] = useState(null);
   const [verifying, setVerifying] = useState(false);
   const [verifyError, setVerifyError] = useState('');
-  const [currentPage, setCurrentPage] = useState(1);
+  const [sectionPages, setSectionPages] = useState({
+    pending: 1,
+    processedVerified: 1,
+    processedDeclined: 1,
+  });
   const [feedback, setFeedback] = useState({ type: '', message: '' });
 
   useEffect(() => {
@@ -429,19 +477,9 @@ const PaymentManagement = () => {
   const fetchPayments = async () => {
     try {
       const response = await api.get('/branch/payments');
-      const uniquePayments = new Map();
-
-      (response.data || []).forEach((payment) => {
-        const key = getPaymentKey(payment);
-        const existing = uniquePayments.get(key);
-        if (!existing || getPaymentPreferenceScore(payment) > getPaymentPreferenceScore(existing)) {
-          uniquePayments.set(key, payment);
-        }
-      });
-
-      const normalizedPayments = Array.from(uniquePayments.values()).sort((left, right) => {
-        const leftTime = parsePaymentDate(left.created_at)?.getTime() || 0;
-        const rightTime = parsePaymentDate(right.created_at)?.getTime() || 0;
+      const normalizedPayments = [...(response.data || [])].sort((left, right) => {
+        const leftTime = parsePaymentDate(left.verified_at || left.created_at)?.getTime() || 0;
+        const rightTime = parsePaymentDate(right.verified_at || right.created_at)?.getTime() || 0;
         return rightTime - leftTime;
       });
 
@@ -543,14 +581,16 @@ const PaymentManagement = () => {
 
     setDeclining(true);
     try {
+      setFeedback({ type: '', message: '' });
       await api.put(`/branch/payments/${paymentToDecline.id}/decline`);
       setShowDeclineModal(false);
       setPaymentToDecline(null);
+      setFeedback({ type: 'success', message: 'Payment declined successfully.' });
       window.dispatchEvent(new CustomEvent('branch-payment-updated', { detail: { action: 'declined', paymentId: paymentToDecline.id } }));
       fetchPayments();
     } catch (error) {
       console.error('Failed to decline payment:', error);
-      alert(`Failed to decline payment: ${error.response?.data?.detail || error.message}`);
+      setFeedback({ type: 'error', message: error.response?.data?.detail || error.message || 'Failed to decline payment.' });
     } finally {
       setDeclining(false);
     }
@@ -576,16 +616,13 @@ const PaymentManagement = () => {
     return taxTypes.sort((left, right) => left.localeCompare(right));
   }, [payments]);
 
-  const filteredPayments = useMemo(() => {
+  const baseFilteredPayments = useMemo(() => {
     return payments.filter((payment) => {
-      const status = normalizeStatus(payment.status);
+      const status = getPaymentBucket(payment);
       const paymentMethod = normalizePaymentMethodLabel(payment.payment_method);
       const createdAt = parsePaymentDate(payment.created_at);
       const normalizedSearch = appliedFilters.search.trim().toLowerCase();
 
-      if (appliedFilters.status !== 'all' && status !== appliedFilters.status) {
-        return false;
-      }
       if (appliedFilters.paymentMethod !== 'all' && paymentMethod !== appliedFilters.paymentMethod) {
         return false;
       }
@@ -635,43 +672,49 @@ const PaymentManagement = () => {
     });
   }, [payments, appliedFilters]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredPayments.length / TRANSACTIONS_PER_PAGE));
-  const safeCurrentPage = Math.min(currentPage, totalPages);
-  const paginatedPayments = filteredPayments.slice(
-    (safeCurrentPage - 1) * TRANSACTIONS_PER_PAGE,
-    safeCurrentPage * TRANSACTIONS_PER_PAGE,
+  const filteredPayments = useMemo(() => {
+    if (appliedFilters.status === 'all') {
+      return baseFilteredPayments;
+    }
+
+    return baseFilteredPayments.filter((payment) => getPaymentBucket(payment) === appliedFilters.status);
+  }, [baseFilteredPayments, appliedFilters.status]);
+
+  const pendingTransactions = useMemo(
+    () => payments.filter((payment) => getPaymentBucket(payment) === 'pending'),
+    [payments]
   );
-  const groupedPaginatedPayments = useMemo(() => {
-    return paginatedPayments.reduce((groups, payment) => {
-      const branchName = payment.branch || 'Unassigned Branch';
-      if (!groups[branchName]) {
-        groups[branchName] = {
-          rpt: [],
-          bt: [],
-          other: [],
-        };
-      }
-      if (payment.tax_type === 'Real Property Tax') {
-        groups[branchName].rpt.push(payment);
-      } else if (payment.tax_type === 'Business Tax') {
-        groups[branchName].bt.push(payment);
-      } else {
-        groups[branchName].other.push(payment);
-      }
-      return groups;
-    }, {});
-  }, [paginatedPayments]);
+  const verifiedTransactions = useMemo(
+    () => payments.filter((payment) => getPaymentBucket(payment) === 'confirmed'),
+    [payments]
+  );
+  const declinedTransactions = useMemo(
+    () => payments.filter((payment) => getPaymentBucket(payment) === 'failed'),
+    [payments]
+  );
 
   useEffect(() => {
-    setCurrentPage(1);
+    setSectionPages({
+      pending: 1,
+      processedVerified: 1,
+      processedDeclined: 1,
+    });
   }, [appliedFilters]);
+
+  useEffect(() => {
+    setSectionPages((current) => ({
+      pending: Math.min(current.pending, Math.max(1, Math.ceil(pendingTransactions.length / TRANSACTIONS_PER_PAGE))),
+      processedVerified: Math.min(current.processedVerified, Math.max(1, Math.ceil(verifiedTransactions.length / TRANSACTIONS_PER_PAGE))),
+      processedDeclined: Math.min(current.processedDeclined, Math.max(1, Math.ceil(declinedTransactions.length / TRANSACTIONS_PER_PAGE))),
+    }));
+  }, [pendingTransactions.length, verifiedTransactions.length, declinedTransactions.length]);
 
   const stats = useMemo(() => {
     const total = filteredPayments.length;
-    const pending = filteredPayments.filter((payment) => normalizeStatus(payment.status) === 'pending').length;
-    const confirmedPayments = filteredPayments.filter((payment) => normalizeStatus(payment.status) === 'confirmed');
+    const pending = filteredPayments.filter((payment) => getPaymentBucket(payment) === 'pending').length;
+    const confirmedPayments = filteredPayments.filter((payment) => getPaymentBucket(payment) === 'confirmed');
     const confirmed = confirmedPayments.length;
-    const failed = filteredPayments.filter((payment) => normalizeStatus(payment.status) === 'failed').length;
+    const failed = filteredPayments.filter((payment) => getPaymentBucket(payment) === 'failed').length;
     const totalCollections = confirmedPayments.reduce((sum, payment) => sum + (payment.amount || 0), 0);
     const todayKey = getPaymentDayKey(new Date().toISOString());
     const todaysPayments = filteredPayments.filter((payment) => getPaymentDayKey(payment.created_at) === todayKey).length;
@@ -695,7 +738,7 @@ const PaymentManagement = () => {
           summary[methodLabel] = { count: 0, amount: 0 };
         }
         summary[methodLabel].count += 1;
-        if (normalizeStatus(payment.status) === 'confirmed') {
+        if (getPaymentBucket(payment) === 'confirmed') {
           summary[methodLabel].amount += payment.amount || 0;
         }
         return summary;
@@ -772,6 +815,204 @@ const PaymentManagement = () => {
           : null,
       ].filter(Boolean)
     : [];
+
+  const renderTransactionTable = ({
+    items,
+    pageKey,
+    emptyMessage,
+    allowActions = false,
+    paginated = false,
+  }) => {
+    const totalPages = Math.max(1, Math.ceil(items.length / TRANSACTIONS_PER_PAGE));
+    const page = sectionPages[pageKey];
+    const visibleItems = paginated
+      ? items.slice((page - 1) * TRANSACTIONS_PER_PAGE, page * TRANSACTIONS_PER_PAGE)
+      : items;
+
+    return (
+      !items.length ? (
+        <div className="rounded-2xl border border-slate-300 bg-white px-6 py-14 text-center shadow-inner">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+            <DashboardIcon type="wallet" />
+          </div>
+          <p className="mt-4 text-base font-semibold text-slate-700">{emptyMessage}</p>
+        </div>
+      ) : (
+        <>
+          <div className="overflow-x-auto rounded-2xl border border-slate-300 bg-white shadow-inner">
+            <table className="min-w-[1180px] w-full text-sm">
+              <thead className="sticky top-0 z-10 bg-slate-100 text-slate-600 shadow-sm">
+                <tr>
+                  <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Reference Number</th>
+                  <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Date</th>
+                  <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Time</th>
+                  <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Citizen Name</th>
+                  <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Branch</th>
+                  <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">TIN</th>
+                  <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Payment Method</th>
+                  <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Tax Type</th>
+                  <th className="px-5 py-4 text-right font-semibold uppercase tracking-[0.12em]">Amount</th>
+                  <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Status</th>
+                  <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 bg-white">
+                {visibleItems.map((payment) => (
+                  <tr key={payment.id} className="transition hover:bg-slate-50">
+                    <td className="px-5 py-4 align-top">
+                      <p className="font-mono text-sm font-semibold text-[#0f2f5f]">{payment.ref_number || 'N/A'}</p>
+                      <p className="mt-1 text-xs text-slate-500">{payment.transaction_id || 'No transaction ID'}</p>
+                    </td>
+                    <td className="px-5 py-4 align-top text-slate-700">
+                      {formatPaymentDate(payment.created_at, { year: 'numeric', month: 'short', day: 'numeric' })}
+                    </td>
+                    <td className="px-5 py-4 align-top text-slate-700">
+                      {formatPaymentDate(payment.created_at, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
+                    </td>
+                    <td className="px-5 py-4 align-top">
+                      <p className="font-semibold text-slate-900">{payment.taxpayer_name || 'N/A'}</p>
+                      <p className="mt-1 text-xs text-slate-500">{payment.email || 'No email provided'}</p>
+                    </td>
+                    <td className="px-5 py-4 align-top text-slate-700">{payment.branch || 'Unassigned Branch'}</td>
+                    <td className="px-5 py-4 align-top text-slate-700">{payment.tin || 'N/A'}</td>
+                    <td className="px-5 py-4 align-top text-slate-700">{normalizePaymentMethodLabel(payment.payment_method)}</td>
+                    <td className="px-5 py-4 align-top text-slate-700">{payment.tax_type || 'N/A'}</td>
+                    <td className="px-5 py-4 text-right align-top font-semibold text-slate-900">{formatCurrency(payment.amount)}</td>
+                    <td className="px-5 py-4 align-top">
+                      <StatusBadge status={getPaymentBucket(payment)} />
+                    </td>
+                    <td className="px-5 py-4 align-top">
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => handleViewDetails(payment)}
+                          className="rounded-xl bg-[#0f2f5f] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#19498d]"
+                        >
+                          View
+                        </button>
+                        {allowActions ? (
+                          <>
+                            <button
+                              onClick={() => handleVerifyClick(payment)}
+                              className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100"
+                            >
+                              Verify
+                            </button>
+                            <button
+                              onClick={() => handleDeclineClick(payment)}
+                              className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 transition hover:bg-amber-100"
+                            >
+                              Decline
+                            </button>
+                          </>
+                        ) : null}
+                        <button
+                          onClick={() => handleDeleteClick(payment)}
+                          className="rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {paginated ? (
+            <PaginationControls
+              page={page}
+              totalPages={totalPages}
+              totalItems={items.length}
+              onPageChange={(nextPage) => setSectionPages((current) => ({ ...current, [pageKey]: nextPage }))}
+            />
+          ) : null}
+        </>
+      )
+    );
+  };
+
+  const renderTransactionSection = ({
+    title,
+    subtitle,
+    items,
+    pageKey,
+    emptyMessage,
+    toneClassName,
+    allowActions = false,
+    paginated = false,
+  }) => {
+    return (
+      <SectionCard
+        title={title}
+        subtitle={subtitle}
+        action={(
+          <div className={`rounded-2xl border px-4 py-2 text-sm font-semibold shadow-sm ${toneClassName}`}>
+            {items.length} transaction{items.length === 1 ? '' : 's'}
+          </div>
+        )}
+      >
+        {renderTransactionTable({
+          items,
+          pageKey,
+          emptyMessage,
+          allowActions,
+          paginated,
+        })}
+      </SectionCard>
+    );
+  };
+
+  const renderProcessedTransactionsSection = () => {
+    return (
+      <SectionCard
+        title="Processed Transactions"
+        subtitle="A unified branch history for payments that were already verified or declined."
+        action={(
+          <div className="rounded-2xl border border-slate-200 bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm">
+            {verifiedTransactions.length + declinedTransactions.length} processed transaction{verifiedTransactions.length + declinedTransactions.length === 1 ? '' : 's'}
+          </div>
+        )}
+      >
+        <div className="space-y-8">
+          <div className="space-y-4">
+            <div className="flex flex-col gap-3 rounded-3xl border border-emerald-200 bg-emerald-50/60 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Verified Transactions Row</h3>
+                <p className="mt-1 text-sm text-slate-600">Branch-approved transactions kept for completed payment records.</p>
+              </div>
+              <div className="rounded-2xl border border-emerald-200 bg-white px-4 py-2 text-sm font-semibold text-emerald-800 shadow-sm">
+                {verifiedTransactions.length} transaction{verifiedTransactions.length === 1 ? '' : 's'}
+              </div>
+            </div>
+            {renderTransactionTable({
+              items: verifiedTransactions,
+              pageKey: 'processedVerified',
+              emptyMessage: 'No verified transactions were found for this branch.',
+              paginated: true,
+            })}
+          </div>
+
+          <div className="space-y-4">
+            <div className="flex flex-col gap-3 rounded-3xl border border-rose-200 bg-rose-50/60 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Declined Transactions Row</h3>
+                <p className="mt-1 text-sm text-slate-600">Transactions marked failed, declined, or expired after branch review.</p>
+              </div>
+              <div className="rounded-2xl border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-800 shadow-sm">
+                {declinedTransactions.length} transaction{declinedTransactions.length === 1 ? '' : 's'}
+              </div>
+            </div>
+            {renderTransactionTable({
+              items: declinedTransactions,
+              pageKey: 'processedDeclined',
+              emptyMessage: 'No declined transactions were found for this branch.',
+              paginated: true,
+            })}
+          </div>
+        </div>
+      </SectionCard>
+    );
+  };
 
   if (loading) {
     return (
@@ -1003,159 +1244,18 @@ const PaymentManagement = () => {
         </div>
       </SectionCard>
 
-      <SectionCard
-        title="Transactions By Branch"
-        subtitle="Newest transactions are grouped into branch-specific tables for cleaner monitoring and future multi-branch expansion."
-        action={
-          <div className="rounded-2xl border border-slate-200 bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm">
-            {filteredPayments.length} transactions
-          </div>
-        }
-      >
-        {!filteredPayments.length ? (
-          <div className="rounded-2xl border border-slate-300 bg-white px-6 py-14 text-center shadow-inner">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-slate-100 text-slate-400">
-              <DashboardIcon type="wallet" />
-            </div>
-            <p className="mt-4 text-base font-semibold text-slate-700">No matching branch payments found.</p>
-            <p className="mt-1 text-sm text-slate-500">Try adjusting the filters or search fields to widen the result set.</p>
-          </div>
-        ) : null}
+      {renderTransactionSection({
+        title: 'Pending Transactions',
+        subtitle: 'Transactions still awaiting branch review, verification, or decline action.',
+        items: pendingTransactions,
+        pageKey: 'pending',
+        emptyMessage: 'No current pending transactions were found for this branch.',
+        toneClassName: 'border-amber-200 bg-amber-50 text-amber-800',
+        allowActions: true,
+        paginated: true,
+      })}
 
-        {Object.entries(groupedPaginatedPayments).map(([branchName, branchGroups]) => (
-          <div key={branchName} className="mb-5 last:mb-0">
-            <div className="mb-3 flex items-center justify-between rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Branch Table</p>
-                <p className="mt-1 text-base font-bold text-[#0f2f5f]">{branchName}</p>
-              </div>
-              <span className="rounded-full bg-[#0f2f5f] px-3 py-1 text-xs font-semibold text-white">
-                {(branchGroups.rpt.length + branchGroups.bt.length + branchGroups.other.length)} transaction{(branchGroups.rpt.length + branchGroups.bt.length + branchGroups.other.length) === 1 ? '' : 's'}
-              </span>
-            </div>
-
-            {[
-              { key: 'rpt', title: 'RPT Transactions', items: branchGroups.rpt },
-              { key: 'bt', title: 'BT Transactions', items: branchGroups.bt },
-              { key: 'other', title: 'Other Transactions', items: branchGroups.other },
-            ].filter((section) => section.items.length).map((section) => (
-              <div key={`${branchName}-${section.key}`} className="mb-4 last:mb-0">
-                <div className="mb-2 flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p className="text-sm font-bold text-slate-800">{section.title}</p>
-                  <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600 shadow-sm">
-                    {section.items.length} item{section.items.length === 1 ? '' : 's'}
-                  </span>
-                </div>
-                <div className="overflow-x-auto rounded-2xl border border-slate-300 bg-white shadow-inner">
-                  <table className="min-w-[1180px] w-full text-sm">
-                    <thead className="sticky top-0 z-10 bg-slate-100 text-slate-600 shadow-sm">
-                      <tr>
-                        <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Reference Number</th>
-                        <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Date</th>
-                        <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Time</th>
-                        <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Citizen Name</th>
-                        <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">TIN</th>
-                        <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Payment Method</th>
-                        <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Tax Type</th>
-                        <th className="px-5 py-4 text-right font-semibold uppercase tracking-[0.12em]">Amount</th>
-                        <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Status</th>
-                        <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200 bg-white">
-                      {section.items.map((payment) => (
-                        <tr key={payment.id} className="transition hover:bg-slate-50">
-                          <td className="px-5 py-4 align-top">
-                            <p className="font-mono text-sm font-semibold text-[#0f2f5f]">{payment.ref_number || 'N/A'}</p>
-                            <p className="mt-1 text-xs text-slate-500">{payment.transaction_id || 'No transaction ID'}</p>
-                          </td>
-                          <td className="px-5 py-4 align-top text-slate-700">
-                            {formatPaymentDate(payment.created_at, { year: 'numeric', month: 'short', day: 'numeric' })}
-                          </td>
-                          <td className="px-5 py-4 align-top text-slate-700">
-                            {formatPaymentDate(payment.created_at, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
-                          </td>
-                          <td className="px-5 py-4 align-top">
-                            <p className="font-semibold text-slate-900">{payment.taxpayer_name || 'N/A'}</p>
-                            <p className="mt-1 text-xs text-slate-500">{payment.email || 'No email provided'}</p>
-                          </td>
-                          <td className="px-5 py-4 align-top text-slate-700">{payment.tin || 'N/A'}</td>
-                          <td className="px-5 py-4 align-top text-slate-700">{normalizePaymentMethodLabel(payment.payment_method)}</td>
-                          <td className="px-5 py-4 align-top text-slate-700">{payment.tax_type || 'N/A'}</td>
-                          <td className="px-5 py-4 text-right align-top font-semibold text-slate-900">{formatCurrency(payment.amount)}</td>
-                          <td className="px-5 py-4 align-top">
-                            <StatusBadge status={payment.status} />
-                          </td>
-                          <td className="px-5 py-4 align-top">
-                            <div className="flex flex-wrap gap-2">
-                              <button
-                                onClick={() => handleViewDetails(payment)}
-                                className="rounded-xl bg-[#0f2f5f] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#19498d]"
-                              >
-                                View
-                              </button>
-                              {isProcessingPayment(payment) ? (
-                                <>
-                                  <button
-                                    onClick={() => handleVerifyClick(payment)}
-                                    className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100"
-                                  >
-                                    Verify
-                                  </button>
-                                  <button
-                                    onClick={() => handleDeclineClick(payment)}
-                                    className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 transition hover:bg-amber-100"
-                                  >
-                                    Decline
-                                  </button>
-                                </>
-                              ) : null}
-                              <button
-                                onClick={() => handleDeleteClick(payment)}
-                                className="rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ))}
-          </div>
-        ))}
-
-        {filteredPayments.length ? (
-          <div className="mt-5 flex flex-col gap-4 border-t border-slate-100 pt-5 md:flex-row md:items-center md:justify-between">
-            <div className="text-sm text-slate-500">
-              Showing {(safeCurrentPage - 1) * TRANSACTIONS_PER_PAGE + 1}-{Math.min(safeCurrentPage * TRANSACTIONS_PER_PAGE, filteredPayments.length)} of {filteredPayments.length} transactions
-              <p className="mt-1 text-xs text-slate-400">Verified collections in this view: {formatCurrency(stats.totalCollections)}</p>
-            </div>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setCurrentPage((previous) => Math.max(1, previous - 1))}
-                disabled={safeCurrentPage === 1}
-                className="rounded-2xl border border-slate-300 px-4 py-2 font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Previous
-              </button>
-              <span className="rounded-2xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700">
-                Page {safeCurrentPage} of {totalPages}
-              </span>
-              <button
-                onClick={() => setCurrentPage((previous) => Math.min(totalPages, previous + 1))}
-                disabled={safeCurrentPage === totalPages}
-                className="rounded-2xl border border-slate-300 px-4 py-2 font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Next
-              </button>
-            </div>
-          </div>
-        ) : null}
-      </SectionCard>
+      {renderProcessedTransactionsSection()}
 
       {showVerifyModal && paymentToVerify ? (
         <ConfirmationModal
