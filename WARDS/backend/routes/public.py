@@ -47,7 +47,9 @@ def serialize_manila_datetime(value: Optional[datetime]) -> Optional[str]:
     if value is None:
         return None
     if value.tzinfo is None:
-        return value.replace(tzinfo=MANILA_TIMEZONE).isoformat()
+        # Database stores UTC time without timezone info, so mark it as UTC first
+        utc_time = value.replace(tzinfo=timezone.utc)
+        return utc_time.astimezone(MANILA_TIMEZONE).isoformat()
     return value.astimezone(MANILA_TIMEZONE).isoformat()
 
 
