@@ -3,6 +3,9 @@ import { useEffect, useState } from 'react';
 import api from '../services/api';
 import { announcementAPI, branchAnnouncementAPI, discrepancyAPI } from '../services/api';
 
+const BRANCH_QUEUE_UPDATED_EVENT = 'branch-queue-updated';
+const BRANCH_RECEIPT_UPDATED_EVENT = 'branch-receipt-updated';
+
 const DynamicSidebar = () => {
   const location = useLocation();
   const [modules, setModules] = useState([]);
@@ -21,6 +24,16 @@ const DynamicSidebar = () => {
     backup: 0,
     logs: 0,
   });
+
+  const getActiveQueueBadgeCount = (items) => (
+    (items || []).filter((item) => {
+      const normalizedStatus = (item?.status || '').toString().trim().toLowerCase();
+      return !['completed', 'cancelled', 'canceled'].includes(normalizedStatus);
+    }).length
+  );
+  const getActiveReceiptBadgeCount = (items) => (
+    (items || []).filter((item) => !['Released', 'Completed'].includes(item.status)).length
+  );
 
   useEffect(() => {
     fetchSidebarModules();
@@ -43,6 +56,28 @@ const DynamicSidebar = () => {
     const handleAdminDiscrepancyViewed = () => fetchUnreadDiscrepancyCount();
     const handleAnnouncementViewed = () => fetchSidebarModuleCounts();
     const handleBranchPaymentUpdated = () => fetchSidebarModuleCounts();
+    const handleBranchReceiptUpdated = (event) => {
+      const eventRequests = event?.detail?.requests;
+      if (!Array.isArray(eventRequests)) {
+        fetchSidebarModuleCounts();
+        return;
+      }
+      setModuleCounts((current) => ({
+        ...current,
+        receipts: getActiveReceiptBadgeCount(eventRequests),
+      }));
+    };
+    const handleBranchQueueUpdated = (event) => {
+      const eventQueues = event?.detail?.queues;
+      if (!Array.isArray(eventQueues)) {
+        fetchSidebarModuleCounts();
+        return;
+      }
+      setModuleCounts((current) => ({
+        ...current,
+        queue: getActiveQueueBadgeCount(eventQueues),
+      }));
+    };
     window.addEventListener('admin-memo-read', handleAdminMemoRead);
     window.addEventListener('admin-policy-read', handleAdminPolicyRead);
     window.addEventListener('admin-policy-updated', handleAdminPolicyUpdated);
@@ -52,6 +87,8 @@ const DynamicSidebar = () => {
     window.addEventListener('admin-announcement-viewed', handleAnnouncementViewed);
     window.addEventListener('branch-announcement-viewed', handleAnnouncementViewed);
     window.addEventListener('branch-payment-updated', handleBranchPaymentUpdated);
+    window.addEventListener(BRANCH_RECEIPT_UPDATED_EVENT, handleBranchReceiptUpdated);
+    window.addEventListener(BRANCH_QUEUE_UPDATED_EVENT, handleBranchQueueUpdated);
     return () => {
       clearInterval(interval);
       window.removeEventListener('admin-memo-read', handleAdminMemoRead);
@@ -63,6 +100,8 @@ const DynamicSidebar = () => {
       window.removeEventListener('admin-announcement-viewed', handleAnnouncementViewed);
       window.removeEventListener('branch-announcement-viewed', handleAnnouncementViewed);
       window.removeEventListener('branch-payment-updated', handleBranchPaymentUpdated);
+      window.removeEventListener(BRANCH_RECEIPT_UPDATED_EVENT, handleBranchReceiptUpdated);
+      window.removeEventListener(BRANCH_QUEUE_UPDATED_EVENT, handleBranchQueueUpdated);
     };
   }, []);
 
@@ -176,9 +215,9 @@ const DynamicSidebar = () => {
         setModuleCounts({
           announcements: announcementsResult.status === 'fulfilled' ? Number(announcementsResult.value.data?.unread_count || 0) : 0,
           alerts: 0,
-          receipts: receiptItems.filter((item) => !['Released', 'Completed'].includes(item.status)).length,
+          receipts: getActiveReceiptBadgeCount(receiptItems),
           payments: paymentItems.filter((item) => normalizePaymentStatus(item.status) === 'pending').length,
-          queue: queueItems.filter((item) => !['Completed', 'Cancelled'].includes(item.status)).length,
+          queue: getActiveQueueBadgeCount(queueItems),
           reports: reportsResult.status === 'fulfilled' ? Number(reportsResult.value.data?.total || 0) : 0,
           accounts: 0,
           backup: 0,

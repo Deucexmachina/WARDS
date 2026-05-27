@@ -681,16 +681,16 @@ const PaymentManagement = () => {
   }, [baseFilteredPayments, appliedFilters.status]);
 
   const pendingTransactions = useMemo(
-    () => payments.filter((payment) => getPaymentBucket(payment) === 'pending'),
-    [payments]
+    () => filteredPayments.filter((payment) => getPaymentBucket(payment) === 'pending'),
+    [filteredPayments]
   );
   const verifiedTransactions = useMemo(
-    () => payments.filter((payment) => getPaymentBucket(payment) === 'confirmed'),
-    [payments]
+    () => filteredPayments.filter((payment) => getPaymentBucket(payment) === 'confirmed'),
+    [filteredPayments]
   );
   const declinedTransactions = useMemo(
-    () => payments.filter((payment) => getPaymentBucket(payment) === 'failed'),
-    [payments]
+    () => filteredPayments.filter((payment) => getPaymentBucket(payment) === 'failed'),
+    [filteredPayments]
   );
 
   useEffect(() => {

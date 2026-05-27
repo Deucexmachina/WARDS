@@ -17,6 +17,7 @@ from database.models import (
     Payment, get_db
 )
 from utils.field_crypto import apply_queue_security, find_citizen_by_email, find_payment_by_ref_number, find_queue_by_queue_number, get_decrypted_or_raw, hash_aware_any, hash_aware_match, hash_optional_value, queue_value, service_value, taxpayer_guide_value
+from utils.field_crypto import receipt_request_value
 from utils.branch_appointment_settings import (
     build_appointment_reservation_key,
     get_branch_immediate_queue_availability,
@@ -75,6 +76,37 @@ def get_service_processing_time_minutes(service: Optional[Service]) -> int:
     return get_transaction_duration_minutes()
 
 
+def get_current_utc_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def get_current_manila_naive() -> datetime:
+    return datetime.now(MANILA_TIMEZONE).replace(tzinfo=None)
+
+
+def calculate_immediate_wait_metrics(
+    *,
+    branch: Branch,
+    average_processing_time: int,
+    waiting_count: int,
+    serving_count: int,
+) -> dict:
+    counters = max(int(branch.counters or 1), 1)
+    normalized_processing_time = max(int(average_processing_time or 0), 0)
+    normalized_waiting = max(int(waiting_count or 0), 0)
+    normalized_serving = max(int(serving_count or 0), 0)
+
+    in_progress_minutes = (normalized_processing_time * 0.5) if normalized_serving > 0 else 0
+    queued_rounds = normalized_waiting / counters
+    queued_minutes = queued_rounds * normalized_processing_time
+    estimated_wait = max(0, int(round(in_progress_minutes + queued_minutes)))
+
+    return {
+        "estimated_wait_time": estimated_wait,
+        "recommended_arrival": get_current_utc_naive() + timedelta(minutes=max(0, estimated_wait - 5)),
+    }
+
+
 def serialize_public_announcement(announcement: Announcement):
     branch_name = (get_decrypted_or_raw(announcement.branch, "name") or announcement.branch.name) if announcement.branch else None
     title = decrypt_optional_value(getattr(announcement, "title_enc", None)) or announcement.title
@@ -120,7 +152,7 @@ def compute_recommended_arrival(
 ) -> datetime:
     if queue_type == "appointment" and appointment_time is not None:
         return appointment_time - timedelta(minutes=5)
-    return datetime.now() + timedelta(minutes=max(0, estimated_wait - 5))
+    return get_current_utc_naive() + timedelta(minutes=max(0, estimated_wait - 5))
 
 
 def should_release_appointment_reservation(status_value: Optional[str]) -> bool:
@@ -575,32 +607,20 @@ async def analyze_queue(branch_id: int, service_type: str, db: Session = Depends
         and_(Queue.branch_id == branch_id, hash_aware_any(Queue, "status", ["Called", "Serving"]))
     ).count()
     
-    # Calculate estimated wait time based on number of counters
-    # Assume branch has multiple counters that can serve clients in parallel
-    num_counters = branch.counters if branch.counters > 0 else 1
-    
-    # If there are clients being served, they'll finish in avg_processing_time/2 on average
-    # Then the waiting clients will be distributed across available counters
-    time_for_serving = (serving * avg_processing_time) / (2 * num_counters) if serving > 0 else 0
-    
-    # Waiting clients are processed in parallel across counters
-    # Calculate how many "rounds" of service needed
-    rounds_needed = (waiting + serving) / num_counters
-    time_for_waiting = rounds_needed * avg_processing_time
-    
-    # Total estimated wait time
-    estimated_wait = int(time_for_serving + time_for_waiting)
-    
-    # Calculate recommended arrival time (arrive 5 minutes before your turn)
-    recommended_arrival = compute_recommended_arrival(queue_type="immediate", estimated_wait=estimated_wait)
+    wait_metrics = calculate_immediate_wait_metrics(
+        branch=branch,
+        average_processing_time=avg_processing_time,
+        waiting_count=waiting,
+        serving_count=serving,
+    )
     
     return {
         "branch_name": get_decrypted_or_raw(branch, "name") or branch.name,
         "current_waiting": waiting,
         "current_serving": serving,
         "average_processing_time": avg_processing_time,
-        "estimated_wait_time": int(estimated_wait),
-        "recommended_arrival": serialize_manila_datetime(recommended_arrival),
+        "estimated_wait_time": wait_metrics["estimated_wait_time"],
+        "recommended_arrival": serialize_manila_datetime(wait_metrics["recommended_arrival"]),
         "queue_level": "low" if waiting < 5 else "moderate" if waiting < 15 else "high",
         "can_register": True,
         "window_capacity": window_capacity,
@@ -742,7 +762,6 @@ async def register_queue(
     # Get service processing time
     avg_processing_time = get_service_processing_time_minutes(service)
     
-    # Calculate estimated wait time based on number of counters
     waiting = db.query(Queue).filter(
         and_(Queue.branch_id == registration.branch_id, hash_aware_match(Queue, "status", "Waiting"))
     ).count()
@@ -751,12 +770,13 @@ async def register_queue(
         and_(Queue.branch_id == registration.branch_id, hash_aware_any(Queue, "status", ["Called", "Serving"]))
     ).count()
     
-    # Use realistic calculation based on counters
-    num_counters = branch.counters if branch.counters > 0 else 1
-    time_for_serving = (serving * avg_processing_time) / (2 * num_counters) if serving > 0 else 0
-    rounds_needed = (waiting + serving) / num_counters
-    time_for_waiting = rounds_needed * avg_processing_time
-    estimated_wait = int(time_for_serving + time_for_waiting)
+    wait_metrics = calculate_immediate_wait_metrics(
+        branch=branch,
+        average_processing_time=avg_processing_time,
+        waiting_count=waiting,
+        serving_count=serving,
+    )
+    estimated_wait = wait_metrics["estimated_wait_time"]
     
     # Create queue entry
     appointment_time = None
@@ -812,7 +832,7 @@ async def register_queue(
         queue_type=queue_type,
         estimated_wait=estimated_wait,
         appointment_time=appointment_time,
-    )
+    ) if queue_type == "appointment" else wait_metrics["recommended_arrival"]
     
     new_queue = Queue(
         queue_number=queue_number,
@@ -897,6 +917,23 @@ async def get_my_active_ticket(
         return {"has_active_ticket": False, "ticket": None}
     
     branch = db.query(Branch).filter(Branch.id == active_queue.branch_id).first()
+    active_queue_number = queue_value(active_queue, "queue_number")
+    active_queue_email = (queue_value(active_queue, "email") or "").strip().lower()
+    citizen_email = ((get_decrypted_or_raw(current_citizen, "email") or current_citizen.email) or "").strip().lower()
+    linked_receipt_requests = (
+        db.query(ReceiptRequest)
+        .filter(hash_aware_match(ReceiptRequest, "linked_queue_number", active_queue_number))
+        .filter(ReceiptRequest.branch_id == active_queue.branch_id)
+        .order_by(ReceiptRequest.created_at.desc(), ReceiptRequest.id.desc())
+        .all()
+    )
+    linked_receipt_requests = [
+        request for request in linked_receipt_requests
+        if (
+            not citizen_email
+            or ((receipt_request_value(request, "email") or "").strip().lower() in {citizen_email, active_queue_email})
+        )
+    ]
     
     # Calculate position in queue
     position = 0
@@ -913,7 +950,7 @@ async def get_my_active_ticket(
         "has_active_ticket": True,
         "ticket": {
             "id": active_queue.id,
-            "queue_number": queue_value(active_queue, "queue_number"),
+            "queue_number": active_queue_number,
             "branch_name": (get_decrypted_or_raw(branch, "name") or branch.name) if branch else "Unknown",
             "branch_address": (get_decrypted_or_raw(branch, "location") or branch.location) if branch else None,
             "service_type": queue_value(active_queue, "service_type"),
@@ -928,6 +965,18 @@ async def get_my_active_ticket(
             "appointment_time": serialize_queue_schedule_datetime(active_queue.appointment_time, queue_value(active_queue, "queue_type")),
             "created_at": serialize_manila_datetime(active_queue.created_at),
             "served_at": serialize_manila_datetime(active_queue.served_at),
+            "linked_receipt_requests": [
+                {
+                    "request_id": receipt_request_value(request, "request_id"),
+                    "tax_type": receipt_request_value(request, "tax_type"),
+                    "request_type": receipt_request_value(request, "request_type"),
+                    "status": receipt_request_value(request, "status"),
+                    "fee_paid": bool(request.fee_paid),
+                    "payment_ref_number": receipt_request_value(request, "payment_ref_number"),
+                    "created_at": serialize_manila_datetime(request.created_at),
+                }
+                for request in linked_receipt_requests
+            ],
         }
     }
 

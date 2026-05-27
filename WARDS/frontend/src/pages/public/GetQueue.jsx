@@ -12,6 +12,8 @@ import {
 } from '../../utils/validation';
 const DEFAULT_DISABLED_MESSAGE = 'This service is currently unavailable because it has been disabled by system administration.';
 const ACTIVE_QUEUE_MESSAGE = 'You already have an active queue request. Please complete or cancel your current queue before registering for another one.';
+const ACTIVE_QUEUE_CONTEXT_STORAGE_KEY = 'wardsActiveQueueContext';
+const PENDING_RECEIPT_QUEUE_LINK_STORAGE_KEY = 'wardsPendingReceiptQueueLink';
 
 const formatAppointmentAvailabilityMessage = (availability) => {
   if (!availability) {
@@ -516,6 +518,16 @@ const GetQueue = () => {
         queue_type: formData.queue_type,
         appointment_time: appointmentDateTime,
       });
+      sessionStorage.setItem(ACTIVE_QUEUE_CONTEXT_STORAGE_KEY, JSON.stringify({
+        queueNumber: response.data.queue_number,
+        queueType: response.data.queue_type,
+        appointmentTime: response.data.appointment_time,
+        branchId: selectedBranch.id,
+        branchName: response.data.branch_name,
+        serviceType: response.data.service_type,
+        taxpayerName: normalizeCitizenFullName(formData.taxpayer_name),
+        email: formData.email,
+      }));
       if (formData.queue_type === 'appointment' && formData.appointment_slot) {
         setAppointmentAvailability((current) => (
           current
@@ -676,16 +688,39 @@ const GetQueue = () => {
 
             <p className="text-gray-600 mb-6">{queueResult.message}</p>
 
-              <div className="flex gap-4">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <button
+                onClick={() => {
+                  const linkedQueuePayload = {
+                    queueNumber: queueResult.queue_number,
+                    queueType: queueResult.queue_type,
+                    appointmentTime: queueResult.appointment_time,
+                    branchId: selectedBranch?.id,
+                    branchName: queueResult.branch_name,
+                    serviceType: queueResult.service_type,
+                    taxpayerName: normalizeCitizenFullName(formData.taxpayer_name),
+                    email: formData.email,
+                  };
+                  sessionStorage.setItem(PENDING_RECEIPT_QUEUE_LINK_STORAGE_KEY, JSON.stringify(linkedQueuePayload));
+                  navigate('/request-receipt?mode=queue-link', {
+                    state: {
+                      linkedQueue: linkedQueuePayload,
+                    },
+                  });
+                }}
+                className="w-full bg-amber-500 px-4 py-3 rounded-lg font-semibold text-white hover:bg-amber-600"
+              >
+                {language === 'en' ? 'Request for a Receipt' : 'Humiling ng Resibo'}
+              </button>
               <button
                 onClick={() => navigate('/')}
-                className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700"
+                className="w-full bg-blue-600 px-4 py-3 rounded-lg font-semibold text-white hover:bg-blue-700"
               >
                 {language === 'en' ? 'Return to Home Page' : 'Bumalik sa Home Page'}
               </button>
               <button
                 onClick={handlePrintReceipt}
-                className="flex-1 bg-gray-600 text-white py-3 rounded-lg font-semibold hover:bg-gray-700"
+                className="w-full bg-gray-600 px-4 py-3 rounded-lg font-semibold text-white hover:bg-gray-700"
               >
                 {language === 'en' ? 'Print' : 'I-print'}
               </button>

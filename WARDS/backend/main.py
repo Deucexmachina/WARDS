@@ -343,6 +343,8 @@ def ensure_auth_extensions():
             conn.execute(text("ALTER TABLE receipt_requests ADD COLUMN release_copy_filename VARCHAR(255)"))
         if "processed_at" not in receipt_request_columns:
             conn.execute(text("ALTER TABLE receipt_requests ADD COLUMN processed_at DATETIME"))
+        if "linked_queue_number" not in receipt_request_columns:
+            conn.execute(text("ALTER TABLE receipt_requests ADD COLUMN linked_queue_number VARCHAR(255)"))
         for column_name, column_type in (
             ("request_id_hash", "VARCHAR(255)"),
             ("request_id_enc", "TEXT"),
@@ -360,6 +362,8 @@ def ensure_auth_extensions():
             ("email_enc", "TEXT"),
             ("status_hash", "VARCHAR(255)"),
             ("status_enc", "TEXT"),
+            ("linked_queue_number_hash", "VARCHAR(255)"),
+            ("linked_queue_number_enc", "TEXT"),
             ("payment_ref_number_hash", "VARCHAR(255)"),
             ("payment_ref_number_enc", "TEXT"),
             ("release_copy_path_hash", "VARCHAR(255)"),
@@ -388,6 +392,9 @@ def ensure_auth_extensions():
             ("email_enc", "TEXT"),
             ("final_status_hash", "VARCHAR(255)"),
             ("final_status_enc", "TEXT"),
+            ("linked_queue_number", "VARCHAR(255)"),
+            ("linked_queue_number_hash", "VARCHAR(255)"),
+            ("linked_queue_number_enc", "TEXT"),
             ("payment_ref_number_hash", "VARCHAR(255)"),
             ("payment_ref_number_enc", "TEXT"),
             ("release_copy_filename_hash", "VARCHAR(255)"),

@@ -6,22 +6,29 @@ import os
 import re
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError, jwt
 from fastapi.responses import FileResponse
 from PIL import Image
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from database.models import ActivityLog, Branch, Payment, ReceiptRecord, ReceiptRequest, ReceiptRequestHistory, get_db
+from database.models import ActivityLog, Branch, CitizenUser, Payment, Queue, ReceiptRecord, ReceiptRequest, ReceiptRequestHistory, get_db
 from middleware.branch_auth import get_current_branch_staff
 from services.ocr_service import ocr_service
 from services.email_service import send_receipt_release_email
 from utils.branch_appointment_settings import validate_branch_appointment_datetime
 from utils.branch_system_settings import get_branch_setting_value
-from utils.field_crypto import apply_receipt_record_security, apply_receipt_request_history_security, apply_receipt_request_security, find_payment_by_ref_number, hash_aware_match, receipt_record_value, receipt_request_history_value, receipt_request_value
+from utils.field_crypto import apply_receipt_record_security, apply_receipt_request_history_security, apply_receipt_request_security, find_citizen_by_email, find_payment_by_ref_number, hash_aware_any, hash_aware_match, queue_value, receipt_record_value, receipt_request_history_value, receipt_request_value
 from utils.security_validation import normalize_email
 from utils.system_settings import SYSTEM_DISABLED_MESSAGE, get_setting_value
 
 router = APIRouter()
+USER_SECRET_KEY = os.getenv("USER_SECRET_KEY", "your-user-secret-key-change-in-production")
+UNIFIED_SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "your-unified-auth-secret-change-in-production")
+ALGORITHM = "HS256"
+ACTIVE_QUEUE_STATUSES = ("Pending", "Waiting", "Called", "Serving")
+optional_user_security = HTTPBearer(auto_error=False)
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads", "receipts")
 RELEASE_UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads", "released_receipts")
@@ -51,6 +58,8 @@ class PublicReceiptRequestCreate(BaseModel):
     email: str
     appointmentDate: str | None = None
     appointmentSlot: str | None = None
+    linkedQueueNumber: str | None = None
+    linkToActiveQueue: bool = False
 
 
 class ReceiptFeePaymentRequest(BaseModel):
@@ -157,6 +166,7 @@ def serialize_receipt_request(request: ReceiptRequest, db: Session):
         "feePaid": request.fee_paid,
         "branchId": request.branch_id,
         "branchName": branch_name,
+        "linkedQueueNumber": receipt_request_value(request, "linked_queue_number"),
         "matchedReceiptId": request.matched_receipt_id,
         "paymentRefNumber": payment.ref_number if payment else receipt_request_value(request, "payment_ref_number"),
         "releaseCopyFilename": receipt_request_value(request, "release_copy_filename"),
@@ -204,6 +214,7 @@ def serialize_receipt_request_history(history: ReceiptRequestHistory, db: Sessio
         "feePaid": history.fee_paid,
         "branchId": history.branch_id,
         "branchName": branch_name,
+        "linkedQueueNumber": receipt_request_history_value(history, "linked_queue_number"),
         "matchedReceiptId": history.matched_receipt_id,
         "paymentRefNumber": receipt_request_history_value(history, "payment_ref_number"),
         "releaseCopyFilename": receipt_request_history_value(history, "release_copy_filename"),
@@ -322,13 +333,15 @@ def get_receipt_request_payment_status(request: ReceiptRequest, payment: Payment
     return "Pending"
 
 
+def has_uploaded_release_copy(request: ReceiptRequest) -> bool:
+    return bool(receipt_request_value(request, "release_copy_path"))
+
+
 def get_receipt_request_release_status(request: ReceiptRequest) -> str:
     current_status = receipt_request_value(request, "status")
     if current_status in {"Released", "Completed"}:
         return "Released"
-    if is_appointment_request(request):
-        return "Ready for Release" if request.fee_paid else "Not Ready for Release"
-    if request.fee_paid and receipt_request_value(request, "release_copy_path"):
+    if request.fee_paid and has_uploaded_release_copy(request):
         return "Ready for Release"
     return "Not Ready for Release"
 
@@ -380,6 +393,7 @@ def archive_receipt_request(
     history_record.final_status = receipt_request_value(receipt_request, "status")
     history_record.fee_paid = receipt_request.fee_paid
     history_record.matched_receipt_id = receipt_request.matched_receipt_id
+    history_record.linked_queue_number = receipt_request_value(receipt_request, "linked_queue_number")
     history_record.appointment_time = receipt_request.appointment_time
     history_record.payment_ref_number = receipt_request_value(receipt_request, "payment_ref_number")
     history_record.release_copy_filename = receipt_request_value(receipt_request, "release_copy_filename")
@@ -518,15 +532,7 @@ def sync_request_status(request: ReceiptRequest):
     if receipt_request_value(request, "status") in {"Released", "Completed"}:
         return
 
-    if is_appointment_request(request):
-        if request.fee_paid:
-            request.status = "Ready for Completion"
-        else:
-            request.status = "Payment Required"
-        apply_receipt_request_security(request)
-        return
-
-    if request.fee_paid and receipt_request_value(request, "release_copy_path"):
+    if request.fee_paid and has_uploaded_release_copy(request):
         request.status = "Ready for Release"
     elif request.fee_paid:
         request.status = "Pending Branch Review"
@@ -553,6 +559,59 @@ def ensure_receipt_requests_enabled(db: Session, branch_id: int | None = None):
         raise HTTPException(status_code=503, detail="Public services are temporarily unavailable because maintenance mode is active.")
     if not get_branch_setting_value(db, "receiptRequestEnabled", branch_id):
         raise HTTPException(status_code=403, detail=SYSTEM_DISABLED_MESSAGE)
+
+
+def resolve_authenticated_citizen(
+    credentials: HTTPAuthorizationCredentials | None,
+    db: Session,
+) -> CitizenUser | None:
+    if credentials is None:
+        return None
+
+    token = credentials.credentials
+    user = None
+
+    try:
+        payload = jwt.decode(token, UNIFIED_SECRET_KEY, algorithms=[ALGORITHM])
+        email = payload.get("email") or payload.get("sub")
+        role = payload.get("role")
+        token_type = payload.get("type")
+        if email and token_type == "role_auth" and role == "public":
+            user = find_citizen_by_email(db, CitizenUser, email)
+    except JWTError:
+        user = None
+
+    if user is None:
+        try:
+            payload = jwt.decode(token, USER_SECRET_KEY, algorithms=[ALGORITHM])
+            email = payload.get("sub")
+            token_type = payload.get("type")
+            if email and token_type == "user":
+                user = find_citizen_by_email(db, CitizenUser, email)
+        except JWTError as exc:
+            raise HTTPException(status_code=401, detail="Could not validate credentials") from exc
+
+    if user and user.status != "Active":
+        raise HTTPException(status_code=403, detail="Account is not active")
+
+    return user
+
+
+def resolve_linked_active_queue(
+    db: Session,
+    *,
+    current_citizen: CitizenUser | None,
+    linked_queue_number: str | None,
+) -> Queue | None:
+    normalized_queue_number = (linked_queue_number or "").strip()
+    if not normalized_queue_number or not current_citizen:
+        return None
+
+    query = db.query(Queue).filter(hash_aware_any(Queue, "status", ACTIVE_QUEUE_STATUSES))
+    query = query.filter(Queue.citizen_user_id == current_citizen.id)
+    query = query.filter(hash_aware_match(Queue, "queue_number", normalized_queue_number))
+
+    return query.order_by(Queue.created_at.desc(), Queue.id.desc()).first()
 
 
 @router.get("/records")
@@ -889,8 +948,6 @@ async def release_receipt_request(request_id: str, current_staff=Depends(get_cur
 
     if receipt_request.branch_id and receipt_request.branch_id != current_staff.branch_id:
         raise HTTPException(status_code=403, detail="Request belongs to another branch")
-    if is_appointment_request(receipt_request):
-        raise HTTPException(status_code=400, detail="Appointment requests must be completed in person")
 
     if not receipt_request.fee_paid:
         raise HTTPException(status_code=400, detail="Receipt request fee has not been paid")
@@ -901,7 +958,8 @@ async def release_receipt_request(request_id: str, current_staff=Depends(get_cur
         raise HTTPException(status_code=400, detail="Upload the finished receipt copy first")
 
     receipt_request.branch_id = current_staff.branch_id
-    receipt_request.status = "Released"
+    final_status = "Completed" if is_appointment_request(receipt_request) else "Released"
+    receipt_request.status = final_status
     receipt_request.processed_at = datetime.utcnow()
     apply_receipt_request_security(receipt_request)
     archive_receipt_request(db, receipt_request, current_staff.username)
@@ -929,9 +987,13 @@ async def release_receipt_request(request_id: str, current_staff=Depends(get_cur
     db.delete(receipt_request)
 
     db.add(ActivityLog(
-        action="Receipt Request Released",
+        action="Receipt Request Released" if final_status == "Released" else "Receipt Appointment Completed",
         user=current_staff.username,
-        details=f"Released and cleared receipt request {request_id} while preserving the linked payment history",
+        details=(
+            f"Released and cleared receipt request {request_id} while preserving the linked payment history"
+            if final_status == "Released"
+            else f"Completed appointment receipt request {request_id} through the receipt release workflow"
+        ),
         type="branch_receipts",
     ))
     db.commit()
@@ -970,6 +1032,7 @@ async def complete_appointment_request(request_id: str, current_staff=Depends(ge
     apply_receipt_request_security(receipt_request)
     archive_receipt_request(db, receipt_request, current_staff.username)
     request_label = receipt_request_value(receipt_request, "request_id") or request_id
+    db.delete(receipt_request)
     db.add(ActivityLog(
         action="Receipt Appointment Completed",
         user=current_staff.username,
@@ -977,8 +1040,7 @@ async def complete_appointment_request(request_id: str, current_staff=Depends(ge
         type="branch_receipts",
     ))
     db.commit()
-    db.refresh(receipt_request)
-    return serialize_receipt_request(receipt_request, db) | {
+    return {
         "success": True,
         "requestId": request_label,
         "message": f"Appointment request {request_label} completed successfully.",
@@ -997,8 +1059,6 @@ async def upload_release_copy(
         raise HTTPException(status_code=404, detail="Receipt request not found")
     if receipt_request.branch_id != current_staff.branch_id:
         raise HTTPException(status_code=403, detail="Request belongs to another branch")
-    if is_appointment_request(receipt_request):
-        raise HTTPException(status_code=400, detail="Appointment requests do not use receipt-copy upload")
 
     extension = os.path.splitext(file.filename or "")[1].lower()
     if extension not in ALLOWED_RELEASE_EXTENSIONS:
@@ -1063,23 +1123,58 @@ async def download_release_copy(
 
 
 @router.post("/request")
-async def create_receipt_request(request: PublicReceiptRequestCreate, db: Session = Depends(get_db)):
-    ensure_receipt_requests_enabled(db, request.branchId)
-    branch = db.query(Branch).filter(Branch.id == request.branchId, Branch.status == "Active").first()
+async def create_receipt_request(
+    request: PublicReceiptRequestCreate,
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials | None = Depends(optional_user_security),
+):
+    taxpayer_name = validate_taxpayer_name(request.taxpayerName)
+    transaction_date = validate_transaction_date(request.txnDate)
+    normalized_email = normalize_email(request.email, check_deliverability=True)
+    normalized_ref_number = normalize_reference_number(request.refNumber)
+    current_citizen = resolve_authenticated_citizen(credentials, db)
+    linked_queue = None
+    if request.linkToActiveQueue:
+        normalized_linked_queue_number = (request.linkedQueueNumber or "").strip()
+        if not normalized_linked_queue_number:
+            raise HTTPException(status_code=400, detail="A queue number is required before this receipt request can be linked to an active queue.")
+        if not current_citizen:
+            raise HTTPException(status_code=401, detail="Please sign in again before linking a receipt request to your active queue.")
+        linked_queue = resolve_linked_active_queue(
+            db,
+            current_citizen=current_citizen,
+            linked_queue_number=normalized_linked_queue_number,
+        )
+        if not linked_queue:
+            raise HTTPException(status_code=404, detail="The queue linked to this request was not found under your active account session or is no longer active.")
+        if request.branchId != linked_queue.branch_id:
+            raise HTTPException(status_code=400, detail="Additional receipt requests must stay attached to the same branch as the active queue number.")
+        linked_queue_email = normalize_email(queue_value(linked_queue, "email"), check_deliverability=True) if queue_value(linked_queue, "email") else None
+        if linked_queue_email and normalized_email != linked_queue_email:
+            raise HTTPException(status_code=400, detail="Linked receipt requests must use the same email address as the active queue number.")
+        linked_queue_taxpayer = (queue_value(linked_queue, "taxpayer_name") or "").strip().lower()
+        if linked_queue_taxpayer and taxpayer_name.strip().lower() != linked_queue_taxpayer:
+            raise HTTPException(status_code=400, detail="Linked receipt requests must use the same taxpayer name as the active queue number.")
+
+    branch_id = linked_queue.branch_id if linked_queue else request.branchId
+    ensure_receipt_requests_enabled(db, branch_id)
+    branch = db.query(Branch).filter(Branch.id == branch_id, Branch.status == "Active").first()
     if not branch:
         raise HTTPException(status_code=404, detail="Selected branch not found")
 
-    taxpayer_name = validate_taxpayer_name(request.taxpayerName)
-    transaction_date = validate_transaction_date(request.txnDate)
-    request_type = normalize_request_type(request.requestType)
-    normalized_email = normalize_email(request.email, check_deliverability=True)
-    normalized_ref_number = normalize_reference_number(request.refNumber)
-    appointment_time = validate_receipt_appointment_datetime(
-        db,
-        branch=branch,
-        request_type=request_type,
-        appointment_date=request.appointmentDate,
-        appointment_slot=request.appointmentSlot,
+    request_type = normalize_request_type(
+        queue_value(linked_queue, "queue_type") if linked_queue else request.requestType
+    )
+    appointment_time = (
+        linked_queue.appointment_time
+        if linked_queue and request_type == "Appointment"
+        else validate_receipt_appointment_datetime(
+            db,
+            branch=branch,
+            request_type=request_type,
+            appointment_date=request.appointmentDate,
+            appointment_slot=request.appointmentSlot,
+        )
     )
     existing_open_request = find_open_receipt_request(db, normalized_email)
     if existing_open_request:
@@ -1092,7 +1187,7 @@ async def create_receipt_request(request: PublicReceiptRequestCreate, db: Sessio
             ),
         )
     request_id = unique_receipt_request_id()
-    matched_receipt = find_matching_receipt(db, request.branchId, normalized_ref_number, taxpayer_name, transaction_date, request.taxType)
+    matched_receipt = find_matching_receipt(db, branch_id, normalized_ref_number, taxpayer_name, transaction_date, request.taxType)
 
     receipt_request = ReceiptRequest(
         request_id=request_id,
@@ -1103,8 +1198,9 @@ async def create_receipt_request(request: PublicReceiptRequestCreate, db: Sessio
         ref_number=normalized_ref_number,
         email=normalized_email,
         fee_paid=False,
-        branch_id=request.branchId,
+        branch_id=branch_id,
         matched_receipt_id=matched_receipt.id if matched_receipt else None,
+        linked_queue_number=queue_value(linked_queue, "queue_number") if linked_queue else None,
         appointment_time=appointment_time,
     )
     sync_request_status(receipt_request)

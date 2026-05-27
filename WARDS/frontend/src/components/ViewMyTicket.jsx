@@ -39,6 +39,7 @@ const ViewMyTicket = ({ onClose }) => {
   };
 
   const handlePrint = () => {
+    const linkedReceiptRequests = ticket.linked_receipt_requests || [];
     printQueueTicket({
       title: 'Queue Ticket',
       queueNumber: ticket.queue_number,
@@ -51,7 +52,7 @@ const ViewMyTicket = ({ onClose }) => {
       createdAt: ticket.created_at,
       taxpayerName: ticket.taxpayer_name,
       contactNumber: ticket.contact_number,
-      message: `Status: ${ticket.status}${ticket.position > 0 ? ` | Position in queue: #${ticket.position}` : ''}`,
+      message: `Status: ${ticket.status}${ticket.position > 0 ? ` | Position in queue: #${ticket.position}` : ''}${linkedReceiptRequests.length ? ` | Linked receipt requests: ${linkedReceiptRequests.length}` : ''}`,
     });
   };
 
@@ -226,7 +227,7 @@ const ViewMyTicket = ({ onClose }) => {
               )}
             </div>
 
-            {ticket.estimated_wait_time && (
+            {ticket.estimated_wait_time != null && (
               <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Estimated Wait Time</p>
                 <p className="mt-1 text-sm font-semibold text-blue-900">{ticket.estimated_wait_time} minutes</p>
@@ -244,6 +245,22 @@ const ViewMyTicket = ({ onClose }) => {
               <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-green-700">Recommended Arrival</p>
                 <p className="mt-1 text-sm font-semibold text-green-900">{formatDate(ticket.recommended_arrival)}</p>
+              </div>
+            )}
+
+            {(ticket.linked_receipt_requests || []).length > 0 && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Linked Request Receipt Transactions</p>
+                <div className="mt-3 space-y-3">
+                  {ticket.linked_receipt_requests.map((request) => (
+                    <div key={request.request_id} className="rounded-lg border border-amber-100 bg-white px-3 py-3">
+                      <p className="text-sm font-semibold text-slate-900">{request.request_id}</p>
+                      <p className="mt-1 text-sm text-slate-700">{request.tax_type} · {request.request_type}</p>
+                      <p className="mt-1 text-xs text-slate-500">Status: {request.status}</p>
+                      <p className="mt-1 text-xs text-slate-500">Fee paid: {request.fee_paid ? 'Yes' : 'No'}</p>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 

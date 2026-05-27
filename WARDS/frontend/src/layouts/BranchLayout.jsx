@@ -7,6 +7,9 @@ import api from '../services/api';
 import { branchAnnouncementAPI, discrepancyAPI } from '../services/api';
 import { getBranchPortalPath } from '../utils/auth';
 
+const BRANCH_QUEUE_UPDATED_EVENT = 'branch-queue-updated';
+const BRANCH_RECEIPT_UPDATED_EVENT = 'branch-receipt-updated';
+
 const BranchLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -29,6 +32,15 @@ const BranchLayout = () => {
   const [receiptCount, setReceiptCount] = useState(0);
   const [paymentCount, setPaymentCount] = useState(0);
   const [reportCount, setReportCount] = useState(0);
+  const getActiveQueueCount = (items) => (
+    (items || []).filter((item) => {
+      const normalizedStatus = (item?.status || '').toString().trim().toLowerCase();
+      return !['completed', 'cancelled', 'canceled'].includes(normalizedStatus);
+    }).length
+  );
+  const getActiveReceiptCount = (items) => (
+    (items || []).filter((item) => !['Released', 'Completed'].includes(item.status)).length
+  );
   const navItems = isQueueWindowAccount
     ? [{ label: `${assignedWindowLabel || 'Queue'} Window Queue Management`, path: queueOnlyPath }]
     : [
@@ -101,8 +113,7 @@ const BranchLayout = () => {
     const fetchQueueCount = async () => {
       try {
         const response = await api.get('/branch/queue');
-        const items = response.data || [];
-        setQueueCount(items.filter((item) => !['Completed', 'Cancelled'].includes(item.status)).length);
+        setQueueCount(getActiveQueueCount(response.data || []));
       } catch (error) {
         console.error('Failed to fetch branch queue count:', error);
       }
@@ -112,7 +123,7 @@ const BranchLayout = () => {
       try {
         const response = await api.get('/receipts/requests');
         const items = response.data || [];
-        setReceiptCount(items.filter((item) => !['Released', 'Completed'].includes(item.status)).length);
+        setReceiptCount(getActiveReceiptCount(items));
       } catch (error) {
         console.error('Failed to fetch branch receipt count:', error);
       }
@@ -169,6 +180,22 @@ const BranchLayout = () => {
       fetchPaymentCount();
       fetchReceiptCount();
     };
+    const handleBranchReceiptUpdated = (event) => {
+      const eventRequests = event?.detail?.requests;
+      if (Array.isArray(eventRequests)) {
+        setReceiptCount(getActiveReceiptCount(eventRequests));
+        return;
+      }
+      fetchReceiptCount();
+    };
+    const handleBranchQueueUpdated = (event) => {
+      const eventQueues = event?.detail?.queues;
+      if (Array.isArray(eventQueues)) {
+        setQueueCount(getActiveQueueCount(eventQueues));
+        return;
+      }
+      fetchQueueCount();
+    };
 
     window.addEventListener('branch-memo-read', handleMemoRead);
     window.addEventListener('branch-policy-read', handlePolicyRead);
@@ -176,6 +203,8 @@ const BranchLayout = () => {
     window.addEventListener('branch-discrepancy-viewed', handleDiscrepancyViewed);
     window.addEventListener('branch-announcement-viewed', handleAnnouncementViewed);
     window.addEventListener('branch-payment-updated', handleBranchPaymentUpdated);
+    window.addEventListener(BRANCH_RECEIPT_UPDATED_EVENT, handleBranchReceiptUpdated);
+    window.addEventListener(BRANCH_QUEUE_UPDATED_EVENT, handleBranchQueueUpdated);
 
     return () => {
       clearInterval(interval);
@@ -185,6 +214,8 @@ const BranchLayout = () => {
       window.removeEventListener('branch-discrepancy-viewed', handleDiscrepancyViewed);
       window.removeEventListener('branch-announcement-viewed', handleAnnouncementViewed);
       window.removeEventListener('branch-payment-updated', handleBranchPaymentUpdated);
+      window.removeEventListener(BRANCH_RECEIPT_UPDATED_EVENT, handleBranchReceiptUpdated);
+      window.removeEventListener(BRANCH_QUEUE_UPDATED_EVENT, handleBranchQueueUpdated);
     };
   }, [isQueueWindowAccount]);
 

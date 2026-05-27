@@ -428,6 +428,7 @@ def apply_receipt_request_security(request):
         ("ref_number", "REQ_REF", 255),
         ("email", "REQ_EMAIL", 255),
         ("status", "REQ_STATUS", 255),
+        ("linked_queue_number", "REQ_QUEUE", 255),
         ("payment_ref_number", "REQ_PAYREF", 255),
         ("release_copy_path", "REQ_RELEASE_PATH", 255),
         ("release_copy_filename", "REQ_RELEASE_NAME", 255),
@@ -448,6 +449,7 @@ def apply_receipt_request_history_security(history):
         ("ref_number", "REQH_REF", 255),
         ("email", "REQH_EMAIL", 255),
         ("final_status", "REQH_STATUS", 255),
+        ("linked_queue_number", "REQH_QUEUE", 255),
         ("payment_ref_number", "REQH_PAYREF", 255),
         ("release_copy_filename", "REQH_RELEASE_NAME", 255),
     ):

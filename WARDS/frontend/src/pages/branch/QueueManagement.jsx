@@ -31,6 +31,8 @@ const queueWindowLabels = {
   QW5: 'Queue Window 5',
 };
 
+const BRANCH_QUEUE_UPDATED_EVENT = 'branch-queue-updated';
+
 const parseDate = (value) => {
   if (!value) {
     return null;
@@ -463,6 +465,14 @@ const QueueManagement = () => {
   const [appointmentPage, setAppointmentPage] = useState(1);
   const [skippedPage, setSkippedPage] = useState(1);
 
+  const dispatchQueueStateUpdate = (nextQueues) => {
+    window.dispatchEvent(new CustomEvent(BRANCH_QUEUE_UPDATED_EVENT, {
+      detail: {
+        queues: Array.isArray(nextQueues) ? nextQueues : [],
+      },
+    }));
+  };
+
   const fetchQueues = async () => {
     try {
       const [queueResponse, historyResponse, statusResponse] = await Promise.all([
@@ -470,10 +480,12 @@ const QueueManagement = () => {
         api.get('/branch/queue/history'),
         api.get('/public/system-status'),
       ]);
-      setQueues(queueResponse.data || []);
+      const nextQueues = queueResponse.data || [];
+      setQueues(nextQueues);
       setQueueHistory(historyResponse.data || []);
       setSystemStatus(statusResponse.data);
       setError('');
+      dispatchQueueStateUpdate(nextQueues);
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to load queue.');
     } finally {
@@ -542,8 +554,7 @@ const QueueManagement = () => {
       if (action === 'call-next') {
         const response = await api.post('/branch/queue/call-next');
         const calledQueue = response.data;
-        
-        // Trigger voice announcement
+        await fetchQueues();
         if (calledQueue && calledQueue.queue_number) {
           setIsAnnouncementPlaying(true);
           try {
@@ -554,6 +565,7 @@ const QueueManagement = () => {
             setIsAnnouncementPlaying(false);
           }
         }
+        return;
       } else if (action === 'delete-skipped') {
         await api.delete('/branch/queue/skipped');
       } else if (action === 'delete') {

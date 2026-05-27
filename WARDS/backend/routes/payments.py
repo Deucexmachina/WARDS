@@ -1582,10 +1582,7 @@ def update_linked_request_status(db: Session, payment: Payment):
 
     receipt_request.fee_paid = True
     receipt_request.payment_ref_number = payment_value(payment, "ref_number")
-    request_type = (receipt_request_value(receipt_request, "request_type") or "").strip().lower()
-    if request_type == "appointment":
-        receipt_request.status = "Ready for Completion"
-    elif receipt_request_value(receipt_request, "release_copy_path"):
+    if receipt_request_value(receipt_request, "release_copy_path"):
         receipt_request.status = "Ready for Release"
     else:
         receipt_request.status = "Pending Branch Review"

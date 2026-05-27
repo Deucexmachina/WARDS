@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 
 import axios from 'axios';
 import { paymentAPI, receiptAPI } from '../../services/api';
 import { getEmailValidationMessage } from '../../utils/validation';
 
 const DEFAULT_DISABLED_MESSAGE = 'This service is currently unavailable because it has been disabled by system administration.';
-const ACTIVE_RECEIPT_REQUEST_STORAGE_KEY = 'activeReceiptRequestId';
+const ACTIVE_RECEIPT_REQUEST_STORAGE_KEY_PREFIX = 'activeReceiptRequestId';
+const PENDING_RECEIPT_QUEUE_LINK_STORAGE_KEY = 'wardsPendingReceiptQueueLink';
 const getTodayDateValue = () =>
   new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Manila',
@@ -36,6 +37,36 @@ const formatAppointmentAvailabilityMessage = (availability) => {
 
 const RequestReceipt = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const storedUser = useMemo(() => JSON.parse(localStorage.getItem('user') || 'null'), []);
+  const activeReceiptRequestStorageKey = useMemo(() => {
+    const normalizedEmail = (storedUser?.email || 'public-user').trim().toLowerCase();
+    return `${ACTIVE_RECEIPT_REQUEST_STORAGE_KEY_PREFIX}:${normalizedEmail}`;
+  }, [storedUser]);
+  const isQueueLinkMode = searchParams.get('mode') === 'queue-link';
+  const linkedQueueFromNavigation = isQueueLinkMode ? (location.state?.linkedQueue || null) : null;
+  const linkedQueueFromStorage = useMemo(() => {
+    if (!isQueueLinkMode) {
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(sessionStorage.getItem(PENDING_RECEIPT_QUEUE_LINK_STORAGE_KEY) || 'null');
+      if (!parsed?.queueNumber) {
+        return null;
+      }
+      const storedEmail = (storedUser?.email || '').trim().toLowerCase();
+      const contextEmail = (parsed?.email || '').trim().toLowerCase();
+      if (storedEmail && contextEmail && storedEmail !== contextEmail) {
+        return null;
+      }
+      return parsed;
+    } catch {
+      return null;
+    }
+  }, [isQueueLinkMode, storedUser]);
+  const linkedQueue = linkedQueueFromNavigation || linkedQueueFromStorage;
   const [branches, setBranches] = useState([]);
   const [formData, setFormData] = useState({
     taxpayerName: '',
@@ -65,6 +96,7 @@ const RequestReceipt = () => {
     () => branches.find((branch) => String(branch.id) === String(formData.branchId)) || null,
     [branches, formData.branchId]
   );
+  const isLinkedToActiveQueue = Boolean(linkedQueue?.queueNumber);
   const needsAppointmentBranch = formData.requestType === 'Appointment' && !selectedBranch;
   const appointmentTimeDisabledReason = useMemo(() => {
     if (formData.requestType !== 'Appointment') {
@@ -95,7 +127,6 @@ const RequestReceipt = () => {
   ]);
 
   const resetForAnotherRequest = () => {
-    const storedUser = JSON.parse(localStorage.getItem('user') || 'null');
     setRequestStatus(null);
     setPaymentMethod('gcash');
     setError('');
@@ -113,7 +144,24 @@ const RequestReceipt = () => {
     });
     setAppointmentError('');
     setAppointmentAvailability(null);
+    sessionStorage.removeItem(PENDING_RECEIPT_QUEUE_LINK_STORAGE_KEY);
   };
+
+  useEffect(() => {
+    if (!isQueueLinkMode) {
+      sessionStorage.removeItem(PENDING_RECEIPT_QUEUE_LINK_STORAGE_KEY);
+      return;
+    }
+
+    if (linkedQueueFromNavigation?.queueNumber) {
+      sessionStorage.setItem(PENDING_RECEIPT_QUEUE_LINK_STORAGE_KEY, JSON.stringify(linkedQueueFromNavigation));
+      return;
+    }
+
+    if (!linkedQueueFromStorage?.queueNumber) {
+      sessionStorage.removeItem(PENDING_RECEIPT_QUEUE_LINK_STORAGE_KEY);
+    }
+  }, [isQueueLinkMode, linkedQueueFromNavigation, linkedQueueFromStorage]);
 
   useEffect(() => {
     const fetchBranches = async () => {
@@ -129,16 +177,25 @@ const RequestReceipt = () => {
       }
     };
 
-    const storedUser = JSON.parse(localStorage.getItem('user') || 'null');
-    if (storedUser?.email) {
-      setFormData((current) => ({ ...current, email: storedUser.email }));
-    }
+    setFormData((current) => ({
+      ...current,
+      taxpayerName: current.taxpayerName || linkedQueue?.taxpayerName || '',
+      requestType: linkedQueue?.queueType === 'appointment' ? 'Appointment' : current.requestType,
+      branchId: current.branchId || linkedQueue?.branchId || '',
+      email: current.email || linkedQueue?.email || storedUser?.email || '',
+    }));
 
     fetchBranches();
-  }, []);
+  }, [linkedQueue, storedUser]);
 
   useEffect(() => {
-    const activeRequestId = localStorage.getItem(ACTIVE_RECEIPT_REQUEST_STORAGE_KEY);
+    const legacyRequestId = localStorage.getItem('activeReceiptRequestId');
+    if (legacyRequestId && !localStorage.getItem(activeReceiptRequestStorageKey)) {
+      localStorage.setItem(activeReceiptRequestStorageKey, legacyRequestId);
+    }
+    localStorage.removeItem('activeReceiptRequestId');
+
+    const activeRequestId = localStorage.getItem(activeReceiptRequestStorageKey);
     if (!activeRequestId) {
       return;
     }
@@ -147,13 +204,13 @@ const RequestReceipt = () => {
       .then((response) => {
         setRequestStatus(response.data);
         if (['Released', 'Completed'].includes(response.data?.overallStatus || response.data?.status)) {
-          localStorage.removeItem(ACTIVE_RECEIPT_REQUEST_STORAGE_KEY);
+          localStorage.removeItem(activeReceiptRequestStorageKey);
         }
       })
       .catch(() => {
-        localStorage.removeItem(ACTIVE_RECEIPT_REQUEST_STORAGE_KEY);
+        localStorage.removeItem(activeReceiptRequestStorageKey);
       });
-  }, []);
+  }, [activeReceiptRequestStorageKey]);
 
   useEffect(() => {
     if (formData.requestType !== 'Appointment') {
@@ -165,6 +222,12 @@ const RequestReceipt = () => {
 
     if (!selectedBranch) {
       setAppointmentAvailability(null);
+      return;
+    }
+    if (isLinkedToActiveQueue && linkedQueue?.queueType === 'appointment') {
+      setAppointmentAvailability(null);
+      setAppointmentAvailabilityLoading(false);
+      setAppointmentError('');
       return;
     }
 
@@ -214,7 +277,7 @@ const RequestReceipt = () => {
     return () => {
       isActive = false;
     };
-  }, [selectedBranch, formData.requestType, formData.appointmentSlot, todayDate]);
+  }, [selectedBranch, formData.requestType, formData.appointmentSlot, todayDate, isLinkedToActiveQueue, linkedQueue]);
 
   const handleInputChange = (event) => {
     const { name, value } = event.target;
@@ -256,6 +319,9 @@ const RequestReceipt = () => {
   const buildAppointmentDateTime = () => {
     if (formData.requestType !== 'Appointment') {
       return null;
+    }
+    if (isLinkedToActiveQueue && linkedQueue?.queueType === 'appointment') {
+      return linkedQueue.appointmentTime || null;
     }
 
     if (!formData.appointmentSlot) {
@@ -317,11 +383,14 @@ const RequestReceipt = () => {
     try {
       const response = await receiptAPI.requestCopy({
         ...formData,
+        linkedQueueNumber: linkedQueue?.queueNumber || null,
+        linkToActiveQueue: isLinkedToActiveQueue && isQueueLinkMode,
         appointmentDate: formData.requestType === 'Appointment' ? todayDate : null,
         appointmentSlot: formData.requestType === 'Appointment' ? formData.appointmentSlot : null,
       });
       setRequestStatus(response.data);
-      localStorage.setItem(ACTIVE_RECEIPT_REQUEST_STORAGE_KEY, response.data.requestId);
+      localStorage.setItem(activeReceiptRequestStorageKey, response.data.requestId);
+      sessionStorage.removeItem(PENDING_RECEIPT_QUEUE_LINK_STORAGE_KEY);
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to submit receipt request.');
     } finally {
@@ -426,6 +495,7 @@ const RequestReceipt = () => {
                   value={formData.taxpayerName}
                   onChange={handleInputChange}
                   disabled={systemStatus && (!systemStatus.receiptRequestEnabled || systemStatus.maintenanceMode)}
+                  readOnly={isLinkedToActiveQueue}
                   placeholder="Enter your full name"
                   className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent ${nameError ? 'border-red-400' : 'border-gray-300'}`}
                 />
@@ -466,7 +536,7 @@ const RequestReceipt = () => {
                   name="requestType"
                   value={formData.requestType}
                   onChange={handleInputChange}
-                  disabled={systemStatus && (!systemStatus.receiptRequestEnabled || systemStatus.maintenanceMode)}
+                  disabled={Boolean(systemStatus && (!systemStatus.receiptRequestEnabled || systemStatus.maintenanceMode)) || isLinkedToActiveQueue}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
                 >
                   <option value="Immediate">Immediate</option>
@@ -482,7 +552,7 @@ const RequestReceipt = () => {
                   name="branchId"
                   value={formData.branchId}
                   onChange={handleInputChange}
-                  disabled={systemStatus && (!systemStatus.receiptRequestEnabled || systemStatus.maintenanceMode)}
+                  disabled={Boolean(systemStatus && (!systemStatus.receiptRequestEnabled || systemStatus.maintenanceMode)) || isLinkedToActiveQueue}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
                 >
                   <option value="">Select branch</option>
@@ -497,6 +567,13 @@ const RequestReceipt = () => {
                 )}
               </div>
             </div>
+
+            {isLinkedToActiveQueue && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                This receipt request will be linked to your active queue number <span className="font-semibold">{linkedQueue.queueNumber}</span> for {linkedQueue.branchName || 'your selected branch'}.
+                {linkedQueue.queueType === 'appointment' && linkedQueue.appointmentTime ? ' The existing appointment schedule on that queue will also be reused.' : ''}
+              </div>
+            )}
 
             {formData.requestType === 'Appointment' && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -514,37 +591,53 @@ const RequestReceipt = () => {
                 </div>
                 <div>
                   <label className="block text-gray-700 font-semibold mb-2">Appointment Time</label>
-                  <select
-                    name="appointmentSlot"
-                    value={formData.appointmentSlot}
-                    onChange={handleInputChange}
-                    disabled={
-                      Boolean(systemStatus && (!systemStatus.receiptRequestEnabled || systemStatus.maintenanceMode)) ||
-                      !selectedBranch ||
-                      appointmentAvailabilityLoading ||
-                      !appointmentAvailability?.is_available
-                    }
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
-                  >
-                    <option value="">
-                      {appointmentAvailabilityLoading
-                        ? 'Loading available times...'
-                        : !selectedBranch
-                          ? 'Select branch first'
-                          : appointmentAvailability?.is_available
-                            ? 'Select available time'
-                            : 'No available time slots for today'}
-                    </option>
-                    {(appointmentAvailability?.available_slots || []).map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                  {appointmentTimeDisabledReason && (
-                    <p className="mt-2 text-sm font-medium text-amber-700">
-                      {appointmentTimeDisabledReason}
-                    </p>
+                  {isLinkedToActiveQueue && linkedQueue?.queueType === 'appointment' ? (
+                    <>
+                      <input
+                        type="text"
+                        value={linkedQueue.appointmentTime ? new Date(linkedQueue.appointmentTime).toLocaleString() : 'Inherited from active queue'}
+                        readOnly
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-slate-50 text-slate-700"
+                      />
+                      <p className="mt-2 text-sm font-medium text-blue-700">
+                        The appointment schedule from your active queue number will be reused for this receipt request.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <select
+                        name="appointmentSlot"
+                        value={formData.appointmentSlot}
+                        onChange={handleInputChange}
+                        disabled={
+                          Boolean(systemStatus && (!systemStatus.receiptRequestEnabled || systemStatus.maintenanceMode)) ||
+                          !selectedBranch ||
+                          appointmentAvailabilityLoading ||
+                          !appointmentAvailability?.is_available
+                        }
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
+                      >
+                        <option value="">
+                          {appointmentAvailabilityLoading
+                            ? 'Loading available times...'
+                            : !selectedBranch
+                              ? 'Select branch first'
+                              : appointmentAvailability?.is_available
+                                ? 'Select available time'
+                                : 'No available time slots for today'}
+                        </option>
+                        {(appointmentAvailability?.available_slots || []).map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      {appointmentTimeDisabledReason && (
+                        <p className="mt-2 text-sm font-medium text-amber-700">
+                          {appointmentTimeDisabledReason}
+                        </p>
+                      )}
+                    </>
                   )}
                 </div>
                 {appointmentAvailability?.is_available && appointmentAvailability?.time_settings && (
@@ -579,6 +672,7 @@ const RequestReceipt = () => {
                 value={formData.email}
                 onChange={handleInputChange}
                 disabled={systemStatus && (!systemStatus.receiptRequestEnabled || systemStatus.maintenanceMode)}
+                readOnly={isLinkedToActiveQueue}
                 placeholder="your.email@example.com"
                 className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent ${
                   emailError ? 'border-red-500 bg-red-50' : 'border-gray-300'

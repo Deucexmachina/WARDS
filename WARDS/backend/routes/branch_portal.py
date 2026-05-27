@@ -150,6 +150,7 @@ def serialize_queue(queue: Queue):
         "status": (queue_value(queue, "status") or "").lower(),
         "status_label": get_queue_display_status(queue),
         "queue_type": (queue_value(queue, "queue_type") or "immediate").lower(),
+        "service_window": normalize_service_window(queue_value(queue, "service_type")),
         "appointment_time": serialize_manila_datetime(queue.appointment_time),
         "estimated_wait_time": queue.estimated_wait_time,
         "recommended_arrival": serialize_manila_datetime(queue.recommended_arrival),

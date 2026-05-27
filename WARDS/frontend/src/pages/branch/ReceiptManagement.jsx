@@ -9,6 +9,19 @@ import ProcessingModal from '../../components/ProcessingModal';
 const SECTION_PAGE_SIZE = 5;
 const MAX_RELEASE_IMAGE_SIZE = 5 * 1024 * 1024;
 const ALLOWED_RELEASE_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const BRANCH_RECEIPT_UPDATED_EVENT = 'branch-receipt-updated';
+
+const dedupeRequestsById = (items) => {
+  const seen = new Set();
+  return (items || []).filter((item) => {
+    const requestId = item?.requestId || '';
+    if (!requestId || seen.has(requestId)) {
+      return false;
+    }
+    seen.add(requestId);
+    return true;
+  });
+};
 
 const normalizeReceiptCategory = (value) => {
   const normalized = (value || '').trim().toUpperCase();
@@ -147,7 +160,20 @@ const ReceiptManagement = () => {
     MISC: '',
   });
 
-  const refreshData = async () => {
+  const getActiveReceiptBadgeCount = (items) => (
+    (items || []).filter((item) => !['Released', 'Completed'].includes(item.status)).length
+  );
+
+  const emitBranchReceiptUpdated = (items) => {
+    window.dispatchEvent(new CustomEvent(BRANCH_RECEIPT_UPDATED_EVENT, {
+      detail: {
+        requests: items || [],
+        activeCount: getActiveReceiptBadgeCount(items || []),
+      },
+    }));
+  };
+
+  const refreshData = async ({ emitReceiptEvent = false } = {}) => {
     try {
       const [recordsResponse, requestsResponse, historyResponse] = await Promise.all([
         receiptAPI.listRecords(),
@@ -157,6 +183,9 @@ const ReceiptManagement = () => {
       setRecords(recordsResponse.data);
       setRequests(requestsResponse.data);
       setRequestHistory(historyResponse.data);
+      if (emitReceiptEvent) {
+        emitBranchReceiptUpdated(requestsResponse.data || []);
+      }
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to load receipt management data.');
     } finally {
@@ -192,7 +221,7 @@ const ReceiptManagement = () => {
 
   useEffect(() => {
     const handleBranchPaymentUpdated = () => {
-      refreshData();
+      refreshData({ emitReceiptEvent: true });
     };
 
     window.addEventListener('branch-payment-updated', handleBranchPaymentUpdated);
@@ -201,9 +230,11 @@ const ReceiptManagement = () => {
     };
   }, []);
 
+  const normalizedActiveRequests = useMemo(() => dedupeRequestsById(requests), [requests]);
+
   const pendingRequests = useMemo(
-    () => requests.filter((request) => !['Released', 'Completed'].includes(request.status)),
-    [requests]
+    () => normalizedActiveRequests.filter((request) => !['Released', 'Completed'].includes(request.status)),
+    [normalizedActiveRequests]
   );
 
   const immediateRequests = useMemo(
@@ -315,7 +346,7 @@ const ReceiptManagement = () => {
 
   const normalizedRequestHistory = useMemo(
     () =>
-      requestHistory.map((request) => ({
+      dedupeRequestsById(requestHistory).map((request) => ({
         ...request,
         normalized_tax_type: normalizeReceiptCategory(request.taxType),
       })),
@@ -471,7 +502,7 @@ const ReceiptManagement = () => {
       setSelectedFile(null);
       setPreviewUrl(null);
       setOcrDraft(null);
-      await refreshData();
+      await refreshData({ emitReceiptEvent: true });
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to save verified receipt record.');
     } finally {
@@ -492,7 +523,7 @@ const ReceiptManagement = () => {
       } else {
         setSuccessMessage('Receipt copy released successfully.');
       }
-      await refreshData();
+      await refreshData({ emitReceiptEvent: true });
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to release receipt request.');
     } finally {
@@ -512,18 +543,6 @@ const ReceiptManagement = () => {
     const requestToRelease = releaseTarget;
     setReleaseTarget(null);
     await handleRelease(requestToRelease.requestId);
-  };
-
-  const handleCompleteAppointment = async (requestId) => {
-    try {
-      setError('');
-      setSuccessMessage('');
-      const response = await receiptAPI.completeAppointmentRequest(requestId);
-      setSuccessMessage(response.data?.message || 'Appointment request completed successfully.');
-      await refreshData();
-    } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to complete appointment request.');
-    }
   };
 
   const handlePrintReleaseCopy = async (requestId) => {
@@ -711,7 +730,7 @@ const ReceiptManagement = () => {
           ? `Release copy uploaded successfully: ${response.data.releaseCopyFilename}`
           : 'Release copy uploaded successfully.'
       );
-      await refreshData();
+      await refreshData({ emitReceiptEvent: true });
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to upload finished receipt copy.');
     } finally {
@@ -753,7 +772,7 @@ const ReceiptManagement = () => {
 
     try {
       await receiptAPI.deleteRecord(recordId);
-      await refreshData();
+      await refreshData({ emitReceiptEvent: true });
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to delete receipt record.');
     } finally {
@@ -779,6 +798,114 @@ const ReceiptManagement = () => {
     }
 
     setDeleteTarget(null);
+  };
+
+  const renderRequestWorkflowActions = (request, { compact = false } = {}) => {
+    const releaseDraft = releaseUploadDrafts[request.requestId];
+    const buttonClassName = compact
+      ? 'rounded-lg px-2.5 py-1.5 text-xs font-semibold transition'
+      : 'rounded-lg px-3 py-1.5 font-semibold transition';
+
+    return (
+      <div className={`space-y-3 ${compact ? 'max-w-[24rem]' : ''}`}>
+        <div className="flex flex-wrap gap-2">
+          <label className={`cursor-pointer bg-slate-700 text-white hover:bg-slate-800 ${buttonClassName}`}>
+            {releaseDraft
+              ? 'Choose Different Image'
+              : request.hasReleaseCopy
+                ? 'Replace Image'
+                : 'Upload Image'}
+            <input
+              type="file"
+              accept=".jpg,.jpeg,.png,.webp"
+              className="hidden"
+              onChange={(event) => handleSelectReleaseCopy(request.requestId, event)}
+            />
+          </label>
+          {request.hasReleaseCopy ? (
+            <button
+              onClick={() => handlePreviewUploadedReleaseCopy(request.requestId)}
+              className={`bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50 ${buttonClassName}`}
+            >
+              View Image
+            </button>
+          ) : null}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {releaseDraft ? (
+            <>
+              <button
+                onClick={() => handleSubmitReleaseCopy(request.requestId)}
+                disabled={uploadingReleaseId === request.requestId}
+                className={`bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 ${buttonClassName}`}
+              >
+                {uploadingReleaseId === request.requestId ? 'Uploading...' : 'Submit Image'}
+              </button>
+              <button
+                onClick={() => clearReleaseUploadDraft(request.requestId)}
+                disabled={uploadingReleaseId === request.requestId}
+                className={`bg-slate-200 text-slate-700 hover:bg-slate-300 disabled:opacity-40 ${buttonClassName}`}
+              >
+                Cancel
+              </button>
+            </>
+          ) : null}
+          <button
+            onClick={() => handleReleaseClick(request)}
+            disabled={!request.hasReleaseCopy || request.paymentStatus !== 'Verified' || releasing}
+            className={`bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 ${buttonClassName}`}
+          >
+            Release Copy
+          </button>
+          <button
+            onClick={() => requestDeleteConfirmation({
+              type: 'request',
+              id: request.requestId,
+              title: 'Delete this active receipt request?',
+              message: 'This will permanently remove the active receipt request and its temporary branch-side workflow record.',
+              details: [
+                { label: 'Request ID', value: request.requestId },
+                { label: 'Taxpayer', value: request.taxpayerName || 'N/A' },
+              ],
+            })}
+            disabled={deletingRequestId === request.requestId}
+            className={`bg-red-600 text-white hover:bg-red-700 disabled:opacity-40 ${buttonClassName}`}
+          >
+            {deletingRequestId === request.requestId ? 'Deleting...' : 'Delete'}
+          </button>
+        </div>
+        <div className="basis-full rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+          Send to: {request.email || 'No requester email'}
+        </div>
+        {releaseDraft ? (
+          <div className="basis-full rounded-xl border border-slate-200 bg-white p-3">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <p className="truncate text-xs font-semibold text-slate-700">{releaseDraft.fileName}</p>
+              <span className="text-[11px] text-slate-500">Ready to upload</span>
+            </div>
+            <div className="overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+              <img
+                src={releaseDraft.previewUrl}
+                alt={`Release copy preview for ${request.requestId}`}
+                className="h-40 w-full object-contain"
+              />
+            </div>
+          </div>
+        ) : null}
+        <div className="basis-full text-xs text-slate-500">
+          {request.paymentStatus === 'Pending'
+            ? 'Citizen payment is still pending.'
+            : request.paymentStatus === 'Declined'
+              ? 'The latest payment attempt was declined. The request stays active until a new verified payment is received.'
+              : request.releaseStatus === 'Ready for Release'
+                ? 'Payment is verified and the request is ready for branch release.'
+                : 'Payment is verified. Upload the finished copy to continue the release flow.'}
+        </div>
+        <div className="basis-full text-xs text-slate-500">
+          After release, this request is marked done and transferred to its completed table.
+        </div>
+      </div>
+    );
   };
 
   const renderVerifiedRecordSection = ({
@@ -897,7 +1024,7 @@ const ReceiptManagement = () => {
     try {
       await receiptAPI.deleteRequest(requestId);
       setSuccessMessage(`Receipt request ${requestId} deleted successfully.`);
-      await refreshData();
+      await refreshData({ emitReceiptEvent: true });
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to delete receipt request.');
     } finally {
@@ -913,7 +1040,7 @@ const ReceiptManagement = () => {
     try {
       await receiptAPI.deleteRequestHistory(requestId);
       setSuccessMessage(`Completed receipt request ${requestId} deleted successfully.`);
-      await refreshData();
+      await refreshData({ emitReceiptEvent: true });
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to delete completed receipt request.');
     } finally {
@@ -1195,7 +1322,7 @@ const ReceiptManagement = () => {
             <>
         <div className="overflow-hidden rounded-2xl border border-slate-200">
           <div className="overflow-x-auto">
-            <table className="min-w-full text-sm text-slate-700">
+            <table className="min-w-[1180px] w-full text-sm text-slate-700">
               <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
                 <tr>
                   <th className="px-4 py-3.5 text-left">Request ID</th>
@@ -1229,119 +1356,14 @@ const ReceiptManagement = () => {
                         {request.releaseStatus || 'Not Ready for Release'}
                       </span>
                     </td>
-                    <td className="px-4 py-4 text-slate-600">
+                    <td className="max-w-[12rem] px-4 py-4 text-slate-600">
                       {request.hasReleaseCopy
                         ? `Uploaded: ${request.releaseCopyFilename || 'receipt copy'}`
                         : request.matchedReceipt
                           ? request.matchedReceipt.receipt_number || 'Matched'
                           : 'Waiting for receipt upload'}
                     </td>
-                    <td className="px-4 py-4">
-                      {(() => {
-                        const releaseDraft = releaseUploadDrafts[request.requestId];
-
-                        return (
-                          <div className="space-y-3">
-                            <div className="flex flex-wrap gap-2">
-                              <label className="cursor-pointer rounded-lg bg-slate-700 px-3 py-1.5 font-semibold text-white transition hover:bg-slate-800">
-                                {releaseDraft
-                                  ? 'Choose Different Image'
-                                  : request.hasReleaseCopy
-                                    ? 'Replace Image'
-                                    : 'Upload Image'}
-                                <input
-                                  type="file"
-                                  accept=".jpg,.jpeg,.png,.webp"
-                                  className="hidden"
-                                  onChange={(event) => handleSelectReleaseCopy(request.requestId, event)}
-                                />
-                              </label>
-                              {request.hasReleaseCopy ? (
-                                <button
-                                  onClick={() => handlePreviewUploadedReleaseCopy(request.requestId)}
-                                  className="rounded-lg bg-white px-3 py-1.5 font-semibold text-slate-700 ring-1 ring-slate-200 transition hover:bg-slate-50"
-                                >
-                                  View Image
-                                </button>
-                              ) : null}
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                              {releaseDraft ? (
-                                <>
-                                  <button
-                                    onClick={() => handleSubmitReleaseCopy(request.requestId)}
-                                    disabled={uploadingReleaseId === request.requestId}
-                                    className="rounded-lg bg-emerald-600 px-3 py-1.5 font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-40"
-                                  >
-                                    {uploadingReleaseId === request.requestId ? 'Uploading...' : 'Submit Image'}
-                                  </button>
-                                  <button
-                                    onClick={() => clearReleaseUploadDraft(request.requestId)}
-                                    disabled={uploadingReleaseId === request.requestId}
-                                    className="rounded-lg bg-slate-200 px-3 py-1.5 font-semibold text-slate-700 transition hover:bg-slate-300 disabled:opacity-40"
-                                  >
-                                    Cancel
-                                  </button>
-                                </>
-                              ) : null}
-                              <button
-                                onClick={() => handleReleaseClick(request)}
-                                disabled={!request.hasReleaseCopy || request.paymentStatus !== 'Verified' || releasing}
-                                className="rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white transition hover:bg-blue-700 disabled:opacity-40"
-                              >
-                                Release Copy
-                              </button>
-                              <button
-                                onClick={() => requestDeleteConfirmation({
-                                  type: 'request',
-                                  id: request.requestId,
-                                  title: 'Delete this active receipt request?',
-                                  message: 'This will permanently remove the active receipt request and its temporary branch-side workflow record.',
-                                  details: [
-                                    { label: 'Request ID', value: request.requestId },
-                                    { label: 'Taxpayer', value: request.taxpayerName || 'N/A' },
-                                  ],
-                                })}
-                                disabled={deletingRequestId === request.requestId}
-                                className="rounded-lg bg-red-600 px-3 py-1.5 font-semibold text-white transition hover:bg-red-700 disabled:opacity-40"
-                              >
-                                {deletingRequestId === request.requestId ? 'Deleting...' : 'Delete'}
-                              </button>
-                            </div>
-                            <div className="basis-full rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-                              Send to: {request.email || 'No requester email'}
-                            </div>
-                            {releaseDraft ? (
-                              <div className="basis-full rounded-xl border border-slate-200 bg-white p-3">
-                                <div className="mb-2 flex items-center justify-between gap-3">
-                                  <p className="truncate text-xs font-semibold text-slate-700">{releaseDraft.fileName}</p>
-                                  <span className="text-[11px] text-slate-500">Ready to upload</span>
-                                </div>
-                                <div className="overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
-                                  <img
-                                    src={releaseDraft.previewUrl}
-                                    alt={`Release copy preview for ${request.requestId}`}
-                                    className="h-40 w-full object-contain"
-                                  />
-                                </div>
-                              </div>
-                            ) : null}
-                            <div className="basis-full text-xs text-slate-500">
-                              {request.paymentStatus === 'Pending'
-                                ? 'Citizen payment is still pending.'
-                                : request.paymentStatus === 'Declined'
-                                  ? 'The latest payment attempt was declined. The request stays active until a new verified payment is received.'
-                                  : request.releaseStatus === 'Ready for Release'
-                                    ? 'Payment is verified and the request is ready for branch release.'
-                                    : 'Payment is verified. Upload the finished copy to continue the release flow.'}
-                            </div>
-                            <div className="basis-full text-xs text-slate-500">
-                              After release, this request is marked done and transferred to its completed table.
-                            </div>
-                          </div>
-                        );
-                      })()}
-                    </td>
+                    <td className="w-[24rem] min-w-[24rem] px-4 py-4">{renderRequestWorkflowActions(request)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1376,29 +1398,32 @@ const ReceiptManagement = () => {
             <>
         <div className="overflow-hidden rounded-2xl border border-slate-200">
           <div className="overflow-x-auto">
-            <table className="min-w-full text-sm text-slate-700">
+            <table className="min-w-[1320px] w-full table-fixed text-sm text-slate-700">
               <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
                 <tr>
-                  <th className="px-4 py-3.5 text-left">Request ID</th>
-                  <th className="px-4 py-3.5 text-left">Taxpayer</th>
-                  <th className="px-4 py-3.5 text-left">Tax Type</th>
-                  <th className="px-4 py-3.5 text-left">Transaction Date</th>
-                  <th className="px-4 py-3.5 text-left">Appointment Time</th>
-                  <th className="px-4 py-3.5 text-left">Reference</th>
-                  <th className="px-4 py-3.5 text-left">Payment Status</th>
-                  <th className="px-4 py-3.5 text-left">Release Status</th>
-                  <th className="px-4 py-3.5 text-left">Action</th>
+                  <th className="w-[10rem] px-4 py-3.5 text-left">Request ID</th>
+                  <th className="w-[12rem] px-4 py-3.5 text-left">Taxpayer</th>
+                  <th className="w-[8rem] px-4 py-3.5 text-left">Tax Type</th>
+                  <th className="w-[8rem] px-4 py-3.5 text-left">Request Type</th>
+                  <th className="w-[9rem] px-4 py-3.5 text-left">Transaction Date</th>
+                  <th className="w-[9rem] px-4 py-3.5 text-left">Appointment Time</th>
+                  <th className="w-[10rem] px-4 py-3.5 text-left">Reference</th>
+                  <th className="w-[9rem] px-4 py-3.5 text-left">Payment Status</th>
+                  <th className="w-[9rem] px-4 py-3.5 text-left">Release Status</th>
+                  <th className="w-[11rem] px-4 py-3.5 text-left">Matched Record</th>
+                  <th className="w-[25rem] px-4 py-3.5 text-left">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
                 {visibleRows.map((request) => (
                   <tr key={request.requestId} className="align-top transition hover:bg-slate-50">
-                    <td className="px-4 py-4 font-semibold text-slate-900">{request.requestId}</td>
-                    <td className="px-4 py-4 font-medium text-slate-900">{request.taxpayerName}</td>
+                    <td className="break-words px-4 py-4 font-semibold text-slate-900">{request.requestId}</td>
+                    <td className="break-words px-4 py-4 font-medium text-slate-900">{request.taxpayerName}</td>
                     <td className="px-4 py-4">{request.taxType || 'N/A'}</td>
+                    <td className="px-4 py-4">{request.requestType || 'Appointment'}</td>
                     <td className="px-4 py-4">{request.transactionDate || 'N/A'}</td>
                     <td className="px-4 py-4">{formatAppointmentSchedule(request.appointmentTime)}</td>
-                    <td className="px-4 py-4 font-mono text-xs text-slate-600">{request.refNumber}</td>
+                    <td className="break-words px-4 py-4 font-mono text-xs text-slate-600">{request.refNumber}</td>
                     <td className="px-4 py-4">
                       <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${getPaymentStatusTone(request.paymentStatus)}`}>
                         {request.paymentStatus || 'Pending'}
@@ -1409,23 +1434,14 @@ const ReceiptManagement = () => {
                         {request.releaseStatus || 'Not Ready for Release'}
                       </span>
                     </td>
-                    <td className="px-4 py-4">
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          onClick={() => handleCompleteAppointment(request.requestId)}
-                          disabled={request.paymentStatus !== 'Verified'}
-                          className="rounded-lg bg-green-600 px-3 py-1.5 font-semibold text-white transition hover:bg-green-700 disabled:opacity-40"
-                        >
-                          Complete
-                        </button>
-                        <div className="basis-full rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-                          Auto-removes this request after completion.
-                        </div>
-                        <div className="basis-full text-xs text-slate-500">
-                          After completion, this request is marked done and transferred to its completed table.
-                        </div>
-                      </div>
+                    <td className="break-words px-4 py-4 text-slate-600">
+                      {request.hasReleaseCopy
+                        ? `Uploaded: ${request.releaseCopyFilename || 'receipt copy'}`
+                        : request.matchedReceipt
+                          ? request.matchedReceipt.receipt_number || 'Matched'
+                          : 'Waiting for receipt upload'}
                     </td>
+                    <td className="px-4 py-4">{renderRequestWorkflowActions(request, { compact: true })}</td>
                   </tr>
                 ))}
               </tbody>
