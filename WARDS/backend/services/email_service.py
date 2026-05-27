@@ -1221,6 +1221,110 @@ def send_registration_confirmation_email(
         }
 
 
+def _build_account_change_text(
+    display_name: str,
+    account_type: str,
+    change_summary: str,
+    changed_fields: list[str],
+) -> str:
+    fields = ", ".join(changed_fields or ["Account information"])
+    return "\n".join(
+        [
+            "WARDS Account Change Notice",
+            "",
+            f"Hello {display_name},",
+            "",
+            change_summary,
+            f"Account Type: {_resolve_account_type_label(account_type)}",
+            f"Changed Fields: {fields}",
+            f"Changed On: {_format_manila_timestamp()}",
+            "",
+            "If you did not make this change, please sign in and change your password immediately or contact the WARDS administrator.",
+            "",
+            "City Treasurer's Office",
+            "WARDS Admin",
+        ]
+    )
+
+
+def _build_account_change_html(
+    display_name: str,
+    account_type: str,
+    change_summary: str,
+    changed_fields: list[str],
+) -> str:
+    field_rows = "".join(
+        f"<li style=\"margin:0 0 6px;color:#475569;\">{field}</li>"
+        for field in (changed_fields or ["Account information"])
+    )
+    return f"""
+<!DOCTYPE html>
+<html lang="en">
+  <body style="margin:0;padding:0;background:#f3f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;">
+    <div style="max-width:640px;margin:0 auto;padding:32px 20px;">
+      {_build_email_shell_header("Account Change Notice", "This security message confirms a recent change to your WARDS account.", [])}
+      <div style="background:#ffffff;border-radius:0 0 24px 24px;padding:30px 30px 32px;box-shadow:0 18px 40px rgba(15,39,68,.10);border:1px solid #dbe3ef;border-top:none;">
+        <p style="margin:0 0 18px;font-size:16px;line-height:1.75;">Hello <strong>{display_name}</strong>,</p>
+        <div style="background:#f8fbff;border:1px solid #dbe7f3;border-radius:18px;padding:20px 22px;margin:0 0 22px;">
+          <p style="margin:0 0 10px;font-size:14px;line-height:1.7;color:#546273;"><strong>Account Type:</strong> {_resolve_account_type_label(account_type)}</p>
+          <p style="margin:0 0 10px;font-size:14px;line-height:1.7;color:#546273;"><strong>Change:</strong> {change_summary}</p>
+          <p style="margin:0;font-size:14px;line-height:1.7;color:#546273;"><strong>Changed On:</strong> {_format_manila_timestamp()}</p>
+        </div>
+        <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:16px;padding:16px 18px;">
+          <p style="margin:0 0 10px;font-size:13px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#64748b;">Changed Fields</p>
+          <ul style="padding-left:18px;margin:0;font-size:14px;line-height:1.7;">{field_rows}</ul>
+        </div>
+        <p style="margin:22px 0 0;font-size:14px;line-height:1.7;color:#5b6471;">
+          If you did not make this change, please sign in and change your password immediately or contact the WARDS administrator.
+        </p>
+      </div>
+    </div>
+  </body>
+</html>
+"""
+
+
+def send_account_change_notification_email(
+    recipient_email: str,
+    display_name: str,
+    account_type: str,
+    change_summary: str,
+    changed_fields: list[str],
+) -> dict:
+    if not recipient_email:
+        return {
+            "sent": False,
+            "status": "skipped",
+            "message": "No recipient email is available for the account change notification.",
+        }
+
+    if not smtp_is_configured():
+        return {
+            "sent": False,
+            "status": "skipped",
+            "message": "SMTP is not configured. Account change notification email was not sent.",
+        }
+
+    smtp_from_email = os.getenv("SMTP_FROM_EMAIL")
+    smtp_from_name = os.getenv("SMTP_FROM_NAME", "WARDS Admin")
+    message = EmailMessage()
+    message["Subject"] = "Account Change Notice | WARDS"
+    message["From"] = f"{smtp_from_name} <{smtp_from_email}>"
+    message["To"] = recipient_email
+    message.set_content(_build_account_change_text(display_name, account_type, change_summary, changed_fields))
+    message.add_alternative(_build_account_change_html(display_name, account_type, change_summary, changed_fields), subtype="html")
+
+    try:
+        result = _send_email_message(message)
+        return {**result, "message": f"Account change notification email sent to {recipient_email}."}
+    except Exception as exc:
+        return {
+            "sent": False,
+            "status": "failed",
+            "message": f"Account change notification email could not be sent: {exc}",
+        }
+
+
 def send_taxpayer_identifier_submission_email(
     recipient_email: str,
     display_name: str,

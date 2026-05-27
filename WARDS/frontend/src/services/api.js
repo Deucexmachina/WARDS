@@ -136,6 +136,7 @@ export const paymentAPI = {
 export const taxpayerAccountAPI = {
   getAccount: () => api.get('/tax-assessment/user/account'),
   updateProfile: (data) => api.put('/tax-assessment/user/account/profile', data),
+  changePassword: (data) => api.put('/tax-assessment/user/account/password', data),
   submitIdentifier: (formData) => api.post('/tax-assessment/user/account/submissions', formData, {
     headers: { 'Content-Type': 'multipart/form-data' }
   }),

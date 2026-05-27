@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { taxpayerAccountAPI, queueAPI } from '../../services/api';
-import { getEmailValidationMessage } from '../../utils/validation';
+import { getEmailValidationMessage, validateStrongPassword } from '../../utils/validation';
 
 const DEFAULT_PROFILE = {
   full_name: '',
@@ -18,6 +18,12 @@ const DEFAULT_IDENTIFIER_FORM = {
   mayor_permit_number: '',
   sec_dti_cda_number: '',
   supporting_file: null,
+};
+
+const DEFAULT_PASSWORD_FORM = {
+  current_password: '',
+  new_password: '',
+  confirm_new_password: '',
 };
 
 const statusTone = {
@@ -45,6 +51,7 @@ const isProfileReady = (profile) =>
 
 const AccountManagement = () => {
   const [profile, setProfile] = useState(DEFAULT_PROFILE);
+  const [originalProfile, setOriginalProfile] = useState(DEFAULT_PROFILE);
   const [identifierForm, setIdentifierForm] = useState(DEFAULT_IDENTIFIER_FORM);
   const [submissions, setSubmissions] = useState([]);
   const [assessments, setAssessments] = useState([]);
@@ -56,6 +63,12 @@ const AccountManagement = () => {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [emailError, setEmailError] = useState('');
+  const [confirmProfilePassword, setConfirmProfilePassword] = useState('');
+  const [showProfileConfirm, setShowProfileConfirm] = useState(false);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [passwordForm, setPasswordForm] = useState(DEFAULT_PASSWORD_FORM);
+  const [passwordError, setPasswordError] = useState('');
+  const [changingPassword, setChangingPassword] = useState(false);
 
   const loadAccount = async () => {
     try {
@@ -63,6 +76,12 @@ const AccountManagement = () => {
       const response = await taxpayerAccountAPI.getAccount();
       const nextProfile = response.data?.profile || DEFAULT_PROFILE;
       setProfile({
+        ...DEFAULT_PROFILE,
+        ...nextProfile,
+        mobile_number: nextProfile.mobile_number || '',
+        tin: nextProfile.tin || '',
+      });
+      setOriginalProfile({
         ...DEFAULT_PROFILE,
         ...nextProfile,
         mobile_number: nextProfile.mobile_number || '',
@@ -133,11 +152,27 @@ const AccountManagement = () => {
       return;
     }
 
+    setConfirmProfilePassword('');
+    setError('');
+    setShowProfileConfirm(true);
+  };
+
+  const handleConfirmSaveProfile = async (event) => {
+    event.preventDefault();
+    if (!confirmProfilePassword) {
+      setError('Enter your current password to confirm profile changes.');
+      return;
+    }
+
     try {
       setSavingProfile(true);
-      const response = await taxpayerAccountAPI.updateProfile(profile);
+      const response = await taxpayerAccountAPI.updateProfile({
+        ...profile,
+        current_password: confirmProfilePassword,
+      });
       const nextProfile = response.data?.profile || profile;
       setProfile((current) => ({ ...current, ...nextProfile, mobile_number: nextProfile.mobile_number || current.mobile_number }));
+      setOriginalProfile((current) => ({ ...current, ...nextProfile, mobile_number: nextProfile.mobile_number || current.mobile_number }));
       const storedUser = JSON.parse(localStorage.getItem('user') || 'null');
       if (storedUser) {
         localStorage.setItem('user', JSON.stringify({
@@ -153,11 +188,59 @@ const AccountManagement = () => {
       setMessage(response.data?.message || 'Profile updated successfully.');
       setError('');
       setIsProfileLocked(true);
+      setShowProfileConfirm(false);
+      setConfirmProfilePassword('');
       await loadAccount();
     } catch (saveError) {
       setError(saveError.response?.data?.detail || 'Failed to update taxpayer profile.');
     } finally {
       setSavingProfile(false);
+    }
+  };
+
+  const handleCancelEditProfile = () => {
+    setProfile(originalProfile);
+    setEmailError('');
+    setIsProfileLocked(true);
+    setMessage('');
+    setError('');
+  };
+
+  const handlePasswordFormChange = (event) => {
+    const { name, value } = event.target;
+    setPasswordForm((current) => ({ ...current, [name]: value }));
+    setPasswordError('');
+    setMessage('');
+    setError('');
+  };
+
+  const handleChangePassword = async (event) => {
+    event.preventDefault();
+    if (!passwordForm.current_password) {
+      setPasswordError('Enter your current password.');
+      return;
+    }
+    if (passwordForm.new_password !== passwordForm.confirm_new_password) {
+      setPasswordError('New password and confirmation do not match.');
+      return;
+    }
+    const nextPasswordError = validateStrongPassword(passwordForm.new_password);
+    if (nextPasswordError) {
+      setPasswordError(nextPasswordError);
+      return;
+    }
+
+    try {
+      setChangingPassword(true);
+      const response = await taxpayerAccountAPI.changePassword(passwordForm);
+      setPasswordForm(DEFAULT_PASSWORD_FORM);
+      setShowPasswordModal(false);
+      setMessage(response.data?.message || 'Password changed successfully.');
+      setError('');
+    } catch (changeError) {
+      setPasswordError(changeError.response?.data?.detail || 'Failed to change password.');
+    } finally {
+      setChangingPassword(false);
     }
   };
 
@@ -259,14 +342,34 @@ const AccountManagement = () => {
                     <h2 className="mt-2 text-2xl font-bold text-slate-900">Taxpayer Information</h2>
                   </div>
                   <button
-                    type={isProfileLocked ? 'button' : 'submit'}
-                    onClick={isProfileLocked ? handleEditProfile : undefined}
-                    disabled={savingProfile}
-                    className="rounded-full bg-[#0f5b83] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#0c4d6f] disabled:opacity-60"
+                    type="button"
+                    onClick={handleEditProfile}
+                    disabled={savingProfile || !isProfileLocked}
+                    className={`${isProfileLocked ? 'bg-[#0f5b83] hover:bg-[#0c4d6f]' : 'bg-slate-300'} rounded-full px-5 py-2.5 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-70`}
                   >
-                    {savingProfile ? 'Saving...' : isProfileLocked ? 'Edit Profile' : 'Save Profile'}
+                    Edit Profile
                   </button>
                 </div>
+
+                {!isProfileLocked ? (
+                  <div className="mb-6 flex flex-wrap justify-end gap-3">
+                    <button
+                      type="button"
+                      onClick={handleCancelEditProfile}
+                      disabled={savingProfile}
+                      className="rounded-full border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={savingProfile}
+                      className="rounded-full bg-[#0f5b83] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#0c4d6f] disabled:opacity-60"
+                    >
+                      {savingProfile ? 'Saving...' : 'Save Changes'}
+                    </button>
+                  </div>
+                ) : null}
 
                 <div className="grid gap-5 md:grid-cols-2">
                   <label className="block">
@@ -297,6 +400,20 @@ const AccountManagement = () => {
                     <span className="mb-2 block text-sm font-semibold text-slate-700">Tax Identification Number (TIN)</span>
                     <input name="tin" value={profile.tin} onChange={handleProfileChange} disabled={isProfileLocked} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 focus:border-[#0f5b83] focus:ring-2 focus:ring-[#0f5b83]/10" placeholder="Optional" />
                   </label>
+                </div>
+
+                <div className="mt-6 border-t border-slate-200 pt-5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPasswordForm(DEFAULT_PASSWORD_FORM);
+                      setPasswordError('');
+                      setShowPasswordModal(true);
+                    }}
+                    className="rounded-full border border-[#0f5b83] bg-white px-5 py-2.5 text-sm font-semibold text-[#0f5b83] transition hover:bg-[#eef8fc]"
+                  >
+                    Change Password
+                  </button>
                 </div>
               </form>
 
@@ -519,6 +636,97 @@ const AccountManagement = () => {
           </div>
         </div>
       </div>
+      {showProfileConfirm ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
+          <form onSubmit={handleConfirmSaveProfile} className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Confirm Profile Update</p>
+            <h2 className="mt-2 text-2xl font-bold text-slate-900">Enter Your Password</h2>
+            <p className="mt-3 text-sm leading-6 text-slate-600">
+              Confirm your current account password before saving taxpayer profile changes.
+            </p>
+            {error ? (
+              <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                {error}
+              </div>
+            ) : null}
+            <label className="mt-5 block">
+              <span className="mb-2 block text-sm font-semibold text-slate-700">Current Password</span>
+              <input
+                type="password"
+                value={confirmProfilePassword}
+                onChange={(event) => setConfirmProfilePassword(event.target.value)}
+                className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-[#0f5b83] focus:ring-2 focus:ring-[#0f5b83]/10"
+                autoComplete="current-password"
+                required
+              />
+            </label>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowProfileConfirm(false);
+                  setConfirmProfilePassword('');
+                }}
+                disabled={savingProfile}
+                className="rounded-full border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button type="submit" disabled={savingProfile} className="rounded-full bg-[#0f5b83] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#0c4d6f] disabled:opacity-60">
+                {savingProfile ? 'Saving...' : 'Confirm and Save'}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
+      {showPasswordModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
+          <form onSubmit={handleChangePassword} className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Account Security</p>
+            <h2 className="mt-2 text-2xl font-bold text-slate-900">Change Password</h2>
+            <p className="mt-3 text-sm leading-6 text-slate-600">
+              Enter your current password, then choose and confirm a new password.
+            </p>
+            {passwordError ? (
+              <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                {passwordError}
+              </div>
+            ) : null}
+            <div className="mt-5 grid gap-4">
+              <label className="block">
+                <span className="mb-2 block text-sm font-semibold text-slate-700">Current Password</span>
+                <input name="current_password" type="password" value={passwordForm.current_password} onChange={handlePasswordFormChange} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-[#0f5b83] focus:ring-2 focus:ring-[#0f5b83]/10" autoComplete="current-password" required />
+              </label>
+              <label className="block">
+                <span className="mb-2 block text-sm font-semibold text-slate-700">New Password</span>
+                <input name="new_password" type="password" value={passwordForm.new_password} onChange={handlePasswordFormChange} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-[#0f5b83] focus:ring-2 focus:ring-[#0f5b83]/10" autoComplete="new-password" required />
+              </label>
+              <label className="block">
+                <span className="mb-2 block text-sm font-semibold text-slate-700">Confirm New Password</span>
+                <input name="confirm_new_password" type="password" value={passwordForm.confirm_new_password} onChange={handlePasswordFormChange} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-[#0f5b83] focus:ring-2 focus:ring-[#0f5b83]/10" autoComplete="new-password" required />
+              </label>
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPasswordModal(false);
+                  setPasswordForm(DEFAULT_PASSWORD_FORM);
+                  setPasswordError('');
+                }}
+                disabled={changingPassword}
+                className="rounded-full border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button type="submit" disabled={changingPassword} className="rounded-full bg-[#0f5b83] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#0c4d6f] disabled:opacity-60">
+                {changingPassword ? 'Changing...' : 'Change Password'}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
     </section>
   );
 };

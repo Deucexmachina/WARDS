@@ -8,6 +8,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
+from passlib.context import CryptContext
 from pydantic import BaseModel, Field
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -24,6 +25,7 @@ from database.models import (
 from middleware.admin_auth import require_main_admin
 from middleware.user_auth import get_current_user
 from services.email_service import (
+    send_account_change_notification_email,
     send_taxpayer_identifier_submission_email,
     send_taxpayer_verification_status_email,
 )
@@ -34,9 +36,11 @@ from utils.security_validation import (
     normalize_email,
     normalize_identity_name,
     normalize_tin,
+    validate_strong_password,
 )
 
 router = APIRouter()
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 UPLOAD_DIR = Path(__file__).resolve().parents[1] / "uploads" / "taxpayer_identifiers"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -57,11 +61,18 @@ class PublicProfileUpdateRequest(BaseModel):
     address: str | None = None
     taxpayer_type: str
     tin: str | None = None
+    current_password: str
 
 
 class SubmissionReviewRequest(BaseModel):
     status: str
     remarks: str | None = None
+
+
+class PublicPasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
+    confirm_new_password: str
 
 
 class TaxAssessmentUpsertRequest(BaseModel):
@@ -235,6 +246,27 @@ def citizen_contact(user: CitizenUser) -> str | None:
 
 def citizen_address(user: CitizenUser) -> str | None:
     return get_decrypted_or_raw(user, "address") or user.address
+
+
+def verify_citizen_password(user: CitizenUser, password: str | None):
+    if not password or not pwd_context.verify(password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Incorrect account password.")
+
+
+def changed_profile_fields(current_user: CitizenUser, payload: PublicProfileUpdateRequest, normalized_email: str, mobile_number: str, taxpayer_type: str, normalized_tin: str | None) -> list[str]:
+    changes = []
+    comparisons = (
+        ("Full Name", citizen_name(current_user), re.sub(r"\s+", " ", (payload.full_name or "").strip())),
+        ("Email Address", citizen_email(current_user), normalized_email),
+        ("Mobile Number", citizen_contact(current_user), mobile_number),
+        ("Address", citizen_address(current_user) or "", (payload.address or "").strip()),
+        ("Taxpayer Type", current_user.taxpayer_type or "Individual", taxpayer_type),
+        ("Tax Identification Number", citizen_tin(current_user) or "", normalized_tin or ""),
+    )
+    for label, old_value, new_value in comparisons:
+        if (old_value or "") != (new_value or ""):
+            changes.append(label)
+    return changes
 
 
 def validate_assessment_payload(payload: TaxAssessmentUpsertRequest, *, tax_type: str, taxpayer_type: str):
@@ -422,6 +454,7 @@ async def update_public_account_profile(
     db: Session = Depends(get_db),
     current_user: CitizenUser = Depends(get_current_user),
 ):
+    verify_citizen_password(current_user, payload.current_password)
     normalized_email = normalize_email(payload.email, check_deliverability=True)
     ensure_email_is_unique(db, normalized_email, exclude_citizen_id=current_user.id)
     taxpayer_type = normalize_taxpayer_type(payload.taxpayer_type)
@@ -434,6 +467,10 @@ async def update_public_account_profile(
     if (payload.tin or "").strip():
         normalized_tin = normalize_tin(payload.tin)
         ensure_tin_is_unique(db, normalized_tin, exclude_citizen_id=current_user.id)
+
+    previous_email = citizen_email(current_user)
+    previous_name = citizen_name(current_user) or full_name
+    changes = changed_profile_fields(current_user, payload, normalized_email, mobile_number, taxpayer_type, normalized_tin)
 
     current_user.full_name = full_name
     current_user.email = normalized_email
@@ -451,6 +488,17 @@ async def update_public_account_profile(
     ))
     db.commit()
     db.refresh(current_user)
+
+    recipients = [email for email in {previous_email, citizen_email(current_user)} if email]
+    for recipient_email in recipients:
+        send_account_change_notification_email(
+            recipient_email=recipient_email,
+            display_name=previous_name,
+            account_type="public",
+            change_summary="Your taxpayer profile information was updated.",
+            changed_fields=changes or ["Taxpayer Profile"],
+        )
+
     return {
         "message": "Account profile updated successfully.",
         "profile": {
@@ -463,6 +511,39 @@ async def update_public_account_profile(
             "tin": citizen_tin(current_user),
         },
     }
+
+
+@router.put("/user/account/password")
+async def change_public_account_password(
+    payload: PublicPasswordChangeRequest,
+    db: Session = Depends(get_db),
+    current_user: CitizenUser = Depends(get_current_user),
+):
+    verify_citizen_password(current_user, payload.current_password)
+    if payload.new_password != payload.confirm_new_password:
+        raise HTTPException(status_code=400, detail="New password and confirmation do not match.")
+    if pwd_context.verify(payload.new_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="New password must be different from your current password.")
+    validate_strong_password(payload.new_password)
+
+    current_user.hashed_password = pwd_context.hash(payload.new_password)
+    db.add(ActivityLog(
+        action="Public Taxpayer Password Changed",
+        user=citizen_email(current_user),
+        details=f"Password changed for citizen user {current_user.id}",
+        type="user",
+    ))
+    db.commit()
+
+    send_account_change_notification_email(
+        recipient_email=citizen_email(current_user),
+        display_name=citizen_name(current_user) or "Taxpayer",
+        account_type="public",
+        change_summary="Your WARDS account password was changed.",
+        changed_fields=["Password"],
+    )
+
+    return {"message": "Password changed successfully."}
 
 
 @router.post("/user/account/submissions")
