@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
-import { formatUtc8DateTime } from '../../utils/dateTime';
+import { buildManilaDateTimeValue, formatUtc8DateTime, parseManilaDateTimeValue } from '../../utils/dateTime';
+import { printQueueTicket } from '../../utils/queueTicketPrint';
 import {
   getEmailValidationMessage,
   normalizeCitizenFullName,
@@ -409,8 +410,8 @@ const GetQueue = () => {
       return null;
     }
 
-    const isoValue = `${formData.appointment_date}T${formData.appointment_slot}:00`;
-    const appointmentDateTime = new Date(isoValue);
+    const isoValue = buildManilaDateTimeValue(formData.appointment_date, formData.appointment_slot);
+    const appointmentDateTime = parseManilaDateTimeValue(isoValue);
     const now = new Date();
 
     if (Number.isNaN(appointmentDateTime.getTime()) || appointmentDateTime < now) {
@@ -575,76 +576,23 @@ const GetQueue = () => {
       return;
     }
 
-    const receiptWindow = window.open('', '_blank', 'width=900,height=700');
-    if (!receiptWindow) {
+    const opened = printQueueTicket({
+      title: 'Queue Registration Receipt',
+      queueNumber: queueResult.queue_number,
+      branchName: queueResult.branch_name,
+      queueType: queueResult.queue_type,
+      serviceType: queueResult.service_type,
+      appointmentTime: queueResult.appointment_time,
+      recommendedArrival: queueResult.recommended_arrival,
+      estimatedWaitTime: queueResult.estimated_wait_time,
+      createdAt: queueResult.created_at,
+      taxpayerName: normalizeCitizenFullName(formData.taxpayer_name),
+      contactNumber: `+63${normalizePhilippineContactDigits(formData.contact_number)}`,
+      message: queueResult.message,
+    });
+    if (!opened) {
       setFormError('Unable to open the print preview. Please allow pop-ups and try again.');
-      return;
     }
-
-    const recommendedArrival = queueResult.recommended_arrival
-      ? formatUtc8DateTime(queueResult.recommended_arrival)
-      : 'N/A';
-    const appointmentLabel = queueResult.appointment_time
-      ? formatUtc8DateTime(queueResult.appointment_time)
-      : 'Not applicable';
-
-    receiptWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Queue Receipt - ${queueResult.queue_number}</title>
-          <style>
-            body { font-family: Arial, sans-serif; margin: 0; padding: 24px; background: #f8fafc; color: #0f172a; }
-            .sheet { max-width: 760px; margin: 0 auto; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 18px; padding: 28px; box-sizing: border-box; }
-            .header { border-bottom: 2px solid #2563eb; padding-bottom: 16px; margin-bottom: 20px; }
-            .title { font-size: 26px; font-weight: 700; margin: 0 0 6px; }
-            .subtitle { font-size: 14px; color: #475569; margin: 0; }
-            .queue-card { background: #eff6ff; border: 2px solid #bfdbfe; border-radius: 16px; padding: 18px; margin-bottom: 20px; text-align: center; }
-            .queue-number { font-size: 38px; font-weight: 800; color: #2563eb; margin: 10px 0 0; }
-            .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 20px; }
-            .field { border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px; background: #ffffff; }
-            .label { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: #64748b; margin-bottom: 6px; font-weight: 700; }
-            .value { font-size: 16px; font-weight: 600; color: #0f172a; line-height: 1.45; word-break: break-word; }
-            .note { border: 1px solid #fde68a; background: #fffbeb; color: #92400e; border-radius: 14px; padding: 14px 16px; font-size: 14px; line-height: 1.6; }
-            @page { size: A4; margin: 12mm; }
-            @media print {
-              body { background: #ffffff; padding: 0; }
-              .sheet { border: none; border-radius: 0; padding: 0; max-width: none; }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="sheet">
-            <div class="header">
-              <p class="title">Queue Registration Receipt</p>
-              <p class="subtitle">WARDS Queueing Module</p>
-            </div>
-            <div class="queue-card">
-              <div class="label">Queue Number</div>
-              <div class="queue-number">${queueResult.queue_number}</div>
-            </div>
-            <div class="grid">
-              <div class="field"><div class="label">Branch</div><div class="value">${queueResult.branch_name}</div></div>
-              <div class="field"><div class="label">Service</div><div class="value">${queueResult.service_type}</div></div>
-              <div class="field"><div class="label">Queue Type</div><div class="value">${queueResult.queue_type}</div></div>
-              <div class="field"><div class="label">Estimated Wait Time</div><div class="value">${queueResult.estimated_wait_time} min</div></div>
-              <div class="field"><div class="label">Recommended Arrival</div><div class="value">${recommendedArrival}</div></div>
-              <div class="field"><div class="label">Appointment Time</div><div class="value">${appointmentLabel}</div></div>
-              <div class="field"><div class="label">Name</div><div class="value">${normalizeCitizenFullName(formData.taxpayer_name)}</div></div>
-              <div class="field"><div class="label">Contact Number</div><div class="value">+63 ${normalizePhilippineContactDigits(formData.contact_number)}</div></div>
-            </div>
-            <div class="note">${queueResult.message}</div>
-          </div>
-          <script>
-            window.onload = function () {
-              window.print();
-              window.onafterprint = function () { window.close(); };
-            };
-          </script>
-        </body>
-      </html>
-    `);
-    receiptWindow.document.close();
   };
 
   const getQueueLevelColor = (level) => {

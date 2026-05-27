@@ -1,4 +1,5 @@
 export const UTC_PLUS_8_TIME_ZONE = 'Asia/Manila';
+export const MANILA_TIMEZONE_OFFSET_SUFFIX = '+08:00';
 
 const TIMEZONE_SUFFIX_PATTERN = /(?:[zZ]|[+-]\d{2}:\d{2})$/;
 
@@ -13,6 +14,29 @@ export const parseUtcDate = (value) => {
       : value;
 
   const parsedDate = new Date(normalizedValue);
+  return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
+};
+
+export const buildManilaDateTimeValue = (dateValue, timeValue) => {
+  const normalizedDate = String(dateValue || '').trim();
+  const normalizedTime = String(timeValue || '').trim();
+  if (!normalizedDate || !normalizedTime) {
+    return '';
+  }
+  return `${normalizedDate}T${normalizedTime}:00`;
+};
+
+export const parseManilaDateTimeValue = (value) => {
+  const normalizedValue = String(value || '').trim();
+  if (!normalizedValue) {
+    return null;
+  }
+
+  const withOffset = TIMEZONE_SUFFIX_PATTERN.test(normalizedValue)
+    ? normalizedValue
+    : `${normalizedValue}${MANILA_TIMEZONE_OFFSET_SUFFIX}`;
+
+  const parsedDate = new Date(withOffset);
   return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
 };
 

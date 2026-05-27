@@ -42,6 +42,10 @@ def _current_ph_date() -> date:
     return datetime.now(PH_TIMEZONE).date()
 
 
+def _current_ph_naive_datetime() -> datetime:
+    return datetime.now(PH_TIMEZONE).replace(tzinfo=None)
+
+
 def _format_time_label(value: str) -> str:
     parsed = datetime.strptime(value, "%H:%M")
     return parsed.strftime("%I:%M %p").lstrip("0")
@@ -916,7 +920,7 @@ def get_branch_appointment_availability(
 
     slot_cursor = datetime.combine(selected_date, opening_time)
     slot_end_limit = datetime.combine(selected_date, last_appointment_time)
-    now = datetime.now()
+    now = _current_ph_naive_datetime()
     window_capacity = get_window_capacity_snapshot(db, branch_id=branch.id, service_type=service_type)
     available_slots = []
 
@@ -1000,7 +1004,7 @@ def validate_branch_appointment_datetime(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid appointment date and time.") from exc
 
-    if appointment_time < datetime.now():
+    if appointment_time < _current_ph_naive_datetime():
         raise HTTPException(status_code=400, detail="Appointment date and time must be from the current date onward.")
 
     availability = get_branch_appointment_availability(

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import api from '../services/api';
 import { formatUtc8DateTime } from '../utils/dateTime';
+import { printQueueTicket } from '../utils/queueTicketPrint';
 
 const ViewMyTicket = ({ onClose }) => {
   const [ticket, setTicket] = useState(null);
@@ -38,7 +39,20 @@ const ViewMyTicket = ({ onClose }) => {
   };
 
   const handlePrint = () => {
-    window.print();
+    printQueueTicket({
+      title: 'Queue Ticket',
+      queueNumber: ticket.queue_number,
+      branchName: ticket.branch_name,
+      queueType: ticket.queue_type,
+      serviceType: ticket.service_type,
+      appointmentTime: ticket.appointment_time,
+      recommendedArrival: ticket.recommended_arrival,
+      estimatedWaitTime: ticket.estimated_wait_time,
+      createdAt: ticket.created_at,
+      taxpayerName: ticket.taxpayer_name,
+      contactNumber: ticket.contact_number,
+      message: `Status: ${ticket.status}${ticket.position > 0 ? ` | Position in queue: #${ticket.position}` : ''}`,
+    });
   };
 
   const formatDate = (dateString) => {

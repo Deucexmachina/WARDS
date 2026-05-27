@@ -62,6 +62,19 @@ def serialize_manila_native_datetime(value: Optional[datetime]) -> Optional[str]
     return value.astimezone(MANILA_TIMEZONE).isoformat()
 
 
+def serialize_queue_schedule_datetime(value: Optional[datetime], queue_type: Optional[str]) -> Optional[str]:
+    if (queue_type or "").strip().lower() == "appointment":
+        return serialize_manila_native_datetime(value)
+    return serialize_manila_datetime(value)
+
+
+def get_service_processing_time_minutes(service: Optional[Service]) -> int:
+    configured_minutes = getattr(service, "average_processing_time", None)
+    if isinstance(configured_minutes, int) and configured_minutes > 0:
+        return configured_minutes
+    return get_transaction_duration_minutes()
+
+
 def serialize_public_announcement(announcement: Announcement):
     branch_name = (get_decrypted_or_raw(announcement.branch, "name") or announcement.branch.name) if announcement.branch else None
     title = decrypt_optional_value(getattr(announcement, "title_enc", None)) or announcement.title
@@ -551,7 +564,7 @@ async def analyze_queue(branch_id: int, service_type: str, db: Session = Depends
     
     # Get service processing time
     service = db.query(Service).filter(hash_aware_match(Service, "name", service_type)).first()
-    avg_processing_time = get_transaction_duration_minutes()
+    avg_processing_time = get_service_processing_time_minutes(service)
     
     # Get current queue
     waiting = db.query(Queue).filter(
@@ -727,7 +740,7 @@ async def register_queue(
     queue_number = generate_next_queue_number(db, branch_name, queue_type)
     
     # Get service processing time
-    avg_processing_time = get_transaction_duration_minutes()
+    avg_processing_time = get_service_processing_time_minutes(service)
     
     # Calculate estimated wait time based on number of counters
     waiting = db.query(Queue).filter(
@@ -852,8 +865,9 @@ async def register_queue(
         "service_type": registration.service_type,
         "queue_type": queue_type,
         "estimated_wait_time": new_queue.estimated_wait_time,
-        "recommended_arrival": serialize_manila_datetime(new_queue.recommended_arrival),
-        "appointment_time": serialize_manila_datetime(new_queue.appointment_time),
+        "recommended_arrival": serialize_queue_schedule_datetime(new_queue.recommended_arrival, queue_type),
+        "appointment_time": serialize_queue_schedule_datetime(new_queue.appointment_time, queue_type),
+        "created_at": serialize_manila_datetime(new_queue.created_at),
         "status": "Registered",
         "message": "Queue registration successful. Please arrive at the recommended time."
     }
@@ -910,8 +924,8 @@ async def get_my_active_ticket(
             "status": queue_value(active_queue, "status"),
             "position": position,
             "estimated_wait_time": active_queue.estimated_wait_time,
-            "recommended_arrival": serialize_manila_native_datetime(active_queue.recommended_arrival),
-            "appointment_time": serialize_manila_native_datetime(active_queue.appointment_time),
+            "recommended_arrival": serialize_queue_schedule_datetime(active_queue.recommended_arrival, queue_value(active_queue, "queue_type")),
+            "appointment_time": serialize_queue_schedule_datetime(active_queue.appointment_time, queue_value(active_queue, "queue_type")),
             "created_at": serialize_manila_datetime(active_queue.created_at),
             "served_at": serialize_manila_datetime(active_queue.served_at),
         }
