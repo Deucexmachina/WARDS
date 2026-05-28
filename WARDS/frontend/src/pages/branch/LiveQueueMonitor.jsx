@@ -1,7 +1,6 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import api from '../../services/api';
-import { announceQueue, recallQueue } from '../../utils/queueAnnouncement';
 
 const queueWindowLabels = {
   RPT: 'RPT',
@@ -22,9 +21,6 @@ const LiveQueueMonitor = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [lastUpdate, setLastUpdate] = useState(null);
-  const [isAnnouncementPlaying, setIsAnnouncementPlaying] = useState(false);
-  const previousServingQueuesRef = useRef(new Map());
-  const lastAnnouncedQueueRef = useRef(null);
 
   const fetchQueueData = async () => {
     try {
@@ -67,125 +63,6 @@ const LiveQueueMonitor = () => {
     const interval = setInterval(fetchQueueData, 3000);
     return () => clearInterval(interval);
   }, []);
-
-  // Listen for recall triggers from Staff Window via localStorage
-  useEffect(() => {
-    const handleStorageChange = (e) => {
-      if (e.key === 'queue_announcement_trigger' && e.newValue) {
-        try {
-          const trigger = JSON.parse(e.newValue);
-          if (trigger.action === 'recall' && trigger.queue_number && !isAnnouncementPlaying) {
-            console.log(`Recall trigger received: ${trigger.queue_number}, window: ${trigger.service_window}`);
-            
-            setIsAnnouncementPlaying(true);
-            const playRecall = async () => {
-              try {
-                await recallQueue(trigger.queue_number, trigger.service_window);
-              } catch (error) {
-                console.error('Recall announcement failed:', error);
-              } finally {
-                setIsAnnouncementPlaying(false);
-              }
-            };
-            playRecall();
-            
-            // Clear the trigger
-            localStorage.removeItem('queue_announcement_trigger');
-          }
-        } catch (error) {
-          console.error('Failed to parse recall trigger:', error);
-        }
-      }
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-    
-    // Also check for triggers on same tab (localStorage events don't fire on same tab)
-    const checkLocalTrigger = () => {
-      const triggerData = localStorage.getItem('queue_announcement_trigger');
-      if (triggerData && !isAnnouncementPlaying) {
-        try {
-          const trigger = JSON.parse(triggerData);
-          if (trigger.action === 'recall' && trigger.queue_number) {
-            console.log(`Recall trigger found in localStorage: ${trigger.queue_number}, window: ${trigger.service_window}`);
-            
-            setIsAnnouncementPlaying(true);
-            const playRecall = async () => {
-              try {
-                await recallQueue(trigger.queue_number, trigger.service_window);
-              } catch (error) {
-                console.error('Recall announcement failed:', error);
-              } finally {
-                setIsAnnouncementPlaying(false);
-              }
-            };
-            playRecall();
-            
-            // Clear the trigger
-            localStorage.removeItem('queue_announcement_trigger');
-          }
-        } catch (error) {
-          console.error('Failed to parse recall trigger:', error);
-        }
-      }
-    };
-    
-    const localCheckInterval = setInterval(checkLocalTrigger, 500);
-    
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-      clearInterval(localCheckInterval);
-    };
-  }, [isAnnouncementPlaying]);
-
-  // Detect new serving queues and play announcements
-  useEffect(() => {
-    if (loading || !queueData.serving) return;
-
-    const currentServingMap = new Map();
-    
-    // Build map of currently serving queues
-    queueData.serving.forEach(queue => {
-      if (queue.queue_number) {
-        currentServingMap.set(queue.queue_number, queue);
-      }
-    });
-
-    // Check for new serving queues
-    currentServingMap.forEach((queue, queueNumber) => {
-      const wasServingBefore = previousServingQueuesRef.current.has(queueNumber);
-      
-      // New queue detected in serving status
-      if (!wasServingBefore && !isAnnouncementPlaying) {
-        // Check if this is a recall (same queue announced again)
-        const isRecall = lastAnnouncedQueueRef.current === queueNumber;
-        
-        console.log(`${isRecall ? 'Recall' : 'New'} queue detected: ${queueNumber}, window: ${queue.service_window}`);
-        
-        setIsAnnouncementPlaying(true);
-        
-        const playAnnouncement = async () => {
-          try {
-            if (isRecall) {
-              await recallQueue(queueNumber, queue.service_window);
-            } else {
-              await announceQueue(queueNumber, queue.service_window);
-            }
-            lastAnnouncedQueueRef.current = queueNumber;
-          } catch (error) {
-            console.error('Voice announcement failed:', error);
-          } finally {
-            setIsAnnouncementPlaying(false);
-          }
-        };
-        
-        playAnnouncement();
-      }
-    });
-
-    // Update previous serving queues reference
-    previousServingQueuesRef.current = currentServingMap;
-  }, [queueData.serving, loading, isAnnouncementPlaying]);
 
   if (loading) {
     return (
