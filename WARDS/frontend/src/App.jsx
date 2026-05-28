@@ -38,6 +38,7 @@ import GetQueue from './pages/public/GetQueue'
 import PaymentStatus from './pages/public/PaymentStatus'
 import PaymentSuccess from './pages/public/PaymentSuccess'
 import PaymentFailed from './pages/public/PaymentFailed'
+import MobileReceiptUpload from './pages/public/MobileReceiptUpload'
 import Dashboard from './pages/admin/Dashboard'
 import Branches from './pages/admin/Branches'
 import Reports from './pages/admin/Reports'
@@ -79,6 +80,7 @@ function App() {
         <Route path="/payment/status" element={<PaymentStatus />} />
         <Route path="/payment/success" element={<PaymentSuccess />} />
         <Route path="/payment/failed" element={<PaymentFailed />} />
+        <Route path="/mobile-receipt-upload/:token" element={<MobileReceiptUpload />} />
         
         <Route path="/login" element={<UnifiedLogin />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />

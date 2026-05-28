@@ -4,12 +4,15 @@ import hashlib
 import mimetypes
 import os
 import re
+import secrets
+import time
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from PIL import Image
+import qrcode
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -29,6 +32,8 @@ UNIFIED_SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "your-unified-auth-secret-chan
 ALGORITHM = "HS256"
 ACTIVE_QUEUE_STATUSES = ("Pending", "Waiting", "Called", "Serving")
 optional_user_security = HTTPBearer(auto_error=False)
+MOBILE_RECEIPT_UPLOAD_SESSIONS: dict[str, dict] = {}
+MOBILE_RECEIPT_UPLOAD_TTL_SECONDS = 15 * 60
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads", "receipts")
 RELEASE_UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads", "released_receipts")
@@ -88,6 +93,11 @@ class ReceiptRecordPayload(BaseModel):
     selected_category: str | None = None
     detected_category: str | None = None
     category_match: bool | None = None
+
+
+class MobileReceiptUploadSessionCreate(BaseModel):
+    queue_id: int
+    category: str
 
 
 def normalize_receipt_payment_method(payment_method: str | None) -> str:
@@ -492,6 +502,184 @@ def find_duplicate_receipt_record(
     return None, None
 
 
+def cleanup_mobile_receipt_upload_sessions():
+    now = time.time()
+    expired_tokens = [
+        token
+        for token, session in MOBILE_RECEIPT_UPLOAD_SESSIONS.items()
+        if float(session.get("expires_at") or 0) <= now
+    ]
+    for token in expired_tokens:
+        MOBILE_RECEIPT_UPLOAD_SESSIONS.pop(token, None)
+
+
+def get_mobile_receipt_upload_session(token: str) -> dict:
+    cleanup_mobile_receipt_upload_sessions()
+    session = MOBILE_RECEIPT_UPLOAD_SESSIONS.get(token)
+    if not session:
+        raise HTTPException(status_code=404, detail="Receipt upload session is invalid or has expired.")
+    return session
+
+
+def save_receipt_record_payload(
+    *,
+    db: Session,
+    payload: ReceiptRecordPayload,
+    branch_id: int,
+    uploaded_by: str,
+) -> ReceiptRecord:
+    normalized_tax_type = normalize_receipt_category(payload.tax_type)
+    selected_category = normalize_receipt_category(payload.selected_category or normalized_tax_type)
+    detected_category = normalize_receipt_category(payload.detected_category or normalized_tax_type)
+
+    if selected_category != normalized_tax_type:
+        raise HTTPException(status_code=400, detail="The verified tax type must match the selected receipt category.")
+
+    if detected_category != selected_category or payload.category_match is False:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Category validation failed. The uploaded receipt appears to be {detected_category}, not {selected_category}.",
+        )
+
+    duplicate_record, duplicate_type = find_duplicate_receipt_record(
+        db,
+        payload.source_image_sha256 or "",
+        payload.source_image_ahash or "",
+    )
+    if duplicate_record:
+        if duplicate_type == "exact":
+            raise HTTPException(status_code=409, detail=f"This receipt image already exists as record #{duplicate_record.id}.")
+        raise HTTPException(
+            status_code=409,
+            detail=f"This receipt image is too similar to existing record #{duplicate_record.id}. Please upload a different image.",
+        )
+
+    normalized_ref_number = normalize_reference_number(payload.ref_number)
+    if normalized_ref_number:
+        existing_reference_record = (
+            db.query(ReceiptRecord)
+            .filter(
+                ReceiptRecord.branch_id == branch_id,
+                hash_aware_match(ReceiptRecord, "ref_number", normalized_ref_number),
+                hash_aware_match(ReceiptRecord, "tax_type", normalized_tax_type),
+            )
+            .first()
+        )
+        if existing_reference_record:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"A {normalized_tax_type} receipt with reference {normalized_ref_number} "
+                    f"already exists as record #{existing_reference_record.id}."
+                ),
+            )
+
+    record = ReceiptRecord(
+        branch_id=branch_id,
+        receipt_number=payload.receipt_number,
+        ref_number=normalized_ref_number,
+        txn_id=payload.txn_id or normalized_ref_number,
+        taxpayer_name=payload.taxpayer_name,
+        transaction_date=payload.transaction_date,
+        amount=payload.amount,
+        tax_type=normalized_tax_type,
+        source_image_sha256=payload.source_image_sha256,
+        source_image_ahash=payload.source_image_ahash,
+        selected_category=selected_category,
+        detected_category=detected_category,
+        source_image_path=payload.source_image_path,
+        raw_ocr_text=payload.raw_text,
+        verification_status="Verified",
+        confidence=payload.confidence or 0.0,
+        uploaded_by=uploaded_by,
+    )
+    apply_receipt_record_security(record)
+    db.add(record)
+    db.flush()
+
+    linked_requests = db.query(ReceiptRequest).filter(hash_aware_match(ReceiptRequest, "ref_number", normalized_ref_number)).all()
+    for request in linked_requests:
+        request.matched_receipt_id = record.id
+        request.branch_id = branch_id
+        sync_request_status(request)
+
+    db.add(ActivityLog(
+        action="Receipt Record Saved",
+        user=uploaded_by,
+        details=f"Saved verified receipt record {normalized_ref_number or payload.receipt_number or record.id}",
+        type="branch_receipts",
+    ))
+    return record
+
+
+def build_receipt_ocr_result(
+    *,
+    db: Session,
+    image_data: bytes,
+    file: UploadFile,
+    file_path: str,
+    category: str,
+    branch_id: int,
+    uploaded_by: str,
+) -> dict:
+    normalized_category = normalize_receipt_category(category)
+    image_sha256 = compute_image_sha256(image_data)
+    image_ahash = compute_image_ahash(image_data)
+    duplicate_record, duplicate_type = find_duplicate_receipt_record(db, image_sha256, image_ahash)
+
+    if duplicate_type == "exact":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"This receipt image was already uploaded by {duplicate_record.uploaded_by or 'another user'} "
+                f"on record #{duplicate_record.id}."
+            ),
+        )
+
+    try:
+        result = ocr_service.process_receipt(
+            image_path=file_path,
+            filename=os.path.basename(file.filename or "receipt.jpg"),
+            category=normalized_category,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    detected_category = normalize_receipt_category(result.get("detected_category") or normalized_category)
+    category_match = result.get("category_match", True)
+    if detected_category != normalized_category or category_match is False:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Receipt category validation failed. This looks like a {detected_category} receipt, "
+                f"but the queue requires {normalized_category}. Please upload the correct receipt type."
+            ),
+        )
+
+    duplicate_warning = ""
+    save_blocked = False
+    if duplicate_type == "similar" and duplicate_record:
+        save_blocked = True
+        duplicate_warning = (
+            f"This receipt image looks very similar to existing record #{duplicate_record.id}. "
+            "Please upload a different receipt image."
+        )
+
+    result["source_image_path"] = file_path
+    result["source_image_sha256"] = image_sha256
+    result["source_image_ahash"] = image_ahash
+    result["branch_id"] = branch_id
+    result["uploaded_by"] = uploaded_by
+    result["category"] = normalized_category
+    result["selected_category"] = normalized_category
+    result["duplicate_detected"] = duplicate_record is not None
+    result["duplicate_type"] = duplicate_type
+    result["duplicate_record"] = serialize_duplicate_record(duplicate_record)
+    result["duplicate_warning"] = duplicate_warning
+    result["save_blocked"] = save_blocked
+    return result
+
+
 def is_appointment_request(request: ReceiptRequest) -> bool:
     return (receipt_request_value(request, "request_type") or "").strip().lower() == "appointment"
 
@@ -636,18 +824,6 @@ async def upload_receipt_for_ocr(
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     image_data = await file.read()
     ensure_valid_image_upload(image_data)
-    image_sha256 = compute_image_sha256(image_data)
-    image_ahash = compute_image_ahash(image_data)
-    duplicate_record, duplicate_type = find_duplicate_receipt_record(db, image_sha256, image_ahash)
-
-    if duplicate_type == "exact":
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"This receipt image was already uploaded by {duplicate_record.uploaded_by or 'another user'} "
-                f"on record #{duplicate_record.id}."
-            ),
-        )
 
     original_name = os.path.basename(file.filename or "receipt.jpg")
     safe_name = f"{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{original_name}"
@@ -656,40 +832,186 @@ async def upload_receipt_for_ocr(
     with open(file_path, "wb") as output_file:
         output_file.write(image_data)
 
+    return build_receipt_ocr_result(
+        db=db,
+        image_data=image_data,
+        file=file,
+        file_path=file_path,
+        category=normalized_category,
+        branch_id=current_staff.branch_id,
+        uploaded_by=current_staff.username,
+    )
+
+
+@router.post("/records/mobile-upload-sessions")
+async def create_mobile_receipt_upload_session(
+    payload: MobileReceiptUploadSessionCreate,
+    current_staff=Depends(get_current_branch_staff),
+    db: Session = Depends(get_db),
+):
+    normalized_category = normalize_receipt_category(payload.category)
+    queue = (
+        db.query(Queue)
+        .filter(Queue.id == payload.queue_id, Queue.branch_id == current_staff.branch_id)
+        .first()
+    )
+    if not queue:
+        raise HTTPException(status_code=404, detail="Queue record not found for mobile receipt upload.")
+
+    token = secrets.token_urlsafe(32)
+    frontend_base_url = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000").rstrip("/")
+    upload_url = f"{frontend_base_url}/mobile-receipt-upload/{token}"
+    MOBILE_RECEIPT_UPLOAD_SESSIONS[token] = {
+        "token": token,
+        "queue_id": queue.id,
+        "queue_number": queue_value(queue, "queue_number"),
+        "branch_id": current_staff.branch_id,
+        "category": normalized_category,
+        "created_by": current_staff.username,
+        "created_at": datetime.utcnow().isoformat(),
+        "expires_at": time.time() + MOBILE_RECEIPT_UPLOAD_TTL_SECONDS,
+        "status": "pending",
+        "result": None,
+        "error": "",
+    }
+    return {
+        "token": token,
+        "upload_url": upload_url,
+        "expires_in_seconds": MOBILE_RECEIPT_UPLOAD_TTL_SECONDS,
+        "status": "pending",
+    }
+
+
+@router.get("/records/mobile-upload-sessions/{token}")
+async def get_mobile_receipt_upload_session_status(
+    token: str,
+    current_staff=Depends(get_current_branch_staff),
+):
+    session = get_mobile_receipt_upload_session(token)
+    if session["branch_id"] != current_staff.branch_id:
+        raise HTTPException(status_code=403, detail="This upload session belongs to another branch.")
+    return {
+        "token": token,
+        "queue_id": session["queue_id"],
+        "queue_number": session["queue_number"],
+        "category": session["category"],
+        "status": session["status"],
+        "result": session.get("result"),
+        "error": session.get("error") or "",
+    }
+
+
+@router.get("/records/mobile-upload-sessions/{token}/qr")
+async def get_mobile_receipt_upload_qr(
+    token: str,
+):
+    session = get_mobile_receipt_upload_session(token)
+    frontend_base_url = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000").rstrip("/")
+    upload_url = f"{frontend_base_url}/mobile-receipt-upload/{token}"
+    image = qrcode.make(upload_url)
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    buffer.seek(0)
+    return StreamingResponse(buffer, media_type="image/png")
+
+
+@router.get("/records/mobile-upload-sessions/{token}/public")
+async def get_mobile_receipt_upload_public_session(token: str):
+    session = get_mobile_receipt_upload_session(token)
+    return {
+        "queue_number": session["queue_number"],
+        "category": session["category"],
+        "status": session["status"],
+        "expires_at": session["expires_at"],
+        "result": session.get("result"),
+        "record_id": session.get("record_id"),
+        "error": session.get("error") or "",
+    }
+
+
+@router.post("/records/mobile-upload-sessions/{token}/upload")
+async def upload_mobile_receipt_for_ocr(
+    token: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    session = get_mobile_receipt_upload_session(token)
+    if session.get("status") in {"processed", "saved"}:
+        raise HTTPException(status_code=409, detail="A receipt has already been uploaded for this session.")
+
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    image_data = await file.read()
+    ensure_valid_image_upload(image_data)
+
+    original_name = os.path.basename(file.filename or "mobile-receipt.jpg")
+    safe_name = f"mobile_{token[:10]}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{original_name}"
+    file_path = os.path.join(UPLOAD_DIR, safe_name)
+    with open(file_path, "wb") as output_file:
+        output_file.write(image_data)
+
+    session["status"] = "processing"
     try:
-        result = ocr_service.process_receipt(
-            image_path=file_path,
-            filename=original_name,
-            category=normalized_category,
+        result = build_receipt_ocr_result(
+            db=db,
+            image_data=image_data,
+            file=file,
+            file_path=file_path,
+            category=session["category"],
+            branch_id=session["branch_id"],
+            uploaded_by=f"mobile:{session['created_by']}",
         )
-    except RuntimeError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except HTTPException as exc:
+        session["status"] = "error"
+        session["error"] = str(exc.detail)
+        raise
 
-    duplicate_warning = ""
-    save_blocked = False
-    if duplicate_type == "similar" and duplicate_record:
-        save_blocked = True
-        duplicate_warning = (
-            f"This receipt image looks very similar to existing record #{duplicate_record.id}. "
-            "Please upload a different receipt image."
-        )
+    session["status"] = "processed"
+    session["result"] = result
+    session["error"] = ""
+    return {
+        "message": "Receipt uploaded and parsed. Please review the OCR result before saving.",
+        "status": "processed",
+        "category": session["category"],
+        "result": result,
+    }
 
-    if not result.get("category_match", True):
-        save_blocked = True
 
-    result["source_image_path"] = file_path
-    result["source_image_sha256"] = image_sha256
-    result["source_image_ahash"] = image_ahash
-    result["branch_id"] = current_staff.branch_id
-    result["uploaded_by"] = current_staff.username
-    result["category"] = normalized_category
-    result["selected_category"] = normalized_category
-    result["duplicate_detected"] = duplicate_record is not None
-    result["duplicate_type"] = duplicate_type
-    result["duplicate_record"] = serialize_duplicate_record(duplicate_record)
-    result["duplicate_warning"] = duplicate_warning
-    result["save_blocked"] = save_blocked
-    return result
+@router.post("/records/mobile-upload-sessions/{token}/save")
+async def save_mobile_receipt_record(
+    token: str,
+    payload: ReceiptRecordPayload,
+    db: Session = Depends(get_db),
+):
+    session = get_mobile_receipt_upload_session(token)
+    if session.get("status") not in {"processed", "saved"} or not session.get("result"):
+        raise HTTPException(status_code=400, detail="Upload and parse a receipt before saving.")
+    if session.get("record_id"):
+        raise HTTPException(status_code=409, detail=f"This mobile receipt was already saved as record #{session['record_id']}.")
+
+    normalized_tax_type = normalize_receipt_category(payload.tax_type)
+    if normalized_tax_type != session["category"]:
+        raise HTTPException(status_code=400, detail=f"This session only accepts {session['category']} receipts.")
+
+    record = save_receipt_record_payload(
+        db=db,
+        payload=payload,
+        branch_id=session["branch_id"],
+        uploaded_by=f"mobile:{session['created_by']}",
+    )
+    db.commit()
+    db.refresh(record)
+    session["status"] = "saved"
+    session["record_id"] = record.id
+    session["result"] = {
+        **session["result"],
+        **payload.dict(),
+    }
+    session["error"] = ""
+    return {
+        "message": "Receipt saved to Receipt Management.",
+        "status": "saved",
+        "record": serialize_receipt_record(record),
+    }
 
 
 @router.post("/records")
@@ -698,87 +1020,12 @@ async def save_receipt_record(
     current_staff=Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
-    normalized_tax_type = normalize_receipt_category(payload.tax_type)
-    selected_category = normalize_receipt_category(payload.selected_category or normalized_tax_type)
-    detected_category = normalize_receipt_category(payload.detected_category or normalized_tax_type)
-
-    if selected_category != normalized_tax_type:
-        raise HTTPException(status_code=400, detail="The verified tax type must match the selected receipt category.")
-
-    if detected_category != selected_category or payload.category_match is False:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Category validation failed. The uploaded receipt appears to be {detected_category}, not {selected_category}.",
-        )
-
-    duplicate_record, duplicate_type = find_duplicate_receipt_record(
-        db,
-        payload.source_image_sha256 or "",
-        payload.source_image_ahash or "",
-    )
-    if duplicate_record:
-        if duplicate_type == "exact":
-            raise HTTPException(status_code=409, detail=f"This receipt image already exists as record #{duplicate_record.id}.")
-        raise HTTPException(
-            status_code=409,
-            detail=f"This receipt image is too similar to existing record #{duplicate_record.id}. Please upload a different image.",
-        )
-
-    normalized_ref_number = normalize_reference_number(payload.ref_number)
-    if normalized_ref_number:
-        existing_reference_record = (
-            db.query(ReceiptRecord)
-            .filter(
-                ReceiptRecord.branch_id == current_staff.branch_id,
-                hash_aware_match(ReceiptRecord, "ref_number", normalized_ref_number),
-                hash_aware_match(ReceiptRecord, "tax_type", normalized_tax_type),
-            )
-            .first()
-        )
-        if existing_reference_record:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"A {normalized_tax_type} receipt with reference {normalized_ref_number} "
-                    f"already exists as record #{existing_reference_record.id}."
-                ),
-            )
-
-    record = ReceiptRecord(
+    record = save_receipt_record_payload(
+        db=db,
+        payload=payload,
         branch_id=current_staff.branch_id,
-        receipt_number=payload.receipt_number,
-        ref_number=normalized_ref_number,
-        txn_id=payload.txn_id or normalized_ref_number,
-        taxpayer_name=payload.taxpayer_name,
-        transaction_date=payload.transaction_date,
-        amount=payload.amount,
-        tax_type=normalized_tax_type,
-        source_image_sha256=payload.source_image_sha256,
-        source_image_ahash=payload.source_image_ahash,
-        selected_category=selected_category,
-        detected_category=detected_category,
-        source_image_path=payload.source_image_path,
-        raw_ocr_text=payload.raw_text,
-        verification_status="Verified",
-        confidence=payload.confidence or 0.0,
         uploaded_by=current_staff.username,
     )
-    apply_receipt_record_security(record)
-    db.add(record)
-    db.flush()
-
-    linked_requests = db.query(ReceiptRequest).filter(hash_aware_match(ReceiptRequest, "ref_number", normalized_ref_number)).all()
-    for request in linked_requests:
-        request.matched_receipt_id = record.id
-        request.branch_id = current_staff.branch_id
-        sync_request_status(request)
-
-    db.add(ActivityLog(
-        action="Receipt Record Saved",
-        user=current_staff.username,
-        details=f"Saved verified receipt record {normalized_ref_number or payload.receipt_number or record.id}",
-        type="branch_receipts",
-    ))
     db.commit()
     db.refresh(record)
     return serialize_receipt_record(record)

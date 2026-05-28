@@ -175,7 +175,14 @@ export const receiptAPI = {
   uploadForOCR: (formData) => api.post('/receipts/records/ocr-upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' }
   }),
-  saveRecord: (data) => api.post('/receipts/records', data),
+  createMobileUploadSession: (data) => api.post('/receipts/records/mobile-upload-sessions', data),
+  getMobileUploadSession: (token) => api.get(`/receipts/records/mobile-upload-sessions/${token}`),
+  getMobileUploadPublicSession: (token) => api.get(`/receipts/records/mobile-upload-sessions/${token}/public`),
+    uploadMobileReceipt: (token, formData) => api.post(`/receipts/records/mobile-upload-sessions/${token}/upload`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }),
+    saveMobileReceipt: (token, data) => api.post(`/receipts/records/mobile-upload-sessions/${token}/save`, data),
+    saveRecord: (data) => api.post('/receipts/records', data),
   deleteRecord: (recordId) => api.delete(`/receipts/records/${recordId}`),
   downloadRecordImage: (recordId) => api.get(`/receipts/records/${recordId}/image`, {
     responseType: 'blob'

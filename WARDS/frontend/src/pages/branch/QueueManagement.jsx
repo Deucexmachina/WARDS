@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useEffect, useMemo, useState } from 'react';
-import api from '../../services/api';
+import api, { receiptAPI } from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 import { announceQueue, isAnnouncementActive } from '../../utils/queueAnnouncement';
@@ -32,6 +32,32 @@ const queueWindowLabels = {
 };
 
 const BRANCH_QUEUE_UPDATED_EVENT = 'branch-queue-updated';
+
+const resolveReceiptCategory = (queue) => {
+  const serviceWindow = (queue?.service_window || '').toUpperCase();
+  const serviceType = (queue?.service_type || '').toLowerCase();
+  if (serviceWindow === 'RPT' || serviceType.includes('rpt') || serviceType.includes('real property')) {
+    return 'RPT';
+  }
+  if (serviceWindow === 'BUSINESS' || serviceType.includes('business') || serviceType.includes('permit') || serviceType.includes('bt')) {
+    return 'BUSINESS';
+  }
+  return 'MISC';
+};
+
+const defaultReceiptDraft = (queue) => ({
+  ref_number: '',
+  txn_id: '',
+  taxpayer_name: queue?.taxpayer_name || '',
+  transaction_date: '',
+  amount: '',
+  tax_type: resolveReceiptCategory(queue),
+  selected_category: resolveReceiptCategory(queue),
+  detected_category: resolveReceiptCategory(queue),
+  category_match: true,
+  confidence: 0,
+  raw_text: '',
+});
 
 const parseDate = (value) => {
   if (!value) {
@@ -461,6 +487,18 @@ const QueueManagement = () => {
     BUSINESS: '',
     MISC: '',
   });
+  const [completionQueue, setCompletionQueue] = useState(null);
+  const [completionMode, setCompletionMode] = useState('options');
+  const [completionError, setCompletionError] = useState('');
+  const [completionNotice, setCompletionNotice] = useState('');
+  const [receiptSavedForCompletion, setReceiptSavedForCompletion] = useState(false);
+  const [showCancelCompletionConfirm, setShowCancelCompletionConfirm] = useState(false);
+  const [receiptDraft, setReceiptDraft] = useState(null);
+  const [receiptUploadFile, setReceiptUploadFile] = useState(null);
+  const [processingReceipt, setProcessingReceipt] = useState(false);
+  const [savingReceipt, setSavingReceipt] = useState(false);
+  const [completingQueueId, setCompletingQueueId] = useState(null);
+  const [mobileSession, setMobileSession] = useState(null);
   const [immediatePage, setImmediatePage] = useState(1);
   const [appointmentPage, setAppointmentPage] = useState(1);
   const [skippedPage, setSkippedPage] = useState(1);
@@ -543,6 +581,157 @@ const QueueManagement = () => {
     setShowDeleteModal(false);
   };
 
+  const resetCompletionFlow = () => {
+    setCompletionQueue(null);
+    setCompletionMode('options');
+    setCompletionError('');
+    setCompletionNotice('');
+    setReceiptSavedForCompletion(false);
+    setShowCancelCompletionConfirm(false);
+    setReceiptDraft(null);
+    setReceiptUploadFile(null);
+    setProcessingReceipt(false);
+    setSavingReceipt(false);
+    setCompletingQueueId(null);
+    setMobileSession(null);
+  };
+
+  const completeQueueDirectly = async (queue) => {
+    try {
+      setCompletingQueueId(queue.id);
+      setCompletionError('');
+      setCompletionNotice('');
+      await api.post(`/branch/queue/${queue.id}/complete`);
+      await fetchQueues();
+      resetCompletionFlow();
+      return true;
+    } catch (err) {
+      setCompletionError(err.response?.data?.detail || 'Failed to complete queue.');
+      return false;
+    } finally {
+      setCompletingQueueId(null);
+    }
+  };
+
+  const handleFileReceiptUpload = async (event) => {
+    event.preventDefault();
+    if (!receiptUploadFile || !completionQueue) {
+      setCompletionError('Choose a receipt image before running OCR.');
+      return;
+    }
+
+    const category = resolveReceiptCategory(completionQueue);
+    const formData = new FormData();
+    formData.append('file', receiptUploadFile);
+    formData.append('category', category);
+
+    try {
+      setProcessingReceipt(true);
+      setCompletionError('');
+      setCompletionNotice('');
+      const response = await receiptAPI.uploadForOCR(formData);
+      setReceiptDraft({
+        ...defaultReceiptDraft(completionQueue),
+        ...response.data,
+        tax_type: response.data?.tax_type || category,
+        selected_category: response.data?.selected_category || category,
+      });
+      setCompletionMode('review');
+    } catch (err) {
+      setCompletionError(err.response?.data?.detail || 'Failed to parse receipt image.');
+    } finally {
+      setProcessingReceipt(false);
+    }
+  };
+
+  const startMobileReceiptUpload = async () => {
+    if (!completionQueue) {
+      return;
+    }
+    try {
+      setProcessingReceipt(true);
+      setCompletionError('');
+      setCompletionNotice('');
+      const response = await receiptAPI.createMobileUploadSession({
+        queue_id: completionQueue.id,
+        category: resolveReceiptCategory(completionQueue),
+      });
+      setMobileSession(response.data);
+      setCompletionMode('mobile');
+    } catch (err) {
+      setCompletionError(err.response?.data?.detail || 'Failed to create mobile upload QR.');
+    } finally {
+      setProcessingReceipt(false);
+    }
+  };
+
+  const checkMobileReceiptUpload = async () => {
+    if (!mobileSession?.token) {
+      return;
+    }
+    try {
+      setProcessingReceipt(true);
+      setCompletionError('');
+      const response = await receiptAPI.getMobileUploadSession(mobileSession.token);
+      setMobileSession((current) => ({ ...current, ...response.data }));
+      if (response.data?.status === 'saved') {
+        setReceiptSavedForCompletion(true);
+        setCompletionNotice('Receipt already uploaded and saved to Receipt Management. You can now complete this queue.');
+        setReceiptDraft(null);
+        setCompletionMode('options');
+      } else if (response.data?.status === 'processed' && response.data?.result) {
+        setReceiptDraft({
+          ...defaultReceiptDraft(completionQueue),
+          ...response.data.result,
+        });
+        setCompletionMode('review');
+      } else if (response.data?.status === 'error') {
+        setCompletionError(response.data?.error || 'Mobile receipt upload failed.');
+      }
+    } catch (err) {
+      setCompletionError(err.response?.data?.detail || 'Failed to check mobile upload status.');
+    } finally {
+      setProcessingReceipt(false);
+    }
+  };
+
+  const handleReceiptDraftChange = (event) => {
+    const { name, value } = event.target;
+    setReceiptDraft((current) => ({
+      ...current,
+      [name]: name === 'amount' ? (value === '' ? '' : Number(value)) : value,
+    }));
+  };
+
+  const saveReceiptAndCompleteQueue = async () => {
+    if (!completionQueue || !receiptDraft) {
+      return;
+    }
+    try {
+      setSavingReceipt(true);
+      setCompletionError('');
+      setCompletionNotice('');
+      const category = resolveReceiptCategory(completionQueue);
+      await receiptAPI.saveRecord({
+        ...receiptDraft,
+        amount: receiptDraft.amount === '' ? null : receiptDraft.amount,
+        tax_type: receiptDraft.tax_type || category,
+        selected_category: receiptDraft.selected_category || category,
+        detected_category: receiptDraft.detected_category || category,
+        category_match: receiptDraft.category_match !== false,
+      });
+      setReceiptSavedForCompletion(true);
+      setCompletionNotice('Receipt uploaded and saved to Receipt Management. You can now complete this queue.');
+      setReceiptDraft(null);
+      setReceiptUploadFile(null);
+      setCompletionMode('options');
+    } catch (err) {
+      setCompletionError(err.response?.data?.detail || 'Failed to save receipt.');
+    } finally {
+      setSavingReceipt(false);
+    }
+  };
+
   const performAction = async (action, queue = null) => {
     setError('');
     if (!systemStatus?.queueEnabled) {
@@ -575,7 +764,16 @@ const QueueManagement = () => {
         setDeletingHistoryId(queue.id);
         await api.delete(`/branch/queue/history/${queue.id}`);
       } else if (action === 'complete') {
-        await api.post(`/branch/queue/${queue.id}/complete`);
+        setCompletionQueue(queue);
+        setCompletionMode('options');
+        setCompletionError('');
+        setCompletionNotice('');
+        setReceiptSavedForCompletion(false);
+        setShowCancelCompletionConfirm(false);
+        setReceiptDraft(null);
+        setReceiptUploadFile(null);
+        setMobileSession(null);
+        return;
       } else if (action === 'recall-skipped') {
         await api.post(`/branch/queue/${queue.id}/recall-skipped`);
       } else {
@@ -594,6 +792,8 @@ const QueueManagement = () => {
         setDeletingQueueId(null);
       } else if (action === 'delete-history') {
         setDeletingHistoryId(null);
+      } else if (action === 'complete') {
+        setCompletingQueueId(null);
       }
     }
   };
@@ -1033,6 +1233,218 @@ const QueueManagement = () => {
               deletingHistoryId={deletingHistoryId}
             />
           ))}
+        </div>
+      ) : null}
+
+      {completionQueue ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4">
+          <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl md:p-8">
+            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">Complete Queue</p>
+                <h3 className="mt-2 text-2xl font-bold text-primary">{completionQueue.queue_number}</h3>
+                <p className="mt-2 text-sm text-slate-600">
+                  {completionQueue.taxpayer_name || 'Walk-in'} | {completionQueue.service_type}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCancelCompletionConfirm(true)}
+                disabled={processingReceipt || savingReceipt || completingQueueId !== null}
+                className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+            </div>
+
+            {completionError ? (
+              <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
+                {completionError}
+              </div>
+            ) : null}
+
+            {completionNotice ? (
+              <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
+                {completionNotice}
+              </div>
+            ) : null}
+
+            {completionMode === 'options' ? (
+              <div className="mt-6 grid gap-4 md:grid-cols-2">
+                {receiptSavedForCompletion ? (
+                  <button
+                    type="button"
+                    onClick={() => completeQueueDirectly(completionQueue)}
+                    disabled={completingQueueId !== null}
+                    className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-6 text-left transition hover:border-emerald-400 hover:bg-emerald-100 disabled:opacity-60"
+                  >
+                    <p className="text-lg font-bold text-emerald-900">Complete Queue</p>
+                    <p className="mt-2 text-sm leading-6 text-emerald-700">
+                      Receipt is already uploaded and saved.
+                    </p>
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCompletionError('');
+                    setCompletionNotice('');
+                    setCompletionMode('file');
+                  }}
+                  disabled={receiptSavedForCompletion}
+                  className="rounded-2xl border border-blue-200 bg-blue-50 px-5 py-6 text-left transition hover:border-blue-400 hover:bg-blue-100"
+                >
+                  <p className="text-lg font-bold text-blue-900">File Upload</p>
+                  <p className="mt-2 text-sm leading-6 text-blue-700">Upload a receipt image from this computer and run OCR.</p>
+                </button>
+                <button
+                  type="button"
+                  onClick={startMobileReceiptUpload}
+                  disabled={processingReceipt || receiptSavedForCompletion}
+                  className="rounded-2xl border border-purple-200 bg-purple-50 px-5 py-6 text-left transition hover:border-purple-400 hover:bg-purple-100 disabled:opacity-60"
+                >
+                  <p className="text-lg font-bold text-purple-900">Via Mobile QR</p>
+                  <p className="mt-2 text-sm leading-6 text-purple-700">Scan a QR code and take the receipt photo from a phone.</p>
+                </button>
+              </div>
+            ) : null}
+
+            {completionMode === 'file' ? (
+              <form onSubmit={handleFileReceiptUpload} className="mt-6 space-y-5">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-sm text-slate-600">
+                  Default receipt category: <span className="font-bold text-slate-900">{resolveReceiptCategory(completionQueue)}</span>
+                </div>
+                <label className="block">
+                  <span className="mb-2 block text-sm font-semibold text-slate-700">Receipt Image</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(event) => {
+                      setCompletionError('');
+                      setReceiptUploadFile(event.target.files?.[0] || null);
+                    }}
+                    className="w-full rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-4 text-sm"
+                    required
+                  />
+                </label>
+                <div className="flex flex-col-reverse gap-3 md:flex-row md:justify-end">
+                  <button type="button" onClick={() => {
+                    setCompletionError('');
+                    setCompletionNotice('');
+                    setCompletionMode('options');
+                  }} className="rounded-xl bg-slate-200 px-5 py-3 font-semibold text-slate-700 transition hover:bg-slate-300">
+                    Back
+                  </button>
+                  <button type="submit" disabled={processingReceipt} className="rounded-xl bg-primary px-5 py-3 font-semibold text-white transition hover:bg-secondary disabled:opacity-60">
+                    {processingReceipt ? 'Parsing...' : 'Run OCR'}
+                  </button>
+                </div>
+              </form>
+            ) : null}
+
+            {completionMode === 'mobile' && mobileSession ? (
+              <div className="mt-6 grid gap-6 md:grid-cols-[240px,1fr]">
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 text-center">
+                  <img
+                    src={`/api/receipts/records/mobile-upload-sessions/${mobileSession.token}/qr`}
+                    alt="Mobile receipt upload QR"
+                    className="mx-auto h-52 w-52"
+                  />
+                </div>
+                <div>
+                  <p className="text-lg font-bold text-slate-900">Scan to upload receipt</p>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    Open the QR link on a phone, take or choose the receipt image, then upload. Once uploaded, check the result here and review the parsed fields.
+                  </p>
+                  <p className="mt-3 break-all rounded-2xl bg-slate-50 px-4 py-3 text-xs text-slate-500">{mobileSession.upload_url}</p>
+                  <div className="mt-5 flex flex-wrap gap-3">
+                    <button type="button" onClick={checkMobileReceiptUpload} disabled={processingReceipt} className="rounded-xl bg-primary px-5 py-3 font-semibold text-white transition hover:bg-secondary disabled:opacity-60">
+                      {processingReceipt ? 'Checking...' : 'Check Upload'}
+                    </button>
+                    <button type="button" onClick={() => {
+                      setCompletionError('');
+                      setCompletionNotice('');
+                      setCompletionMode('options');
+                    }} className="rounded-xl bg-slate-200 px-5 py-3 font-semibold text-slate-700 transition hover:bg-slate-300">
+                      Back
+                    </button>
+                  </div>
+                  <p className="mt-4 text-sm font-semibold text-slate-700">Status: {mobileSession.status || 'pending'}</p>
+                </div>
+              </div>
+            ) : null}
+
+            {completionMode === 'review' && receiptDraft ? (
+              <div className="mt-6 space-y-5">
+                {receiptDraft.duplicate_warning || receiptDraft.category_warning ? (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    {receiptDraft.duplicate_warning || receiptDraft.category_warning}
+                  </div>
+                ) : null}
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">Reference Number</span>
+                    <input name="ref_number" value={receiptDraft.ref_number || ''} onChange={handleReceiptDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none" />
+                  </label>
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">Taxpayer Name</span>
+                    <input name="taxpayer_name" value={receiptDraft.taxpayer_name || ''} onChange={handleReceiptDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none" />
+                  </label>
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">Transaction Date</span>
+                    <input name="transaction_date" value={receiptDraft.transaction_date || ''} onChange={handleReceiptDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none" />
+                  </label>
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">Amount</span>
+                    <input name="amount" type="number" step="0.01" value={receiptDraft.amount ?? ''} onChange={handleReceiptDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none" />
+                  </label>
+                </div>
+                <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                  Category: {receiptDraft.selected_category || resolveReceiptCategory(completionQueue)} | Confidence: {receiptDraft.confidence || 0} | Engine: {receiptDraft.engine || 'ocr'}
+                </div>
+                <div className="flex flex-col-reverse gap-3 md:flex-row md:justify-end">
+                  <button type="button" onClick={() => {
+                    setCompletionError('');
+                    setCompletionNotice('');
+                    setCompletionMode('options');
+                  }} disabled={savingReceipt} className="rounded-xl bg-slate-200 px-5 py-3 font-semibold text-slate-700 transition hover:bg-slate-300 disabled:opacity-60">
+                    Back
+                  </button>
+                  <button type="button" onClick={saveReceiptAndCompleteQueue} disabled={savingReceipt || receiptDraft.save_blocked} className="rounded-xl bg-emerald-600 px-5 py-3 font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60">
+                    {savingReceipt ? 'Saving...' : receiptDraft.save_blocked ? 'Review Blocked' : 'Save Receipt'}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {showCancelCompletionConfirm ? (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 px-4">
+                <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+                  <p className="text-xs font-semibold uppercase tracking-[0.25em] text-amber-500">Cancel Process</p>
+                  <h4 className="mt-2 text-xl font-bold text-primary">Are you sure you want to cancel?</h4>
+                  <p className="mt-3 text-sm leading-6 text-slate-600">
+                    This will close the Complete Queue process. Any unsaved receipt upload or OCR review in this modal will be discarded.
+                  </p>
+                  <div className="mt-6 grid gap-3 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowCancelCompletionConfirm(false)}
+                      className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+                    >
+                      No, Keep Editing
+                    </button>
+                    <button
+                      type="button"
+                      onClick={resetCompletionFlow}
+                      className="rounded-xl bg-rose-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-rose-700"
+                    >
+                      Yes, Cancel
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </div>
         </div>
       ) : null}
 
