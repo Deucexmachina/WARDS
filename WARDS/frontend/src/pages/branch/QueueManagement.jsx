@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import api, { receiptAPI } from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
-import { announceQueue, isAnnouncementActive } from '../../utils/queueAnnouncement';
+import { announceQueue, recallQueue, isAnnouncementActive } from '../../utils/queueAnnouncement';
 
 const PAGE_SIZE = 10;
 const DEFAULT_DISABLED_MESSAGE = 'This service is currently unavailable because it has been disabled by system administration.';
@@ -481,6 +481,7 @@ const QueueManagement = () => {
   const [windowFilter, setWindowFilter] = useState('all');
   const [queueNumberFilter, setQueueNumberFilter] = useState('');
   const [isAnnouncementPlaying, setIsAnnouncementPlaying] = useState(false);
+  const [lastCalledQueue, setLastCalledQueue] = useState(null);
   const [searchFilter, setSearchFilter] = useState('');
   const [historySearch, setHistorySearch] = useState({
     RPT: '',
@@ -745,11 +746,30 @@ const QueueManagement = () => {
         const calledQueue = response.data;
         await fetchQueues();
         if (calledQueue && calledQueue.queue_number) {
+          // Store last called queue for recall feature
+          setLastCalledQueue({
+            queue_number: calledQueue.queue_number,
+            service_type: calledQueue.service_type
+          });
+          
           setIsAnnouncementPlaying(true);
           try {
             await announceQueue(calledQueue.queue_number, calledQueue.service_type);
           } catch (announcementError) {
             console.error('Voice announcement failed:', announcementError);
+          } finally {
+            setIsAnnouncementPlaying(false);
+          }
+        }
+        return;
+      } else if (action === 'recall') {
+        // Recall (replay) the last called queue announcement
+        if (lastCalledQueue && lastCalledQueue.queue_number) {
+          setIsAnnouncementPlaying(true);
+          try {
+            await recallQueue(lastCalledQueue.queue_number, lastCalledQueue.service_type);
+          } catch (announcementError) {
+            console.error('Recall announcement failed:', announcementError);
           } finally {
             setIsAnnouncementPlaying(false);
           }
@@ -1080,6 +1100,14 @@ const QueueManagement = () => {
               className="rounded-xl bg-primary px-6 py-3 font-semibold text-white transition hover:bg-secondary disabled:opacity-50"
             >
               {isAnnouncementPlaying ? 'Announcing...' : 'Call Next'}
+            </button>
+            <button
+              onClick={() => performAction('recall')}
+              disabled={!lastCalledQueue || isAnnouncementPlaying || isBranchAdmin}
+              className="rounded-xl bg-orange-500 px-6 py-3 font-semibold text-white transition hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed"
+              title={!lastCalledQueue ? 'No queue available for recall' : 'Replay the last called queue announcement'}
+            >
+              {isAnnouncementPlaying ? 'Playing...' : 'Recall'}
             </button>
             <button
               onClick={() => performAction('delete-skipped')}
