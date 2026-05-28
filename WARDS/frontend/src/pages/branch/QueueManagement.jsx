@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import api, { receiptAPI } from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
-import { announceQueue, recallQueue, isAnnouncementActive } from '../../utils/queueAnnouncement';
+import { isAnnouncementActive } from '../../utils/queueAnnouncement';
 
 const PAGE_SIZE = 10;
 const DEFAULT_DISABLED_MESSAGE = 'This service is currently unavailable because it has been disabled by system administration.';
@@ -775,14 +775,8 @@ const QueueManagement = () => {
             service_type: calledQueue.service_type
           });
           
-          setIsAnnouncementPlaying(true);
-          try {
-            await announceQueue(calledQueue.queue_number, calledQueue.service_type);
-          } catch (announcementError) {
-            console.error('Voice announcement failed:', announcementError);
-          } finally {
-            setIsAnnouncementPlaying(false);
-          }
+          // Voice announcement will play on Live Monitor
+          console.log(`Queue ${calledQueue.queue_number} called - announcement will play on Live Monitor`);
         }
         return;
       } else if (action === 'recall') {
@@ -801,14 +795,17 @@ const QueueManagement = () => {
             return;
           }
           
-          setIsAnnouncementPlaying(true);
-          try {
-            await recallQueue(lastCalledQueue.queue_number, lastCalledQueue.service_type);
-          } catch (announcementError) {
-            console.error('Recall announcement failed:', announcementError);
-          } finally {
-            setIsAnnouncementPlaying(false);
-          }
+          // Trigger recall announcement on Live Monitor using localStorage
+          const recallTrigger = {
+            queue_number: lastCalledQueue.queue_number,
+            service_type: lastCalledQueue.service_type,
+            timestamp: Date.now(),
+            action: 'recall'
+          };
+          localStorage.setItem('queue_announcement_trigger', JSON.stringify(recallTrigger));
+          
+          // Voice announcement will play on Live Monitor
+          console.log(`Queue ${lastCalledQueue.queue_number} recall triggered - announcement will play on Live Monitor`);
         } else {
           setError('No active queue available for recall.');
         }
