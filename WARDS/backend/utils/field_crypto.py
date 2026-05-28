@@ -97,11 +97,11 @@ def set_encrypted_hash_companions(entity, field_name: str, value: Optional[str] 
 
 
 def apply_citizen_user_security(user):
-    email_value = get_decrypted_or_raw(user, "email") or user.email
-    full_name_value = get_decrypted_or_raw(user, "full_name") or user.full_name
-    tin_value = get_decrypted_or_raw(user, "tin") or user.tin
-    contact_value = get_decrypted_or_raw(user, "contact_number") or user.contact_number
-    address_value = get_decrypted_or_raw(user, "address") or user.address
+    email_value = get_preferred_write_value(user, "email")
+    full_name_value = get_preferred_write_value(user, "full_name")
+    tin_value = get_preferred_write_value(user, "tin")
+    contact_value = get_preferred_write_value(user, "contact_number")
+    address_value = get_preferred_write_value(user, "address")
     set_encrypted_hash_companions(user, "email", email_value)
     set_encrypted_hash_companions(user, "full_name", full_name_value)
     set_encrypted_hash_companions(user, "tin", tin_value)
@@ -116,19 +116,19 @@ def apply_citizen_user_security(user):
 
 
 def apply_discrepancy_report_security(report):
-    title_value = get_decrypted_or_raw(report, "title") or report.title
-    report_date_value = get_decrypted_or_raw(report, "report_date") or report.report_date
-    discrepancy_type_value = get_decrypted_or_raw(report, "discrepancy_type") or report.discrepancy_type
-    description_value = get_decrypted_or_raw(report, "description") or report.description
-    supporting_documents_value = get_decrypted_or_raw(report, "supporting_documents") or report.supporting_documents
-    attachment_path_value = get_decrypted_or_raw(report, "attachment_path") or report.attachment_path
-    attachment_filename_value = get_decrypted_or_raw(report, "attachment_filename") or report.attachment_filename
-    verification_notes_value = get_decrypted_or_raw(report, "verification_notes") or report.verification_notes
-    branch_reply_notes_value = get_decrypted_or_raw(report, "branch_reply_notes") or report.branch_reply_notes
-    conversation_thread_value = get_decrypted_or_raw(report, "conversation_thread") or report.conversation_thread
-    reported_by_value = get_decrypted_or_raw(report, "reported_by") or report.reported_by
-    verified_by_value = get_decrypted_or_raw(report, "verified_by") or report.verified_by
-    branch_replied_by_value = get_decrypted_or_raw(report, "branch_replied_by") or report.branch_replied_by
+    title_value = get_preferred_write_value(report, "title")
+    report_date_value = get_preferred_write_value(report, "report_date")
+    discrepancy_type_value = get_preferred_write_value(report, "discrepancy_type")
+    description_value = get_preferred_write_value(report, "description")
+    supporting_documents_value = get_preferred_write_value(report, "supporting_documents")
+    attachment_path_value = get_preferred_write_value(report, "attachment_path")
+    attachment_filename_value = get_preferred_write_value(report, "attachment_filename")
+    verification_notes_value = get_preferred_write_value(report, "verification_notes")
+    branch_reply_notes_value = get_preferred_write_value(report, "branch_reply_notes")
+    conversation_thread_value = get_preferred_write_value(report, "conversation_thread")
+    reported_by_value = get_preferred_write_value(report, "reported_by")
+    verified_by_value = get_preferred_write_value(report, "verified_by")
+    branch_replied_by_value = get_preferred_write_value(report, "branch_replied_by")
 
     for field_name, value in (
         ("title", title_value),
@@ -164,8 +164,8 @@ def apply_discrepancy_report_security(report):
 
 
 def apply_email_otp_security(otp_record):
-    email_value = get_decrypted_or_raw(otp_record, "email") or otp_record.email
-    role_value = get_decrypted_or_raw(otp_record, "role") or otp_record.role
+    email_value = get_preferred_write_value(otp_record, "email")
+    role_value = get_preferred_write_value(otp_record, "role")
     set_encrypted_hash_companions(otp_record, "email", email_value)
     set_encrypted_hash_companions(otp_record, "role", role_value)
     otp_record.email = build_redacted_text("OTP_EMAIL", email_value, 255)
@@ -174,8 +174,8 @@ def apply_email_otp_security(otp_record):
 
 
 def apply_email_verification_token_security(token_record):
-    email_value = get_decrypted_or_raw(token_record, "email") or token_record.email
-    token_value = get_decrypted_or_raw(token_record, "token") or token_record.token
+    email_value = get_preferred_write_value(token_record, "email")
+    token_value = get_preferred_write_value(token_record, "token")
     set_encrypted_hash_companions(token_record, "email", email_value)
     set_encrypted_hash_companions(token_record, "token", token_value)
     token_record.email = build_redacted_text("VERIFY_EMAIL", email_value, 255)
@@ -184,9 +184,9 @@ def apply_email_verification_token_security(token_record):
 
 
 def apply_mfa_secret_security(mfa_record):
-    portal_value = get_decrypted_or_raw(mfa_record, "portal") or mfa_record.portal
-    username_value = get_decrypted_or_raw(mfa_record, "username") or mfa_record.username
-    secret_value = get_decrypted_or_raw(mfa_record, "secret") or mfa_record.secret
+    portal_value = get_preferred_write_value(mfa_record, "portal")
+    username_value = get_preferred_write_value(mfa_record, "username")
+    secret_value = get_preferred_write_value(mfa_record, "secret")
     set_encrypted_hash_companions(mfa_record, "portal", portal_value)
     set_encrypted_hash_companions(mfa_record, "username", username_value)
     set_encrypted_hash_companions(mfa_record, "secret", secret_value)
@@ -221,7 +221,7 @@ def apply_payment_security(payment):
         ("official_receipt_path", "PAY_OR_PATH", 255),
         ("release_method", "PAY_RELEASE", 255),
     ):
-        value = get_decrypted_or_raw(payment, field_name) or getattr(payment, field_name, None)
+        value = get_preferred_write_value(payment, field_name)
         set_encrypted_hash_companions(payment, field_name, value)
         setattr(payment, field_name, build_redacted_text(prefix, value, length))
     return payment
@@ -250,7 +250,7 @@ def apply_rpt_property_record_security(record):
 
 
 def apply_queue_activity_security(activity):
-    service_type_value = get_decrypted_or_raw(activity, "service_type") or activity.service_type
+    service_type_value = get_preferred_write_value(activity, "service_type")
     set_encrypted_hash_companions(activity, "service_type", service_type_value)
     activity.service_type = build_redacted_text("QUEUE_SERVICE", service_type_value, 255)
     return activity
@@ -562,10 +562,10 @@ def find_payment_by_field(db, Payment, field_name: str, value: Optional[str]):
 
 
 def apply_faq_security(faq):
-    question_value = get_decrypted_or_raw(faq, "question") or faq.question
-    answer_value = get_decrypted_or_raw(faq, "answer") or faq.answer
-    category_value = get_decrypted_or_raw(faq, "category") or faq.category
-    language_value = get_decrypted_or_raw(faq, "language") or faq.language
+    question_value = get_preferred_write_value(faq, "question")
+    answer_value = get_preferred_write_value(faq, "answer")
+    category_value = get_preferred_write_value(faq, "category")
+    language_value = get_preferred_write_value(faq, "language")
     set_encrypted_hash_companions(faq, "question", question_value)
     set_encrypted_hash_companions(faq, "answer", answer_value)
     set_encrypted_hash_companions(faq, "category", category_value)
@@ -578,9 +578,9 @@ def apply_faq_security(faq):
 
 
 def apply_invite_security(invite):
-    email_value = get_decrypted_or_raw(invite, "email") or invite.email
-    role_value = get_decrypted_or_raw(invite, "role") or invite.role
-    token_value = get_decrypted_or_raw(invite, "token") or invite.token
+    email_value = get_preferred_write_value(invite, "email")
+    role_value = get_preferred_write_value(invite, "role")
+    token_value = get_preferred_write_value(invite, "token")
     set_encrypted_hash_companions(invite, "email", email_value)
     set_encrypted_hash_companions(invite, "role", role_value)
     set_encrypted_hash_companions(invite, "token", token_value)
@@ -615,8 +615,8 @@ def find_active_invite_by_email_role(db, Invite, email: Optional[str], role: Opt
 
 
 def apply_memo_view_security(memo_view):
-    username_value = get_decrypted_or_raw(memo_view, "viewer_username") or memo_view.viewer_username
-    viewer_type_value = get_decrypted_or_raw(memo_view, "viewer_type") or memo_view.viewer_type
+    username_value = get_preferred_write_value(memo_view, "viewer_username")
+    viewer_type_value = get_preferred_write_value(memo_view, "viewer_type")
     set_encrypted_hash_companions(memo_view, "viewer_username", username_value)
     set_encrypted_hash_companions(memo_view, "viewer_type", viewer_type_value)
     memo_view.viewer_username = build_redacted_text("MEMO_VIEWER", username_value, 255)
@@ -625,8 +625,8 @@ def apply_memo_view_security(memo_view):
 
 
 def apply_announcement_view_security(announcement_view):
-    username_value = get_decrypted_or_raw(announcement_view, "viewer_username") or announcement_view.viewer_username
-    viewer_type_value = get_decrypted_or_raw(announcement_view, "viewer_type") or announcement_view.viewer_type
+    username_value = get_preferred_write_value(announcement_view, "viewer_username")
+    viewer_type_value = get_preferred_write_value(announcement_view, "viewer_type")
     set_encrypted_hash_companions(announcement_view, "viewer_username", username_value)
     set_encrypted_hash_companions(announcement_view, "viewer_type", viewer_type_value)
     announcement_view.viewer_username = build_redacted_text("ANNOUNCEMENT_VIEWER", username_value, 255)
@@ -695,14 +695,14 @@ def get_memo_viewed_ids(db, MemoView, viewer_username: Optional[str], viewer_typ
 
 
 def apply_memo_security(memo):
-    title_value = get_decrypted_or_raw(memo, "title") or memo.title
-    content_value = get_decrypted_or_raw(memo, "content") or memo.content
-    recipients_value = get_decrypted_or_raw(memo, "recipients") or memo.recipients
-    recipient_type_value = get_decrypted_or_raw(memo, "recipient_type") or memo.recipient_type
-    author_value = get_decrypted_or_raw(memo, "author") or memo.author
-    priority_value = get_decrypted_or_raw(memo, "priority") or memo.priority
-    attachment_path_value = get_decrypted_or_raw(memo, "attachment_path") or memo.attachment_path
-    attachment_filename_value = get_decrypted_or_raw(memo, "attachment_filename") or memo.attachment_filename
+    title_value = get_preferred_write_value(memo, "title")
+    content_value = get_preferred_write_value(memo, "content")
+    recipients_value = get_preferred_write_value(memo, "recipients")
+    recipient_type_value = get_preferred_write_value(memo, "recipient_type")
+    author_value = get_preferred_write_value(memo, "author")
+    priority_value = get_preferred_write_value(memo, "priority")
+    attachment_path_value = get_preferred_write_value(memo, "attachment_path")
+    attachment_filename_value = get_preferred_write_value(memo, "attachment_filename")
 
     for field_name, value in (
         ("title", title_value),

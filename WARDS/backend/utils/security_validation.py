@@ -132,19 +132,18 @@ def normalize_ph_contact_number(contact_number: str) -> str:
     if not raw_value:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Contact number is required.")
 
-    normalized = re.sub(r"[^\d+]", "", raw_value)
-    if normalized.startswith("+63"):
-        subscriber_number = normalized[3:]
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Contact number must start with +63 followed by exactly 10 digits.",
-        )
+    normalized = re.sub(r"\D", "", raw_value)
+    subscriber_number = normalized
+
+    if subscriber_number.startswith("63"):
+        subscriber_number = subscriber_number[2:]
+    elif subscriber_number.startswith("0"):
+        subscriber_number = subscriber_number[1:]
 
     if not PH_CONTACT_DIGITS_PATTERN.fullmatch(subscriber_number):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Contact number must start with +63 followed by exactly 10 digits.",
+            detail="Contact number must begin with 9 and contain exactly 10 digits.",
         )
 
     return f"+63{subscriber_number}"

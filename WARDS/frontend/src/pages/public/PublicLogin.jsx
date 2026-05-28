@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
 import { getEmailValidationMessage } from '../../utils/validation';
 import PasswordField from '../../components/PasswordField';
+import { setStoredPublicUser } from '../../utils/publicSession';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 
@@ -43,7 +44,7 @@ const PublicLogin = () => {
       
       // Store token and user data
       localStorage.setItem('publicToken', response.data.access_token);
-      localStorage.setItem('publicUser', JSON.stringify(response.data.user));
+      setStoredPublicUser(response.data.user);
       
       // Redirect to the page they were trying to access or home
       const redirectTo = localStorage.getItem('redirectAfterLogin') || '/';

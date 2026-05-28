@@ -253,7 +253,7 @@ const UserRegister = () => {
                 onChange={handleChange}
                 inputMode="numeric"
                 maxLength={10}
-                placeholder="9202717703"
+                placeholder="912 345 6789"
                 className="w-full px-4 py-3 focus:outline-none"
                 required
               />

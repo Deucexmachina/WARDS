@@ -729,12 +729,26 @@ async def register_queue(
             detail="Queue registration failed: Immediate queueing is unavailable because this service requires an appointment schedule. Please choose Appointment queueing.",
         )
 
-    validated_taxpayer_name = validate_taxpayer_name(registration.taxpayer_name)
-    validated_contact_number = validate_ph_mobile_number(registration.contact_number)
     current_citizen = resolve_authenticated_citizen(credentials, db)
+    resolved_taxpayer_name = (
+        (get_decrypted_or_raw(current_citizen, "full_name") or current_citizen.full_name)
+        if current_citizen
+        else registration.taxpayer_name
+    )
+    resolved_contact_number = (
+        (get_decrypted_or_raw(current_citizen, "contact_number") or current_citizen.contact_number)
+        if current_citizen
+        else registration.contact_number
+    )
+    validated_taxpayer_name = validate_taxpayer_name(resolved_taxpayer_name)
+    validated_contact_number = validate_ph_mobile_number(resolved_contact_number)
     effective_email = (
         (registration.email or "").strip()
-        or (current_citizen.email.strip() if current_citizen and current_citizen.email else "")
+        or (
+            (get_decrypted_or_raw(current_citizen, "email") or current_citizen.email).strip()
+            if current_citizen and (get_decrypted_or_raw(current_citizen, "email") or current_citizen.email)
+            else ""
+        )
     ) or None
     if effective_email:
         effective_email = normalize_email(effective_email, check_deliverability=True)

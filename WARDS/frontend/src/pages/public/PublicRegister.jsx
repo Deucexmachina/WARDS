@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
+import { setStoredPublicUser } from '../../utils/publicSession';
 
 import {
   getEmailValidationMessage,
@@ -110,7 +111,7 @@ const PublicRegister = () => {
       }
 
       localStorage.setItem('publicToken', response.data.access_token);
-      localStorage.setItem('publicUser', JSON.stringify(response.data.user));
+      setStoredPublicUser(response.data.user);
 
       const redirectTo = localStorage.getItem('redirectAfterLogin') || '/';
       localStorage.removeItem('redirectAfterLogin');
@@ -192,7 +193,7 @@ const PublicRegister = () => {
                   onChange={handleInputChange}
                   inputMode="numeric"
                   maxLength={10}
-                  placeholder="9202717703"
+                  placeholder="912 345 6789"
                   className="w-full px-4 py-3 focus:outline-none"
                   required
                 />
@@ -200,7 +201,7 @@ const PublicRegister = () => {
               {contactError ? (
                 <p className="mt-2 text-sm font-semibold text-red-600">{contactError}</p>
               ) : (
-                <p className="mt-2 text-sm text-gray-500">Enter exactly 10 digits after +63.</p>
+                <p className="mt-2 text-sm text-gray-500">Enter exactly 10 digits after +63, starting with 9.</p>
               )}
             </div>
 

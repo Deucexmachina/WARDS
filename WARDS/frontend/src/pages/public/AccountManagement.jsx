@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { taxpayerAccountAPI, queueAPI } from '../../services/api';
-import { getEmailValidationMessage, validateStrongPassword } from '../../utils/validation';
+import { getStoredPublicUser, setStoredPublicUser } from '../../utils/publicSession';
+import {
+  getEmailValidationMessage,
+  normalizePhilippineContactDigits,
+  validatePhilippineContactDigits,
+  validateStrongPassword,
+} from '../../utils/validation';
 
 const DEFAULT_PROFILE = {
   full_name: '',
@@ -40,6 +46,16 @@ const formatCurrency = (value) =>
 const formatTimestamp = (value) =>
   value ? new Date(value).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }) : 'N/A';
 
+const buildStoredPublicProfile = (profile) => ({
+  id: profile?.id,
+  email: profile?.email || '',
+  full_name: profile?.full_name || '',
+  contact_number: profile?.mobile_number || '',
+  address: profile?.address || '',
+  taxpayer_type: profile?.taxpayer_type || 'Individual',
+  tin: profile?.tin || '',
+});
+
 const isProfileReady = (profile) =>
   Boolean(
     profile?.full_name?.trim() &&
@@ -63,6 +79,7 @@ const AccountManagement = () => {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [emailError, setEmailError] = useState('');
+  const [contactError, setContactError] = useState('');
   const [confirmProfilePassword, setConfirmProfilePassword] = useState('');
   const [showProfileConfirm, setShowProfileConfirm] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -78,15 +95,16 @@ const AccountManagement = () => {
       setProfile({
         ...DEFAULT_PROFILE,
         ...nextProfile,
-        mobile_number: nextProfile.mobile_number || '',
+        mobile_number: normalizePhilippineContactDigits(nextProfile.mobile_number || ''),
         tin: nextProfile.tin || '',
       });
       setOriginalProfile({
         ...DEFAULT_PROFILE,
         ...nextProfile,
-        mobile_number: nextProfile.mobile_number || '',
+        mobile_number: normalizePhilippineContactDigits(nextProfile.mobile_number || ''),
         tin: nextProfile.tin || '',
       });
+      setStoredPublicUser(buildStoredPublicProfile(nextProfile));
       setIsProfileLocked(isProfileReady(nextProfile));
       setIdentifierForm((current) => ({
         ...current,
@@ -121,6 +139,15 @@ const AccountManagement = () => {
 
   const handleProfileChange = (event) => {
     const { name, value } = event.target;
+    if (name === 'mobile_number') {
+      const normalizedDigits = normalizePhilippineContactDigits(value);
+      setProfile((current) => ({ ...current, mobile_number: normalizedDigits }));
+      setContactError(validatePhilippineContactDigits(normalizedDigits));
+      setMessage('');
+      setError('');
+      return;
+    }
+
     setProfile((current) => ({ ...current, [name]: value }));
     if (name === 'email') {
       setEmailError(getEmailValidationMessage(value));
@@ -152,6 +179,13 @@ const AccountManagement = () => {
       return;
     }
 
+    const nextContactError = validatePhilippineContactDigits(profile.mobile_number);
+    if (nextContactError) {
+      setContactError(nextContactError);
+      setError('Correct the highlighted contact number field before saving.');
+      return;
+    }
+
     setConfirmProfilePassword('');
     setError('');
     setShowProfileConfirm(true);
@@ -171,20 +205,13 @@ const AccountManagement = () => {
         current_password: confirmProfilePassword,
       });
       const nextProfile = response.data?.profile || profile;
-      setProfile((current) => ({ ...current, ...nextProfile, mobile_number: nextProfile.mobile_number || current.mobile_number }));
-      setOriginalProfile((current) => ({ ...current, ...nextProfile, mobile_number: nextProfile.mobile_number || current.mobile_number }));
-      const storedUser = JSON.parse(localStorage.getItem('user') || 'null');
-      if (storedUser) {
-        localStorage.setItem('user', JSON.stringify({
-          ...storedUser,
-          full_name: nextProfile.full_name,
-          email: nextProfile.email,
-          contact_number: nextProfile.mobile_number,
-          address: nextProfile.address,
-          taxpayer_type: nextProfile.taxpayer_type,
-          tin: nextProfile.tin,
-        }));
-      }
+      setProfile((current) => ({ ...current, ...nextProfile, mobile_number: normalizePhilippineContactDigits(nextProfile.mobile_number || current.mobile_number) }));
+      setOriginalProfile((current) => ({ ...current, ...nextProfile, mobile_number: normalizePhilippineContactDigits(nextProfile.mobile_number || current.mobile_number) }));
+      const currentStoredUser = getStoredPublicUser();
+      setStoredPublicUser({
+        ...(currentStoredUser || {}),
+        ...buildStoredPublicProfile(nextProfile),
+      });
       setMessage(response.data?.message || 'Profile updated successfully.');
       setError('');
       setIsProfileLocked(true);
@@ -201,6 +228,7 @@ const AccountManagement = () => {
   const handleCancelEditProfile = () => {
     setProfile(originalProfile);
     setEmailError('');
+    setContactError('');
     setIsProfileLocked(true);
     setMessage('');
     setError('');
@@ -382,8 +410,22 @@ const AccountManagement = () => {
                     {emailError ? <span className="mt-2 block text-xs font-medium text-rose-600">{emailError}</span> : null}
                   </label>
                   <label className="block">
-                    <span className="mb-2 block text-sm font-semibold text-slate-700">Mobile Number</span>
-                    <input name="mobile_number" value={profile.mobile_number} onChange={handleProfileChange} disabled={isProfileLocked} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 focus:border-[#0f5b83] focus:ring-2 focus:ring-[#0f5b83]/10" placeholder="09XXXXXXXXX" required />
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">Contact Number</span>
+                    <div className={`flex overflow-hidden rounded-2xl border ${contactError ? 'border-rose-400 bg-rose-50' : 'border-slate-300'} ${isProfileLocked ? 'bg-slate-100' : 'bg-white'}`}>
+                      <span className="flex items-center bg-slate-100 px-4 font-semibold text-slate-700">+63</span>
+                      <input
+                        name="mobile_number"
+                        value={profile.mobile_number}
+                        onChange={handleProfileChange}
+                        disabled={isProfileLocked}
+                        inputMode="numeric"
+                        maxLength={10}
+                        className="w-full px-4 py-3 text-sm outline-none transition disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
+                        placeholder="9123456789"
+                        required
+                      />
+                    </div>
+                    {contactError ? <span className="mt-2 block text-xs font-medium text-rose-600">{contactError}</span> : null}
                   </label>
                   <label className="block">
                     <span className="mb-2 block text-sm font-semibold text-slate-700">Taxpayer Type</span>

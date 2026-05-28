@@ -4,6 +4,12 @@ import { formatUtc8Date, formatUtc8DateTime } from '../../utils/dateTime';
 import GeneratedReportContent from '../../components/reports/GeneratedReportContent';
 import WardsPageHero from '../../components/WardsPageHero';
 import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
+import {
+  applyBranchReportViewedState,
+  BRANCH_REPORT_VIEWED_EVENT,
+  BRANCH_REPORTS_UPDATED_EVENT,
+  markBranchReportViewed,
+} from '../../utils/branchReportViews';
 
 const REPORT_TYPES = ['Operational', 'Daily', 'Weekly', 'Monthly', 'Quarterly', 'Annual'];
 const SERVICE_TYPES = ['All Services', 'Real Property Tax', 'Business Tax', 'Miscellaneous Tax', 'Document Request'];
@@ -66,6 +72,7 @@ const ReportMetricsModal = ({ report, metrics, onClose }) => {
 
 const BranchReports = () => {
   const [filters, setFilters] = useState(initialFilters);
+  const [generationMode, setGenerationMode] = useState('manual');
   const [reportsState, setReportsState] = useState({ items: [], page: 1, page_size: PAGE_SIZE, total: 0, total_pages: 1 });
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
@@ -92,7 +99,10 @@ const BranchReports = () => {
     try {
       setLoading(true);
       const response = await branchReportAPI.getAll({ page, page_size: PAGE_SIZE });
-      setReportsState(response.data);
+      setReportsState({
+        ...response.data,
+        items: applyBranchReportViewedState(response.data?.items || [], branchStaff),
+      });
     } catch (fetchError) {
       console.error('Failed to fetch branch reports:', fetchError);
       setError(fetchError.response?.data?.detail || 'Failed to load submitted branch reports.');
@@ -138,8 +148,15 @@ const BranchReports = () => {
         transaction_category: filters.service_type === 'Document Request' ? '' : filters.transaction_category,
       };
       const response = await branchReportAPI.generate(payload);
-      setSelectedReport(response.data.report);
+      const viewedIds = markBranchReportViewed(branchStaff, response.data?.report?.id);
+      const nextReport = {
+        ...response.data.report,
+        is_viewed: viewedIds.includes(Number(response.data?.report?.id)),
+      };
+      setSelectedReport(nextReport);
       setSelectedMetrics(response.data.metrics);
+      window.dispatchEvent(new CustomEvent(BRANCH_REPORT_VIEWED_EVENT, { detail: { reportId: response.data?.report?.id } }));
+      window.dispatchEvent(new CustomEvent(BRANCH_REPORTS_UPDATED_EVENT));
       await fetchReports(1);
     } catch (generateError) {
       console.error('Failed to generate branch report:', generateError);
@@ -154,8 +171,20 @@ const BranchReports = () => {
       setDetailsLoading(true);
       setError('');
       const response = await branchReportAPI.getDetails(reportId);
-      setSelectedReport(response.data.report);
+      const viewedIds = markBranchReportViewed(branchStaff, reportId);
+      const nextReport = {
+        ...response.data.report,
+        is_viewed: viewedIds.includes(Number(reportId)),
+      };
+      setSelectedReport(nextReport);
       setSelectedMetrics(response.data.metrics);
+      setReportsState((current) => ({
+        ...current,
+        items: (current.items || []).map((report) =>
+          report.id === reportId ? { ...report, is_viewed: true } : report
+        ),
+      }));
+      window.dispatchEvent(new CustomEvent(BRANCH_REPORT_VIEWED_EVENT, { detail: { reportId } }));
     } catch (viewError) {
       console.error('Failed to load branch report details:', viewError);
       setError(viewError.response?.data?.detail || 'Failed to load report details.');
@@ -184,6 +213,7 @@ const BranchReports = () => {
         setSelectedMetrics(null);
       }
       setReportToDelete(null);
+      window.dispatchEvent(new CustomEvent(BRANCH_REPORTS_UPDATED_EVENT, { detail: { deletedReportId: reportToDelete.id } }));
     } catch (deleteError) {
       console.error('Failed to delete branch report:', deleteError);
       setError(deleteError.response?.data?.detail || 'Failed to delete the report.');
@@ -230,9 +260,9 @@ const BranchReports = () => {
       <section className="rounded-2xl bg-white p-6 shadow">
         <div className="mb-6 flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-xl font-bold text-primary">Generate And Submit Report</h2>
+            <h2 className="text-xl font-bold text-primary">Report Submission Mode</h2>
             <p className="mt-2 text-sm text-slate-500">
-              This branch module generates the report, previews the professional operational layout, and stores it for Main Admin review.
+              Choose the report generation workflow you want to use before sending branch reports to Main Admin.
             </p>
           </div>
           <div className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700">
@@ -240,221 +270,258 @@ const BranchReports = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-5">
-          <div>
-            <label className="mb-2 block text-sm font-semibold text-slate-700">Report Type</label>
-            <select
-              value={filters.reportType}
-              onChange={(event) => setFilters((current) => ({ ...current, reportType: event.target.value }))}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
-            >
-              {REPORT_TYPES.map((type) => (
-                <option key={type} value={type}>{type}</option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="mb-2 block text-sm font-semibold text-slate-700">Service Type</label>
-            <select
-              value={filters.service_type}
-              onChange={(event) => setFilters((current) => ({
-                ...current,
-                service_type: event.target.value,
-                transaction_category: event.target.value === 'Document Request' ? 'All Categories' : current.transaction_category,
-              }))}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
-            >
-              {SERVICE_TYPES.map((type) => (
-                <option key={type} value={type}>{type}</option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="mb-2 block text-sm font-semibold text-slate-700">Transaction Category</label>
-            <select
-              value={filters.transaction_category}
-              disabled={filters.service_type === 'Document Request'}
-              onChange={(event) => setFilters((current) => ({ ...current, transaction_category: event.target.value }))}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm disabled:bg-slate-100"
-            >
-              {TRANSACTION_CATEGORIES.map((type) => (
-                <option key={type} value={type}>{type}</option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="mb-2 block text-sm font-semibold text-slate-700">Date From</label>
-            <input
-              type="date"
-              max={filters.dateTo || undefined}
-              value={filters.dateFrom}
-              onChange={(event) => setFilters((current) => ({ ...current, dateFrom: event.target.value }))}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
-            />
-          </div>
-
-          <div>
-            <label className="mb-2 block text-sm font-semibold text-slate-700">Date To</label>
-            <input
-              type="date"
-              min={filters.dateFrom || undefined}
-              value={filters.dateTo}
-              onChange={(event) => setFilters((current) => ({ ...current, dateTo: event.target.value }))}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
-            />
-          </div>
-        </div>
-
-        {getInvalidDateRangeMessage(filters.dateFrom, filters.dateTo) ? (
-          <p className="mt-4 text-sm font-medium text-red-600">
-            {getInvalidDateRangeMessage(filters.dateFrom, filters.dateTo)}
-          </p>
-        ) : null}
-
-        <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-          <button
-            onClick={handleGenerate}
-            disabled={generating}
-            className="rounded-xl bg-primary px-6 py-3 font-semibold text-white transition hover:bg-secondary disabled:opacity-60"
+        <div className="max-w-md">
+          <label className="mb-2 block text-sm font-semibold text-slate-700">Submission Mode</label>
+          <select
+            value={generationMode}
+            onChange={(event) => setGenerationMode(event.target.value)}
+            className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
           >
-            {generating ? 'Generating And Submitting...' : 'Generate And Submit To Main Admin'}
-          </button>
-          <button
-            onClick={() => setFilters(initialFilters)}
-            className="rounded-xl bg-slate-200 px-6 py-3 font-semibold text-slate-700 transition hover:bg-slate-300"
-          >
-            Reset Filters
-          </button>
+            <option value="manual">Manual Report Generation</option>
+            <option value="automatic">Automatic Report Generation</option>
+          </select>
         </div>
       </section>
 
-      <section className="rounded-2xl bg-white p-6 shadow">
-        <div className="mb-6 flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-xl font-bold text-primary">Automatic Scheduled Sending</h2>
-            <p className="mt-2 text-sm text-slate-500">
-              Save a branch-level schedule so WARDS can generate and send due reports to Main Branch automatically when this module is accessed.
+      {generationMode === 'manual' ? (
+        <section className="rounded-2xl bg-white p-6 shadow">
+          <div className="mb-6 flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-bold text-primary">Generate And Submit Report</h2>
+              <p className="mt-2 text-sm text-slate-500">
+                Generate a report from recorded branch activity, review the output, and submit it directly to Main Admin.
+              </p>
+            </div>
+            <div className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700">
+              Manual Sending
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-5">
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-slate-700">Report Type</label>
+              <select
+                value={filters.reportType}
+                onChange={(event) => setFilters((current) => ({ ...current, reportType: event.target.value }))}
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
+              >
+                {REPORT_TYPES.map((type) => (
+                  <option key={type} value={type}>{type}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-slate-700">Service Type</label>
+              <select
+                value={filters.service_type}
+                onChange={(event) => setFilters((current) => ({
+                  ...current,
+                  service_type: event.target.value,
+                  transaction_category: event.target.value === 'Document Request' ? 'All Categories' : current.transaction_category,
+                }))}
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
+              >
+                {SERVICE_TYPES.map((type) => (
+                  <option key={type} value={type}>{type}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-slate-700">Transaction Category</label>
+              <select
+                value={filters.transaction_category}
+                disabled={filters.service_type === 'Document Request'}
+                onChange={(event) => setFilters((current) => ({ ...current, transaction_category: event.target.value }))}
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm disabled:bg-slate-100"
+              >
+                {TRANSACTION_CATEGORIES.map((type) => (
+                  <option key={type} value={type}>{type}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-slate-700">Date From</label>
+              <input
+                type="date"
+                max={filters.dateTo || undefined}
+                value={filters.dateFrom}
+                onChange={(event) => setFilters((current) => ({ ...current, dateFrom: event.target.value }))}
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-slate-700">Date To</label>
+              <input
+                type="date"
+                min={filters.dateFrom || undefined}
+                value={filters.dateTo}
+                onChange={(event) => setFilters((current) => ({ ...current, dateTo: event.target.value }))}
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
+              />
+            </div>
+          </div>
+
+          {getInvalidDateRangeMessage(filters.dateFrom, filters.dateTo) ? (
+            <p className="mt-4 text-sm font-medium text-red-600">
+              {getInvalidDateRangeMessage(filters.dateFrom, filters.dateTo)}
             </p>
-          </div>
-        </div>
+          ) : null}
 
-        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
-          <label className="flex items-center gap-3 rounded-xl border border-slate-200 px-4 py-3">
-            <input
-              type="checkbox"
-              checked={automation.enabled}
-              onChange={(event) => setAutomation((current) => ({ ...current, enabled: event.target.checked }))}
-            />
-            <span className="text-sm font-semibold text-slate-700">Enable automatic sending</span>
-          </label>
-
-          <div>
-            <label className="mb-2 block text-sm font-semibold text-slate-700">Frequency</label>
-            <select
-              value={automation.frequency}
-              onChange={(event) => setAutomation((current) => ({ ...current, frequency: event.target.value }))}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+            <button
+              onClick={handleGenerate}
+              disabled={generating}
+              className="rounded-xl bg-primary px-6 py-3 font-semibold text-white transition hover:bg-secondary disabled:opacity-60"
             >
-              {AUTO_FREQUENCIES.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="mb-2 block text-sm font-semibold text-slate-700">Dispatch Time</label>
-            <input
-              type="time"
-              value={automation.dispatch_time}
-              onChange={(event) => setAutomation((current) => ({ ...current, dispatch_time: event.target.value }))}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
-            />
-          </div>
-
-          <div>
-            <label className="mb-2 block text-sm font-semibold text-slate-700">Scheduled Report Type</label>
-            <select
-              value={automation.reportType}
-              onChange={(event) => setAutomation((current) => ({ ...current, reportType: event.target.value }))}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
+              {generating ? 'Generating And Submitting...' : 'Generate And Submit To Main Admin'}
+            </button>
+            <button
+              onClick={() => setFilters(initialFilters)}
+              className="rounded-xl bg-slate-200 px-6 py-3 font-semibold text-slate-700 transition hover:bg-slate-300"
             >
-              {REPORT_TYPES.map((type) => (
-                <option key={type} value={type}>{type}</option>
-              ))}
-            </select>
+              Reset Filters
+            </button>
           </div>
-        </div>
+        </section>
+      ) : null}
 
-        <div className="mt-5 grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
-          <div>
-            <label className="mb-2 block text-sm font-semibold text-slate-700">Service Type</label>
-            <select
-              value={automation.service_type}
-              onChange={(event) => setAutomation((current) => ({ ...current, service_type: event.target.value }))}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
+      {generationMode === 'automatic' ? (
+        <section className="rounded-2xl bg-white p-6 shadow">
+          <div className="mb-6 flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-bold text-primary">Automatic Scheduled Sending</h2>
+              <p className="mt-2 text-sm text-slate-500">
+                Save a branch-level schedule so WARDS can generate and send due reports to Main Admin automatically.
+              </p>
+            </div>
+            <div className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700">
+              Automatic Sending
+            </div>
+          </div>
+
+          <div className="mb-5 rounded-2xl border border-sky-200 bg-sky-50 px-5 py-4 text-sm text-sky-900">
+            Automatic mode uses the saved schedule below and generates reports from live branch data when the scheduled dispatch time is due.
+          </div>
+
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
+            <label className="flex items-center gap-3 rounded-xl border border-slate-200 px-4 py-3">
+              <input
+                type="checkbox"
+                checked={automation.enabled}
+                onChange={(event) => setAutomation((current) => ({ ...current, enabled: event.target.checked }))}
+              />
+              <span className="text-sm font-semibold text-slate-700">Enable automatic sending</span>
+            </label>
+
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-slate-700">Frequency</label>
+              <select
+                value={automation.frequency}
+                onChange={(event) => setAutomation((current) => ({ ...current, frequency: event.target.value }))}
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
+              >
+                {AUTO_FREQUENCIES.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-slate-700">Dispatch Time</label>
+              <input
+                type="time"
+                value={automation.dispatch_time}
+                onChange={(event) => setAutomation((current) => ({ ...current, dispatch_time: event.target.value }))}
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-slate-700">Scheduled Report Type</label>
+              <select
+                value={automation.reportType}
+                onChange={(event) => setAutomation((current) => ({ ...current, reportType: event.target.value }))}
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
+              >
+                {REPORT_TYPES.map((type) => (
+                  <option key={type} value={type}>{type}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="mt-5 grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-slate-700">Service Type</label>
+              <select
+                value={automation.service_type}
+                onChange={(event) => setAutomation((current) => ({ ...current, service_type: event.target.value }))}
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
+              >
+                {SERVICE_TYPES.map((type) => (
+                  <option key={type} value={type}>{type}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-slate-700">Transaction Category</label>
+              <select
+                value={automation.transaction_category}
+                onChange={(event) => setAutomation((current) => ({ ...current, transaction_category: event.target.value }))}
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
+              >
+                {TRANSACTION_CATEGORIES.map((type) => (
+                  <option key={type} value={type}>{type}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-slate-700">Weekly Day</label>
+              <select
+                value={automation.weekday}
+                onChange={(event) => setAutomation((current) => ({ ...current, weekday: Number(event.target.value) }))}
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
+              >
+                <option value={0}>Monday</option>
+                <option value={1}>Tuesday</option>
+                <option value={2}>Wednesday</option>
+                <option value={3}>Thursday</option>
+                <option value={4}>Friday</option>
+                <option value={5}>Saturday</option>
+                <option value={6}>Sunday</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-slate-700">Monthly Day</label>
+              <input
+                type="number"
+                min="1"
+                max="28"
+                value={automation.month_day}
+                onChange={(event) => setAutomation((current) => ({ ...current, month_day: Number(event.target.value) }))}
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
+              />
+            </div>
+          </div>
+
+          <div className="mt-6">
+            <button
+              onClick={handleSaveAutomation}
+              disabled={savingAutomation}
+              className="rounded-xl bg-primary px-6 py-3 font-semibold text-white transition hover:bg-secondary disabled:opacity-60"
             >
-              {SERVICE_TYPES.map((type) => (
-                <option key={type} value={type}>{type}</option>
-              ))}
-            </select>
+              {savingAutomation ? 'Saving Schedule...' : 'Save Automatic Sending'}
+            </button>
           </div>
-
-          <div>
-            <label className="mb-2 block text-sm font-semibold text-slate-700">Transaction Category</label>
-            <select
-              value={automation.transaction_category}
-              onChange={(event) => setAutomation((current) => ({ ...current, transaction_category: event.target.value }))}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
-            >
-              {TRANSACTION_CATEGORIES.map((type) => (
-                <option key={type} value={type}>{type}</option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="mb-2 block text-sm font-semibold text-slate-700">Weekly Day</label>
-            <select
-              value={automation.weekday}
-              onChange={(event) => setAutomation((current) => ({ ...current, weekday: Number(event.target.value) }))}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
-            >
-              <option value={0}>Monday</option>
-              <option value={1}>Tuesday</option>
-              <option value={2}>Wednesday</option>
-              <option value={3}>Thursday</option>
-              <option value={4}>Friday</option>
-              <option value={5}>Saturday</option>
-              <option value={6}>Sunday</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="mb-2 block text-sm font-semibold text-slate-700">Monthly Day</label>
-            <input
-              type="number"
-              min="1"
-              max="28"
-              value={automation.month_day}
-              onChange={(event) => setAutomation((current) => ({ ...current, month_day: Number(event.target.value) }))}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
-            />
-          </div>
-        </div>
-
-        <div className="mt-6">
-          <button
-            onClick={handleSaveAutomation}
-            disabled={savingAutomation}
-            className="rounded-xl bg-primary px-6 py-3 font-semibold text-white transition hover:bg-secondary disabled:opacity-60"
-          >
-            {savingAutomation ? 'Saving Schedule...' : 'Save Automatic Sending'}
-          </button>
-        </div>
-      </section>
+        </section>
+      ) : null}
 
       <section className="overflow-hidden rounded-2xl bg-white shadow">
         <div className="border-b border-slate-100 px-6 py-5">
@@ -486,9 +553,16 @@ const BranchReports = () => {
                 </thead>
                 <tbody className="divide-y divide-slate-200 bg-white">
                   {reportsState.items.map((report) => (
-                    <tr key={report.id} className="hover:bg-slate-50">
+                    <tr key={report.id} className={`${report.is_viewed ? 'hover:bg-slate-50' : 'bg-blue-50/40 ring-1 ring-inset ring-blue-100 hover:bg-blue-50/60'}`}>
                       <td className="px-6 py-4">
-                        <p className="font-semibold text-primary">{report.title}</p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-semibold text-primary">{report.title}</p>
+                          {!report.is_viewed ? (
+                            <span className="rounded-full bg-red-500 px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.12em] text-white">
+                              New
+                            </span>
+                          ) : null}
+                        </div>
                         <p className="mt-1 text-xs uppercase tracking-[0.16em] text-slate-400">{report.report_type}</p>
                       </td>
                       <td className="px-6 py-4 text-slate-700">{report.service_type}</td>

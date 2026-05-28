@@ -1,3 +1,5 @@
+import { clearStoredPublicUser, setStoredPublicUser } from './publicSession';
+
 const DEFAULT_BRANCH_PORTAL_PATH = '/branch-dashboard/branch-portal';
 
 export const getBranchPortalPath = (branchUser) => {
@@ -74,7 +76,7 @@ export const persistSession = ({ portal, access_token, user }) => {
     localStorage.removeItem('branchToken');
     localStorage.removeItem('branchUser');
     localStorage.removeItem('userToken');
-    localStorage.removeItem('user');
+    clearStoredPublicUser();
     return;
   }
 
@@ -85,12 +87,12 @@ export const persistSession = ({ portal, access_token, user }) => {
     localStorage.removeItem('adminToken');
     localStorage.removeItem('adminUser');
     localStorage.removeItem('userToken');
-    localStorage.removeItem('user');
+    clearStoredPublicUser();
     return;
   }
 
   localStorage.setItem('userToken', access_token);
-  localStorage.setItem('user', JSON.stringify(user));
+  setStoredPublicUser(user);
   localStorage.setItem('userAuthenticatedAt', new Date().toISOString());
   localStorage.removeItem('adminToken');
   localStorage.removeItem('adminUser');
@@ -118,6 +120,6 @@ export const clearSession = (portal) => {
   }
 
   localStorage.removeItem('userToken');
-  localStorage.removeItem('user');
+  clearStoredPublicUser();
   localStorage.removeItem('userAuthenticatedAt');
 };

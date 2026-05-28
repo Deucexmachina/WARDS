@@ -1,6 +1,7 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import axios from 'axios';
+import { clearStoredPublicUser, setStoredPublicUser } from '../utils/publicSession';
 
 const UserProtectedRoute = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(null);
@@ -38,7 +39,7 @@ const UserProtectedRoute = ({ children }) => {
       if (serverStartedAt && (!userAuthenticatedAt || userAuthenticatedAt <= serverStartedAt)) {
         setIsAuthenticated(false);
         localStorage.removeItem('userToken');
-        localStorage.removeItem('user');
+        clearStoredPublicUser();
         localStorage.removeItem('userAuthenticatedAt');
         sessionStorage.setItem('redirectAfterLogin', location.pathname);
         sessionStorage.setItem('loginMessage', 'Please login again after the backend restarts.');
@@ -47,21 +48,21 @@ const UserProtectedRoute = ({ children }) => {
 
       if (response.data.valid && response.data.user?.role === 'public') {
         setIsAuthenticated(true);
-        localStorage.setItem('user', JSON.stringify(response.data.user));
+        setStoredPublicUser(response.data.user);
         if (!localStorage.getItem('userAuthenticatedAt')) {
           localStorage.setItem('userAuthenticatedAt', new Date().toISOString());
         }
       } else {
         setIsAuthenticated(false);
         localStorage.removeItem('userToken');
-        localStorage.removeItem('user');
+        clearStoredPublicUser();
         localStorage.removeItem('userAuthenticatedAt');
         sessionStorage.setItem('redirectAfterLogin', location.pathname);
       }
     } catch (error) {
       setIsAuthenticated(false);
       localStorage.removeItem('userToken');
-      localStorage.removeItem('user');
+      clearStoredPublicUser();
       localStorage.removeItem('userAuthenticatedAt');
       sessionStorage.setItem('redirectAfterLogin', location.pathname);
     } finally {

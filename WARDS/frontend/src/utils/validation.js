@@ -3,7 +3,7 @@ export const CITIZEN_NAME_PATTERN = /^[A-Za-z ]+$/;
 export const PH_CONTACT_DIGITS_PATTERN = /^9\d{9}$/;
 export const REAL_EMAIL_RULE_MESSAGE = 'Please enter a real email address, like name@example.com.';
 export const CITIZEN_NAME_RULE_MESSAGE = 'Full name must contain letters and spaces only.';
-export const PH_CONTACT_RULE_MESSAGE = 'Contact number must use +63 followed by exactly 10 digits.';
+export const PH_CONTACT_RULE_MESSAGE = 'Contact number must begin with 9 and contain exactly 10 digits.';
 
 export const PASSWORD_RULE_MESSAGE =
   'Password must be more than 12 characters long and include at least one uppercase letter, one lowercase letter, and at least one number or special character.';
@@ -88,11 +88,41 @@ export const validateCitizenFullName = (value) => {
   return '';
 };
 
-export const normalizePhilippineContactDigits = (value) => String(value || '').replace(/\D/g, '').slice(0, 10);
+export const normalizePhilippineContactDigits = (value) => {
+  let digits = String(value || '').replace(/\D/g, '');
+
+  if (digits.startsWith('63')) {
+    digits = digits.slice(2);
+  }
+
+  if (digits.startsWith('0')) {
+    digits = digits.slice(1);
+  }
+
+  if (digits && !digits.startsWith('9')) {
+    const firstNineIndex = digits.indexOf('9');
+    digits = firstNineIndex >= 0 ? digits.slice(firstNineIndex) : '';
+  }
+
+  return digits.slice(0, 10);
+};
 
 export const formatPhilippineContactNumber = (digits) => {
   const normalizedDigits = normalizePhilippineContactDigits(digits);
-  return normalizedDigits ? `+63 ${normalizedDigits}` : '+63';
+  if (!normalizedDigits) {
+    return '';
+  }
+
+  const first = normalizedDigits.slice(0, 3);
+  const second = normalizedDigits.slice(3, 6);
+  const third = normalizedDigits.slice(6, 10);
+
+  return [first, second, third].filter(Boolean).join(' ');
+};
+
+export const toCanonicalPhilippineContactNumber = (value) => {
+  const normalizedDigits = normalizePhilippineContactDigits(value);
+  return normalizedDigits ? `+63${normalizedDigits}` : '';
 };
 
 export const validatePhilippineContactDigits = (value) => {

@@ -2,14 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import PublicBrandLogo from './PublicBrandLogo';
 import { clearSession } from '../utils/auth';
-
-const getStoredPublicUser = () => {
-  try {
-    return JSON.parse(localStorage.getItem('user') || localStorage.getItem('publicUser') || 'null');
-  } catch {
-    return null;
-  }
-};
+import { clearStoredPublicUser, getStoredPublicUser, PUBLIC_USER_STORAGE_EVENT } from '../utils/publicSession';
 
 const hasPublicSession = () =>
   Boolean(
@@ -43,9 +36,11 @@ const Navbar = () => {
     syncPublicUser();
     window.addEventListener('storage', syncPublicUser);
     window.addEventListener('focus', syncPublicUser);
+    window.addEventListener(PUBLIC_USER_STORAGE_EVENT, syncPublicUser);
     return () => {
       window.removeEventListener('storage', syncPublicUser);
       window.removeEventListener('focus', syncPublicUser);
+      window.removeEventListener(PUBLIC_USER_STORAGE_EVENT, syncPublicUser);
     };
   }, [location.pathname]);
 
@@ -56,7 +51,7 @@ const Navbar = () => {
     sessionStorage.removeItem('loginPortal');
     clearSession('public');
     localStorage.removeItem('publicToken');
-    localStorage.removeItem('publicUser');
+    clearStoredPublicUser();
     sessionStorage.removeItem('redirectAfterLogin');
     sessionStorage.removeItem('loginMessage');
     setPublicUser(null);

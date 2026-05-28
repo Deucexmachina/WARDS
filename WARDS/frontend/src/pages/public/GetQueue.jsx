@@ -2,11 +2,13 @@ import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
 import { buildManilaDateTimeValue, formatUtc8DateTime, parseManilaDateTimeValue } from '../../utils/dateTime';
+import { getStoredPublicUser, PUBLIC_USER_STORAGE_EVENT } from '../../utils/publicSession';
 import { printQueueTicket } from '../../utils/queueTicketPrint';
 import {
   getEmailValidationMessage,
   normalizeCitizenFullName,
   normalizePhilippineContactDigits,
+  toCanonicalPhilippineContactNumber,
   validateCitizenFullName,
   validatePhilippineContactDigits,
 } from '../../utils/validation';
@@ -172,19 +174,27 @@ const GetQueue = () => {
   }, []);
 
   useEffect(() => {
-    try {
-      const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
-      if (storedUser) {
+    const syncStoredUser = () => {
+      try {
+        const storedUser = getStoredPublicUser() || {};
         setFormData((current) => ({
           ...current,
           taxpayer_name: current.taxpayer_name || storedUser.full_name || '',
           contact_number: current.contact_number || normalizePhilippineContactDigits(storedUser.contact_number || ''),
           email: current.email || storedUser.email || '',
         }));
+      } catch {
+        // Ignore malformed local user storage and keep manual entry available.
       }
-    } catch {
-      // Ignore malformed local user storage and keep manual entry available.
-    }
+    };
+
+    syncStoredUser();
+    window.addEventListener(PUBLIC_USER_STORAGE_EVENT, syncStoredUser);
+    window.addEventListener('focus', syncStoredUser);
+    return () => {
+      window.removeEventListener(PUBLIC_USER_STORAGE_EVENT, syncStoredUser);
+      window.removeEventListener('focus', syncStoredUser);
+    };
   }, []);
 
   useEffect(() => {
@@ -513,7 +523,7 @@ const GetQueue = () => {
         branch_id: selectedBranch.id,
         service_type: formData.service_type,
         taxpayer_name: normalizeCitizenFullName(formData.taxpayer_name),
-        contact_number: `+63${normalizePhilippineContactDigits(formData.contact_number)}`,
+        contact_number: toCanonicalPhilippineContactNumber(formData.contact_number),
         email: formData.email,
         queue_type: formData.queue_type,
         appointment_time: appointmentDateTime,
@@ -599,7 +609,7 @@ const GetQueue = () => {
       estimatedWaitTime: queueResult.estimated_wait_time,
       createdAt: queueResult.created_at,
       taxpayerName: normalizeCitizenFullName(formData.taxpayer_name),
-      contactNumber: `+63${normalizePhilippineContactDigits(formData.contact_number)}`,
+      contactNumber: toCanonicalPhilippineContactNumber(formData.contact_number),
       message: queueResult.message,
     });
     if (!opened) {
@@ -852,7 +862,7 @@ const GetQueue = () => {
               <div className="space-y-4">
                 <div>
                   <label className="block text-gray-700 font-semibold mb-3">
-                    {language === 'en' ? 'Service Type *' : 'Uri ng Serbisyo *'}
+                    {language === 'en' ? 'Service Type' : 'Uri ng Serbisyo'}
                   </label>
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                     {services.map((service) => (
@@ -976,7 +986,7 @@ const GetQueue = () => {
 
                 <div>
                   <label className="block text-gray-700 font-semibold mb-2">
-                    {language === 'en' ? 'Name *' : 'Pangalan *'}
+                    {language === 'en' ? 'Name' : 'Pangalan'}
                   </label>
                   <input
                     type="text"
@@ -999,7 +1009,7 @@ const GetQueue = () => {
 
                 <div>
                   <label className="block text-gray-700 font-semibold mb-2">
-                    {language === 'en' ? 'Contact Number *' : 'Numero ng Kontak *'}
+                    {language === 'en' ? 'Contact Number' : 'Numero ng Kontak'}
                   </label>
                   <div className={`flex overflow-hidden rounded-lg border ${
                     contactError ? 'border-red-400 bg-red-50' : 'border-gray-300'
@@ -1013,7 +1023,7 @@ const GetQueue = () => {
                       disabled={queueUnavailable}
                       inputMode="numeric"
                       maxLength={10}
-                      placeholder="9202717703"
+                      placeholder="9123456789"
                       className="w-full px-4 py-3 focus:outline-none"
                       required
                     />
@@ -1025,7 +1035,7 @@ const GetQueue = () => {
                   )}
                   {!contactError && (
                     <p className="mt-2 text-sm text-gray-500">
-                      {language === 'en' ? 'Enter exactly 10 digits after +63.' : 'Maglagay ng eksaktong 10 digit pagkatapos ng +63.'}
+                      {language === 'en' ? 'Enter exactly 10 digits after +63, starting with 9.' : 'Maglagay ng eksaktong 10 digit pagkatapos ng +63, na nagsisimula sa 9.'}
                     </p>
                   )}
                 </div>

@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 
 import axios from 'axios';
 import { paymentAPI, receiptAPI } from '../../services/api';
+import { getStoredPublicUser } from '../../utils/publicSession';
 import { getEmailValidationMessage } from '../../utils/validation';
 
 const DEFAULT_DISABLED_MESSAGE = 'This service is currently unavailable because it has been disabled by system administration.';
@@ -39,7 +40,7 @@ const RequestReceipt = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
-  const storedUser = useMemo(() => JSON.parse(localStorage.getItem('user') || 'null'), []);
+  const storedUser = useMemo(() => getStoredPublicUser(), []);
   const activeReceiptRequestStorageKey = useMemo(() => {
     const normalizedEmail = (storedUser?.email || 'public-user').trim().toLowerCase();
     return `${ACTIVE_RECEIPT_REQUEST_STORAGE_KEY_PREFIX}:${normalizedEmail}`;

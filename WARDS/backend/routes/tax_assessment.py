@@ -35,6 +35,7 @@ from utils.security_validation import (
     ensure_tin_is_unique,
     normalize_email,
     normalize_identity_name,
+    normalize_ph_contact_number,
     normalize_tin,
     validate_strong_password,
 )
@@ -129,11 +130,7 @@ def normalize_identifier(value: str, label: str) -> str:
 
 
 def normalize_mobile_number(value: str) -> str:
-    normalized = re.sub(r"\s+", "", (value or "").strip())
-    digits = re.sub(r"\D", "", normalized)
-    if len(digits) != 11 or not digits.startswith("09"):
-        raise HTTPException(status_code=400, detail="Enter a valid Philippine mobile number.")
-    return digits
+    return normalize_ph_contact_number(value)
 
 
 def serialize_submission(record: TaxpayerIdentifierSubmission) -> dict:
@@ -248,6 +245,51 @@ def citizen_address(user: CitizenUser) -> str | None:
     return get_decrypted_or_raw(user, "address") or user.address
 
 
+def get_citizen_profile_snapshot(user: CitizenUser) -> dict:
+    return {
+        "full_name": citizen_name(user),
+        "email": citizen_email(user),
+        "mobile_number": citizen_contact(user),
+        "address": citizen_address(user),
+        "taxpayer_type": user.taxpayer_type or "Individual",
+        "tin": citizen_tin(user),
+    }
+
+
+def sync_citizen_profile_to_related_records(
+    db: Session,
+    *,
+    citizen_user_id: int,
+    full_name: str,
+    email: str,
+    mobile_number: str,
+    address: str | None,
+):
+    submissions = (
+        db.query(TaxpayerIdentifierSubmission)
+        .filter(TaxpayerIdentifierSubmission.citizen_user_id == citizen_user_id)
+        .all()
+    )
+    for submission in submissions:
+        submission.full_name = full_name
+        submission.email = email
+        submission.mobile_number = mobile_number
+        submission.address = address
+        apply_taxpayer_identifier_submission_security(submission)
+
+    assessments = (
+        db.query(TaxAssessmentRecord)
+        .filter(TaxAssessmentRecord.citizen_user_id == citizen_user_id)
+        .all()
+    )
+    for assessment in assessments:
+        assessment.taxpayer_name = full_name
+        assessment.taxpayer_email = email
+        assessment.mobile_number = mobile_number
+        assessment.address = address
+        apply_tax_assessment_record_security(assessment)
+
+
 def verify_citizen_password(user: CitizenUser, password: str | None):
     if not password or not pwd_context.verify(password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Incorrect account password.")
@@ -258,7 +300,7 @@ def changed_profile_fields(current_user: CitizenUser, payload: PublicProfileUpda
     comparisons = (
         ("Full Name", citizen_name(current_user), re.sub(r"\s+", " ", (payload.full_name or "").strip())),
         ("Email Address", citizen_email(current_user), normalized_email),
-        ("Mobile Number", citizen_contact(current_user), mobile_number),
+        ("Contact Number", citizen_contact(current_user), mobile_number),
         ("Address", citizen_address(current_user) or "", (payload.address or "").strip()),
         ("Taxpayer Type", current_user.taxpayer_type or "Individual", taxpayer_type),
         ("Tax Identification Number", citizen_tin(current_user) or "", normalized_tin or ""),
@@ -479,6 +521,14 @@ async def update_public_account_profile(
     current_user.taxpayer_type = taxpayer_type
     current_user.tin = normalized_tin
     apply_citizen_user_security(current_user)
+    sync_citizen_profile_to_related_records(
+        db,
+        citizen_user_id=current_user.id,
+        full_name=full_name,
+        email=normalized_email,
+        mobile_number=mobile_number,
+        address=current_user.address,
+    )
 
     db.add(ActivityLog(
         action="Public Taxpayer Profile Updated",
@@ -503,12 +553,7 @@ async def update_public_account_profile(
         "message": "Account profile updated successfully.",
         "profile": {
             "id": current_user.id,
-            "full_name": citizen_name(current_user),
-            "email": citizen_email(current_user),
-            "mobile_number": citizen_contact(current_user),
-            "address": citizen_address(current_user),
-            "taxpayer_type": current_user.taxpayer_type or "Individual",
-            "tin": citizen_tin(current_user),
+            **get_citizen_profile_snapshot(current_user),
         },
     }
 
@@ -564,11 +609,14 @@ async def create_taxpayer_identifier_submission(
 ):
     normalized_submission_type = normalize_submission_type(submission_type)
     normalized_taxpayer_type = normalize_taxpayer_type(taxpayer_type)
-    normalized_email = normalize_email(email)
-    normalized_mobile = normalize_mobile_number(mobile_number)
-    normalized_full_name = re.sub(r"\s+", " ", full_name.strip())
+    profile_snapshot = get_citizen_profile_snapshot(current_user)
+    normalized_email = normalize_email(profile_snapshot["email"] or email)
+    normalized_mobile = normalize_mobile_number(profile_snapshot["mobile_number"] or mobile_number)
+    normalized_full_name = re.sub(r"\s+", " ", (profile_snapshot["full_name"] or full_name).strip())
     if not normalized_full_name:
         raise HTTPException(status_code=400, detail="Full Name is required.")
+    normalized_address = (profile_snapshot["address"] or address or "").strip() or None
+    normalized_taxpayer_type = normalize_taxpayer_type(profile_snapshot["taxpayer_type"] or normalized_taxpayer_type)
 
     normalized_tdn = None
     normalized_permit = None
@@ -611,7 +659,7 @@ async def create_taxpayer_identifier_submission(
         full_name=normalized_full_name,
         email=normalized_email,
         mobile_number=normalized_mobile,
-        address=(address or "").strip() or None,
+        address=normalized_address,
         tdn=normalized_tdn,
         mayor_permit_number=normalized_permit,
         sec_dti_cda_number=normalized_registration,

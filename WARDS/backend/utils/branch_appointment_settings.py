@@ -958,6 +958,28 @@ def get_branch_appointment_availability(
 
     if not available_slots:
         reasons = []
+        now_ph = _current_ph_naive_datetime()
+        operating_window = _format_time_window(time_settings["opening_time"], time_settings["closing_time"])
+        if selected_date == now_ph.date() and now_ph.time() > last_appointment_time:
+            _append_reason(
+                reasons,
+                "after_operating_hours",
+                f"No appointment slots remain for today ({operating_window})",
+                f"today's appointment window ({operating_window}) has already ended for this branch",
+            )
+            return {
+                "is_available": False,
+                "message": _build_unavailable_message(
+                    "Appointments",
+                    reasons,
+                    "Please choose the next available date.",
+                ),
+                "available_slots": [],
+                "status": "after_operating_hours",
+                "reasons": reasons,
+                "window_capacity": window_capacity,
+            }
+
         _append_reason(
             reasons,
             "fully_booked",

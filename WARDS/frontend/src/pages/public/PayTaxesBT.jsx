@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { paymentAPI, taxpayerAccountAPI } from '../../services/api';
+import { getStoredPublicUser } from '../../utils/publicSession';
 import { formatTin } from '../../utils/validation';
 
 const API_ORIGIN = 'http://localhost:8000';
@@ -33,14 +34,6 @@ const buildApiAssetUrl = (path) => {
   if (!path) return '';
   if (/^https?:\/\//i.test(path)) return path;
   return `${API_ORIGIN}${path.startsWith('/') ? path : `/${path}`}`;
-};
-
-const getStoredPublicUser = () => {
-  try {
-    return JSON.parse(localStorage.getItem('user') || localStorage.getItem('publicUser') || 'null');
-  } catch {
-    return null;
-  }
 };
 
 const PayTaxesBT = () => {

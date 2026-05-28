@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { paymentAPI, taxpayerAccountAPI } from '../../services/api';
+import { getStoredPublicUser } from '../../utils/publicSession';
 import { formatTin, getEmailValidationMessage, validateTin } from '../../utils/validation';
 
 const API_BASE_URL = 'http://localhost:8000/api';
@@ -21,14 +22,6 @@ const BANK_OPTIONS = [
   { value: 'landbank', label: 'Landbank' },
 ];
 const RPT_FINAL_CLEAR_STATUSES = new Set(['PAYMENT_VERIFIED', 'OR_GENERATED', 'COMPLETED']);
-
-const getStoredPublicUser = () => {
-  try {
-    return JSON.parse(localStorage.getItem('user') || localStorage.getItem('publicUser') || 'null');
-  } catch {
-    return null;
-  }
-};
 
 const normalizeIdentityName = (value) =>
   String(value || '')

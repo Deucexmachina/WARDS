@@ -6,6 +6,11 @@ import galasLogo from '../assets/branding/galas_logo.png';
 import api from '../services/api';
 import { branchAnnouncementAPI, discrepancyAPI } from '../services/api';
 import { getBranchPortalPath } from '../utils/auth';
+import {
+  BRANCH_REPORT_VIEWED_EVENT,
+  BRANCH_REPORTS_UPDATED_EVENT,
+  getUnreadBranchReportCount,
+} from '../utils/branchReportViews';
 
 const BRANCH_QUEUE_UPDATED_EVENT = 'branch-queue-updated';
 const BRANCH_RECEIPT_UPDATED_EVENT = 'branch-receipt-updated';
@@ -32,6 +37,25 @@ const BranchLayout = () => {
   const [receiptCount, setReceiptCount] = useState(0);
   const [paymentCount, setPaymentCount] = useState(0);
   const [reportCount, setReportCount] = useState(0);
+  const fetchAllBranchReports = async () => {
+    const firstResponse = await api.get('/branch/reports', { params: { page: 1, page_size: 5 } });
+    const firstPageData = firstResponse.data || {};
+    const totalPages = Number(firstPageData.total_pages || 1);
+    let items = [...(firstPageData.items || [])];
+
+    if (totalPages > 1) {
+      const remainingResponses = await Promise.all(
+        Array.from({ length: totalPages - 1 }, (_, index) =>
+          api.get('/branch/reports', { params: { page: index + 2, page_size: 5 } })
+        )
+      );
+      remainingResponses.forEach((response) => {
+        items = items.concat(response.data?.items || []);
+      });
+    }
+
+    return items;
+  };
   const getActiveQueueCount = (items) => (
     (items || []).filter((item) => {
       const normalizedStatus = (item?.status || '').toString().trim().toLowerCase();
@@ -141,8 +165,8 @@ const BranchLayout = () => {
 
     const fetchReportCount = async () => {
       try {
-        const response = await api.get('/branch/reports', { params: { page: 1, page_size: 1 } });
-        setReportCount(Number(response.data?.total || 0));
+        const reports = await fetchAllBranchReports();
+        setReportCount(getUnreadBranchReportCount(reports, staff));
       } catch (error) {
         console.error('Failed to fetch branch report count:', error);
       }
@@ -180,6 +204,8 @@ const BranchLayout = () => {
       fetchPaymentCount();
       fetchReceiptCount();
     };
+    const handleBranchReportViewed = () => fetchReportCount();
+    const handleBranchReportsUpdated = () => fetchReportCount();
     const handleBranchReceiptUpdated = (event) => {
       const eventRequests = event?.detail?.requests;
       if (Array.isArray(eventRequests)) {
@@ -203,6 +229,8 @@ const BranchLayout = () => {
     window.addEventListener('branch-discrepancy-viewed', handleDiscrepancyViewed);
     window.addEventListener('branch-announcement-viewed', handleAnnouncementViewed);
     window.addEventListener('branch-payment-updated', handleBranchPaymentUpdated);
+    window.addEventListener(BRANCH_REPORT_VIEWED_EVENT, handleBranchReportViewed);
+    window.addEventListener(BRANCH_REPORTS_UPDATED_EVENT, handleBranchReportsUpdated);
     window.addEventListener(BRANCH_RECEIPT_UPDATED_EVENT, handleBranchReceiptUpdated);
     window.addEventListener(BRANCH_QUEUE_UPDATED_EVENT, handleBranchQueueUpdated);
 
@@ -214,6 +242,8 @@ const BranchLayout = () => {
       window.removeEventListener('branch-discrepancy-viewed', handleDiscrepancyViewed);
       window.removeEventListener('branch-announcement-viewed', handleAnnouncementViewed);
       window.removeEventListener('branch-payment-updated', handleBranchPaymentUpdated);
+      window.removeEventListener(BRANCH_REPORT_VIEWED_EVENT, handleBranchReportViewed);
+      window.removeEventListener(BRANCH_REPORTS_UPDATED_EVENT, handleBranchReportsUpdated);
       window.removeEventListener(BRANCH_RECEIPT_UPDATED_EVENT, handleBranchReceiptUpdated);
       window.removeEventListener(BRANCH_QUEUE_UPDATED_EVENT, handleBranchQueueUpdated);
     };

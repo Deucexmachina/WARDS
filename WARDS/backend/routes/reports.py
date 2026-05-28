@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
+from sqlalchemy import func, and_, or_
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta, time
@@ -13,12 +13,20 @@ import json
 
 from database.models import (
     Report, get_db, ActivityLog, Branch, Queue, Payment,
-    ReceiptRequest, QueueActivity, Service, DiscrepancyReport, BranchSystemSetting
+    ReceiptRequest, QueueActivity, QueueHistory, ReceiptRequestHistory,
+    Service, DiscrepancyReport, BranchSystemSetting
 )
 from middleware.admin_auth import get_current_admin_user
 from middleware.branch_auth import get_current_branch_staff, require_any_branch_staff
 from utils.rbac import require_permission
-from utils.field_crypto import get_decrypted_or_raw, hash_aware_match, hash_optional_value, queue_value
+from utils.field_crypto import (
+    get_decrypted_or_raw,
+    hash_aware_match,
+    hash_optional_value,
+    queue_value,
+    receipt_request_value,
+    receipt_request_history_value,
+)
 
 router = APIRouter()
 branch_router = APIRouter()
@@ -49,6 +57,26 @@ DOCUMENT_REQUEST_SERVICE = "Document Request"
 RECEIPT_REQUEST_FEE_CATEGORY = "Receipt Request Fee"
 RECEIPT_REQUEST_FEE_AMOUNT = 50.0
 REPORT_AUTOMATION_KEY = "branchReportAutomation"
+
+
+def get_branch_display_name(branch: Branch) -> str:
+    return get_decrypted_or_raw(branch, "name") or branch.name
+
+
+def find_branch_by_display_name(db: Session, branch_name: Optional[str]) -> Branch | None:
+    normalized = (branch_name or "").strip()
+    if not normalized:
+        return None
+
+    direct_match = db.query(Branch).filter(Branch.name == normalized).first()
+    if direct_match:
+        return direct_match
+
+    for branch in db.query(Branch).all():
+        if get_branch_display_name(branch) == normalized:
+            return branch
+
+    return None
 
 
 def normalize_service_type(service_type: Optional[str]) -> Optional[str]:
@@ -139,6 +167,178 @@ def format_export_value(value: Any) -> str:
     if isinstance(value, float):
         return f"{value:.2f}"
     return str(value)
+
+
+def payment_value(payment: Payment, field_name: str) -> Optional[str]:
+    return get_decrypted_or_raw(payment, field_name) or getattr(payment, field_name, None)
+
+
+def queue_record_value(record: Queue | QueueHistory, field_name: str) -> Optional[str]:
+    if isinstance(record, QueueHistory):
+        if field_name == "status":
+            return record.final_status or None
+        return getattr(record, field_name, None)
+    return queue_value(record, field_name)
+
+
+def queue_record_datetime(record: Queue | QueueHistory, field_name: str) -> Optional[datetime]:
+    return getattr(record, field_name, None)
+
+
+def receipt_record_value(record: ReceiptRequest | ReceiptRequestHistory, field_name: str) -> Optional[str]:
+    if isinstance(record, ReceiptRequestHistory):
+        if field_name == "status":
+            return receipt_request_history_value(record, "final_status")
+        return receipt_request_history_value(record, field_name)
+    if field_name == "status":
+        return receipt_request_value(record, "status")
+    return receipt_request_value(record, field_name)
+
+
+def receipt_record_datetime(record: ReceiptRequest | ReceiptRequestHistory, field_name: str) -> Optional[datetime]:
+    return getattr(record, field_name, None)
+
+
+def dedupe_records(records: List[Any], key_builder) -> List[Any]:
+    deduped: Dict[str, Any] = {}
+    ordered_records = sorted(records, key=lambda item: key_builder(item)[1], reverse=True)
+    for record in ordered_records:
+        key, _ = key_builder(record)
+        if key not in deduped:
+            deduped[key] = record
+    return list(deduped.values())
+
+
+def build_payment_branch_filter(branch: Branch):
+    branch_name = get_branch_display_name(branch)
+    branch_hash = hash_optional_value(branch_name)
+    return or_(
+        Payment.branch_id == branch.id,
+        and_(
+            Payment.branch_id.is_(None),
+            or_(
+                Payment.branch == branch_name,
+                Payment.branch_hash == branch_hash,
+            ),
+        ),
+    )
+
+
+def collect_queue_records(
+    db: Session,
+    *,
+    branch_id: Optional[int],
+    start_date: datetime,
+    end_date: datetime,
+    service_type: Optional[str],
+) -> List[Queue | QueueHistory]:
+    queue_query = db.query(Queue).filter(Queue.created_at.between(start_date, end_date))
+    queue_history_query = db.query(QueueHistory).filter(QueueHistory.created_at.between(start_date, end_date))
+
+    if branch_id:
+        queue_query = queue_query.filter(Queue.branch_id == branch_id)
+        queue_history_query = queue_history_query.filter(QueueHistory.branch_id == branch_id)
+
+    if service_type:
+        queue_query = queue_query.filter(hash_aware_match(Queue, "service_type", service_type))
+        queue_history_query = queue_history_query.filter(QueueHistory.service_type == service_type)
+
+    combined = queue_query.all() + queue_history_query.all()
+    return dedupe_records(
+        combined,
+        lambda record: (
+            queue_record_value(record, "queue_number") or f"queue-{getattr(record, 'id', 'unknown')}",
+            queue_record_datetime(record, "completed_at")
+            or queue_record_datetime(record, "archived_at")
+            or queue_record_datetime(record, "created_at")
+            or datetime.min,
+        ),
+    )
+
+
+def collect_receipt_records(
+    db: Session,
+    *,
+    branch_id: Optional[int],
+    start_date: datetime,
+    end_date: datetime,
+    service_type: Optional[str],
+    include_receipts_in_scope: bool,
+) -> List[ReceiptRequest | ReceiptRequestHistory]:
+    if not include_receipts_in_scope:
+        return []
+
+    receipt_query = db.query(ReceiptRequest).filter(ReceiptRequest.created_at.between(start_date, end_date))
+    receipt_history_query = db.query(ReceiptRequestHistory).filter(ReceiptRequestHistory.created_at.between(start_date, end_date))
+
+    if branch_id:
+        receipt_query = receipt_query.filter(ReceiptRequest.branch_id == branch_id)
+        receipt_history_query = receipt_history_query.filter(ReceiptRequestHistory.branch_id == branch_id)
+
+    if service_type and service_type != DOCUMENT_REQUEST_SERVICE:
+        receipt_query = receipt_query.filter(hash_aware_match(ReceiptRequest, "tax_type", service_type))
+        receipt_history_query = receipt_history_query.filter(hash_aware_match(ReceiptRequestHistory, "tax_type", service_type))
+
+    combined = receipt_query.all() + receipt_history_query.all()
+    return dedupe_records(
+        combined,
+        lambda record: (
+            receipt_record_value(record, "request_id")
+            or receipt_record_value(record, "payment_ref_number")
+            or f"receipt-{getattr(record, 'id', 'unknown')}",
+            receipt_record_datetime(record, "processed_at")
+            or receipt_record_datetime(record, "archived_at")
+            or receipt_record_datetime(record, "created_at")
+            or datetime.min,
+        ),
+    )
+
+
+def collect_queue_activity_records(
+    db: Session,
+    *,
+    branch_id: Optional[int],
+    start_date: datetime,
+    end_date: datetime,
+    service_type: Optional[str],
+) -> List[QueueActivity]:
+    query = db.query(QueueActivity).filter(QueueActivity.timestamp.between(start_date, end_date))
+    if branch_id:
+        query = query.filter(QueueActivity.branch_id == branch_id)
+    if service_type and service_type != DOCUMENT_REQUEST_SERVICE:
+        query = query.filter(hash_aware_match(QueueActivity, "service_type", service_type))
+    return query.order_by(QueueActivity.timestamp.asc()).all()
+
+
+def calculate_operational_statistics(activities: List[QueueActivity]) -> Dict[str, Any]:
+    if not activities:
+        return {
+            "total_snapshots": 0,
+            "average_waiting": 0.0,
+            "average_serving": 0.0,
+            "average_completed": 0.0,
+            "peak_waiting": 0,
+            "peak_serving": 0,
+            "peak_completed": 0,
+            "latest_snapshot_at": None,
+        }
+
+    total_snapshots = len(activities)
+    waiting_values = [activity.clients_waiting or 0 for activity in activities]
+    serving_values = [activity.clients_being_served or 0 for activity in activities]
+    completed_values = [activity.clients_completed or 0 for activity in activities]
+    latest_snapshot = max((activity.timestamp for activity in activities if activity.timestamp), default=None)
+
+    return {
+        "total_snapshots": total_snapshots,
+        "average_waiting": round(sum(waiting_values) / total_snapshots, 2),
+        "average_serving": round(sum(serving_values) / total_snapshots, 2),
+        "average_completed": round(sum(completed_values) / total_snapshots, 2),
+        "peak_waiting": max(waiting_values, default=0),
+        "peak_serving": max(serving_values, default=0),
+        "peak_completed": max(completed_values, default=0),
+        "latest_snapshot_at": latest_snapshot.isoformat() if latest_snapshot else None,
+    }
 
 
 def serialize_report_summary(report: Report) -> Dict[str, Any]:
@@ -287,7 +487,7 @@ def get_report_branch_id(db: Session, report: Report) -> Optional[int]:
         return report.branch_id
 
     if report.branch and report.branch != "All Branches":
-        branch = db.query(Branch).filter(Branch.name == report.branch).first()
+        branch = find_branch_by_display_name(db, report.branch)
         return branch.id if branch else None
 
     return None
@@ -408,7 +608,7 @@ def resolve_branch_selection(
         branch = db.query(Branch).filter(Branch.id == enforced_branch_id).first()
         if not branch:
             raise HTTPException(status_code=404, detail="Assigned branch not found.")
-        return branch.id, branch.name
+        return branch.id, get_branch_display_name(branch)
 
     if branch_value == "all":
         return None, "All Branches"
@@ -425,7 +625,7 @@ def resolve_branch_selection(
     if not branch:
         raise HTTPException(status_code=404, detail="Selected branch not found.")
 
-    return branch.id, branch.name
+    return branch.id, get_branch_display_name(branch)
 
 
 TABULAR_EXPORT_SECTIONS = {
@@ -494,6 +694,18 @@ def build_export_sections(report: Report, metrics: Dict[str, Any]) -> List[tuple
                 ["Pending Requests", metrics.get("receipt_requests", {}).get("pending_requests", 0)],
             ],
         ),
+        (
+            "Operational Statistics",
+            [
+                ["Queue Activity Snapshots", metrics.get("operational_statistics", {}).get("total_snapshots", 0)],
+                ["Average Waiting", metrics.get("operational_statistics", {}).get("average_waiting", 0)],
+                ["Average Serving", metrics.get("operational_statistics", {}).get("average_serving", 0)],
+                ["Average Completed", metrics.get("operational_statistics", {}).get("average_completed", 0)],
+                ["Peak Waiting", metrics.get("operational_statistics", {}).get("peak_waiting", 0)],
+                ["Peak Serving", metrics.get("operational_statistics", {}).get("peak_serving", 0)],
+                ["Peak Completed", metrics.get("operational_statistics", {}).get("peak_completed", 0)],
+            ],
+        ),
     ]
 
     service_rows = [["Service Activity", "Total", "Completed", "Success Rate (%)"]]
@@ -545,14 +757,15 @@ def build_export_sections(report: Report, metrics: Dict[str, Any]) -> List[tuple
 
 
 def build_daily_trend(
-    queues: List[Queue],
+    queues: List[Queue | QueueHistory],
     payments: List[Payment],
-    receipts: List[ReceiptRequest],
+    receipts: List[ReceiptRequest | ReceiptRequestHistory],
     start_date: datetime,
     end_date: datetime,
     *,
     use_receipts_for_clients: bool = False,
     use_receipts_for_transactions: bool = False,
+    include_receipt_transactions_in_totals: bool = False,
 ) -> List[Dict[str, Any]]:
     queue_counts = Counter()
     payment_counts = Counter()
@@ -560,8 +773,9 @@ def build_daily_trend(
     revenue_by_date: Dict[str, float] = {}
 
     for queue in queues:
-        if queue.created_at:
-            date_key = queue.created_at.date().isoformat()
+        created_at = queue_record_datetime(queue, "created_at")
+        if created_at:
+            date_key = created_at.date().isoformat()
             queue_counts[date_key] += 1
 
     for payment in payments:
@@ -572,8 +786,9 @@ def build_daily_trend(
                 revenue_by_date[date_key] = revenue_by_date.get(date_key, 0.0) + float(payment.amount or 0)
 
     for receipt in receipts:
-        if receipt.created_at:
-            date_key = receipt.created_at.date().isoformat()
+        created_at = receipt_record_datetime(receipt, "created_at")
+        if created_at:
+            date_key = created_at.date().isoformat()
             receipt_counts[date_key] += 1
             revenue_by_date[date_key] = revenue_by_date.get(date_key, 0.0) + get_receipt_request_amount(receipt)
 
@@ -585,7 +800,11 @@ def build_daily_trend(
         trend_rows.append({
             "date": date_key,
             "clients_served": receipt_counts.get(date_key, 0) if use_receipts_for_clients else queue_counts.get(date_key, 0),
-            "transactions": receipt_counts.get(date_key, 0) if use_receipts_for_transactions else payment_counts.get(date_key, 0),
+            "transactions": (
+                receipt_counts.get(date_key, 0)
+                if use_receipts_for_transactions
+                else payment_counts.get(date_key, 0) + (receipt_counts.get(date_key, 0) if include_receipt_transactions_in_totals else 0)
+            ),
             "revenue": round(revenue_by_date.get(date_key, 0.0), 2),
         })
         current_date += timedelta(days=1)
@@ -594,9 +813,9 @@ def build_daily_trend(
 
 
 def build_detailed_report_rows(
-    queues: List[Queue],
+    queues: List[Queue | QueueHistory],
     payments: List[Payment],
-    receipts: List[ReceiptRequest],
+    receipts: List[ReceiptRequest | ReceiptRequestHistory],
     *,
     include_queue_rows: bool = True,
     include_payment_rows: bool = True,
@@ -606,46 +825,48 @@ def build_detailed_report_rows(
 
     if include_queue_rows:
         for queue in queues:
+            created_at = queue_record_datetime(queue, "created_at")
             rows.append({
-                "reference": queue_value(queue, "queue_number") or f"QUEUE-{queue.id}",
-                "timestamp": to_iso_or_none(queue.created_at),
-                "date": queue.created_at.date().isoformat() if queue.created_at else None,
-                "time": format_record_time_label(queue.created_at),
-                "service_type": queue_value(queue, "service_type") or "Service Activity",
+                "reference": queue_record_value(queue, "queue_number") or f"QUEUE-{getattr(queue, 'id', 'unknown')}",
+                "timestamp": to_iso_or_none(created_at),
+                "date": created_at.date().isoformat() if created_at else None,
+                "time": format_record_time_label(created_at),
+                "service_type": queue_record_value(queue, "service_type") or "Service Activity",
                 "category": "Queue Service",
-                "status": queue_value(queue, "status") or "Unknown",
+                "status": queue_record_value(queue, "status") or "Unknown",
                 "amount": None,
-                "notes": f"{(queue_value(queue, 'queue_type') or 'Immediate').title()} queue for {queue_value(queue, 'taxpayer_name') or 'Walk-in taxpayer'}",
+                "notes": f"{(queue_record_value(queue, 'queue_type') or 'Immediate').title()} queue for {queue_record_value(queue, 'taxpayer_name') or 'Walk-in taxpayer'}",
                 "source_type": "Queue",
             })
 
     if include_payment_rows:
         for payment in payments:
             rows.append({
-                "reference": payment.ref_number or payment.txn_id or f"PAYMENT-{payment.id}",
+                "reference": payment_value(payment, "ref_number") or payment_value(payment, "txn_id") or f"PAYMENT-{payment.id}",
                 "timestamp": to_iso_or_none(payment.created_at),
                 "date": payment.created_at.date().isoformat() if payment.created_at else None,
                 "time": format_record_time_label(payment.created_at),
-                "service_type": payment.tax_type or "Payment",
-                "category": payment.tax_type or "Payment",
-                "status": payment.status or "Unknown",
+                "service_type": payment_value(payment, "tax_type") or "Payment",
+                "category": payment_value(payment, "tax_type") or "Payment",
+                "status": payment_value(payment, "status") or "Unknown",
                 "amount": float(payment.amount or 0),
-                "notes": f"{payment.payment_method or 'Payment method unavailable'} payment by {payment.taxpayer_name or 'Unknown taxpayer'}",
+                "notes": f"{payment_value(payment, 'payment_method') or 'Payment method unavailable'} payment by {payment_value(payment, 'taxpayer_name') or 'Unknown taxpayer'}",
                 "source_type": "Payment",
             })
 
     if include_receipt_rows:
         for receipt in receipts:
+            created_at = receipt_record_datetime(receipt, "created_at")
             rows.append({
-                "reference": receipt.request_id or receipt.payment_ref_number or f"RECEIPT-{receipt.id}",
-                "timestamp": to_iso_or_none(receipt.created_at),
-                "date": receipt.created_at.date().isoformat() if receipt.created_at else None,
-                "time": format_record_time_label(receipt.created_at),
+                "reference": receipt_record_value(receipt, "request_id") or receipt_record_value(receipt, "payment_ref_number") or f"RECEIPT-{getattr(receipt, 'id', 'unknown')}",
+                "timestamp": to_iso_or_none(created_at),
+                "date": created_at.date().isoformat() if created_at else None,
+                "time": format_record_time_label(created_at),
                 "service_type": DOCUMENT_REQUEST_SERVICE,
-                "category": receipt.tax_type or "Receipt Request",
-                "status": receipt.status or "Unknown",
-                "amount": get_receipt_request_amount(receipt) if receipt.fee_paid else None,
-                "notes": f"{normalize_receipt_request_type(receipt.request_type)} request for {receipt.taxpayer_name or 'Unknown taxpayer'}",
+                "category": receipt_record_value(receipt, "tax_type") or "Receipt Request",
+                "status": receipt_record_value(receipt, "status") or "Unknown",
+                "amount": get_receipt_request_amount(receipt) if getattr(receipt, "fee_paid", False) else None,
+                "notes": f"{normalize_receipt_request_type(receipt_record_value(receipt, 'request_type'))} request for {receipt_record_value(receipt, 'taxpayer_name') or 'Unknown taxpayer'}",
                 "source_type": "Receipt",
             })
 
@@ -1090,7 +1311,7 @@ def dispatch_due_automatic_branch_report(
         db=db,
         request=report_request,
         branch_id=branch.id,
-        branch_name=branch.name,
+        branch_name=get_branch_display_name(branch),
         actor_username=current_staff.username,
         dispatch_mode="automatic",
     )
@@ -1172,7 +1393,7 @@ def calculate_report_metrics_sync(
     transaction_category: Optional[str] = None
 ) -> Dict[str, Any]:
     """Calculate comprehensive operational metrics for the report"""
-    
+
     # Parse dates using an inclusive end-of-day range for date-only inputs
     start_date, end_date, normalized_date_from, normalized_date_to = parse_report_date_range(date_from, date_to)
     normalized_service_type = normalize_service_type(service_type)
@@ -1184,175 +1405,177 @@ def calculate_report_metrics_sync(
         or is_document_request_report
         or is_receipt_fee_report
     )
-    
-    # Build queries
-    queue_query = db.query(Queue).filter(
-        Queue.created_at.between(start_date, end_date)
+
+    branch = db.query(Branch).filter(Branch.id == branch_id).first() if branch_id else None
+
+    queue_records = [] if is_document_request_report else collect_queue_records(
+        db,
+        branch_id=branch_id,
+        start_date=start_date,
+        end_date=end_date,
+        service_type=normalized_service_type,
     )
-    payment_query = db.query(Payment).filter(
-        Payment.created_at.between(start_date, end_date)
-    )
-    receipt_query = db.query(ReceiptRequest).filter(
-        ReceiptRequest.created_at.between(start_date, end_date)
-    )
-    
-    # Apply branch filter
-    if branch_id:
-        queue_query = queue_query.filter(Queue.branch_id == branch_id)
-        receipt_query = receipt_query.filter(ReceiptRequest.branch_id == branch_id)
-        
-        # Get branch name for payment filtering
-        branch = db.query(Branch).filter(Branch.id == branch_id).first()
-        if branch:
-            branch_name = get_decrypted_or_raw(branch, "name") or branch.name
-            payment_query = payment_query.filter((Payment.branch == branch_name) | (Payment.branch_hash == hash_optional_value(branch_name)))
-    # When branch_id is None (All Branches), include all records without filtering
-    
-    # Apply service type filter
-    if normalized_service_type:
-        if is_document_request_report:
-            queue_query = queue_query.filter(False)
-        else:
-            queue_query = queue_query.filter(hash_aware_match(Queue, "service_type", normalized_service_type))
-    
-    # Apply transaction category filter
+
+    payment_query = db.query(Payment).filter(Payment.created_at.between(start_date, end_date))
+    if branch:
+        payment_query = payment_query.filter(build_payment_branch_filter(branch))
     if normalized_transaction_category:
         if is_receipt_fee_report:
             payment_query = payment_query.filter(False)
         else:
-            payment_query = payment_query.filter(Payment.tax_type == normalized_transaction_category)
-
-    if normalized_service_type and normalized_service_type != DOCUMENT_REQUEST_SERVICE and include_receipts_in_scope:
-        receipt_query = receipt_query.filter(ReceiptRequest.tax_type == normalized_service_type)
-
-    if not include_receipts_in_scope:
-        receipt_query = receipt_query.filter(False)
-    
-    # Get all records
-    queues = queue_query.all()
+            payment_query = payment_query.filter(hash_aware_match(Payment, "tax_type", normalized_transaction_category))
     payments = payment_query.all()
-    receipts = receipt_query.all()
-    
+
+    receipt_records = collect_receipt_records(
+        db,
+        branch_id=branch_id,
+        start_date=start_date,
+        end_date=end_date,
+        service_type=normalized_service_type,
+        include_receipts_in_scope=include_receipts_in_scope,
+    )
+    operational_activities = collect_queue_activity_records(
+        db,
+        branch_id=branch_id,
+        start_date=start_date,
+        end_date=end_date,
+        service_type=normalized_service_type,
+    )
+
     # Calculate clients served metrics
     if is_document_request_report:
-        total_clients = len(receipts)
-        clients_completed = len([r for r in receipts if is_completed_receipt_request(r.status)])
-        clients_waiting = len([r for r in receipts if is_pending_receipt_request(r.status)])
+        total_clients = len(receipt_records)
+        clients_completed = len([r for r in receipt_records if is_completed_receipt_request(receipt_record_value(r, "status"))])
+        clients_waiting = len([r for r in receipt_records if is_pending_receipt_request(receipt_record_value(r, "status"))])
         clients_serving = 0
     else:
-        total_clients = len(queues)
-        clients_completed = len([q for q in queues if queue_value(q, "status") == "Completed"])
-        clients_waiting = len([q for q in queues if queue_value(q, "status") == "Waiting"])
-        clients_serving = len([q for q in queues if queue_value(q, "status") == "Serving"])
+        total_clients = len(queue_records)
+        clients_completed = len([q for q in queue_records if (queue_record_value(q, "status") or "").lower() == "completed"])
+        clients_waiting = len([q for q in queue_records if (queue_record_value(q, "status") or "").lower() == "waiting"])
+        clients_serving = len([q for q in queue_records if (queue_record_value(q, "status") or "").lower() == "serving"])
 
     wait_times = []
     service_times = []
     if not is_document_request_report:
-        for queue in queues:
-            if queue.created_at and queue.served_at and queue.served_at >= queue.created_at:
-                wait_times.append((queue.served_at - queue.created_at).total_seconds() / 60)
-            elif queue.estimated_wait_time is not None:
-                wait_times.append(float(queue.estimated_wait_time))
+        for queue in queue_records:
+            created_at = queue_record_datetime(queue, "created_at")
+            served_at = queue_record_datetime(queue, "served_at")
+            completed_at = queue_record_datetime(queue, "completed_at")
+            estimated_wait_time = getattr(queue, "estimated_wait_time", None)
 
-            if queue.served_at and queue.completed_at and queue.completed_at >= queue.served_at:
-                service_times.append((queue.completed_at - queue.served_at).total_seconds() / 60)
-    
+            if created_at and served_at and served_at >= created_at:
+                wait_times.append((served_at - created_at).total_seconds() / 60)
+            elif estimated_wait_time is not None:
+                wait_times.append(float(estimated_wait_time))
+
+            if served_at and completed_at and completed_at >= served_at:
+                service_times.append((completed_at - served_at).total_seconds() / 60)
+
     # Calculate transaction volumes
     if is_document_request_report or is_receipt_fee_report:
-        total_transactions = len(receipts)
-        verified_transactions = len([r for r in receipts if r.fee_paid])
-        pending_transactions = len([r for r in receipts if not r.fee_paid and is_pending_receipt_request(r.status)])
+        total_transactions = len(receipt_records)
+        verified_transactions = len([r for r in receipt_records if bool(getattr(r, "fee_paid", False))])
+        pending_transactions = len([r for r in receipt_records if not getattr(r, "fee_paid", False) and is_pending_receipt_request(receipt_record_value(r, "status"))])
         failed_transactions = 0
-        total_amount = sum(get_receipt_request_amount(receipt) for receipt in receipts if receipt.fee_paid)
+        total_amount = sum(get_receipt_request_amount(receipt) for receipt in receipt_records if getattr(receipt, "fee_paid", False))
     else:
-        total_transactions = len(payments)
-        verified_transactions = len([p for p in payments if is_completed_payment(p.status)])
-        pending_transactions = len([p for p in payments if is_pending_payment(p.status)])
-        failed_transactions = len([p for p in payments if is_failed_payment(p.status)])
-        total_amount = sum((p.amount or 0) for p in payments if is_completed_payment(p.status))
-    
+        receipt_verified_transactions = len([r for r in receipt_records if bool(getattr(r, "fee_paid", False))]) if include_receipts_in_scope else 0
+        receipt_pending_transactions = len([r for r in receipt_records if not getattr(r, "fee_paid", False) and is_pending_receipt_request(receipt_record_value(r, "status"))]) if include_receipts_in_scope else 0
+        total_transactions = len(payments) + (len(receipt_records) if include_receipts_in_scope else 0)
+        verified_transactions = len([p for p in payments if is_completed_payment(payment_value(p, "status"))]) + receipt_verified_transactions
+        pending_transactions = len([p for p in payments if is_pending_payment(payment_value(p, "status"))]) + receipt_pending_transactions
+        failed_transactions = len([p for p in payments if is_failed_payment(payment_value(p, "status"))])
+        total_amount = (
+            sum((p.amount or 0) for p in payments if is_completed_payment(payment_value(p, "status")))
+            + (sum(get_receipt_request_amount(receipt) for receipt in receipt_records if getattr(receipt, "fee_paid", False)) if include_receipts_in_scope else 0)
+        )
+
     # Calculate service utilization by type
     service_breakdown = {}
     if is_document_request_report:
-        if receipts:
+        if receipt_records:
             service_breakdown[DOCUMENT_REQUEST_SERVICE] = {
-                "count": len(receipts),
-                "completed": len([r for r in receipts if is_completed_receipt_request(r.status)]),
+                "count": len(receipt_records),
+                "completed": len([r for r in receipt_records if is_completed_receipt_request(receipt_record_value(r, "status"))]),
             }
     else:
-        for queue in queues:
-            service = queue_value(queue, "service_type") or "Unknown"
+        for queue in queue_records:
+            service = queue_record_value(queue, "service_type") or "Unknown"
             # Exclude cedula services
             if service and "cedula" in service.lower():
                 continue
             if service not in service_breakdown:
                 service_breakdown[service] = {"count": 0, "completed": 0}
             service_breakdown[service]["count"] += 1
-            if queue_value(queue, "status") == "Completed":
+            if (queue_record_value(queue, "status") or "").lower() == "completed":
                 service_breakdown[service]["completed"] += 1
-    
+
     # Calculate transaction category breakdown
     category_breakdown = {}
     if is_document_request_report or is_receipt_fee_report:
-        if receipts:
+        if receipt_records:
             category_breakdown[RECEIPT_REQUEST_FEE_CATEGORY] = {
-                "count": len(receipts),
+                "count": len(receipt_records),
                 "amount": float(total_amount),
             }
     else:
         for payment in payments:
-            category = payment.tax_type or "Unknown"
+            category = payment_value(payment, "tax_type") or "Unknown"
             # Exclude cedula transactions
             if category and "cedula" in category.lower():
                 continue
             if category not in category_breakdown:
                 category_breakdown[category] = {"count": 0, "amount": 0}
             category_breakdown[category]["count"] += 1
-            if is_completed_payment(payment.status):
+            if is_completed_payment(payment_value(payment, "status")):
                 category_breakdown[category]["amount"] += payment.amount or 0
-    
+        if include_receipts_in_scope and receipt_records:
+            category_breakdown[RECEIPT_REQUEST_FEE_CATEGORY] = {
+                "count": len(receipt_records),
+                "amount": float(sum(get_receipt_request_amount(receipt) for receipt in receipt_records if getattr(receipt, "fee_paid", False))),
+            }
+
     # Calculate receipt request metrics
-    total_receipt_requests = len(receipts)
-    completed_receipts = len([r for r in receipts if is_completed_receipt_request(r.status)])
-    pending_receipts = len([r for r in receipts if is_pending_receipt_request(r.status)])
+    total_receipt_requests = len(receipt_records)
+    completed_receipts = len([r for r in receipt_records if is_completed_receipt_request(receipt_record_value(r, "status"))])
+    pending_receipts = len([r for r in receipt_records if is_pending_receipt_request(receipt_record_value(r, "status"))])
     receipt_status_breakdown: Dict[str, int] = {}
     receipt_type_breakdown = {"Immediate": 0, "Appointment": 0}
-    for receipt in receipts:
-        status_label = normalize_receipt_request_status(receipt.status)
+    for receipt in receipt_records:
+        status_label = normalize_receipt_request_status(receipt_record_value(receipt, "status"))
         receipt_status_breakdown[status_label] = receipt_status_breakdown.get(status_label, 0) + 1
 
-        type_label = normalize_receipt_request_type(receipt.request_type)
+        type_label = normalize_receipt_request_type(receipt_record_value(receipt, "request_type"))
         if type_label.lower() == "appointment":
             receipt_type_breakdown["Appointment"] += 1
         else:
             receipt_type_breakdown["Immediate"] += 1
-    
+
     # Calculate daily averages
     days_in_period = max((end_date.date() - start_date.date()).days + 1, 1)
     avg_clients_per_day = total_clients / days_in_period
     avg_transactions_per_day = total_transactions / days_in_period
-    
+
     # Calculate peak operating hours
-    peak_hours = calculate_peak_hours(receipts if is_document_request_report else queues)
-    
+    peak_hours = calculate_peak_hours(receipt_records if is_document_request_report else queue_records)
+
     # Calculate peak days
-    peak_days = calculate_peak_days(receipts if is_document_request_report else queues)
-    
+    peak_days = calculate_peak_days(receipt_records if is_document_request_report else queue_records)
+
     # Calculate operational problems by branch
     operational_problems = calculate_operational_problems(db, branch_id, start_date, end_date)
-    
+    operational_statistics = calculate_operational_statistics(operational_activities)
+
     # Get branch-specific data if filtering by branch
     branch_data = None
-    if branch_id:
-        branch = db.query(Branch).filter(Branch.id == branch_id).first()
-        if branch:
-            branch_data = {
-                "id": branch.id,
-                "name": branch.name,
-                "location": branch.location,
-                "counters": branch.counters,
-                "status": branch.status
-            }
+    if branch:
+        branch_data = {
+            "id": branch.id,
+            "name": get_branch_display_name(branch),
+            "location": branch.location,
+            "counters": branch.counters,
+            "status": branch.status
+        }
 
     historical_comparison = calculate_historical_comparison(
         db=db,
@@ -1367,21 +1590,22 @@ def calculate_report_metrics_sync(
         current_receipt_requests=total_receipt_requests,
     )
     detailed_rows = build_detailed_report_rows(
-        queues,
+        queue_records,
         payments,
-        receipts,
+        receipt_records,
         include_queue_rows=not is_document_request_report,
         include_payment_rows=not (is_document_request_report or is_receipt_fee_report),
         include_receipt_rows=include_receipts_in_scope,
     )
     daily_trend = build_daily_trend(
-        queues,
+        queue_records,
         payments,
-        receipts,
+        receipt_records,
         start_date,
         end_date,
         use_receipts_for_clients=is_document_request_report,
         use_receipts_for_transactions=(is_document_request_report or is_receipt_fee_report),
+        include_receipt_transactions_in_totals=(include_receipts_in_scope and not (is_document_request_report or is_receipt_fee_report)),
     )
     insights = build_report_insights(
         service_breakdown=service_breakdown,
@@ -1469,19 +1693,21 @@ def calculate_report_metrics_sync(
         "detailed_rows": detailed_rows,
         "insights": insights,
         "branch": branch_data,
+        "operational_statistics": operational_statistics,
         "peak_hours": peak_hours,
         "peak_operating_hours": peak_hours,
         "peak_days": peak_days,
         "operational_problems": operational_problems
     }
 
-def calculate_peak_hours(queues: List) -> Dict[str, Any]:
+def calculate_peak_hours(queues: List[Any]) -> Dict[str, Any]:
     """Calculate peak operating hours based on queue activity"""
     hour_counts = Counter()
     
     for queue in queues:
-        if queue.created_at:
-            hour = queue.created_at.hour
+        created_at = queue_record_datetime(queue, "created_at") if isinstance(queue, (Queue, QueueHistory)) else receipt_record_datetime(queue, "created_at")
+        if created_at:
+            hour = created_at.hour
             hour_counts[hour] += 1
     
     if not hour_counts:
@@ -1507,17 +1733,18 @@ def calculate_peak_hours(queues: List) -> Dict[str, Any]:
         "hourly_distribution": hourly_dist
     }
 
-def calculate_peak_days(queues: List) -> Dict[str, Any]:
+def calculate_peak_days(queues: List[Any]) -> Dict[str, Any]:
     """Calculate peak days based on queue activity"""
     day_counts = Counter()
     weekday_counts = Counter()
     
     for queue in queues:
-        if queue.created_at:
-            date_str = queue.created_at.strftime('%Y-%m-%d')
+        created_at = queue_record_datetime(queue, "created_at") if isinstance(queue, (Queue, QueueHistory)) else receipt_record_datetime(queue, "created_at")
+        if created_at:
+            date_str = created_at.strftime('%Y-%m-%d')
             day_counts[date_str] += 1
-            
-            weekday = queue.created_at.strftime('%A')
+
+            weekday = created_at.strftime('%A')
             weekday_counts[weekday] += 1
     
     if not day_counts:
@@ -1563,39 +1790,33 @@ def calculate_historical_comparison(
     is_receipt_fee_report = is_receipt_request_fee_category(transaction_category)
     include_receipts_in_scope = service_type is None or is_document_request_report or is_receipt_fee_report
 
-    queue_query = db.query(Queue).filter(Queue.created_at.between(previous_start, previous_end))
     payment_query = db.query(Payment).filter(Payment.created_at.between(previous_start, previous_end))
-    receipt_query = db.query(ReceiptRequest).filter(ReceiptRequest.created_at.between(previous_start, previous_end))
-
-    if branch_id:
-        queue_query = queue_query.filter(Queue.branch_id == branch_id)
-        receipt_query = receipt_query.filter(ReceiptRequest.branch_id == branch_id)
-        branch = db.query(Branch).filter(Branch.id == branch_id).first()
-        if branch:
-            branch_name = get_decrypted_or_raw(branch, "name") or branch.name
-            payment_query = payment_query.filter((Payment.branch == branch_name) | (Payment.branch_hash == hash_optional_value(branch_name)))
-
-    if service_type:
-        if is_document_request_report:
-            queue_query = queue_query.filter(False)
-        else:
-            queue_query = queue_query.filter(hash_aware_match(Queue, "service_type", service_type))
+    branch = db.query(Branch).filter(Branch.id == branch_id).first() if branch_id else None
+    if branch:
+        payment_query = payment_query.filter(build_payment_branch_filter(branch))
 
     if transaction_category:
         if is_receipt_fee_report:
             payment_query = payment_query.filter(False)
         else:
-            payment_query = payment_query.filter(Payment.tax_type == transaction_category)
+            payment_query = payment_query.filter(hash_aware_match(Payment, "tax_type", transaction_category))
 
-    if service_type and service_type != DOCUMENT_REQUEST_SERVICE and include_receipts_in_scope:
-        receipt_query = receipt_query.filter(ReceiptRequest.tax_type == service_type)
-
-    if not include_receipts_in_scope:
-        receipt_query = receipt_query.filter(False)
-
-    previous_queues = queue_query.all()
+    previous_queues = [] if is_document_request_report else collect_queue_records(
+        db,
+        branch_id=branch_id,
+        start_date=previous_start,
+        end_date=previous_end,
+        service_type=service_type,
+    )
     previous_payments = payment_query.all()
-    previous_receipts = receipt_query.all()
+    previous_receipts = collect_receipt_records(
+        db,
+        branch_id=branch_id,
+        start_date=previous_start,
+        end_date=previous_end,
+        service_type=service_type,
+        include_receipts_in_scope=include_receipts_in_scope,
+    )
 
     previous_clients = (
         len(previous_receipts)
@@ -1603,11 +1824,21 @@ def calculate_historical_comparison(
         else len(previous_queues)
     )
     if is_document_request_report or is_receipt_fee_report:
-        previous_completed_transactions = len([receipt for receipt in previous_receipts if receipt.fee_paid])
-        previous_total_amount = float(sum(get_receipt_request_amount(receipt) for receipt in previous_receipts if receipt.fee_paid))
+        previous_completed_transactions = len([receipt for receipt in previous_receipts if getattr(receipt, "fee_paid", False)])
+        previous_total_amount = float(sum(get_receipt_request_amount(receipt) for receipt in previous_receipts if getattr(receipt, "fee_paid", False)))
     else:
-        previous_completed_transactions = len([payment for payment in previous_payments if is_completed_payment(payment.status)])
-        previous_total_amount = float(sum((payment.amount or 0) for payment in previous_payments if is_completed_payment(payment.status)))
+        previous_completed_transactions = (
+            len([payment for payment in previous_payments if is_completed_payment(payment_value(payment, "status"))])
+            + (len([receipt for receipt in previous_receipts if getattr(receipt, "fee_paid", False)]) if include_receipts_in_scope else 0)
+        )
+        previous_total_amount = float(
+            sum((payment.amount or 0) for payment in previous_payments if is_completed_payment(payment_value(payment, "status")))
+            + (
+                sum(get_receipt_request_amount(receipt) for receipt in previous_receipts if getattr(receipt, "fee_paid", False))
+                if include_receipts_in_scope
+                else 0
+            )
+        )
     previous_receipt_requests = len(previous_receipts)
 
     def delta(current_value: float, previous_value: float) -> float:
@@ -1679,7 +1910,7 @@ def calculate_operational_problems(
         if not branch:
             continue
         
-        branch_name = branch.name
+        branch_name = get_branch_display_name(branch)
         if branch_name not in branch_problems:
             branch_problems[branch_name] = {
                 'branch_id': branch.id,
