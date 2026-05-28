@@ -772,11 +772,11 @@ const QueueManagement = () => {
           // Store last called queue for recall feature
           setLastCalledQueue({
             queue_number: calledQueue.queue_number,
-            service_type: calledQueue.service_type
+            service_window: calledQueue.service_window
           });
           
           // Voice announcement will play on Live Monitor
-          console.log(`Queue ${calledQueue.queue_number} called - announcement will play on Live Monitor`);
+          console.log(`Queue ${calledQueue.queue_number} called for window ${calledQueue.service_window} - announcement will play on Live Monitor`);
         }
         return;
       } else if (action === 'recall') {
@@ -798,14 +798,14 @@ const QueueManagement = () => {
           // Trigger recall announcement on Live Monitor using localStorage
           const recallTrigger = {
             queue_number: lastCalledQueue.queue_number,
-            service_type: lastCalledQueue.service_type,
+            service_window: lastCalledQueue.service_window,
             timestamp: Date.now(),
             action: 'recall'
           };
           localStorage.setItem('queue_announcement_trigger', JSON.stringify(recallTrigger));
           
           // Voice announcement will play on Live Monitor
-          console.log(`Queue ${lastCalledQueue.queue_number} recall triggered - announcement will play on Live Monitor`);
+          console.log(`Queue ${lastCalledQueue.queue_number} recall triggered for window ${lastCalledQueue.service_window} - announcement will play on Live Monitor`);
         } else {
           setError('No active queue available for recall.');
         }

@@ -75,12 +75,12 @@ const LiveQueueMonitor = () => {
         try {
           const trigger = JSON.parse(e.newValue);
           if (trigger.action === 'recall' && trigger.queue_number && !isAnnouncementPlaying) {
-            console.log(`Recall trigger received: ${trigger.queue_number}`);
+            console.log(`Recall trigger received: ${trigger.queue_number}, window: ${trigger.service_window}`);
             
             setIsAnnouncementPlaying(true);
             const playRecall = async () => {
               try {
-                await recallQueue(trigger.queue_number, trigger.service_type);
+                await recallQueue(trigger.queue_number, trigger.service_window);
               } catch (error) {
                 console.error('Recall announcement failed:', error);
               } finally {
@@ -107,12 +107,12 @@ const LiveQueueMonitor = () => {
         try {
           const trigger = JSON.parse(triggerData);
           if (trigger.action === 'recall' && trigger.queue_number) {
-            console.log(`Recall trigger found in localStorage: ${trigger.queue_number}`);
+            console.log(`Recall trigger found in localStorage: ${trigger.queue_number}, window: ${trigger.service_window}`);
             
             setIsAnnouncementPlaying(true);
             const playRecall = async () => {
               try {
-                await recallQueue(trigger.queue_number, trigger.service_type);
+                await recallQueue(trigger.queue_number, trigger.service_window);
               } catch (error) {
                 console.error('Recall announcement failed:', error);
               } finally {
@@ -160,16 +160,16 @@ const LiveQueueMonitor = () => {
         // Check if this is a recall (same queue announced again)
         const isRecall = lastAnnouncedQueueRef.current === queueNumber;
         
-        console.log(`${isRecall ? 'Recall' : 'New'} queue detected: ${queueNumber}, service: ${queue.service_type}`);
+        console.log(`${isRecall ? 'Recall' : 'New'} queue detected: ${queueNumber}, window: ${queue.service_window}`);
         
         setIsAnnouncementPlaying(true);
         
         const playAnnouncement = async () => {
           try {
             if (isRecall) {
-              await recallQueue(queueNumber, queue.service_type);
+              await recallQueue(queueNumber, queue.service_window);
             } else {
-              await announceQueue(queueNumber, queue.service_type);
+              await announceQueue(queueNumber, queue.service_window);
             }
             lastAnnouncedQueueRef.current = queueNumber;
           } catch (error) {
