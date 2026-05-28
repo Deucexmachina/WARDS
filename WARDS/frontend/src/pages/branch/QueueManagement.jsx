@@ -544,6 +544,22 @@ const QueueManagement = () => {
     setSkippedPage(1);
   }, [queueTypeFilter, statusFilter, dateFilter, timeSlotFilter, serviceTypeFilter, windowFilter, queueNumberFilter, searchFilter]);
 
+  // Clear lastCalledQueue if it's no longer in the active serving state
+  useEffect(() => {
+    if (lastCalledQueue && lastCalledQueue.queue_number) {
+      // Check if the last called queue still exists and is in serving/called status
+      const queueStillActive = queues.find(
+        (q) => q.queue_number === lastCalledQueue.queue_number && 
+               ['called', 'serving'].includes((q.status || '').toLowerCase())
+      );
+      
+      if (!queueStillActive) {
+        console.log(`Clearing recall state: ${lastCalledQueue.queue_number} is no longer active`);
+        setLastCalledQueue(null);
+      }
+    }
+  }, [queues, lastCalledQueue]);
+
   const windowOptions = useMemo(() => {
     const fromAccounts = managedWindowAccounts.map((account) => ({
       key: account.service_window,
@@ -603,6 +619,13 @@ const QueueManagement = () => {
       setCompletionError('');
       setCompletionNotice('');
       await api.post(`/branch/queue/${queue.id}/complete`);
+      
+      // Clear recall state if completing the last called queue
+      if (lastCalledQueue && lastCalledQueue.queue_number === queue.queue_number) {
+        console.log(`Clearing recall state: ${queue.queue_number} has been completed`);
+        setLastCalledQueue(null);
+      }
+      
       await fetchQueues();
       resetCompletionFlow();
       return true;
@@ -765,6 +788,19 @@ const QueueManagement = () => {
       } else if (action === 'recall') {
         // Recall (replay) the last called queue announcement
         if (lastCalledQueue && lastCalledQueue.queue_number) {
+          // Validate that the queue still exists and is in active serving state
+          const queueStillActive = queues.find(
+            (q) => q.queue_number === lastCalledQueue.queue_number && 
+                   ['called', 'serving'].includes((q.status || '').toLowerCase())
+          );
+          
+          if (!queueStillActive) {
+            console.warn(`Cannot recall ${lastCalledQueue.queue_number}: queue is no longer active`);
+            setLastCalledQueue(null);
+            setError('The queue is no longer active and cannot be recalled.');
+            return;
+          }
+          
           setIsAnnouncementPlaying(true);
           try {
             await recallQueue(lastCalledQueue.queue_number, lastCalledQueue.service_type);
@@ -773,6 +809,8 @@ const QueueManagement = () => {
           } finally {
             setIsAnnouncementPlaying(false);
           }
+        } else {
+          setError('No active queue available for recall.');
         }
         return;
       } else if (action === 'delete-skipped') {
@@ -799,6 +837,16 @@ const QueueManagement = () => {
       } else {
         await api.post(`/branch/queue/${queue.id}/${action}`);
       }
+      
+      // Clear recall state if the action affects the last called queue
+      if (lastCalledQueue && queue && lastCalledQueue.queue_number === queue.queue_number) {
+        const statusChangingActions = ['skip', 'serve', 'delete', 'cancel'];
+        if (statusChangingActions.includes(action)) {
+          console.log(`Clearing recall state: ${queue.queue_number} status changed by ${action}`);
+          setLastCalledQueue(null);
+        }
+      }
+      
       await fetchQueues();
       if (action === 'delete' || action === 'delete-history') {
         setQueueToDelete(null);
