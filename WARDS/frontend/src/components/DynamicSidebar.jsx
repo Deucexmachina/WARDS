@@ -290,13 +290,36 @@ const DynamicSidebar = () => {
         ? (JSON.parse(localStorage.getItem('adminUser') || '{}').internal_role || 'main_admin')
         : response.data.role;
 
-      setModules(response.data.modules?.length ? response.data.modules : getDefaultModules(resolvedRole));
+      setModules(ensureMainTaxCollectionModule(
+        response.data.modules?.length ? response.data.modules : getDefaultModules(resolvedRole),
+        resolvedRole,
+      ));
       setUserRole(resolvedRole);
     } catch (error) {
       console.error('Failed to fetch sidebar modules:', error);
       setUserRole(storedRole);
-      setModules(getDefaultModules(storedRole));
+      setModules(ensureMainTaxCollectionModule(getDefaultModules(storedRole), storedRole));
     }
+  };
+
+  const ensureMainTaxCollectionModule = (moduleList, role) => {
+    if (role !== 'main_admin' && role !== 'superadmin') {
+      return moduleList;
+    }
+    const hasTaxCollection = moduleList.some((module) => module.path === '/admin/payments' || module.name === 'Tax Collection');
+    if (hasTaxCollection) {
+      return moduleList;
+    }
+    const taxCollectionModule = { name: 'Tax Collection', path: '/admin/payments', icon: 'payments' };
+    const taxAssessmentIndex = moduleList.findIndex((module) => module.path === '/admin/tax-assessment' || module.name === 'Tax Assessment');
+    if (taxAssessmentIndex === -1) {
+      return [...moduleList, taxCollectionModule];
+    }
+    return [
+      ...moduleList.slice(0, taxAssessmentIndex + 1),
+      taxCollectionModule,
+      ...moduleList.slice(taxAssessmentIndex + 1),
+    ];
   };
 
   const getDefaultModules = (role) => {
@@ -305,6 +328,7 @@ const DynamicSidebar = () => {
         { name: 'Dashboard', path: '/admin', icon: 'dashboard' },
         { name: 'Manage Branches', path: '/admin/branches', icon: 'branches' },
         { name: 'Tax Assessment', path: '/admin/tax-assessment', icon: 'assessment' },
+        { name: 'Tax Collection', path: '/admin/payments', icon: 'payments' },
         { name: 'Branch Reports', path: '/admin/reports', icon: 'reports' },
         { name: 'Announcements', path: '/admin/announcements', icon: 'announcements' },
         { name: 'Internal Memos', path: '/admin/memos', icon: 'memos' },

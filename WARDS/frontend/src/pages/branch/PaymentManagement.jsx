@@ -446,6 +446,11 @@ const ConfirmationModal = ({
 
 const PaymentManagement = () => {
   const [payments, setPayments] = useState([]);
+  const [remittanceSummary, setRemittanceSummary] = useState(null);
+  const [remittances, setRemittances] = useState([]);
+  const [selectedRemittancePayments, setSelectedRemittancePayments] = useState([]);
+  const [remittanceReportFile, setRemittanceReportFile] = useState(null);
+  const [remitting, setRemitting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [draftFilters, setDraftFilters] = useState(() => createEmptyFilters());
   const [appliedFilters, setAppliedFilters] = useState(() => createEmptyFilters());
@@ -476,7 +481,11 @@ const PaymentManagement = () => {
 
   const fetchPayments = async () => {
     try {
-      const response = await api.get('/branch/payments');
+      const [response, summaryResponse, remittanceResponse] = await Promise.all([
+        api.get('/branch/payments'),
+        api.get('/branch/payments/remittances/summary'),
+        api.get('/branch/payments/remittances'),
+      ]);
       const normalizedPayments = [...(response.data || [])].sort((left, right) => {
         const leftTime = parsePaymentDate(left.verified_at || left.created_at)?.getTime() || 0;
         const rightTime = parsePaymentDate(right.verified_at || right.created_at)?.getTime() || 0;
@@ -484,10 +493,53 @@ const PaymentManagement = () => {
       });
 
       setPayments(normalizedPayments);
+      setRemittanceSummary(summaryResponse.data || null);
+      setRemittances(remittanceResponse.data || []);
+      setSelectedRemittancePayments((current) => {
+        const availableIds = new Set((summaryResponse.data?.available_payments || []).map((payment) => payment.id));
+        return current.filter((paymentId) => availableIds.has(paymentId));
+      });
     } catch (error) {
       console.error('Failed to fetch payments:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const toggleRemittancePayment = (paymentId) => {
+    setSelectedRemittancePayments((current) => (
+      current.includes(paymentId)
+        ? current.filter((id) => id !== paymentId)
+        : [...current, paymentId]
+    ));
+  };
+
+  const submitRemittance = async () => {
+    if (!selectedRemittancePayments.length) {
+      setFeedback({ type: 'error', message: 'Select at least one verified payment to remit to Main.' });
+      return;
+    }
+    if (!remittanceReportFile) {
+      setFeedback({ type: 'error', message: 'Upload the remittance report before submitting to Main.' });
+      return;
+    }
+    setRemitting(true);
+    try {
+      setFeedback({ type: '', message: '' });
+      const formData = new FormData();
+      formData.append('payment_ids', JSON.stringify(selectedRemittancePayments));
+      formData.append('report', remittanceReportFile);
+      const response = await api.post('/branch/payments/remittances/report', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setFeedback({ type: 'success', message: `Remittance ${response.data?.remittance_number || ''} submitted to Main.` });
+      setSelectedRemittancePayments([]);
+      setRemittanceReportFile(null);
+      fetchPayments();
+    } catch (error) {
+      setFeedback({ type: 'error', message: error.response?.data?.detail || error.message || 'Failed to submit remittance.' });
+    } finally {
+      setRemitting(false);
     }
   };
 
@@ -729,6 +781,13 @@ const PaymentManagement = () => {
       averageVerifiedValue: confirmed ? totalCollections / confirmed : 0,
     };
   }, [filteredPayments]);
+
+  const selectedRemittanceAmount = useMemo(() => {
+    const selected = new Set(selectedRemittancePayments);
+    return (remittanceSummary?.available_payments || [])
+      .filter((payment) => selected.has(payment.id))
+      .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  }, [remittanceSummary, selectedRemittancePayments]);
 
   const paymentMethodChartItems = useMemo(() => {
     return Object.entries(
@@ -1068,6 +1127,120 @@ const PaymentManagement = () => {
         <KpiCard icon="trend" label="Total Collections" value={formatCurrency(stats.totalCollections)} helper="Verified revenue only for the selected records" />
         <KpiCard icon="clock" label="Today's Payments" value={stats.todaysPayments} helper="Transactions created today in the current branch view" />
       </section>
+
+      <SectionCard
+        title="Remit To Main"
+        subtitle="Prepare secure remittance batches from verified branch collections. Submitted batches are locked until Main accepts or rejects them."
+        action={(
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 shadow-sm">
+            {formatCurrency(remittanceSummary?.available_amount)} available
+          </div>
+        )}
+      >
+        <div className="grid gap-4 md:grid-cols-3">
+          <KpiCard icon="wallet" label="Branch Cash Available" value={formatCurrency(remittanceSummary?.available_amount)} helper="Verified payments ready for remittance" />
+          <KpiCard icon="clock" label="Pending Main Review" value={formatCurrency(remittanceSummary?.pending_remittance_amount)} helper="Submitted remittances not yet accepted" />
+          <KpiCard icon="check" label="Already Remitted" value={formatCurrency(remittanceSummary?.remitted_amount)} helper="Accepted by Main collection account" />
+        </div>
+
+        <div className="mt-6 grid gap-6 xl:grid-cols-[1.4fr,1fr]">
+          <div className="overflow-x-auto rounded-2xl border border-slate-200">
+            <table className="min-w-full divide-y divide-slate-200 text-sm">
+              <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">Select</th>
+                  <th className="px-4 py-3">Reference</th>
+                  <th className="px-4 py-3">Taxpayer</th>
+                  <th className="px-4 py-3">Tax Type</th>
+                  <th className="px-4 py-3 text-right">Amount</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 bg-white">
+                {(remittanceSummary?.available_payments || []).map((payment) => (
+                  <tr key={payment.id}>
+                    <td className="px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedRemittancePayments.includes(payment.id)}
+                        onChange={() => toggleRemittancePayment(payment.id)}
+                        className="h-4 w-4 rounded border-slate-300"
+                      />
+                    </td>
+                    <td className="px-4 py-3 font-semibold text-slate-900">{payment.ref_number}</td>
+                    <td className="px-4 py-3 text-slate-600">{payment.taxpayer_name}</td>
+                    <td className="px-4 py-3 text-slate-600">{payment.tax_type}</td>
+                    <td className="px-4 py-3 text-right font-semibold text-slate-900">{formatCurrency(payment.amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!(remittanceSummary?.available_payments || []).length ? (
+              <div className="bg-white px-4 py-8 text-center text-sm text-slate-500">
+                No verified payments are currently available for remittance.
+              </div>
+            ) : null}
+          </div>
+
+          <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Remittance Batch</p>
+            <p className="mt-3 text-3xl font-bold text-slate-900">{formatCurrency(selectedRemittanceAmount)}</p>
+            <p className="mt-1 text-sm text-slate-600">{selectedRemittancePayments.length} selected payment{selectedRemittancePayments.length === 1 ? '' : 's'}</p>
+            <label className="mt-5 block">
+              <span className="mb-2 block text-sm font-semibold text-slate-700">Remittance Report</span>
+              <input
+                key={remittanceReportFile ? 'selected-remittance-report' : 'empty-remittance-report'}
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx"
+                onChange={(event) => setRemittanceReportFile(event.target.files?.[0] || null)}
+                className="w-full rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm shadow-sm file:mr-4 file:rounded-xl file:border-0 file:bg-[#0f2f5f] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-slate-200"
+              />
+              <span className="mt-2 block text-xs text-slate-500">
+                Accepted formats: PDF, JPG, PNG, DOC, DOCX, XLS, XLSX. Maximum 10MB.
+              </span>
+            </label>
+            <button
+              type="button"
+              onClick={submitRemittance}
+              disabled={remitting || !selectedRemittancePayments.length || !remittanceReportFile}
+              className="mt-4 w-full rounded-2xl bg-[#0f2f5f] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#174d85] disabled:opacity-60"
+            >
+              {remitting ? 'Submitting...' : 'Submit Remittance To Main'}
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-6 overflow-x-auto rounded-2xl border border-slate-200">
+          <table className="min-w-full divide-y divide-slate-200 text-sm">
+            <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+              <tr>
+                <th className="px-4 py-3">Remittance No.</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Payments</th>
+                <th className="px-4 py-3">Report</th>
+                <th className="px-4 py-3 text-right">Amount</th>
+                <th className="px-4 py-3">Submitted</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 bg-white">
+              {remittances.slice(0, 5).map((remittance) => (
+                <tr key={remittance.id}>
+                  <td className="px-4 py-3 font-semibold text-slate-900">{remittance.remittance_number}</td>
+                  <td className="px-4 py-3 text-slate-600">{remittance.status}</td>
+                  <td className="px-4 py-3 text-slate-600">{remittance.payment_count}</td>
+                  <td className="px-4 py-3 text-slate-600">{remittance.report_file_name || 'No report'}</td>
+                  <td className="px-4 py-3 text-right font-semibold text-slate-900">{formatCurrency(remittance.total_amount)}</td>
+                  <td className="px-4 py-3 text-slate-600">{formatPaymentDate(remittance.submitted_at, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!remittances.length ? (
+            <div className="bg-white px-4 py-8 text-center text-sm text-slate-500">
+              No remittance batches submitted yet.
+            </div>
+          ) : null}
+        </div>
+      </SectionCard>
 
       <SectionCard
         title="Filter And Search"

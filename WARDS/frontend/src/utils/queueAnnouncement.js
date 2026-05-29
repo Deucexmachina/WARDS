@@ -55,15 +55,15 @@ const getCharacterAudioPath = (char) => {
 };
 
 /**
- * Extract window number from service type
+ * Extract window number from service window
  * Examples: "RPT" -> 1, "BUSINESS" -> 2, "MISC" -> 3
  */
-const getWindowNumber = (serviceType) => {
-  if (!serviceType) return 1;
+const getWindowNumber = (serviceWindow) => {
+  if (!serviceWindow) return 1;
   
-  const serviceUpper = serviceType.toUpperCase();
+  const windowUpper = serviceWindow.toUpperCase();
   
-  // Map service types to window numbers
+  // Map service windows to window numbers
   const serviceWindowMap = {
     'RPT': 1,
     'REAL PROPERTY TAX': 1,
@@ -74,22 +74,22 @@ const getWindowNumber = (serviceType) => {
     'MISCELLANEOUS': 3,
   };
   
-  return serviceWindowMap[serviceUpper] || 1;
+  return serviceWindowMap[windowUpper] || 1;
 };
 
 /**
  * Play queue announcement with strict sequential playback
  * @param {string} queueNumber - Queue number (e.g., "LA-001")
- * @param {string} serviceType - Service type to determine window number
+ * @param {string} serviceWindow - Service window to determine window number
  * @returns {Promise} - Resolves when announcement completes
  */
-export const playQueueAnnouncement = async (queueNumber, serviceType) => {
+export const playQueueAnnouncement = async (queueNumber, serviceWindow) => {
   if (!queueNumber) {
     console.error('Queue number is required for announcement');
     return;
   }
 
-  console.log(`Starting announcement for queue: ${queueNumber}, service: ${serviceType}`);
+  console.log(`Starting announcement for queue: ${queueNumber}, window: ${serviceWindow}`);
 
   try {
     // 1. Play alert sound (normal speed)
@@ -118,7 +118,7 @@ export const playQueueAnnouncement = async (queueNumber, serviceType) => {
     await playAudio(`${VOICELINES_BASE}/phrases/proceed-window.mp3`, 1.2);
     
     // 6. Play window announcement (normal speed for clarity)
-    const windowNumber = getWindowNumber(serviceType);
+    const windowNumber = getWindowNumber(serviceWindow);
     console.log(`Step 5: Playing window ${windowNumber} announcement`);
     await playAudio(`${VOICELINES_BASE}/windows/window${windowNumber}.mp3`, 1.1);
     
@@ -137,10 +137,62 @@ let isAnnouncementPlaying = false;
 export const isAnnouncementActive = () => isAnnouncementPlaying;
 
 /**
+ * Play recall queue announcement with strict sequential playback
+ * @param {string} queueNumber - Queue number (e.g., "LA-001")
+ * @param {string} serviceWindow - Service window to determine window number
+ * @returns {Promise} - Resolves when announcement completes
+ */
+export const playRecallAnnouncement = async (queueNumber, serviceWindow) => {
+  if (!queueNumber) {
+    console.error('Queue number is required for recall announcement');
+    return;
+  }
+
+  console.log(`Starting RECALL announcement for queue: ${queueNumber}, window: ${serviceWindow}`);
+
+  try {
+    // 1. Play alert sound (normal speed)
+    console.log('Step 1: Playing alert sound');
+    await playAudio(`${VOICELINES_BASE}/alerts/dingdong.mp3`, 1.0);
+    
+    // 2. Play "recalling" phrase (slightly faster)
+    console.log('Step 2: Playing recalling phrase');
+    await playAudio(`${VOICELINES_BASE}/phrases/recalling.mp3`, 1.2);
+    
+    // 3. Split queue number into characters (remove dash)
+    const cleanedNumber = queueNumber.replace(/-/g, '');
+    const characters = cleanedNumber.split('');
+    console.log(`Step 3: Playing characters: ${characters.join(', ')}`);
+    
+    // 4. Play each character sequentially (faster for letters/numbers)
+    for (const char of characters) {
+      const audioPath = getCharacterAudioPath(char);
+      if (audioPath) {
+        await playAudio(audioPath, 1.4); // Faster for individual characters
+      }
+    }
+    
+    // 5. Play "proceed to window" phrase (slightly faster)
+    console.log('Step 4: Playing proceed-window phrase');
+    await playAudio(`${VOICELINES_BASE}/phrases/proceed-window.mp3`, 1.2);
+    
+    // 6. Play window announcement (normal speed for clarity)
+    const windowNumber = getWindowNumber(serviceWindow);
+    console.log(`Step 5: Playing window ${windowNumber} announcement`);
+    await playAudio(`${VOICELINES_BASE}/windows/window${windowNumber}.mp3`, 1.1);
+    
+    console.log(`✅ Recall announcement completed: ${queueNumber} -> Window ${windowNumber}`);
+  } catch (error) {
+    console.error('❌ Error during recall announcement:', error);
+    // Don't throw, just log the error
+  }
+};
+
+/**
  * Play queue announcement with state management
  */
-export const announceQueue = async (queueNumber, serviceType) => {
-  console.log(`🔊 announceQueue called with: ${queueNumber}, ${serviceType}`);
+export const announceQueue = async (queueNumber, serviceWindow) => {
+  console.log(`🔊 announceQueue called with: ${queueNumber}, window: ${serviceWindow}`);
   
   if (isAnnouncementPlaying) {
     console.warn('⚠️ Announcement already in progress, skipping...');
@@ -151,11 +203,35 @@ export const announceQueue = async (queueNumber, serviceType) => {
   console.log('🎵 Starting announcement playback...');
   
   try {
-    await playQueueAnnouncement(queueNumber, serviceType);
+    await playQueueAnnouncement(queueNumber, serviceWindow);
   } catch (error) {
     console.error('❌ Error in announceQueue:', error);
   } finally {
     isAnnouncementPlaying = false;
     console.log('🔇 Announcement playback finished');
+  }
+};
+
+/**
+ * Recall (replay) the last called queue announcement
+ */
+export const recallQueue = async (queueNumber, serviceWindow) => {
+  console.log(`🔁 recallQueue called with: ${queueNumber}, window: ${serviceWindow}`);
+  
+  if (isAnnouncementPlaying) {
+    console.warn('⚠️ Announcement already in progress, skipping recall...');
+    return;
+  }
+  
+  isAnnouncementPlaying = true;
+  console.log('🎵 Starting RECALL announcement playback...');
+  
+  try {
+    await playRecallAnnouncement(queueNumber, serviceWindow);
+  } catch (error) {
+    console.error('❌ Error in recallQueue:', error);
+  } finally {
+    isAnnouncementPlaying = false;
+    console.log('🔇 Recall announcement playback finished');
   }
 };

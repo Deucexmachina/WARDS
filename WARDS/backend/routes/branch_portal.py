@@ -2,18 +2,19 @@ from datetime import datetime, timedelta, timezone
 from io import BytesIO
 import json
 import os
+import re
 from pathlib import Path
 from typing import Optional
 
 from typing import List
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 
-from database.models import ActivityLog, Announcement, AnnouncementAttachment, AnnouncementView, Branch, BranchStaff, BusinessTaxApplication, Memo, MemoView, Payment, Policy, PolicyView, Queue, QueueHistory, ReceiptRequest, ReceiptRequestHistory, get_db
+from database.models import ActivityLog, Announcement, AnnouncementAttachment, AnnouncementView, Branch, BranchStaff, BusinessTaxApplication, CollectionAccount, Memo, MemoView, Payment, Policy, PolicyView, Queue, QueueHistory, ReceiptRequest, ReceiptRequestHistory, Remittance, RemittanceItem, get_db
 from middleware.branch_auth import get_current_branch_staff, require_any_branch_staff
 from utils.announcement_attachments import (
     enforce_attachment_limit,
@@ -29,6 +30,10 @@ from utils.branch_system_settings import get_branch_setting_value
 from utils.system_settings import SYSTEM_DISABLED_MESSAGE, get_setting_value
 
 router = APIRouter()
+REMITTANCE_REPORT_DIR = Path(__file__).resolve().parents[1] / "uploads" / "remittance_reports"
+REMITTANCE_REPORT_DIR.mkdir(parents=True, exist_ok=True)
+ALLOWED_REMITTANCE_REPORT_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".doc", ".docx", ".xls", ".xlsx"}
+MAX_REMITTANCE_REPORT_SIZE_BYTES = 10 * 1024 * 1024
 OUTPUT_DIR = Path(__file__).resolve().parents[1] / "output" / "payments" / "business-tax"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 MANILA_TIMEZONE = timezone(timedelta(hours=8))
@@ -52,6 +57,11 @@ class BranchAnnouncementPayload(BaseModel):
     icon_type: Optional[str] = "megaphone"
     icon_color: Optional[str] = "blue"
     is_active: Optional[bool] = True
+
+
+class BranchRemittanceCreatePayload(BaseModel):
+    payment_ids: List[int]
+    remarks: Optional[str] = None
 
 
 def normalize_payment_status(status_value: Optional[str]) -> str:
@@ -459,6 +469,209 @@ def get_branch_payments(current_staff: BranchStaff, branch: Branch, db: Session)
         if payment_belongs_to_branch(payment, branch, current_staff, db)
     ]
     return deduplicate_branch_payments(matched_payments)
+
+
+def get_or_create_collection_account(db: Session, *, owner_type: str, branch: Branch | None = None) -> CollectionAccount:
+    query = db.query(CollectionAccount).filter(CollectionAccount.owner_type == owner_type)
+    if owner_type == "branch":
+        if not branch:
+            raise HTTPException(status_code=400, detail="Branch account requires a branch.")
+        query = query.filter(CollectionAccount.branch_id == branch.id)
+    else:
+        query = query.filter(CollectionAccount.branch_id.is_(None))
+    account = query.first()
+    if account:
+        return account
+    account = CollectionAccount(
+        owner_type=owner_type,
+        branch_id=branch.id if branch else None,
+        account_name=f"{get_decrypted_or_raw(branch, 'name') or branch.name} Collection Account" if branch else "Main Collection Account",
+    )
+    db.add(account)
+    db.flush()
+    return account
+
+
+def is_payment_locked_for_remittance(db: Session, payment_id: int) -> bool:
+    return (
+        db.query(RemittanceItem)
+        .join(Remittance, Remittance.id == RemittanceItem.remittance_id)
+        .filter(
+            RemittanceItem.payment_id == payment_id,
+            Remittance.status.in_(["Submitted", "Accepted"]),
+        )
+        .first()
+        is not None
+    )
+
+
+def get_branch_remittance_item_statuses(db: Session, payment_ids: list[int]) -> dict[int, str]:
+    if not payment_ids:
+        return {}
+    rows = (
+        db.query(RemittanceItem, Remittance)
+        .join(Remittance, Remittance.id == RemittanceItem.remittance_id)
+        .filter(RemittanceItem.payment_id.in_(payment_ids))
+        .order_by(RemittanceItem.created_at.desc())
+        .all()
+    )
+    statuses: dict[int, str] = {}
+    for item, remittance in rows:
+        statuses.setdefault(item.payment_id, remittance.status)
+    return statuses
+
+
+def serialize_remittance(db: Session, remittance: Remittance) -> dict:
+    branch = db.query(Branch).filter(Branch.id == remittance.branch_id).first()
+    items = list(remittance.items or [])
+    return {
+        "id": remittance.id,
+        "remittance_number": remittance.remittance_number,
+        "branch_id": remittance.branch_id,
+        "branch_name": get_decrypted_or_raw(branch, "name") or branch.name if branch else f"Branch {remittance.branch_id}",
+        "total_amount": float(remittance.total_amount or 0),
+        "payment_count": remittance.payment_count or len(items),
+        "status": remittance.status,
+        "remarks": remittance.remarks,
+        "report_file_name": remittance.report_file_name,
+        "submitted_by": remittance.submitted_by,
+        "reviewed_by": remittance.reviewed_by,
+        "submitted_at": serialize_manila_datetime(remittance.submitted_at),
+        "reviewed_at": serialize_manila_datetime(remittance.reviewed_at),
+        "items": [
+            {
+                "id": item.id,
+                "payment_id": item.payment_id,
+                "amount": float(item.amount or 0),
+                "ref_number": get_decrypted_or_raw(item.payment, "ref_number") or item.payment.ref_number if item.payment else None,
+                "taxpayer_name": get_decrypted_or_raw(item.payment, "taxpayer_name") or item.payment.taxpayer_name if item.payment else None,
+                "tax_type": get_decrypted_or_raw(item.payment, "tax_type") or item.payment.tax_type if item.payment else None,
+            }
+            for item in items
+        ],
+    }
+
+
+async def store_remittance_report_file(file: UploadFile, remittance_number: str) -> tuple[str, str, str | None]:
+    original_name = (file.filename or "").strip()
+    extension = Path(original_name).suffix.lower()
+    if extension not in ALLOWED_REMITTANCE_REPORT_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail="Upload a valid remittance report file: PDF, JPG, PNG, DOC, DOCX, XLS, or XLSX.",
+        )
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Remittance report file is required.")
+    if len(file_bytes) > MAX_REMITTANCE_REPORT_SIZE_BYTES:
+        raise HTTPException(status_code=400, detail="Maximum remittance report file size is 10MB.")
+
+    safe_original = re.sub(r"[^A-Za-z0-9._-]+", "_", original_name).strip("._") or f"remittance-report{extension}"
+    safe_remittance = re.sub(r"[^A-Za-z0-9-]+", "-", remittance_number).strip("-") or "remittance"
+    stored_name = f"{safe_remittance}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{safe_original}"
+    destination = REMITTANCE_REPORT_DIR / stored_name
+    destination.write_bytes(file_bytes)
+    return str(destination), original_name or safe_original, file.content_type
+
+
+def create_branch_remittance_record(
+    db: Session,
+    current_staff: BranchStaff,
+    branch: Branch,
+    payment_ids: list[int],
+    remarks: str | None = None,
+    report_file_path: str | None = None,
+    report_file_name: str | None = None,
+    report_file_mime: str | None = None,
+    remittance_number: str | None = None,
+) -> Remittance:
+    unique_payment_ids = sorted({int(payment_id) for payment_id in payment_ids or []})
+    if not unique_payment_ids:
+        raise HTTPException(status_code=400, detail="Select at least one verified payment to remit.")
+
+    candidate_payments = get_branch_payments(current_staff, branch, db)
+    payment_lookup = {payment.id: payment for payment in candidate_payments}
+    selected_payments = []
+    for payment_id in unique_payment_ids:
+        payment = payment_lookup.get(payment_id)
+        if not payment:
+            raise HTTPException(status_code=404, detail=f"Payment #{payment_id} is not available for this branch.")
+        if get_effective_payment_status(payment) != "confirmed":
+            raise HTTPException(status_code=400, detail=f"Payment #{payment_id} is not verified yet.")
+        if is_payment_locked_for_remittance(db, payment.id):
+            raise HTTPException(status_code=409, detail=f"Payment #{payment_id} is already included in an active remittance.")
+        selected_payments.append(payment)
+
+    total_amount = sum(float(payment.amount or 0) for payment in selected_payments)
+    remittance_number = remittance_number or f"REM-{current_staff.branch_id}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+    remittance = Remittance(
+        remittance_number=remittance_number,
+        branch_id=current_staff.branch_id,
+        total_amount=total_amount,
+        payment_count=len(selected_payments),
+        status="Submitted",
+        remarks=(remarks or "").strip() or None,
+        report_file_path=report_file_path,
+        report_file_name=report_file_name,
+        report_file_mime=report_file_mime,
+        submitted_by=current_staff.username,
+        submitted_at=datetime.utcnow(),
+    )
+    db.add(remittance)
+    db.flush()
+    for payment in selected_payments:
+        db.add(RemittanceItem(
+            remittance_id=remittance.id,
+            payment_id=payment.id,
+            branch_id=current_staff.branch_id,
+            amount=float(payment.amount or 0),
+            status="Submitted",
+        ))
+
+    branch_account = get_or_create_collection_account(db, owner_type="branch", branch=branch)
+    branch_account.current_balance = max(0.0, float(branch_account.current_balance or 0) - total_amount)
+    branch_account.total_remitted = float(branch_account.total_remitted or 0) + total_amount
+    branch_account.updated_at = datetime.utcnow()
+    log_branch_action(db, current_staff, "Remittance Submitted", f"Submitted {remittance_number} for {format_currency(total_amount)}")
+    return remittance
+
+
+def branch_collection_summary(db: Session, branch: Branch, payments: list[Payment]) -> dict:
+    account = get_or_create_collection_account(db, owner_type="branch", branch=branch)
+    confirmed_payments = [payment for payment in payments if get_effective_payment_status(payment) == "confirmed"]
+    statuses = get_branch_remittance_item_statuses(db, [payment.id for payment in confirmed_payments])
+    available = [payment for payment in confirmed_payments if statuses.get(payment.id) not in {"Submitted", "Accepted"}]
+    submitted = [payment for payment in confirmed_payments if statuses.get(payment.id) == "Submitted"]
+    accepted = [payment for payment in confirmed_payments if statuses.get(payment.id) == "Accepted"]
+    total_collected = sum(float(payment.amount or 0) for payment in confirmed_payments)
+    pending_amount = sum(float(payment.amount or 0) for payment in submitted)
+    remitted_amount = sum(float(payment.amount or 0) for payment in accepted)
+    available_amount = sum(float(payment.amount or 0) for payment in available)
+    account.total_collected = total_collected
+    account.total_remitted = remitted_amount
+    account.current_balance = available_amount
+    account.updated_at = datetime.utcnow()
+    return {
+        "account": {
+            "id": account.id,
+            "account_name": account.account_name,
+            "owner_type": account.owner_type,
+            "branch_id": account.branch_id,
+            "current_balance": account.current_balance,
+            "total_collected": account.total_collected,
+            "total_remitted": account.total_remitted,
+        },
+        "available_amount": available_amount,
+        "pending_remittance_amount": pending_amount,
+        "remitted_amount": remitted_amount,
+        "verified_collection_amount": total_collected,
+        "available_count": len(available),
+        "pending_count": len(submitted),
+        "remitted_count": len(accepted),
+        "available_payments": available,
+        "payment_remittance_statuses": statuses,
+    }
 
 
 def serialize_branch_policy(policy: Policy, current_username: str | None = None, db: Session | None = None):
@@ -930,6 +1143,7 @@ async def list_branch_payments(
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
     payments = get_branch_payments(current_staff, branch, db)
+    remittance_statuses = get_branch_remittance_item_statuses(db, [payment.id for payment in payments])
     log_branch_action(db, current_staff, "Payments Viewed", f"Viewed {branch.name} payments")
     db.commit()
     serialized = []
@@ -951,6 +1165,7 @@ async def list_branch_payments(
             "payment_method": get_decrypted_or_raw(payment, "payment_method") or payment.payment_method,
             "branch": get_decrypted_or_raw(payment, "branch") or payment.branch,
             "status": get_effective_payment_status(payment),
+            "remittance_status": remittance_statuses.get(payment.id, "Available" if get_effective_payment_status(payment) == "confirmed" else "Not Eligible"),
             "workflow_status": payment.status,
             "tin": get_decrypted_or_raw(payment, "tin") or payment.tin,
             "email": get_decrypted_or_raw(payment, "email") or payment.email,
@@ -991,6 +1206,102 @@ async def list_branch_payments(
             } if bt_application else None,
         })
     return serialized
+
+
+@router.get("/payments/remittances/summary")
+async def get_branch_remittance_summary(
+    current_staff: BranchStaff = Depends(get_current_branch_staff),
+    db: Session = Depends(get_db),
+):
+    branch = db.query(Branch).filter(Branch.id == current_staff.branch_id).first()
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    payments = get_branch_payments(current_staff, branch, db)
+    summary = branch_collection_summary(db, branch, payments)
+    db.commit()
+    return {
+        **{key: value for key, value in summary.items() if key not in {"available_payments", "payment_remittance_statuses"}},
+        "available_payments": [
+            {
+                "id": payment.id,
+                "ref_number": get_decrypted_or_raw(payment, "ref_number") or payment.ref_number,
+                "taxpayer_name": get_decrypted_or_raw(payment, "taxpayer_name") or payment.taxpayer_name,
+                "tax_type": get_decrypted_or_raw(payment, "tax_type") or payment.tax_type,
+                "amount": float(payment.amount or 0),
+                "verified_at": to_utc_iso(payment.verified_at),
+            }
+            for payment in summary["available_payments"]
+        ],
+    }
+
+
+@router.get("/payments/remittances")
+async def list_branch_remittances(
+    current_staff: BranchStaff = Depends(get_current_branch_staff),
+    db: Session = Depends(get_db),
+):
+    remittances = (
+        db.query(Remittance)
+        .filter(Remittance.branch_id == current_staff.branch_id)
+        .order_by(Remittance.submitted_at.desc(), Remittance.id.desc())
+        .all()
+    )
+    return [serialize_remittance(db, remittance) for remittance in remittances]
+
+
+@router.post("/payments/remittances")
+async def create_branch_remittance(
+    payload: BranchRemittanceCreatePayload,
+    current_staff: BranchStaff = Depends(get_current_branch_staff),
+    db: Session = Depends(get_db),
+):
+    branch = db.query(Branch).filter(Branch.id == current_staff.branch_id).first()
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    remittance = create_branch_remittance_record(db, current_staff, branch, payload.payment_ids, payload.remarks)
+    db.commit()
+    db.refresh(remittance)
+    return serialize_remittance(db, remittance)
+
+
+@router.post("/payments/remittances/report")
+async def create_branch_remittance_with_report(
+    payment_ids: str = Form(...),
+    report: UploadFile = File(...),
+    current_staff: BranchStaff = Depends(get_current_branch_staff),
+    db: Session = Depends(get_db),
+):
+    branch = db.query(Branch).filter(Branch.id == current_staff.branch_id).first()
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    try:
+        parsed_payment_ids = json.loads(payment_ids)
+    except json.JSONDecodeError:
+        parsed_payment_ids = [value.strip() for value in payment_ids.split(",") if value.strip()]
+    if not isinstance(parsed_payment_ids, list):
+        raise HTTPException(status_code=400, detail="Invalid payment selection.")
+
+    remittance_number = f"REM-{current_staff.branch_id}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+    report_file_path, report_file_name, report_file_mime = await store_remittance_report_file(report, remittance_number)
+    try:
+        remittance = create_branch_remittance_record(
+            db,
+            current_staff,
+            branch,
+            parsed_payment_ids,
+            remarks=f"Remittance report uploaded: {report_file_name}",
+            report_file_path=report_file_path,
+            report_file_name=report_file_name,
+            report_file_mime=report_file_mime,
+            remittance_number=remittance_number,
+        )
+        db.commit()
+        db.refresh(remittance)
+        return serialize_remittance(db, remittance)
+    except Exception:
+        if report_file_path and os.path.exists(report_file_path):
+            os.remove(report_file_path)
+        raise
 
 
 @router.put("/payments/{payment_id}/verify")

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import api from '../../services/api';
 import { discrepancyAPI } from '../../services/api';
 import { formatUtc8DateTime, formatUtc8Time } from '../../utils/dateTime';
@@ -205,6 +205,36 @@ const Dashboard = () => {
   );
 
   const formatCurrency = (value) => `PHP ${Number(value || 0).toLocaleString()}`;
+  const recentPayments = stats?.payments?.recent_payments || [];
+  const paymentBranchGroups = useMemo(() => (
+    recentPayments.reduce((groups, payment) => {
+      const branchName = payment.branch_name || 'Unassigned Branch';
+      if (!groups[branchName]) {
+        groups[branchName] = {
+          branchName,
+          payments: [],
+          totalAmount: 0,
+          verifiedCount: 0,
+          pendingCount: 0,
+          failedCount: 0,
+        };
+      }
+      const normalizedStatus = String(payment.status || '').trim().toLowerCase();
+      groups[branchName].payments.push(payment);
+      groups[branchName].totalAmount += Number(payment.amount || 0);
+      if (['confirmed', 'verified', 'paid', 'successful', 'success'].includes(normalizedStatus)) {
+        groups[branchName].verifiedCount += 1;
+      } else if (['pending', 'processing'].includes(normalizedStatus)) {
+        groups[branchName].pendingCount += 1;
+      } else {
+        groups[branchName].failedCount += 1;
+      }
+      return groups;
+    }, {})
+  ), [recentPayments]);
+  const paymentBranchSections = Object.values(paymentBranchGroups).sort((left, right) => (
+    right.totalAmount - left.totalAmount || left.branchName.localeCompare(right.branchName)
+  ));
   const recentDiscrepancies = discrepancies.slice(0, 5);
   const pendingDiscrepancies = discrepancies.filter((report) => report.status === 'Pending Review').length;
   const verifiedDiscrepancies = discrepancies.filter((report) => report.status === 'Verified').length;
@@ -533,104 +563,105 @@ const Dashboard = () => {
         </div>
       </div>
 
-      <div className="mb-6 rounded-xl bg-white p-6 shadow-lg">
-        <h3 className="mb-4 text-xl font-bold text-primary">Online Payment Activity</h3>
+      <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-lg shadow-slate-200/70">
+        <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-500">Payment Monitor</p>
+            <h3 className="mt-2 text-2xl font-black text-primary">Online Payment Activity</h3>
+            <p className="mt-1 text-sm text-slate-500">Recent online collections are grouped by branch for cleaner review.</p>
+          </div>
+          <span className="rounded-full bg-slate-100 px-4 py-2 text-xs font-bold text-slate-600">
+            {recentPayments.length} recent records
+          </span>
+        </div>
         <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-4">
-          <div className="rounded-lg bg-blue-50 p-4">
-            <p className="mb-1 text-sm text-gray-600">Total Payments Today</p>
-            <p className="text-2xl font-bold text-blue-600">
+          <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4">
+            <p className="mb-1 text-sm font-medium text-slate-600">Total Payments Today</p>
+            <p className="text-3xl font-black text-blue-600">
               {formatCurrency(stats?.payments?.total_amount)}
             </p>
           </div>
-          <div className="rounded-lg bg-yellow-50 p-4">
-            <p className="mb-1 text-sm text-gray-600">Pending Verification</p>
-            <p className="text-2xl font-bold text-yellow-600">
+          <div className="rounded-2xl border border-amber-100 bg-amber-50 p-4">
+            <p className="mb-1 text-sm font-medium text-slate-600">Pending Verification</p>
+            <p className="text-3xl font-black text-amber-600">
               {stats?.payments?.pending_count || 0}
             </p>
           </div>
-          <div className="rounded-lg bg-green-50 p-4">
-            <p className="mb-1 text-sm text-gray-600">Confirmed</p>
-            <p className="text-2xl font-bold text-green-600">
+          <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
+            <p className="mb-1 text-sm font-medium text-slate-600">Confirmed</p>
+            <p className="text-3xl font-black text-emerald-600">
               {stats?.payments?.confirmed_count || 0}
             </p>
           </div>
-          <div className="rounded-lg bg-red-50 p-4">
-            <p className="mb-1 text-sm text-gray-600">Failed</p>
-            <p className="text-2xl font-bold text-red-600">
+          <div className="rounded-2xl border border-rose-100 bg-rose-50 p-4">
+            <p className="mb-1 text-sm font-medium text-slate-600">Failed</p>
+            <p className="text-3xl font-black text-rose-600">
               {stats?.payments?.failed_count || 0}
             </p>
           </div>
         </div>
 
-        {stats?.payments?.recent_payments?.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="min-w-full">
-              <thead>
-                <tr className="bg-gray-50">
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase text-gray-500">
-                    Transaction ID
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase text-gray-500">
-                    Branch
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase text-gray-500">
-                    Taxpayer
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase text-gray-500">
-                    Amount
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase text-gray-500">
-                    Status
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase text-gray-500">
-                    Time
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase text-gray-500">
-                    Action
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200 bg-white">
-                {stats.payments.recent_payments.map((payment) => (
-                  <tr key={payment.id}>
-                    <td className="whitespace-nowrap px-6 py-4 font-mono text-sm">
-                      {payment.transaction_id}
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-700">
-                      {payment.branch_name}
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-4">{payment.taxpayer_name}</td>
-                    <td className="whitespace-nowrap px-6 py-4 font-semibold">
-                      {formatCurrency(payment.amount)}
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-4">
-                      <span
-                        className={`rounded-full px-2 py-1 text-xs font-semibold ${getPaymentStatusClasses(payment.status)}`}
-                      >
-                        {payment.status}
-                      </span>
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">
-                      {formatUtc8Time(payment.created_at)}
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-4">
-                      {String(payment.status || '').trim().toLowerCase() === 'pending' ? (
-                        <button
-                          type="button"
-                          onClick={() => handleDeletePendingPayment(payment)}
-                          disabled={deletingPaymentId === payment.id}
-                          className="rounded-md bg-red-50 px-3 py-1 text-xs font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {deletingPaymentId === payment.id ? 'Removing...' : 'Remove'}
-                        </button>
-                      ) : (
-                        <span className="text-xs text-gray-400">-</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {paymentBranchSections.length > 0 && (
+          <div className="space-y-4">
+            {paymentBranchSections.map((branchGroup) => (
+              <section key={branchGroup.branchName} className="overflow-hidden rounded-2xl border border-slate-200">
+                <div className="flex flex-col gap-3 bg-slate-50 px-5 py-4 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Branch Collection</p>
+                    <h4 className="mt-1 text-lg font-black text-[#0f2f5f]">{branchGroup.branchName}</h4>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs font-bold text-slate-600 sm:grid-cols-4">
+                    <span className="rounded-full bg-white px-3 py-2 ring-1 ring-slate-200">{branchGroup.payments.length} records</span>
+                    <span className="rounded-full bg-white px-3 py-2 ring-1 ring-slate-200">{formatCurrency(branchGroup.totalAmount)}</span>
+                    <span className="rounded-full bg-emerald-50 px-3 py-2 text-emerald-700 ring-1 ring-emerald-100">{branchGroup.verifiedCount} verified</span>
+                    <span className="rounded-full bg-rose-50 px-3 py-2 text-rose-700 ring-1 ring-rose-100">{branchGroup.failedCount} failed</span>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full">
+                    <thead>
+                      <tr className="bg-white">
+                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Transaction ID</th>
+                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Taxpayer</th>
+                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Amount</th>
+                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Status</th>
+                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Time</th>
+                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {branchGroup.payments.map((payment) => (
+                        <tr key={payment.id} className="hover:bg-slate-50">
+                          <td className="whitespace-nowrap px-5 py-4 font-mono text-sm text-slate-900">{payment.transaction_id}</td>
+                          <td className="whitespace-nowrap px-5 py-4 font-semibold text-slate-900">{payment.taxpayer_name}</td>
+                          <td className="whitespace-nowrap px-5 py-4 font-bold text-slate-950">{formatCurrency(payment.amount)}</td>
+                          <td className="whitespace-nowrap px-5 py-4">
+                            <span className={`rounded-full px-2 py-1 text-xs font-semibold ${getPaymentStatusClasses(payment.status)}`}>
+                              {payment.status}
+                            </span>
+                          </td>
+                          <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-500">{formatUtc8Time(payment.created_at)}</td>
+                          <td className="whitespace-nowrap px-5 py-4">
+                            {String(payment.status || '').trim().toLowerCase() === 'pending' ? (
+                              <button
+                                type="button"
+                                onClick={() => handleDeletePendingPayment(payment)}
+                                disabled={deletingPaymentId === payment.id}
+                                className="rounded-md bg-red-50 px-3 py-1 text-xs font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {deletingPaymentId === payment.id ? 'Removing...' : 'Remove'}
+                              </button>
+                            ) : (
+                              <span className="text-xs text-slate-400">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            ))}
           </div>
         )}
       </div>

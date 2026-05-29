@@ -20,11 +20,15 @@ from database.models import (
     BusinessRegistry,
     BusinessTaxApplication,
     CitizenUser,
+    CollectionAccount,
     Payment,
     ReceiptRequest,
+    Remittance,
+    RemittanceItem,
     TaxAssessmentRecord,
     get_db,
 )
+from middleware.admin_auth import require_main_admin
 from middleware.user_auth import get_current_user
 from services.email_service import send_payment_receipt_email
 from services.paymongo import paymongo_service
@@ -156,6 +160,10 @@ class PayMongoWebhookPayload(BaseModel):
     data: dict
 
 
+class RemittanceReviewPayload(BaseModel):
+    remarks: str | None = None
+
+
 class RptCartItem(BaseModel):
     tdn: str
     taxpayer_name: str
@@ -262,6 +270,22 @@ def payment_value(payment: Payment, field_name: str):
     return get_decrypted_or_raw(payment, field_name) or getattr(payment, field_name, None)
 
 
+def resolve_payment_branch_name(payment: Payment) -> str | None:
+    branch = getattr(payment, "branch_record", None)
+    if branch:
+        branch_name = get_decrypted_or_raw(branch, "name") or branch.name
+        if branch_name:
+            return branch_name
+    branch_name = payment_value(payment, "branch")
+    if branch_name and branch_name.strip().upper() != "BRANCH_NAME":
+        return branch_name
+    metadata = parse_payment_metadata(payment)
+    selected_branch_name = (metadata.get("selected_branch_name") or "").strip()
+    if selected_branch_name and selected_branch_name.upper() != "BRANCH_NAME":
+        return selected_branch_name
+    return None
+
+
 def to_utc_iso(value: datetime | None) -> str | None:
     if value is None:
         return None
@@ -288,7 +312,9 @@ def serialize_payment(payment: Payment):
         "payment_method": payment_value(payment, "payment_method"),
         "status": normalize_payment_status(payment.status),
         "workflow_status": payment.status,
-        "branch": payment_value(payment, "branch"),
+        "branch": resolve_payment_branch_name(payment) or payment_value(payment, "branch"),
+        "branch_id": payment.branch_id,
+        "branch_name": resolve_payment_branch_name(payment),
         "source_module": payment.source_module or "tax_payment",
         "related_request_id": payment.related_request_id,
         "paymongo_checkout_session_id": payment_value(payment, "paymongo_checkout_session_id"),
@@ -313,6 +339,56 @@ def serialize_payment(payment: Payment):
         "verified_at": to_utc_iso(payment.verified_at),
         "payment_expiry": to_utc_iso(payment.payment_expiry),
         "receipt_sent_at": to_utc_iso(payment.receipt_sent_at),
+    }
+
+
+def get_or_create_main_collection_account(db: Session) -> CollectionAccount:
+    account = (
+        db.query(CollectionAccount)
+        .filter(CollectionAccount.owner_type == "main", CollectionAccount.branch_id.is_(None))
+        .first()
+    )
+    if account:
+        return account
+    account = CollectionAccount(
+        owner_type="main",
+        branch_id=None,
+        account_name="Main Collection Account",
+    )
+    db.add(account)
+    db.flush()
+    return account
+
+
+def serialize_remittance(remittance: Remittance) -> dict:
+    branch = remittance.branch
+    items = list(remittance.items or [])
+    return {
+        "id": remittance.id,
+        "remittance_number": remittance.remittance_number,
+        "branch_id": remittance.branch_id,
+        "branch_name": get_decrypted_or_raw(branch, "name") or branch.name if branch else f"Branch {remittance.branch_id}",
+        "total_amount": float(remittance.total_amount or 0),
+        "payment_count": remittance.payment_count or len(items),
+        "status": remittance.status,
+        "remarks": remittance.remarks,
+        "report_file_name": remittance.report_file_name,
+        "report_download_url": f"/api/payments/remittances/{remittance.id}/report" if remittance.report_file_path else None,
+        "submitted_by": remittance.submitted_by,
+        "reviewed_by": remittance.reviewed_by,
+        "submitted_at": to_utc_iso(remittance.submitted_at),
+        "reviewed_at": to_utc_iso(remittance.reviewed_at),
+        "items": [
+            {
+                "id": item.id,
+                "payment_id": item.payment_id,
+                "amount": float(item.amount or 0),
+                "ref_number": payment_value(item.payment, "ref_number") if item.payment else None,
+                "taxpayer_name": payment_value(item.payment, "taxpayer_name") if item.payment else None,
+                "tax_type": payment_value(item.payment, "tax_type") if item.payment else None,
+            }
+            for item in items
+        ],
     }
 
 
@@ -2519,6 +2595,118 @@ async def verify_payment(ref_number: str, db: Session = Depends(get_db)):
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
     return serialize_payment(payment)
+
+
+@router.get("/remittances")
+async def list_main_remittances(
+    current_admin=Depends(require_main_admin()),
+    db: Session = Depends(get_db),
+):
+    remittances = db.query(Remittance).order_by(Remittance.submitted_at.desc(), Remittance.id.desc()).all()
+    accepted_amount = sum(float(remittance.total_amount or 0) for remittance in remittances if remittance.status == "Accepted")
+    pending_amount = sum(float(remittance.total_amount or 0) for remittance in remittances if remittance.status == "Submitted")
+    account = get_or_create_main_collection_account(db)
+    account.current_balance = accepted_amount
+    account.total_collected = accepted_amount
+    account.updated_at = datetime.utcnow()
+    db.commit()
+    return {
+        "account": {
+            "id": account.id,
+            "account_name": account.account_name,
+            "owner_type": account.owner_type,
+            "current_balance": account.current_balance,
+            "total_collected": account.total_collected,
+        },
+        "pending_amount": pending_amount,
+        "accepted_amount": accepted_amount,
+        "remittances": [serialize_remittance(remittance) for remittance in remittances],
+    }
+
+
+@router.get("/remittances/{remittance_id}/report")
+async def download_remittance_report(
+    remittance_id: int,
+    current_admin=Depends(require_main_admin()),
+    db: Session = Depends(get_db),
+):
+    remittance = db.query(Remittance).filter(Remittance.id == remittance_id).first()
+    if not remittance:
+        raise HTTPException(status_code=404, detail="Remittance not found")
+    if not remittance.report_file_path:
+        raise HTTPException(status_code=404, detail="No remittance report was uploaded for this batch.")
+    report_path = Path(remittance.report_file_path)
+    if not report_path.exists():
+        raise HTTPException(status_code=404, detail="Remittance report file is missing.")
+    return FileResponse(
+        report_path,
+        filename=remittance.report_file_name or report_path.name,
+        media_type=remittance.report_file_mime or "application/octet-stream",
+    )
+
+
+@router.post("/remittances/{remittance_id}/accept")
+async def accept_main_remittance(
+    remittance_id: int,
+    payload: RemittanceReviewPayload | None = None,
+    current_admin=Depends(require_main_admin()),
+    db: Session = Depends(get_db),
+):
+    remittance = db.query(Remittance).filter(Remittance.id == remittance_id).first()
+    if not remittance:
+        raise HTTPException(status_code=404, detail="Remittance not found")
+    if remittance.status != "Submitted":
+        raise HTTPException(status_code=409, detail="Only submitted remittances can be accepted.")
+    remittance.status = "Accepted"
+    remittance.reviewed_by = getattr(current_admin, "username", None) or getattr(current_admin, "email", "main_admin")
+    remittance.reviewed_at = datetime.utcnow()
+    if payload and payload.remarks:
+        remittance.remarks = payload.remarks.strip()
+    for item in remittance.items or []:
+        item.status = "Accepted"
+    account = get_or_create_main_collection_account(db)
+    account.current_balance = float(account.current_balance or 0) + float(remittance.total_amount or 0)
+    account.total_collected = float(account.total_collected or 0) + float(remittance.total_amount or 0)
+    account.updated_at = datetime.utcnow()
+    db.add(ActivityLog(
+        action="Remittance Accepted",
+        user=remittance.reviewed_by,
+        details=f"Accepted remittance {remittance.remittance_number}",
+        type="remittance",
+    ))
+    db.commit()
+    db.refresh(remittance)
+    return serialize_remittance(remittance)
+
+
+@router.post("/remittances/{remittance_id}/reject")
+async def reject_main_remittance(
+    remittance_id: int,
+    payload: RemittanceReviewPayload | None = None,
+    current_admin=Depends(require_main_admin()),
+    db: Session = Depends(get_db),
+):
+    remittance = db.query(Remittance).filter(Remittance.id == remittance_id).first()
+    if not remittance:
+        raise HTTPException(status_code=404, detail="Remittance not found")
+    if remittance.status != "Submitted":
+        raise HTTPException(status_code=409, detail="Only submitted remittances can be rejected.")
+    remittance.status = "Rejected"
+    remittance.reviewed_by = getattr(current_admin, "username", None) or getattr(current_admin, "email", "main_admin")
+    remittance.reviewed_at = datetime.utcnow()
+    if payload and payload.remarks:
+        remittance.remarks = payload.remarks.strip()
+    for item in remittance.items or []:
+        item.status = "Rejected"
+    db.add(ActivityLog(
+        action="Remittance Rejected",
+        user=remittance.reviewed_by,
+        details=f"Rejected remittance {remittance.remittance_number}",
+        type="remittance",
+    ))
+    db.commit()
+    db.refresh(remittance)
+    return serialize_remittance(remittance)
 
 
 @router.get("/transactions")

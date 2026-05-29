@@ -290,6 +290,60 @@ class Payment(Base):
     branch_record = relationship("Branch", backref="payments")
 
 
+class CollectionAccount(Base):
+    __tablename__ = "collection_accounts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    owner_type = Column(String, nullable=False, index=True)  # main, branch
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=True, index=True)
+    account_name = Column(String, nullable=False)
+    current_balance = Column(Float, default=0.0)
+    total_collected = Column(Float, default=0.0)
+    total_remitted = Column(Float, default=0.0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    branch = relationship("Branch", backref="collection_accounts")
+
+
+class Remittance(Base):
+    __tablename__ = "remittances"
+
+    id = Column(Integer, primary_key=True, index=True)
+    remittance_number = Column(String, unique=True, index=True, nullable=False)
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
+    total_amount = Column(Float, default=0.0)
+    payment_count = Column(Integer, default=0)
+    status = Column(String, default="Submitted", index=True)  # Submitted, Accepted, Rejected
+    remarks = Column(Text, nullable=True)
+    report_file_path = Column(String, nullable=True)
+    report_file_name = Column(String, nullable=True)
+    report_file_mime = Column(String, nullable=True)
+    submitted_by = Column(String, nullable=True)
+    reviewed_by = Column(String, nullable=True)
+    submitted_at = Column(DateTime, default=datetime.utcnow)
+    reviewed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    branch = relationship("Branch", backref="remittances")
+
+
+class RemittanceItem(Base):
+    __tablename__ = "remittance_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    remittance_id = Column(Integer, ForeignKey("remittances.id"), nullable=False, index=True)
+    payment_id = Column(Integer, ForeignKey("payments.id"), nullable=False, index=True)
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
+    amount = Column(Float, default=0.0)
+    status = Column(String, default="Submitted", index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    remittance = relationship("Remittance", backref="items")
+    payment = relationship("Payment", backref="remittance_items")
+    branch = relationship("Branch", backref="remittance_items")
+
+
 class BusinessRegistry(Base):
     __tablename__ = "business_registry"
 
