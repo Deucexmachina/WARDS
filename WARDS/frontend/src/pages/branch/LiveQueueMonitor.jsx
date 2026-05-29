@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import api from '../../services/api';
+import { announceQueue, recallQueue } from '../../utils/queueAnnouncement';
 
 const queueWindowLabels = {
   RPT: 'RPT',
@@ -21,6 +22,10 @@ const LiveQueueMonitor = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [lastUpdate, setLastUpdate] = useState(null);
+  const [isAnnouncementPlaying, setIsAnnouncementPlaying] = useState(false);
+  const previousServingQueuesRef = useRef([]);
+  const lastAnnouncedQueueRef = useRef(null);
+  const lastProcessedTriggerRef = useRef(null);
 
   const fetchQueueData = async () => {
     try {
@@ -63,6 +68,118 @@ const LiveQueueMonitor = () => {
     const interval = setInterval(fetchQueueData, 3000);
     return () => clearInterval(interval);
   }, []);
+
+  // Auto-detect newly called/serving queues and play announcements
+  useEffect(() => {
+    if (loading || isAnnouncementPlaying) return;
+
+    const currentServingQueues = queueData.serving || [];
+    const previousServingQueues = previousServingQueuesRef.current || [];
+
+    // Find newly added serving queue
+    const newServingQueue = currentServingQueues.find(queue => {
+      return !previousServingQueues.some(prev => prev.queue_number === queue.queue_number);
+    });
+
+    if (newServingQueue && newServingQueue.queue_number) {
+      // Check if we already announced this queue
+      if (lastAnnouncedQueueRef.current !== newServingQueue.queue_number) {
+        console.log('🔊 Auto-detected new serving queue:', newServingQueue.queue_number);
+        setIsAnnouncementPlaying(true);
+        lastAnnouncedQueueRef.current = newServingQueue.queue_number;
+
+        announceQueue(newServingQueue.queue_number, newServingQueue.service_window || 'MISC')
+          .then(() => {
+            console.log('✅ Auto-announcement completed');
+          })
+          .catch(err => {
+            console.error('❌ Auto-announcement failed:', err);
+          })
+          .finally(() => {
+            setIsAnnouncementPlaying(false);
+          });
+      }
+    }
+
+    // Update previous serving queues
+    previousServingQueuesRef.current = currentServingQueues;
+  }, [queueData.serving, loading, isAnnouncementPlaying]);
+
+  // Listen for recall triggers from Staff Window via localStorage
+  useEffect(() => {
+    const handleStorageChange = (event) => {
+      if (event.key === 'queue_announcement_trigger' && event.newValue) {
+        try {
+          const trigger = JSON.parse(event.newValue);
+          processAnnouncementTrigger(trigger);
+        } catch (err) {
+          console.error('Failed to parse announcement trigger:', err);
+        }
+      }
+    };
+
+    // Polling fallback for same-tab triggers (storage event doesn't fire in same tab)
+    const pollTrigger = () => {
+      try {
+        const triggerData = localStorage.getItem('queue_announcement_trigger');
+        if (triggerData) {
+          const trigger = JSON.parse(triggerData);
+          processAnnouncementTrigger(trigger);
+        }
+      } catch (err) {
+        // Ignore parsing errors
+      }
+    };
+
+    const processAnnouncementTrigger = (trigger) => {
+      if (!trigger || !trigger.queue_number || !trigger.timestamp) return;
+
+      // Prevent duplicate processing of same trigger
+      if (lastProcessedTriggerRef.current === trigger.timestamp) {
+        return;
+      }
+
+      // Ignore old triggers (older than 10 seconds)
+      const age = Date.now() - trigger.timestamp;
+      if (age > 10000) {
+        console.log('⏰ Ignoring old trigger:', age, 'ms old');
+        return;
+      }
+
+      if (isAnnouncementPlaying) {
+        console.log('⚠️ Announcement already playing, skipping trigger');
+        return;
+      }
+
+      console.log('📢 Processing announcement trigger:', trigger);
+      lastProcessedTriggerRef.current = trigger.timestamp;
+      setIsAnnouncementPlaying(true);
+
+      const playAnnouncement = trigger.recall
+        ? recallQueue(trigger.queue_number, trigger.service_window || 'MISC')
+        : announceQueue(trigger.queue_number, trigger.service_window || 'MISC');
+
+      playAnnouncement
+        .then(() => {
+          console.log('✅ Trigger announcement completed');
+          lastAnnouncedQueueRef.current = trigger.queue_number;
+        })
+        .catch(err => {
+          console.error('❌ Trigger announcement failed:', err);
+        })
+        .finally(() => {
+          setIsAnnouncementPlaying(false);
+        });
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    const pollInterval = setInterval(pollTrigger, 500);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      clearInterval(pollInterval);
+    };
+  }, [isAnnouncementPlaying]);
 
   if (loading) {
     return (
