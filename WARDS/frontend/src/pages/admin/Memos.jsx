@@ -574,27 +574,25 @@ const Memos = () => {
 
               <div>
                 <label className="block text-gray-700 font-semibold mb-2">Attachment (Optional)</label>
-                <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 hover:border-blue-400 transition">
-                  <input
-                    type="file"
-                    onChange={handleFileChange}
-                    className="w-full"
-                    accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.jpg,.jpeg,.png"
-                  />
-                  {formData.attachment && (
-                    <p className="mt-2 text-sm text-gray-600">
-                      Selected: <span className="font-semibold">{formData.attachment.name}</span>
-                    </p>
-                  )}
-                  {editingMemo && editingMemo.attachment_filename && !formData.attachment && (
-                    <p className="mt-2 text-sm text-blue-600">
-                      Current: <span className="font-semibold">{editingMemo.attachment_filename}</span>
-                    </p>
-                  )}
-                  <p className="mt-2 text-xs text-gray-500">
-                    Supported formats: PDF, Word, Excel, Text, Images (Max 10MB)
+                <input
+                  type="file"
+                  onChange={handleFileChange}
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.jpg,.jpeg,.png"
+                  className="mb-4 w-full cursor-pointer rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm shadow-sm file:mr-4 file:rounded-xl file:border-0 file:bg-[#0f2f5f] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:border-blue-400 hover:bg-slate-50 focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-slate-200 transition"
+                />
+                {formData.attachment && (
+                  <p className="mt-2 text-sm text-gray-600">
+                    Selected: <span className="font-semibold">{formData.attachment.name}</span>
                   </p>
-                </div>
+                )}
+                {editingMemo && editingMemo.attachment_filename && !formData.attachment && (
+                  <p className="mt-2 text-sm text-blue-600">
+                    Current: <span className="font-semibold">{editingMemo.attachment_filename}</span>
+                  </p>
+                )}
+                <p className="mt-2 text-xs text-gray-500">
+                  Supported formats: PDF, Word, Excel, Text, Images (Max 10MB)
+                </p>
               </div>
             </div>
 

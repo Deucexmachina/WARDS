@@ -813,7 +813,7 @@ const ReceiptManagement = () => {
             type="file"
             accept=".jpg,.jpeg,.png,.webp"
             onChange={(event) => handleSelectReleaseCopy(request.requestId, event)}
-            className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-2 text-sm shadow-sm file:mr-4 file:rounded-lg file:border-0 file:bg-[#0f2f5f] file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-white focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-slate-200"
+            className="cursor-pointer rounded-xl border border-dashed border-slate-300 bg-white px-4 py-2 text-sm shadow-sm file:mr-4 file:rounded-lg file:border-0 file:bg-[#0f2f5f] file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-white hover:border-blue-400 hover:bg-slate-50 focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-slate-200 transition"
           />
           {request.hasReleaseCopy ? (
             <button
@@ -1205,7 +1205,7 @@ const ReceiptManagement = () => {
             type="file"
             accept="image/*"
             onChange={handleFileSelect}
-            className="mb-4 w-full rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm shadow-sm file:mr-4 file:rounded-xl file:border-0 file:bg-[#0f2f5f] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-slate-200"
+            className="mb-4 w-full cursor-pointer rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm shadow-sm file:mr-4 file:rounded-xl file:border-0 file:bg-[#0f2f5f] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:border-blue-400 hover:bg-slate-50 focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-slate-200 transition"
           />
 
           {previewUrl && (
