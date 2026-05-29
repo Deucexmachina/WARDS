@@ -1,9 +1,9 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import api, { receiptAPI } from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
-import { announceQueue, isAnnouncementActive } from '../../utils/queueAnnouncement';
+import { isAnnouncementActive } from '../../utils/queueAnnouncement';
 
 const PAGE_SIZE = 10;
 const DEFAULT_DISABLED_MESSAGE = 'This service is currently unavailable because it has been disabled by system administration.';
@@ -502,6 +502,8 @@ const QueueManagement = () => {
   const [immediatePage, setImmediatePage] = useState(1);
   const [appointmentPage, setAppointmentPage] = useState(1);
   const [skippedPage, setSkippedPage] = useState(1);
+  const [lastCalledQueue, setLastCalledQueue] = useState(null);
+  const lastCalledQueueRef = useRef(null);
 
   const dispatchQueueStateUpdate = (nextQueues) => {
     window.dispatchEvent(new CustomEvent(BRANCH_QUEUE_UPDATED_EVENT, {
@@ -536,6 +538,28 @@ const QueueManagement = () => {
     const interval = setInterval(fetchQueues, 10000);
     return () => clearInterval(interval);
   }, []);
+
+  // Auto-clear invalid recall state - monitors queue list and clears stale lastCalledQueue
+  useEffect(() => {
+    const checkRecallValidity = () => {
+      if (!lastCalledQueue) return;
+
+      const queue = queues.find(q => q.id === lastCalledQueue.id);
+      const status = queue?.status?.toLowerCase();
+
+      // Clear if queue no longer exists or is not in active status
+      if (!queue || !['called', 'serving'].includes(status)) {
+        console.log('Auto-clearing invalid recall state:', lastCalledQueue.queue_number);
+        setLastCalledQueue(null);
+        lastCalledQueueRef.current = null;
+      }
+    };
+
+    // Check immediately and then every 10 seconds
+    checkRecallValidity();
+    const interval = setInterval(checkRecallValidity, 10000);
+    return () => clearInterval(interval);
+  }, [queues, lastCalledQueue]);
 
   useEffect(() => {
     setImmediatePage(1);
@@ -744,15 +768,27 @@ const QueueManagement = () => {
         const response = await api.post('/branch/queue/call-next');
         const calledQueue = response.data;
         await fetchQueues();
+        
+        // Store last called queue with service_window (NOT service_type)
         if (calledQueue && calledQueue.queue_number) {
-          setIsAnnouncementPlaying(true);
-          try {
-            await announceQueue(calledQueue.queue_number, calledQueue.service_type);
-          } catch (announcementError) {
-            console.error('Voice announcement failed:', announcementError);
-          } finally {
-            setIsAnnouncementPlaying(false);
-          }
+          const queueData = {
+            id: calledQueue.id,
+            queue_number: calledQueue.queue_number,
+            service_window: calledQueue.service_window || 'MISC',
+            status: calledQueue.status,
+            timestamp: new Date().toISOString(),
+          };
+          setLastCalledQueue(queueData);
+          lastCalledQueueRef.current = queueData;
+
+          // Trigger announcement on Live Monitor via localStorage
+          localStorage.setItem('queue_announcement_trigger', JSON.stringify({
+            queue_number: calledQueue.queue_number,
+            queue_id: calledQueue.id,
+            service_window: calledQueue.service_window || 'MISC',
+            recall: false,
+            timestamp: Date.now(),
+          }));
         }
         return;
       } else if (action === 'delete-skipped') {
@@ -774,12 +810,48 @@ const QueueManagement = () => {
         setReceiptUploadFile(null);
         setMobileSession(null);
         return;
+      } else if (action === 'recall') {
+        // Validate queue before recall
+        if (!lastCalledQueue) {
+          setError('No queue available to recall.');
+          return;
+        }
+
+        const currentQueue = queues.find(q => q.id === lastCalledQueue.id);
+        const currentStatus = currentQueue?.status?.toLowerCase();
+
+        if (!currentQueue || !['called', 'serving'].includes(currentStatus)) {
+          setError('Queue is no longer active and cannot be recalled.');
+          setLastCalledQueue(null);
+          lastCalledQueueRef.current = null;
+          return;
+        }
+
+        // Trigger recall announcement on Live Monitor
+        localStorage.setItem('queue_announcement_trigger', JSON.stringify({
+          queue_number: lastCalledQueue.queue_number,
+          queue_id: lastCalledQueue.id,
+          service_window: lastCalledQueue.service_window,
+          recall: true,
+          timestamp: Date.now(),
+        }));
+        return;
       } else if (action === 'recall-skipped') {
         await api.post(`/branch/queue/${queue.id}/recall-skipped`);
       } else {
         await api.post(`/branch/queue/${queue.id}/${action}`);
       }
       await fetchQueues();
+      
+      // Clear lastCalledQueue if the queue was completed, deleted, skipped, or cancelled
+      if (['complete', 'skip', 'delete'].includes(action) && queue) {
+        if (lastCalledQueue && lastCalledQueue.id === queue.id) {
+          console.log('Clearing lastCalledQueue after action:', action);
+          setLastCalledQueue(null);
+          lastCalledQueueRef.current = null;
+        }
+      }
+      
       if (action === 'delete' || action === 'delete-history') {
         setQueueToDelete(null);
         setHistoryToDelete(null);
@@ -1080,6 +1152,14 @@ const QueueManagement = () => {
               className="rounded-xl bg-primary px-6 py-3 font-semibold text-white transition hover:bg-secondary disabled:opacity-50"
             >
               {isAnnouncementPlaying ? 'Announcing...' : 'Call Next'}
+            </button>
+            <button
+              onClick={() => performAction('recall')}
+              disabled={queueUnavailable || !lastCalledQueue || isBranchAdmin}
+              className="rounded-xl bg-blue-600 px-6 py-3 font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
+              title={lastCalledQueue ? `Recall ${lastCalledQueue.queue_number}` : 'No queue to recall'}
+            >
+              Recall Queue
             </button>
             <button
               onClick={() => performAction('delete-skipped')}

@@ -56,7 +56,7 @@ const getCharacterAudioPath = (char) => {
 
 /**
  * Extract window number from service window
- * Examples: "RPT" -> 1, "BUSINESS" -> 2, "MISC" -> 3
+ * Examples: "RPT" -> 1, "BUSINESS" -> 2, "MISC" -> 3, "QW4" -> 4, "QW5" -> 5
  */
 const getWindowNumber = (serviceWindow) => {
   if (!serviceWindow) return 1;
@@ -72,6 +72,10 @@ const getWindowNumber = (serviceWindow) => {
     'BUSINESS TAX': 2,
     'MISC': 3,
     'MISCELLANEOUS': 3,
+    'QW4': 4,
+    'QUEUE WINDOW 4': 4,
+    'QW5': 5,
+    'QUEUE WINDOW 5': 5,
   };
   
   return serviceWindowMap[windowUpper] || 1;
