@@ -296,6 +296,18 @@ const PaymentManagement = () => {
     }, {})
   ), [branches]);
 
+  const groupedLedgerPayments = useMemo(() => {
+    const groups = new Map();
+    filteredPayments.forEach((payment) => {
+      const branchName = getBranchName(payment, branchLookup);
+      if (!groups.has(branchName)) {
+        groups.set(branchName, []);
+      }
+      groups.get(branchName).push(payment);
+    });
+    return Array.from(groups.entries()).map(([branchName, records]) => ({ branchName, records }));
+  }, [filteredPayments, branchLookup]);
+
   const paymentStats = useMemo(() => {
     const confirmedPayments = monthlyPayments.filter((payment) => normalizeStatus(payment.status) === 'confirmed');
     const pendingPayments = monthlyPayments.filter((payment) => normalizeStatus(payment.status) === 'pending');
@@ -759,78 +771,87 @@ const PaymentManagement = () => {
           </div>
         </div>
 
-        <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200">
-          <table className="min-w-[1100px] w-full divide-y divide-slate-200 text-sm">
-            <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
-              <tr>
-                <th className="px-5 py-4">Transaction ID</th>
-                <th className="px-5 py-4">Taxpayer</th>
-                <th className="px-5 py-4">Branch</th>
-                <th className="px-5 py-4 text-right">Amount</th>
-                <th className="px-5 py-4">Method</th>
-                <th className="px-5 py-4">Status</th>
-                <th className="px-5 py-4">Created</th>
-                <th className="px-5 py-4">Verified</th>
-                <th className="px-5 py-4">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 bg-white">
-              {filteredPayments.map((payment) => {
-                const status = normalizeStatus(payment.status);
-                return (
-                  <tr key={payment.id} className="hover:bg-slate-50">
-                    <td className="px-5 py-4 font-mono text-sm font-semibold text-slate-900">{payment.transaction_id || payment.ref_number || 'N/A'}</td>
-                    <td className="px-5 py-4 font-semibold text-slate-900">{payment.taxpayer_name || 'N/A'}</td>
-                    <td className="px-5 py-4 text-slate-600">{getBranchName(payment, branchLookup)}</td>
-                    <td className="px-5 py-4 text-right font-bold text-slate-950">{formatCurrency(payment.amount)}</td>
-                    <td className="px-5 py-4 text-slate-600">{payment.payment_method || 'N/A'}</td>
-                    <td className="px-5 py-4">
-                      <span className={`rounded-full px-3 py-1 text-xs font-bold ${statusStyles[status] || statusStyles.failed}`}>
-                        {getStatusLabel(payment.status)}
-                      </span>
-                    </td>
-                    <td className="px-5 py-4 text-slate-500">
-                      <div className="font-medium text-slate-700">
-                        {formatPaymentDate(payment.created_at, { year: 'numeric', month: 'short', day: 'numeric' })}
-                      </div>
-                      <div className="text-xs text-slate-400">
-                        {formatPaymentDate(payment.created_at, { hour: '2-digit', minute: '2-digit', hour12: true })}
-                      </div>
-                    </td>
-                    <td className="px-5 py-4 text-slate-500">
-                      {payment.verified_at ? (
-                        <>
-                          <div className="font-medium text-slate-700">
-                            {formatPaymentDate(payment.verified_at, { year: 'numeric', month: 'short', day: 'numeric' })}
-                          </div>
-                          <div className="text-xs text-slate-400">
-                            {formatPaymentDate(payment.verified_at, { hour: '2-digit', minute: '2-digit', hour12: true })}
-                          </div>
-                        </>
-                      ) : (
-                        'N/A'
-                      )}
-                    </td>
-                    <td className="px-5 py-4">
-                      {status === 'pending' ? (
-                        <button
-                          type="button"
-                          onClick={() => handleVerifyPayment(payment.id)}
-                          className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-emerald-700"
-                        >
-                          Verify
-                        </button>
-                      ) : (
-                        <span className="text-xs font-semibold text-slate-400">Recorded</span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="mt-5 space-y-5">
+          {groupedLedgerPayments.map(({ branchName, records }) => (
+            <div key={branchName} className="overflow-hidden rounded-2xl border border-slate-200">
+              <div className="border-b border-slate-200 bg-[#0f2f5f] px-5 py-3 text-white">
+                <p className="text-xs font-black uppercase tracking-[0.22em]">{branchName}</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-[1100px] w-full divide-y divide-slate-200 text-sm">
+                  <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
+                    <tr>
+                      <th className="px-5 py-4">Transaction ID</th>
+                      <th className="px-5 py-4">Taxpayer</th>
+                      <th className="px-5 py-4">Branch</th>
+                      <th className="px-5 py-4 text-right">Amount</th>
+                      <th className="px-5 py-4">Method</th>
+                      <th className="px-5 py-4">Status</th>
+                      <th className="px-5 py-4">Created</th>
+                      <th className="px-5 py-4">Verified</th>
+                      <th className="px-5 py-4">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {records.map((payment) => {
+                      const status = normalizeStatus(payment.status);
+                      return (
+                        <tr key={payment.id} className="hover:bg-slate-50">
+                          <td className="px-5 py-4 font-mono text-sm font-semibold text-slate-900">{payment.transaction_id || payment.ref_number || 'N/A'}</td>
+                          <td className="px-5 py-4 font-semibold text-slate-900">{payment.taxpayer_name || 'N/A'}</td>
+                          <td className="px-5 py-4 text-slate-600">{branchName}</td>
+                          <td className="px-5 py-4 text-right font-bold text-slate-950">{formatCurrency(payment.amount)}</td>
+                          <td className="px-5 py-4 text-slate-600">{payment.payment_method || 'N/A'}</td>
+                          <td className="px-5 py-4">
+                            <span className={`rounded-full px-3 py-1 text-xs font-bold ${statusStyles[status] || statusStyles.failed}`}>
+                              {getStatusLabel(payment.status)}
+                            </span>
+                          </td>
+                          <td className="px-5 py-4 text-slate-500">
+                            <div className="font-medium text-slate-700">
+                              {formatPaymentDate(payment.created_at, { year: 'numeric', month: 'short', day: 'numeric' })}
+                            </div>
+                            <div className="text-xs text-slate-400">
+                              {formatPaymentDate(payment.created_at, { hour: '2-digit', minute: '2-digit', hour12: true })}
+                            </div>
+                          </td>
+                          <td className="px-5 py-4 text-slate-500">
+                            {payment.verified_at ? (
+                              <>
+                                <div className="font-medium text-slate-700">
+                                  {formatPaymentDate(payment.verified_at, { year: 'numeric', month: 'short', day: 'numeric' })}
+                                </div>
+                                <div className="text-xs text-slate-400">
+                                  {formatPaymentDate(payment.verified_at, { hour: '2-digit', minute: '2-digit', hour12: true })}
+                                </div>
+                              </>
+                            ) : (
+                              'N/A'
+                            )}
+                          </td>
+                          <td className="px-5 py-4">
+                            {status === 'pending' ? (
+                              <button
+                                type="button"
+                                onClick={() => handleVerifyPayment(payment.id)}
+                                className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-emerald-700"
+                              >
+                                Verify
+                              </button>
+                            ) : (
+                              <span className="text-xs font-semibold text-slate-400">Recorded</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
           {!filteredPayments.length ? (
-            <div className="bg-white px-5 py-10 text-center text-sm text-slate-500">No payments match the selected filter for {collectionMonthLabel}.</div>
+            <div className="rounded-2xl border border-slate-200 bg-white px-5 py-10 text-center text-sm text-slate-500">No payments match the selected filter for {collectionMonthLabel}.</div>
           ) : null}
         </div>
       </section>
