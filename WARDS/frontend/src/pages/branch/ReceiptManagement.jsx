@@ -808,20 +808,13 @@ const ReceiptManagement = () => {
 
     return (
       <div className={`space-y-3 ${compact ? 'max-w-[24rem]' : ''}`}>
-        <div className="flex flex-wrap gap-2">
-          <label className={`cursor-pointer bg-slate-700 text-white hover:bg-slate-800 ${buttonClassName}`}>
-            {releaseDraft
-              ? 'Choose Different Image'
-              : request.hasReleaseCopy
-                ? 'Replace Image'
-                : 'Upload Image'}
-            <input
-              type="file"
-              accept=".jpg,.jpeg,.png,.webp"
-              className="hidden"
-              onChange={(event) => handleSelectReleaseCopy(request.requestId, event)}
-            />
-          </label>
+        <div className="mb-4 flex flex-wrap gap-2">
+          <input
+            type="file"
+            accept=".jpg,.jpeg,.png,.webp"
+            onChange={(event) => handleSelectReleaseCopy(request.requestId, event)}
+            className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-2 text-sm shadow-sm file:mr-4 file:rounded-lg file:border-0 file:bg-[#0f2f5f] file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-white focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-slate-200"
+          />
           {request.hasReleaseCopy ? (
             <button
               onClick={() => handlePreviewUploadedReleaseCopy(request.requestId)}
@@ -1208,7 +1201,12 @@ const ReceiptManagement = () => {
               <option value="MISC">Miscellaneous</option>
             </select>
           </div>
-          <input type="file" accept="image/*" onChange={handleFileSelect} className="mb-4" />
+          <input
+            type="file"
+            accept="image/*"
+            onChange={handleFileSelect}
+            className="mb-4 w-full rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm shadow-sm file:mr-4 file:rounded-xl file:border-0 file:bg-[#0f2f5f] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-slate-200"
+          />
 
           {previewUrl && (
             <div className="mb-4 border rounded-lg overflow-hidden">
