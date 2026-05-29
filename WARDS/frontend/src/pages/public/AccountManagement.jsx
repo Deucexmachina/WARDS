@@ -496,7 +496,7 @@ const AccountManagement = () => {
 
                     <label className="block">
                       <span className="mb-2 block text-sm font-semibold text-slate-700">Supporting File</span>
-                      <input type="file" name="supporting_file" onChange={handleIdentifierChange} accept=".pdf,.png,.jpg,.jpeg,.doc,.docx" className="w-full rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm" required />
+                      <input type="file" name="supporting_file" onChange={handleIdentifierChange} accept=".pdf,.png,.jpg,.jpeg,.doc,.docx" className="mb-4 w-full cursor-pointer rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm shadow-sm file:mr-4 file:rounded-xl file:border-0 file:bg-[#0f2f5f] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:border-blue-400 hover:bg-slate-50 focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-slate-200 transition" required />
                       <span className="mt-2 block text-xs text-slate-500">Accepted formats: PDF, PNG, JPG, JPEG, DOC, DOCX. Maximum 10MB.</span>
                     </label>
 
