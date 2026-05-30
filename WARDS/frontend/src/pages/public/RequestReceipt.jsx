@@ -520,9 +520,7 @@ const RequestReceipt = () => {
         ));
         return;
       }
-      if (canUseOverTheCounter && paymentOption === 'pay_online') {
-        await handlePayFee(response.data.requestId);
-      }
+      // Removed automatic payment for queue-linked requests - user must manually click "Pay Request Fee" button
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to submit receipt request.');
     } finally {

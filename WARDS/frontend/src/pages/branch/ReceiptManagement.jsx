@@ -607,21 +607,47 @@ const ReceiptManagement = () => {
                   display: flex;
                   justify-content: center;
                   align-items: flex-start;
+                  min-height: 100vh;
+                }
+                .print-container {
+                  width: 100%;
+                  max-width: 100%;
+                  padding: 10mm;
+                  box-sizing: border-box;
                 }
                 img {
                   display: block;
-                  width: 100%;
                   max-width: 100%;
+                  max-height: 100vh;
+                  width: auto;
                   height: auto;
                   object-fit: contain;
+                  margin: 0 auto;
                 }
                 @page {
-                  margin: 12mm;
+                  size: auto;
+                  margin: 10mm;
+                }
+                @media print {
+                  body {
+                    margin: 0;
+                    padding: 0;
+                  }
+                  .print-container {
+                    padding: 0;
+                  }
+                  img {
+                    max-width: 100%;
+                    max-height: 100%;
+                    page-break-inside: avoid;
+                  }
                 }
               </style>
             </head>
             <body>
-              <img id="receipt-image" src="${imageSrc}" alt="Receipt record" />
+              <div class="print-container">
+                <img id="receipt-image" src="${imageSrc}" alt="Receipt record" />
+              </div>
             </body>
           </html>
         `);
@@ -811,6 +837,7 @@ const ReceiptManagement = () => {
         <div className="mb-4 flex flex-wrap gap-2">
           <input
             type="file"
+            id={`release-file-${request.requestId}`}
             accept=".jpg,.jpeg,.png,.webp"
             onChange={(event) => handleSelectReleaseCopy(request.requestId, event)}
             className="cursor-pointer rounded-xl border border-dashed border-slate-300 bg-white px-4 py-2 text-sm shadow-sm file:mr-4 file:rounded-lg file:border-0 file:bg-[#0f2f5f] file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-white hover:border-blue-400 hover:bg-slate-50 focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-slate-200 transition"
@@ -828,29 +855,41 @@ const ReceiptManagement = () => {
           {releaseDraft ? (
             <>
               <button
+                type="button"
                 onClick={() => handleSubmitReleaseCopy(request.requestId)}
                 disabled={uploadingReleaseId === request.requestId}
-                className={`bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 ${buttonClassName}`}
+                className={`bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed ${buttonClassName}`}
               >
                 {uploadingReleaseId === request.requestId ? 'Uploading...' : 'Submit Image'}
               </button>
               <button
+                type="button"
                 onClick={() => clearReleaseUploadDraft(request.requestId)}
                 disabled={uploadingReleaseId === request.requestId}
-                className={`bg-slate-200 text-slate-700 hover:bg-slate-300 disabled:opacity-40 ${buttonClassName}`}
+                className={`bg-slate-200 text-slate-700 hover:bg-slate-300 disabled:opacity-40 disabled:cursor-not-allowed ${buttonClassName}`}
               >
                 Cancel
               </button>
             </>
-          ) : null}
+          ) : (
+            <button
+              type="button"
+              onClick={() => document.getElementById(`release-file-${request.requestId}`)?.click()}
+              className={`bg-slate-100 text-slate-600 hover:bg-slate-200 ${buttonClassName}`}
+            >
+              Select Image
+            </button>
+          )}
           <button
+            type="button"
             onClick={() => handleReleaseClick(request)}
             disabled={!request.hasReleaseCopy || request.paymentStatus !== 'Verified' || releasing}
-            className={`bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 ${buttonClassName}`}
+            className={`bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed ${buttonClassName}`}
           >
             Release Copy
           </button>
           <button
+            type="button"
             onClick={() => requestDeleteConfirmation({
               type: 'request',
               id: request.requestId,
@@ -862,7 +901,7 @@ const ReceiptManagement = () => {
               ],
             })}
             disabled={deletingRequestId === request.requestId}
-            className={`bg-red-600 text-white hover:bg-red-700 disabled:opacity-40 ${buttonClassName}`}
+            className={`bg-red-600 text-white hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed ${buttonClassName}`}
           >
             {deletingRequestId === request.requestId ? 'Deleting...' : 'Delete'}
           </button>
