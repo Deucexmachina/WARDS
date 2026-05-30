@@ -133,6 +133,35 @@ def get_branch_dashboard_url(account: object) -> str:
     return f"{base_url}/branch-dashboard/branch-{branch_id or 'portal'}"
 
 
+def get_branch_window_label(account: object) -> Optional[str]:
+    service_window = getattr(account, "service_window", None)
+    if not service_window:
+        return None
+    return getattr(account, "service_window_label", None) or {
+        "RPT": "RPT Window",
+        "BUSINESS": "BT Window",
+        "MISC": "MISC Window",
+        "QW4": "Queue Window 4",
+        "QW5": "Queue Window 5",
+    }.get(service_window, service_window)
+
+
+def get_branch_assigned_window_number(account: object) -> Optional[int]:
+    service_window = getattr(account, "service_window", None)
+    if not service_window:
+        return None
+    assigned_window_number = getattr(account, "assigned_window_number", None)
+    if assigned_window_number:
+        return assigned_window_number
+    return {
+        "RPT": 1,
+        "BUSINESS": 2,
+        "MISC": 3,
+        "QW4": 4,
+        "QW5": 5,
+    }.get(service_window)
+
+
 def tracking_key(portal: str, identifier: str) -> str:
     return f"{portal}:{normalize_identifier(identifier)}"
 
@@ -317,6 +346,9 @@ def build_user_response(portal: str, account: object) -> dict:
         "status": account.status,
         "account_scope": getattr(account, "account_scope", "full_branch"),
         "service_window": getattr(account, "service_window", None),
+        "service_window_label": get_branch_window_label(account),
+        "window_label": get_branch_window_label(account),
+        "assigned_window_number": get_branch_assigned_window_number(account),
         "mfa_setup_required": False,
     }
 
@@ -348,6 +380,8 @@ def build_token_payload(portal: str, account: object) -> dict:
         "branch_id": account.branch_id,
         "account_scope": getattr(account, "account_scope", "full_branch"),
         "service_window": getattr(account, "service_window", None),
+        "service_window_label": get_branch_window_label(account),
+        "assigned_window_number": get_branch_assigned_window_number(account),
         "type": "branch",
     }
 

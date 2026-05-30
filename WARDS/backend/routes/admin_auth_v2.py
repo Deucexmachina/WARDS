@@ -9,7 +9,7 @@ Security Level: HIGH
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
@@ -46,13 +46,13 @@ RATE_LIMIT_WINDOW = 60
 MAX_REQUESTS_PER_WINDOW = 30
 
 class AdminLoginRequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str
     totp_code: Optional[str] = None
     recaptcha_token: Optional[str] = None
 
 class AdminSetupMFARequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str
 
 class Token(BaseModel):

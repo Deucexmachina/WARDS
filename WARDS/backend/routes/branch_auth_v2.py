@@ -10,7 +10,7 @@ Security Level: HIGH
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
@@ -48,13 +48,13 @@ RATE_LIMIT_WINDOW = 60
 MAX_REQUESTS_PER_WINDOW = 30
 
 class BranchLoginRequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str
     totp_code: Optional[str] = None
     recaptcha_token: Optional[str] = None
 
 class BranchSetupMFARequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str
 
 class Token(BaseModel):
@@ -164,6 +164,32 @@ def save_mfa_secret(db: Session, username: str, secret: str):
 
 def public_role(role: str) -> str:
     return "branch" if role in {"branch", "branch_admin", "branch_staff"} else role
+
+
+def get_window_display_label(staff: BranchStaff) -> str | None:
+    if not staff.service_window:
+        return None
+    return staff.service_window_label or {
+        "RPT": "RPT Window",
+        "BUSINESS": "BT Window",
+        "MISC": "MISC Window",
+        "QW4": "Queue Window 4",
+        "QW5": "Queue Window 5",
+    }.get(staff.service_window, staff.service_window)
+
+
+def get_assigned_window_number(staff: BranchStaff) -> int | None:
+    if not staff.service_window:
+        return None
+    if staff.assigned_window_number:
+        return staff.assigned_window_number
+    return {
+        "RPT": 1,
+        "BUSINESS": 2,
+        "MISC": 3,
+        "QW4": 4,
+        "QW5": 5,
+    }.get(staff.service_window)
 
 
 def slugify_branch_name(name: str) -> str:
@@ -386,6 +412,8 @@ async def branch_login(request: Request, credentials: BranchLoginRequest, db: Se
             "branch_id": staff.branch_id,
             "account_scope": staff.account_scope or "full_branch",
             "service_window": staff.service_window,
+            "service_window_label": get_window_display_label(staff),
+            "assigned_window_number": get_assigned_window_number(staff),
             "user_id": staff.id,
             "type": "branch"
         },
@@ -414,6 +442,9 @@ async def branch_login(request: Request, credentials: BranchLoginRequest, db: Se
             "status": staff.status,
             "account_scope": staff.account_scope or "full_branch",
             "service_window": staff.service_window,
+            "service_window_label": get_window_display_label(staff),
+            "window_label": get_window_display_label(staff),
+            "assigned_window_number": get_assigned_window_number(staff),
         },
         "requires_mfa": False,
         "requires_captcha": False
@@ -530,7 +561,7 @@ async def verify_token(request: Request, db: Session = Depends(get_db)):
                     BranchStaff.account_scope == "queue_window",
                     BranchStaff.status == "Active",
                 )
-                .order_by(BranchStaff.service_window.asc(), BranchStaff.id.asc())
+                .order_by(BranchStaff.assigned_window_number.asc(), BranchStaff.id.asc())
                 .all()
             )
 
@@ -548,6 +579,9 @@ async def verify_token(request: Request, db: Session = Depends(get_db)):
                 "dashboard_url": get_branch_dashboard_url(staff),
                 "account_scope": staff.account_scope or "full_branch",
                 "service_window": staff.service_window,
+                "service_window_label": get_window_display_label(staff),
+                "window_label": get_window_display_label(staff),
+                "assigned_window_number": get_assigned_window_number(staff),
                 "superadmin_managed_branch": is_superadmin_managed_branch,
                 "window_accounts": [
                     {
@@ -555,13 +589,9 @@ async def verify_token(request: Request, db: Session = Depends(get_db)):
                         "username": account.username,
                         "full_name": account.full_name,
                         "service_window": account.service_window,
-                        "window_label": {
-                            "RPT": "RPT Window",
-                            "BUSINESS": "BT Window",
-                            "MISC": "MISC Window",
-                            "QW4": "Queue Window 4",
-                            "QW5": "Queue Window 5",
-                        }.get(account.service_window, account.service_window),
+                        "service_window_label": get_window_display_label(account),
+                        "assigned_window_number": get_assigned_window_number(account),
+                        "window_label": get_window_display_label(account),
                     }
                     for account in window_accounts
                 ],

@@ -23,7 +23,10 @@ const BranchLayout = () => {
   const isSuperadminManagedBranch = Boolean(staff?.superadmin_managed_branch);
   const isQueueWindowAccount = staff?.account_scope === 'queue_window';
   const isBranchAdmin = !isSuperadminManagedBranch && (staff?.role === 'branch_admin' || staff?.internal_role === 'branch_admin');
-  const assignedWindowLabel = staff?.service_window === 'BUSINESS' ? 'BT' : (staff?.service_window || '');
+  const rawAssignedServiceLabel = staff?.window_label || staff?.service_window_label || (staff?.service_window === 'BUSINESS' ? 'BT' : (staff?.service_window || ''));
+  const assignedServiceLabel = rawAssignedServiceLabel.replace(/\s+Window$/i, '');
+  const assignedPhysicalWindowLabel = staff?.assigned_window_number ? `Window ${staff.assigned_window_number}` : '';
+  const assignedWindowLabel = [assignedPhysicalWindowLabel, assignedServiceLabel].filter(Boolean).join(' - ');
   const branchDisplayName = branchSlug
     ? `${branchSlug.replace(/-/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase())} Branch`
     : 'Galas Branch';
@@ -66,7 +69,7 @@ const BranchLayout = () => {
     (items || []).filter((item) => !['Released', 'Completed'].includes(item.status)).length
   );
   const navItems = isQueueWindowAccount
-    ? [{ label: `${assignedWindowLabel || 'Queue'} Window Queue Management`, path: queueOnlyPath }]
+    ? [{ label: `${assignedWindowLabel || 'Queue Window'} Queue Management`, path: queueOnlyPath }]
     : [
         { label: 'Dashboard', path: basePath },
         { label: 'Queue Management', path: `${basePath}/queue` },
@@ -289,7 +292,7 @@ const BranchLayout = () => {
             <h1 className="truncate text-sm font-bold text-white">{branchDisplayName}</h1>
             <p className="truncate text-xs text-slate-300">
               {isSuperadminManagedBranch ? 'superadmin' : (staff?.full_name || staff?.username || 'Branch User')}
-              {isQueueWindowAccount && assignedWindowLabel ? ` • ${assignedWindowLabel} Window` : ''}
+              {isQueueWindowAccount && assignedWindowLabel ? ` - ${assignedWindowLabel}` : ''}
             </p>
           </div>
         </div>

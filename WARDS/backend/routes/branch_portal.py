@@ -41,6 +41,20 @@ SERVICE_WINDOW_RULES = {
     "RPT": ("rpt", "real property", "amilyar", "property tax", "assessment"),
     "BUSINESS": ("business", "mayor", "permit", "bt", "city tax", "garbage fee", "sanitary", "zoning", "occupancy"),
 }
+SERVICE_WINDOW_DEFAULT_WINDOW_NUMBERS = {
+    "RPT": 1,
+    "BUSINESS": 2,
+    "MISC": 3,
+    "QW4": 4,
+    "QW5": 5,
+}
+SERVICE_WINDOW_DEFAULT_LABELS = {
+    "RPT": "RPT Window",
+    "BUSINESS": "BT Window",
+    "MISC": "MISC Window",
+    "QW4": "Queue Window 4",
+    "QW5": "Queue Window 5",
+}
 
 
 def serialize_manila_datetime(value: Optional[datetime]) -> Optional[str]:
@@ -148,7 +162,28 @@ def get_queue_display_status(queue: Queue) -> str:
     return status_label(queue_value(queue, "status") or "Waiting")
 
 
-def serialize_queue(queue: Queue):
+def default_assigned_window_number(service_window: Optional[str]) -> int:
+    return SERVICE_WINDOW_DEFAULT_WINDOW_NUMBERS.get(service_window or "", 3)
+
+
+def get_service_window_label_for_branch(db: Session, branch_id: int, service_window: str) -> str:
+    staff = (
+        db.query(BranchStaff)
+        .filter(
+            BranchStaff.branch_id == branch_id,
+            BranchStaff.role == "branch_staff",
+            BranchStaff.account_scope == "queue_window",
+            BranchStaff.service_window == service_window,
+            BranchStaff.status == "Active",
+        )
+        .order_by(BranchStaff.id.asc())
+        .first()
+    )
+    return (staff.service_window_label if staff and staff.service_window_label else SERVICE_WINDOW_DEFAULT_LABELS.get(service_window, service_window))
+
+
+def serialize_queue(queue: Queue, assigned_window_number: Optional[int] = None, window_label: Optional[str] = None, service_window: Optional[str] = None):
+    service_window = service_window or normalize_service_window(queue_value(queue, "service_type"))
     return {
         "id": queue.id,
         "queue_number": queue_value(queue, "queue_number"),
@@ -160,7 +195,9 @@ def serialize_queue(queue: Queue):
         "status": (queue_value(queue, "status") or "").lower(),
         "status_label": get_queue_display_status(queue),
         "queue_type": (queue_value(queue, "queue_type") or "immediate").lower(),
-        "service_window": normalize_service_window(queue_value(queue, "service_type")),
+        "service_window": service_window,
+        "assigned_window_number": assigned_window_number or default_assigned_window_number(service_window),
+        "window_label": window_label or SERVICE_WINDOW_DEFAULT_LABELS.get(service_window, service_window),
         "appointment_time": serialize_manila_datetime(queue.appointment_time),
         "estimated_wait_time": queue.estimated_wait_time,
         "recommended_arrival": serialize_manila_datetime(queue.recommended_arrival),
@@ -168,6 +205,16 @@ def serialize_queue(queue: Queue):
         "served_at": serialize_manila_datetime(queue.served_at),
         "completed_at": serialize_manila_datetime(queue.completed_at),
     }
+
+
+def serialize_branch_queue(db: Session, queue: Queue, branch_id: int, assigned_window_number: Optional[int] = None):
+    service_window = normalize_service_window_for_branch(db, branch_id, queue_value(queue, "service_type"))
+    return serialize_queue(
+        queue,
+        assigned_window_number=assigned_window_number or get_assigned_window_number_for_service(db, branch_id, service_window),
+        window_label=get_service_window_label_for_branch(db, branch_id, service_window),
+        service_window=service_window,
+    )
 
 
 def serialize_queue_history(queue: QueueHistory):
@@ -211,6 +258,73 @@ def normalize_service_window(service_type: Optional[str]) -> str:
     return "MISC"
 
 
+def normalize_service_window_for_branch(db: Session, branch_id: int, service_type: Optional[str]) -> str:
+    service_window = normalize_service_window(service_type)
+    if service_window != "MISC":
+        return service_window
+
+    normalized_service = " ".join((service_type or "").strip().casefold().split())
+    if not normalized_service:
+        return service_window
+
+    custom_window_account = (
+        db.query(BranchStaff)
+        .filter(
+            BranchStaff.branch_id == branch_id,
+            BranchStaff.role == "branch_staff",
+            BranchStaff.account_scope == "queue_window",
+            BranchStaff.service_window.in_(("QW4", "QW5")),
+            BranchStaff.status == "Active",
+        )
+        .all()
+    )
+    for account in custom_window_account:
+        normalized_label = " ".join((account.service_window_label or "").strip().casefold().split())
+        if normalized_label and normalized_label == normalized_service:
+            return account.service_window
+    return service_window
+
+
+def get_assigned_window_number_for_service(db: Session, branch_id: int, service_window: str) -> int:
+    staff = (
+        db.query(BranchStaff)
+        .filter(
+            BranchStaff.branch_id == branch_id,
+            BranchStaff.role == "branch_staff",
+            BranchStaff.account_scope == "queue_window",
+            BranchStaff.service_window == service_window,
+            BranchStaff.status == "Active",
+        )
+        .order_by(BranchStaff.id.asc())
+        .first()
+    )
+    return (staff.assigned_window_number if staff and staff.assigned_window_number else default_assigned_window_number(service_window))
+
+
+def get_configured_window_accounts(db: Session, branch_id: int) -> list[BranchStaff]:
+    return (
+        db.query(BranchStaff)
+        .filter(
+            BranchStaff.branch_id == branch_id,
+            BranchStaff.role == "branch_staff",
+            BranchStaff.account_scope == "queue_window",
+            BranchStaff.status == "Active",
+        )
+        .order_by(BranchStaff.assigned_window_number.asc(), BranchStaff.id.asc())
+        .all()
+    )
+
+
+def get_assigned_window_number_for_staff(staff: BranchStaff, service_window: Optional[str] = None) -> int:
+    return staff.assigned_window_number or default_assigned_window_number(service_window or staff.service_window)
+
+
+def get_effective_assigned_window_number(db: Session, staff: BranchStaff, service_window: str) -> int:
+    if is_queue_window_staff(staff):
+        return get_assigned_window_number_for_staff(staff, service_window)
+    return get_assigned_window_number_for_service(db, staff.branch_id, service_window)
+
+
 def archive_completed_queue(db: Session, queue: Queue, completed_by: str) -> QueueHistory:
     decrypted_queue_number = queue_value(queue, "queue_number")
     existing_history = (
@@ -221,7 +335,7 @@ def archive_completed_queue(db: Session, queue: Queue, completed_by: str) -> Que
     history_record = existing_history or QueueHistory(queue_number=decrypted_queue_number)
     history_record.branch_id = queue.branch_id
     history_record.service_type = queue_value(queue, "service_type")
-    history_record.service_window = normalize_service_window(queue_value(queue, "service_type"))
+    history_record.service_window = normalize_service_window_for_branch(db, queue.branch_id, queue_value(queue, "service_type"))
     history_record.taxpayer_name = queue_value(queue, "taxpayer_name")
     history_record.contact_number = queue_value(queue, "contact_number")
     history_record.email = queue_value(queue, "email")
@@ -243,11 +357,11 @@ def is_queue_window_staff(staff: BranchStaff) -> bool:
     return staff.role == "branch_staff" and (staff.account_scope or "full_branch") == "queue_window" and bool(staff.service_window)
 
 
-def ensure_queue_window_access(current_staff: BranchStaff, queue: Queue):
+def ensure_queue_window_access(db: Session, current_staff: BranchStaff, queue: Queue):
     if not is_queue_window_staff(current_staff):
         return
     assigned_window = current_staff.service_window or "MISC"
-    queue_window = normalize_service_window(queue_value(queue, "service_type"))
+    queue_window = normalize_service_window_for_branch(db, current_staff.branch_id, queue_value(queue, "service_type"))
     if queue_window != assigned_window:
         raise HTTPException(
             status_code=403,
@@ -271,7 +385,7 @@ def get_active_branch_queue(
     if current_staff is not None and is_queue_window_staff(current_staff):
         queues = [
             queue for queue in queues
-            if normalize_service_window(queue_value(queue, "service_type")) == current_staff.service_window
+            if normalize_service_window_for_branch(db, current_staff.branch_id, queue_value(queue, "service_type")) == current_staff.service_window
         ]
     return queues[0] if queues else None
 
@@ -825,7 +939,7 @@ async def get_branch_dashboard(
             "payments_failed": len([p for p in payments if get_effective_payment_status(p) == "failed"]),
         },
         "activity_trend": buckets,
-        "recent_queue": [serialize_queue(queue) for queue in sorted(recent_queues, key=lambda item: item.created_at, reverse=True)[:10]],
+        "recent_queue": [serialize_branch_queue(db, queue, current_staff.branch_id) for queue in sorted(recent_queues, key=lambda item: item.created_at, reverse=True)[:10]],
         "timestamp": datetime.utcnow().isoformat(),
     }
 
@@ -840,11 +954,11 @@ async def list_branch_queue(
         queues = [
             queue
             for queue in query.order_by(Queue.created_at.asc()).all()
-            if normalize_service_window(queue_value(queue, "service_type")) == current_staff.service_window
+            if normalize_service_window_for_branch(db, current_staff.branch_id, queue_value(queue, "service_type")) == current_staff.service_window
         ]
     else:
         queues = query.order_by(Queue.created_at.asc()).all()
-    return [serialize_queue(queue) for queue in queues]
+    return [serialize_branch_queue(db, queue, current_staff.branch_id) for queue in queues]
 
 
 @router.get("/queue/history")
@@ -902,19 +1016,36 @@ async def get_live_queue_monitor(
         queues = [
             queue
             for queue in query.order_by(Queue.created_at.asc()).all()
-            if normalize_service_window(queue_value(queue, "service_type")) == current_staff.service_window
+            if normalize_service_window_for_branch(db, current_staff.branch_id, queue_value(queue, "service_type")) == current_staff.service_window
         ]
     else:
         queues = query.order_by(Queue.created_at.asc()).all()
     
     windows_data = {}
+
+    for account in get_configured_window_accounts(db, current_staff.branch_id):
+        if is_queue_window_staff(current_staff) and account.service_window != current_staff.service_window:
+            continue
+        service_window = account.service_window or "MISC"
+        windows_data[service_window] = {
+            "window_label": account.service_window_label or SERVICE_WINDOW_DEFAULT_LABELS.get(service_window, service_window),
+            "assigned_window_number": account.assigned_window_number or default_assigned_window_number(service_window),
+            "serving": [],
+            "waiting": [],
+            "completed": [],
+            "skipped": []
+        }
     
     for queue in queues:
         status = (queue_value(queue, "status") or "").lower()
-        service_window = normalize_service_window(queue_value(queue, "service_type"))
+        service_window = normalize_service_window_for_branch(db, current_staff.branch_id, queue_value(queue, "service_type"))
+        assigned_window_number = get_assigned_window_number_for_service(db, current_staff.branch_id, service_window)
+        window_label = get_service_window_label_for_branch(db, current_staff.branch_id, service_window)
         
         if service_window not in windows_data:
             windows_data[service_window] = {
+                "window_label": window_label,
+                "assigned_window_number": assigned_window_number,
                 "serving": [],
                 "waiting": [],
                 "completed": [],
@@ -924,6 +1055,8 @@ async def get_live_queue_monitor(
         queue_data = {
             "queue_number": queue_value(queue, "queue_number"),
             "service_window": service_window,
+            "assigned_window_number": assigned_window_number,
+            "window_label": window_label,
             "status": status,
         }
         
@@ -978,7 +1111,7 @@ async def call_next_queue(
     if is_queue_window_staff(current_staff):
         waiting_queues = [
             queue for queue in waiting_queues
-            if normalize_service_window(queue_value(queue, "service_type")) == current_staff.service_window
+            if normalize_service_window_for_branch(db, current_staff.branch_id, queue_value(queue, "service_type")) == current_staff.service_window
         ]
     queue = waiting_queues[0] if waiting_queues else None
     if not queue:
@@ -989,7 +1122,8 @@ async def call_next_queue(
     log_branch_action(db, current_staff, "Queue Called", f"Called queue {queue_value(queue, 'queue_number')}")
     db.commit()
     db.refresh(queue)
-    return serialize_queue(queue)
+    service_window = normalize_service_window_for_branch(db, current_staff.branch_id, queue_value(queue, "service_type"))
+    return serialize_branch_queue(db, queue, current_staff.branch_id, assigned_window_number=get_effective_assigned_window_number(db, current_staff, service_window))
 
 
 @router.post("/queue/{queue_id}/serve")
@@ -1002,7 +1136,7 @@ async def serve_queue(
     queue = db.query(Queue).filter(Queue.id == queue_id, Queue.branch_id == current_staff.branch_id).first()
     if not queue:
         raise HTTPException(status_code=404, detail="Queue record not found")
-    ensure_queue_window_access(current_staff, queue)
+    ensure_queue_window_access(db, current_staff, queue)
     if queue_value(queue, "status") != "Called":
         raise HTTPException(status_code=409, detail="Only a called queue can be moved to serving.")
     active_queue = get_active_branch_queue(db, current_staff.branch_id, exclude_queue_id=queue.id, current_staff=current_staff)
@@ -1015,7 +1149,8 @@ async def serve_queue(
     log_branch_action(db, current_staff, "Queue Served", f"Serving queue {queue_value(queue, 'queue_number')}")
     db.commit()
     db.refresh(queue)
-    return serialize_queue(queue)
+    service_window = normalize_service_window_for_branch(db, current_staff.branch_id, queue_value(queue, "service_type"))
+    return serialize_branch_queue(db, queue, current_staff.branch_id, assigned_window_number=get_effective_assigned_window_number(db, current_staff, service_window))
 
 
 @router.post("/queue/{queue_id}/skip")
@@ -1028,7 +1163,7 @@ async def skip_queue(
     queue = db.query(Queue).filter(Queue.id == queue_id, Queue.branch_id == current_staff.branch_id).first()
     if not queue:
         raise HTTPException(status_code=404, detail="Queue record not found")
-    ensure_queue_window_access(current_staff, queue)
+    ensure_queue_window_access(db, current_staff, queue)
     if queue_value(queue, "status") not in {"Called", "Serving"}:
         raise HTTPException(status_code=409, detail="Only the active queue can be skipped.")
     queue.status = "Skipped"
@@ -1036,7 +1171,8 @@ async def skip_queue(
     log_branch_action(db, current_staff, "Queue Skipped", f"Skipped queue {queue_value(queue, 'queue_number')}")
     db.commit()
     db.refresh(queue)
-    return serialize_queue(queue)
+    service_window = normalize_service_window_for_branch(db, current_staff.branch_id, queue_value(queue, "service_type"))
+    return serialize_branch_queue(db, queue, current_staff.branch_id, assigned_window_number=get_effective_assigned_window_number(db, current_staff, service_window))
 
 
 @router.post("/queue/{queue_id}/recall-skipped")
@@ -1049,7 +1185,7 @@ async def recall_skipped_queue(
     queue = db.query(Queue).filter(Queue.id == queue_id, Queue.branch_id == current_staff.branch_id).first()
     if not queue:
         raise HTTPException(status_code=404, detail="Skipped queue record not found")
-    ensure_queue_window_access(current_staff, queue)
+    ensure_queue_window_access(db, current_staff, queue)
     if queue_value(queue, "status") != "Skipped":
         raise HTTPException(status_code=409, detail="Only skipped queue records can be pulled back to the current window.")
     active_queue = get_active_branch_queue(db, current_staff.branch_id, current_staff=current_staff)
@@ -1061,7 +1197,8 @@ async def recall_skipped_queue(
     log_branch_action(db, current_staff, "Skipped Queue Recalled", f"Pulled skipped queue {queue_value(queue, 'queue_number')} back to the current window")
     db.commit()
     db.refresh(queue)
-    return serialize_queue(queue)
+    service_window = normalize_service_window_for_branch(db, current_staff.branch_id, queue_value(queue, "service_type"))
+    return serialize_branch_queue(db, queue, current_staff.branch_id, assigned_window_number=get_effective_assigned_window_number(db, current_staff, service_window))
 
 
 @router.delete("/queue/skipped")
@@ -1079,7 +1216,7 @@ async def delete_skipped_queues(
     if is_queue_window_staff(current_staff):
         skipped_queues = [
             queue for queue in skipped_queues
-            if normalize_service_window(queue_value(queue, "service_type")) == current_staff.service_window
+            if normalize_service_window_for_branch(db, current_staff.branch_id, queue_value(queue, "service_type")) == current_staff.service_window
         ]
 
     count = len(skipped_queues)
@@ -1100,7 +1237,7 @@ async def complete_queue(
     queue = db.query(Queue).filter(Queue.id == queue_id, Queue.branch_id == current_staff.branch_id).first()
     if not queue:
         raise HTTPException(status_code=404, detail="Queue record not found")
-    ensure_queue_window_access(current_staff, queue)
+    ensure_queue_window_access(db, current_staff, queue)
     if queue_value(queue, "status") != "Serving":
         raise HTTPException(status_code=409, detail="Only a serving queue can be completed.")
 
@@ -1125,7 +1262,7 @@ async def delete_queue(
     queue = db.query(Queue).filter(Queue.id == queue_id, Queue.branch_id == current_staff.branch_id).first()
     if not queue:
         raise HTTPException(status_code=404, detail="Queue record not found")
-    ensure_queue_window_access(current_staff, queue)
+    ensure_queue_window_access(db, current_staff, queue)
 
     queue_number = queue_value(queue, "queue_number")
     db.delete(queue)

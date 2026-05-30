@@ -11,6 +11,10 @@ const queueWindowLabels = {
   QW5: 'Queue Window 5',
 };
 
+const getWindowLabel = (windowKey, windowData) => (
+  windowData?.window_label || queueWindowLabels[windowKey] || windowKey
+);
+
 const LiveQueueMonitor = () => {
   const { branchSlug } = useParams();
   const [queueData, setQueueData] = useState({
@@ -88,7 +92,7 @@ const LiveQueueMonitor = () => {
         setIsAnnouncementPlaying(true);
         lastAnnouncedQueueRef.current = newServingQueue.queue_number;
 
-        announceQueue(newServingQueue.queue_number, newServingQueue.service_window || 'MISC')
+        announceQueue(newServingQueue.queue_number, newServingQueue.assigned_window_number || newServingQueue.service_window || 'MISC')
           .then(() => {
             console.log('✅ Auto-announcement completed');
           })
@@ -156,8 +160,8 @@ const LiveQueueMonitor = () => {
       setIsAnnouncementPlaying(true);
 
       const playAnnouncement = trigger.recall
-        ? recallQueue(trigger.queue_number, trigger.service_window || 'MISC')
-        : announceQueue(trigger.queue_number, trigger.service_window || 'MISC');
+        ? recallQueue(trigger.queue_number, trigger.assigned_window_number || trigger.service_window || 'MISC')
+        : announceQueue(trigger.queue_number, trigger.assigned_window_number || trigger.service_window || 'MISC');
 
       playAnnouncement
         .then(() => {
@@ -355,7 +359,7 @@ const LiveQueueMonitor = () => {
                       {/* Blue Top Banner */}
                       <div className="bg-blue-600 p-4 text-white">
                         <h3 className="text-xl font-bold text-center">
-                          {queueWindowLabels[windowKey] || windowKey}
+                          {getWindowLabel(windowKey, windowData)}
                         </h3>
                       </div>
                       

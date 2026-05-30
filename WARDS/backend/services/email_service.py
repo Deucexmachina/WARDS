@@ -236,10 +236,11 @@ def _build_branch_access_text(
             ]
         )
         for account in queue_accounts:
+            window_name = f"Window {account.get('assigned_window_number')} - {account.get('window_label') or account.get('service_window')}"
             lines.extend(
                 [
                     "",
-                    f"{account.get('window_label') or account.get('service_window')} ",
+                    window_name,
                     f"- Login email: {account['email']}",
                     f"- Temporary password: {account['temporary_password']}",
                     f"- Access scope: {account.get('account_scope', 'queue_window')}",
@@ -292,7 +293,7 @@ def _build_branch_access_html(
             f"""
             <tr>
               <td style="padding:12px 0;border-bottom:1px solid #e5e7eb;vertical-align:top;">
-                <div style="font-weight:700;color:#0f2744;">{account.get('window_label') or account.get('service_window')}</div>
+                <div style="font-weight:700;color:#0f2744;">Window {account.get('assigned_window_number')} - {account.get('window_label') or account.get('service_window')}</div>
                 <div style="margin-top:4px;font-size:14px;color:#475569;">Login Email: <strong>{account['email']}</strong></div>
                 <div style="margin-top:4px;font-size:14px;color:#475569;">Temporary Password: <strong>{account['temporary_password']}</strong></div>
                 <div style="margin-top:4px;font-size:13px;color:#6b7280;">Queue-only access with Microsoft Authenticator MFA required on first login.</div>

@@ -245,6 +245,10 @@ def ensure_auth_extensions():
                 conn.execute(text("ALTER TABLE branch_staff ADD COLUMN account_scope VARCHAR DEFAULT 'full_branch'"))
             if "service_window" not in branch_staff_columns:
                 conn.execute(text("ALTER TABLE branch_staff ADD COLUMN service_window VARCHAR"))
+            if "service_window_label" not in branch_staff_columns:
+                conn.execute(text("ALTER TABLE branch_staff ADD COLUMN service_window_label VARCHAR"))
+            if "assigned_window_number" not in branch_staff_columns:
+                conn.execute(text("ALTER TABLE branch_staff ADD COLUMN assigned_window_number INTEGER"))
         else:
             citizen_columns = {column["name"] for column in inspector.get_columns("citizen_users")}
             if "tin" not in citizen_columns:
@@ -289,6 +293,10 @@ def ensure_auth_extensions():
                 conn.execute(text("ALTER TABLE branch_staff ADD COLUMN account_scope VARCHAR(255) DEFAULT 'full_branch'"))
             if "service_window" not in branch_staff_columns:
                 conn.execute(text("ALTER TABLE branch_staff ADD COLUMN service_window VARCHAR(255)"))
+            if "service_window_label" not in branch_staff_columns:
+                conn.execute(text("ALTER TABLE branch_staff ADD COLUMN service_window_label VARCHAR(255)"))
+            if "assigned_window_number" not in branch_staff_columns:
+                conn.execute(text("ALTER TABLE branch_staff ADD COLUMN assigned_window_number INTEGER"))
 
         email_otp_columns = {column["name"] for column in inspector.get_columns("email_otps")}
         for column_name, column_type in (

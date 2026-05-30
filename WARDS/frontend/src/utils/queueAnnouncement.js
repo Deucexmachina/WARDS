@@ -59,9 +59,22 @@ const getCharacterAudioPath = (char) => {
  * Examples: "RPT" -> 1, "BUSINESS" -> 2, "MISC" -> 3, "QW4" -> 4, "QW5" -> 5
  */
 const getWindowNumber = (serviceWindow) => {
+  if (typeof serviceWindow === 'number') {
+    return Math.min(Math.max(serviceWindow, 1), 5);
+  }
   if (!serviceWindow) return 1;
   
-  const windowUpper = serviceWindow.toUpperCase();
+  const normalizedText = String(serviceWindow).trim();
+  if (/^[1-5]$/.test(normalizedText)) {
+    return Number(normalizedText);
+  }
+
+  const explicitWindowMatch = normalizedText.match(/(?:WINDOW|QW)\s*([1-5])/i);
+  if (explicitWindowMatch) {
+    return Number(explicitWindowMatch[1]);
+  }
+
+  const windowUpper = normalizedText.toUpperCase();
   
   // Map service windows to window numbers
   const serviceWindowMap = {

@@ -15,6 +15,7 @@ const EMPTY_FORM = {
   role: 'branch_staff',
   branch_id: null,
   service_window: '',
+  assigned_window_number: 1,
   status: 'Active',
 };
 
@@ -27,7 +28,11 @@ const SERVICE_WINDOW_OPTIONS = [
   { value: 'RPT', label: 'RPT' },
   { value: 'BUSINESS', label: 'BT' },
   { value: 'MISC', label: 'MISC' },
+  { value: 'QW4', label: 'Queue Window 4' },
+  { value: 'QW5', label: 'Queue Window 5' },
 ];
+
+const PHYSICAL_WINDOW_OPTIONS = [1, 2, 3, 4, 5];
 
 const INTERNAL_BRANCH_EMAIL_PATTERN = /^[A-Za-z0-9._-]+@branch\.local$/i;
 
@@ -148,6 +153,7 @@ const Accounts = () => {
       const nextState = { ...formData, role: value };
       if (value !== 'branch_staff') {
         nextState.service_window = '';
+        nextState.assigned_window_number = 1;
       }
       setFormData(nextState);
       setEmailError(getAccountEmailValidationMessage(nextState.email, value));
@@ -185,6 +191,7 @@ const Accounts = () => {
       role: account.role,
       branch_id: account.branch_id,
       service_window: account.service_window || '',
+      assigned_window_number: account.assigned_window_number || 1,
       status: account.status,
     });
     setError('');
@@ -230,6 +237,14 @@ const Accounts = () => {
     if (formData.role === 'branch_staff' && !formData.service_window) {
       setError('Please select the assigned queue/service role for this branch staff account.');
       return;
+    }
+
+    if (formData.role === 'branch_staff') {
+      const assignedWindowNumber = Number.parseInt(formData.assigned_window_number, 10);
+      if (Number.isNaN(assignedWindowNumber) || assignedWindowNumber < 1 || assignedWindowNumber > 5) {
+        setError('Please assign a physical window from 1 to 5 for this branch staff account.');
+        return;
+      }
     }
 
     setLoading(true);
@@ -427,7 +442,7 @@ const Accounts = () => {
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
                   {account.role === 'branch_staff'
-                    ? getServiceWindowLabel(account.service_window_label || account.service_window)
+                    ? `${getServiceWindowLabel(account.service_window_label || account.service_window)} - Window ${account.assigned_window_number || 1}`
                     : account.role === 'branch_admin'
                     ? 'Full Branch'
                     : 'N/A'}
@@ -792,23 +807,45 @@ const Accounts = () => {
                       </select>
 
                       {formData.role === 'branch_staff' && (
-                        <div>
-                          <label className="block text-sm font-semibold text-slate-700 mb-2">Assigned Queue / Service Role</label>
-                          <select
-                            name="service_window"
-                            value={formData.service_window}
-                            onChange={handleInputChange}
-                            className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm font-medium text-slate-900 shadow-sm transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:outline-none"
-                            required
-                          >
-                            <option value="">Select Queue / Service Role</option>
-                            {SERVICE_WINDOW_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>{option.label}</option>
-                            ))}
-                          </select>
-                          <p className="mt-2 text-xs text-slate-500">
-                            Branch staff accounts must be assigned to exactly one queue/service role: RPT, BT, or MISC.
-                          </p>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <div>
+                            <label className="block text-sm font-semibold text-slate-700 mb-2">Assigned Queue / Service Role</label>
+                            <select
+                              name="service_window"
+                              value={formData.service_window}
+                              onChange={handleInputChange}
+                              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm font-medium text-slate-900 shadow-sm transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:outline-none"
+                              required
+                            >
+                              <option value="">Select Queue / Service Role</option>
+                              {SERVICE_WINDOW_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                              ))}
+                            </select>
+                            <p className="mt-2 text-xs text-slate-500">
+                              Branch staff accounts must be assigned to exactly one queue/service role.
+                            </p>
+                          </div>
+
+                          <div>
+                            <label className="block text-sm font-semibold text-slate-700 mb-2">Voice Announcement Window</label>
+                            <select
+                              name="assigned_window_number"
+                              value={formData.assigned_window_number || 1}
+                              onChange={(event) => setFormData({ ...formData, assigned_window_number: Number.parseInt(event.target.value, 10) })}
+                              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm font-medium text-slate-900 shadow-sm transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:outline-none"
+                              required
+                            >
+                              {PHYSICAL_WINDOW_OPTIONS.map((windowNumber) => (
+                                <option key={windowNumber} value={windowNumber}>
+                                  Window {windowNumber}
+                                </option>
+                              ))}
+                            </select>
+                            <p className="mt-2 text-xs text-slate-500">
+                              Voice announcements use this physical window number.
+                            </p>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -896,7 +933,7 @@ const Accounts = () => {
                   <div className="mt-2 space-y-1 text-sm text-blue-900">
                     <p><span className="font-semibold">Role:</span> {getRoleDisplay(pendingAccountSave.payload.role)}</p>
                     {pendingAccountSave.payload.role === 'branch_staff' ? (
-                      <p><span className="font-semibold">Assigned queue role:</span> {getServiceWindowLabel(pendingAccountSave.payload.service_window)}</p>
+                      <p><span className="font-semibold">Assigned queue role:</span> {getServiceWindowLabel(pendingAccountSave.payload.service_window)} - Window {pendingAccountSave.payload.assigned_window_number || 1}</p>
                     ) : null}
                     <p><span className="font-semibold">Email login:</span> {pendingAccountSave.payload.email}</p>
                     {pendingAccountSave.payload.username ? (

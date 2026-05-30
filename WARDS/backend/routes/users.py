@@ -30,6 +30,7 @@ class UserCreate(BaseModel):
     full_name: Optional[str] = None
     branch_id: Optional[int] = None
     service_window: Optional[str] = None
+    assigned_window_number: Optional[int] = None
     status: str = "Active"
 
 
@@ -41,6 +42,7 @@ class UserUpdate(BaseModel):
     full_name: Optional[str] = None
     branch_id: Optional[int] = None
     service_window: Optional[str] = None
+    assigned_window_number: Optional[int] = None
     status: str
     current_admin_password: str
 
@@ -65,13 +67,21 @@ SERVICE_WINDOW_ALIASES = {
     "BUSINESS_TAX": "BUSINESS",
     "MISC": "MISC",
     "MISCELLANEOUS": "MISC",
+    "QW4": "QW4",
+    "QUEUE_WINDOW_4": "QW4",
+    "QW5": "QW5",
+    "QUEUE_WINDOW_5": "QW5",
 }
 
 SERVICE_WINDOW_LABELS = {
     "RPT": "RPT",
     "BUSINESS": "BT",
     "MISC": "MISC",
+    "QW4": "Queue Window 4",
+    "QW5": "Queue Window 5",
 }
+
+MAX_ASSIGNED_WINDOW_NUMBER = 5
 
 
 def is_internal_branch_email(email: str) -> bool:
@@ -95,14 +105,32 @@ def normalize_branch_service_window(value: Optional[str]) -> str:
     if not service_window:
         raise HTTPException(
             status_code=400,
-            detail="Branch staff accounts require an assigned queue/service role: RPT, BT, or MISC.",
+            detail="Branch staff accounts require an assigned queue/service role: RPT, BT, MISC, Queue Window 4, or Queue Window 5.",
         )
     return service_window
+
+
+def default_assigned_window_number(service_window: Optional[str]) -> int:
+    defaults = {"RPT": 1, "BUSINESS": 2, "MISC": 3, "QW4": 4, "QW5": 5}
+    return defaults.get(service_window or "", 1)
+
+
+def normalize_assigned_window_number(value: Optional[int], service_window: Optional[str]) -> int:
+    if value is None:
+        return default_assigned_window_number(service_window)
+    try:
+        window_number = int(value)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Assigned physical window must be a number from 1 to 5.")
+    if window_number < 1 or window_number > MAX_ASSIGNED_WINDOW_NUMBER:
+        raise HTTPException(status_code=400, detail="Assigned physical window must be between 1 and 5.")
+    return window_number
 
 
 def serialize_account(user, branch_name: Optional[str] = None):
     citizen_profile = serialize_citizen_user(user) if isinstance(user, CitizenUser) else None
     service_window = getattr(user, "service_window", None)
+    service_window_label = getattr(user, "service_window_label", None) or SERVICE_WINDOW_LABELS.get(service_window, service_window)
     return {
         "id": user.id,
         "username": getattr(user, "username", None),
@@ -113,7 +141,8 @@ def serialize_account(user, branch_name: Optional[str] = None):
         "branch_name": branch_name or "All Branches",
         "account_scope": getattr(user, "account_scope", None),
         "service_window": service_window,
-        "service_window_label": SERVICE_WINDOW_LABELS.get(service_window, service_window),
+        "service_window_label": service_window_label,
+        "assigned_window_number": getattr(user, "assigned_window_number", None) or default_assigned_window_number(service_window),
         "status": user.status,
         "last_login": user.last_login.isoformat() if user.last_login else None,
         "created_at": user.created_at.isoformat() if user.created_at else None,
@@ -248,9 +277,11 @@ async def create_user(
             raise HTTPException(status_code=400, detail="Username is required for branch accounts")
         ensure_username_is_unique(db, username)
         service_window = None
+        assigned_window_number = None
         account_scope = "full_branch"
         if user.role == "branch_staff":
             service_window = normalize_branch_service_window(user.service_window)
+            assigned_window_number = normalize_assigned_window_number(user.assigned_window_number, service_window)
             account_scope = "queue_window"
         account = BranchStaff(
             username=username,
@@ -261,6 +292,8 @@ async def create_user(
             role=user.role,
             account_scope=account_scope,
             service_window=service_window,
+            service_window_label=SERVICE_WINDOW_LABELS.get(service_window, service_window) if service_window else None,
+            assigned_window_number=assigned_window_number,
             status=user.status,
             is_verified=True,
         )
@@ -354,9 +387,13 @@ async def update_user(
         account.full_name = user.full_name or account.full_name or username
         if user.role == "branch_staff":
             account.service_window = normalize_branch_service_window(user.service_window)
+            account.service_window_label = SERVICE_WINDOW_LABELS.get(account.service_window, account.service_window)
+            account.assigned_window_number = normalize_assigned_window_number(user.assigned_window_number, account.service_window)
             account.account_scope = "queue_window"
         else:
             account.service_window = None
+            account.service_window_label = None
+            account.assigned_window_number = None
             account.account_scope = "full_branch"
         branch = db.query(Branch).filter(Branch.id == user.branch_id).first()
         branch_name = (get_decrypted_or_raw(branch, "name") or branch.name) if branch else "Unassigned Branch"

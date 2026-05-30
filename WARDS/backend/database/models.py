@@ -75,6 +75,8 @@ class BranchStaff(Base):
     role = Column(String, default="branch_staff")  # branch_admin or branch_staff
     account_scope = Column(String, default="full_branch")
     service_window = Column(String, nullable=True)
+    service_window_label = Column(String, nullable=True)
+    assigned_window_number = Column(Integer, nullable=True)
     is_verified = Column(Boolean, default=False)
     status = Column(String, default="Active")
     last_login = Column(DateTime, nullable=True)

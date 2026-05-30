@@ -70,6 +70,11 @@ SERVICE_WINDOW_LABELS = {
     "QW4": "Queue Window 4",
     "QW5": "Queue Window 5",
 }
+SERVICE_ROLE_LABELS = {
+    "RPT": "RPT",
+    "BUSINESS": "BT",
+    "MISC": "MISC",
+}
 MAX_QUEUE_WINDOW_ACCOUNTS = 5
 
 
@@ -130,7 +135,7 @@ def serialize_branch(branch: Branch, db: Session) -> dict:
             BranchStaff.role == "branch_staff",
             BranchStaff.account_scope == "queue_window",
         )
-        .order_by(BranchStaff.created_at.asc())
+        .order_by(BranchStaff.assigned_window_number.asc(), BranchStaff.created_at.asc())
         .all()
     )
     return {
@@ -149,6 +154,8 @@ def serialize_branch(branch: Branch, db: Session) -> dict:
                 "email": account.email,
                 "full_name": account.full_name,
                 "service_window": account.service_window,
+                "service_window_label": get_window_display_label(account),
+                "assigned_window_number": account.assigned_window_number or default_assigned_window_number(account.service_window),
                 "account_scope": account.account_scope,
                 "status": account.status,
                 "is_verified": account.is_verified,
@@ -167,13 +174,22 @@ def normalize_service_window(value: str) -> str:
     return service_window
 
 
-def generate_window_username(db: Session, branch_name: str, service_window: str) -> str:
+def get_window_display_label(account: BranchStaff) -> str:
+    return account.service_window_label or SERVICE_WINDOW_LABELS.get(account.service_window, account.service_window)
+
+
+def normalize_custom_window_label(value: Optional[str], assigned_window_number: int) -> str:
+    label = (value or "").strip()
+    if not label:
+        raise HTTPException(status_code=400, detail=f"Please enter a name for Window {assigned_window_number}.")
+    if len(label) > 80:
+        raise HTTPException(status_code=400, detail="Window name must be 80 characters or less.")
+    return label
+
+
+def generate_window_username(db: Session, branch_name: str, assigned_window_number: int) -> str:
     branch_slug = slugify_branch_name(branch_name).replace("-", "")
-    try:
-        window_number = SERVICE_WINDOW_SEQUENCE.index(service_window) + 1
-    except ValueError:
-        window_number = 1
-    base_username = normalize_username(f"{branch_slug}_staff{window_number}")
+    base_username = normalize_username(f"{branch_slug}_staff{assigned_window_number}")
 
     candidate = base_username
     counter = 1
@@ -192,13 +208,31 @@ def generate_window_internal_email(username: str) -> str:
     return f"{username}@branch.local"
 
 
-def generate_window_full_name(branch_name: str, service_window: str) -> str:
-    window_label = SERVICE_WINDOW_LABELS.get(service_window, f"{service_window} Window")
+def generate_window_full_name(branch_name: str, window_label: str) -> str:
     return f"{branch_name} {window_label} Staff"
 
 
 def normalize_counter_count(counters: int) -> int:
     return max(1, min(int(counters or 1), MAX_QUEUE_WINDOW_ACCOUNTS))
+
+
+def default_assigned_window_number(service_window: Optional[str]) -> int:
+    try:
+        return SERVICE_WINDOW_SEQUENCE.index(service_window or "") + 1
+    except ValueError:
+        return 3
+
+
+def normalize_assigned_window_number(value: Optional[int], fallback_service_window: Optional[str] = None) -> int:
+    if value is None:
+        return default_assigned_window_number(fallback_service_window)
+    try:
+        window_number = int(value)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Assigned window must be a number from 1 to 5.")
+    if window_number < 1 or window_number > MAX_QUEUE_WINDOW_ACCOUNTS:
+        raise HTTPException(status_code=400, detail="Assigned window must be between 1 and 5.")
+    return window_number
 
 
 def clear_branch_mfa_secret(db: Session, username: str):
@@ -209,6 +243,8 @@ def clear_branch_mfa_secret(db: Session, username: str):
 
 class BranchWindowAccountCreate(BaseModel):
     service_window: str
+    assigned_window_number: Optional[int] = None
+    custom_label: Optional[str] = None
 
 class BranchCreate(BaseModel):
     name: str
@@ -275,7 +311,7 @@ async def create_superadmin_branch_session(
             BranchStaff.account_scope == "queue_window",
             BranchStaff.status == "Active",
         )
-        .order_by(BranchStaff.service_window.asc(), BranchStaff.id.asc())
+        .order_by(BranchStaff.assigned_window_number.asc(), BranchStaff.id.asc())
         .all()
     )
 
@@ -287,6 +323,8 @@ async def create_superadmin_branch_session(
             "branch_id": staff.branch_id,
             "account_scope": staff.account_scope or "full_branch",
             "service_window": staff.service_window,
+            "service_window_label": get_window_display_label(staff),
+            "assigned_window_number": staff.assigned_window_number,
             "user_id": staff.id,
             "type": "branch",
             "managed_by": "superadmin",
@@ -316,6 +354,9 @@ async def create_superadmin_branch_session(
             "status": staff.status,
             "account_scope": staff.account_scope or "full_branch",
             "service_window": staff.service_window,
+            "service_window_label": get_window_display_label(staff),
+            "window_label": get_window_display_label(staff),
+            "assigned_window_number": staff.assigned_window_number,
             "superadmin_managed_branch": True,
             "window_accounts": [
                 {
@@ -323,7 +364,9 @@ async def create_superadmin_branch_session(
                     "username": account.username,
                     "full_name": account.full_name,
                     "service_window": account.service_window,
-                    "window_label": SERVICE_WINDOW_LABELS.get(account.service_window, account.service_window),
+                    "service_window_label": get_window_display_label(account),
+                    "assigned_window_number": account.assigned_window_number or default_assigned_window_number(account.service_window),
+                    "window_label": get_window_display_label(account),
                 }
                 for account in window_accounts
             ],
@@ -361,10 +404,33 @@ async def create_branch(
 
     if branch.admin_email:
         reserved_emails.add(normalize_email(branch.admin_email, check_deliverability=True))
-    normalized_window_accounts = [
-        {"service_window": service_window}
-        for service_window in SERVICE_WINDOW_SEQUENCE[:normalized_counter_count]
-    ]
+    requested_window_accounts = branch.window_accounts or []
+    normalized_window_accounts = []
+    used_service_windows: set[str] = set()
+    for index in range(normalized_counter_count):
+        requested = requested_window_accounts[index] if index < len(requested_window_accounts) else None
+        assigned_window_number = normalize_assigned_window_number(
+            requested.assigned_window_number if requested else index + 1,
+            SERVICE_WINDOW_SEQUENCE[index],
+        )
+        requested_role = (requested.service_window if requested else SERVICE_WINDOW_SEQUENCE[index] or "").strip().upper()
+        if requested_role == "OTHER":
+            if assigned_window_number not in (4, 5):
+                raise HTTPException(status_code=400, detail="Other queue windows are only available for Window 4 and Window 5.")
+            service_window = f"QW{assigned_window_number}"
+            window_label = normalize_custom_window_label(requested.custom_label if requested else None, assigned_window_number)
+        else:
+            service_window = normalize_service_window(requested.service_window) if requested else SERVICE_WINDOW_SEQUENCE[index]
+            window_label = SERVICE_WINDOW_LABELS.get(service_window, service_window)
+        if service_window in used_service_windows:
+            role_label = SERVICE_ROLE_LABELS.get(service_window, window_label)
+            raise HTTPException(status_code=400, detail=f"{role_label} is already assigned to another window in this branch setup.")
+        used_service_windows.add(service_window)
+        normalized_window_accounts.append({
+            "service_window": service_window,
+            "assigned_window_number": assigned_window_number,
+            "window_label": window_label,
+        })
 
     # Create admin account if credentials provided
     if branch.admin_username and branch.admin_email and branch.admin_password:
@@ -414,7 +480,7 @@ async def create_branch(
         generated_username = generate_window_username(
             db,
             branch_name=new_branch.name,
-            service_window=window_account["service_window"],
+            assigned_window_number=window_account["assigned_window_number"],
         )
         generated_password = generate_window_password(window_account["service_window"])
         generated_email = generate_window_internal_email(generated_username)
@@ -422,7 +488,7 @@ async def create_branch(
             raise HTTPException(status_code=400, detail="Generated branch staff email alias collided with an existing branch account.")
         ensure_email_is_unique(db, generated_email)
         reserved_emails.add(generated_email)
-        staff_full_name = generate_window_full_name(new_branch.name, window_account["service_window"])
+        staff_full_name = generate_window_full_name(new_branch.name, window_account["window_label"])
 
         staff_user = BranchStaff(
             username=generated_username,
@@ -433,6 +499,8 @@ async def create_branch(
             branch_id=new_branch.id,
             account_scope="queue_window",
             service_window=window_account["service_window"],
+            service_window_label=window_account["window_label"],
+            assigned_window_number=window_account["assigned_window_number"],
             is_verified=True,
             status="Active",
         )
@@ -442,7 +510,8 @@ async def create_branch(
 
         window_account_deliveries.append({
             "service_window": window_account["service_window"],
-            "window_label": SERVICE_WINDOW_LABELS.get(window_account["service_window"], window_account["service_window"]),
+            "assigned_window_number": window_account["assigned_window_number"],
+            "window_label": window_account["window_label"],
             "username": generated_username,
             "email": generated_email,
             "full_name": staff_full_name,

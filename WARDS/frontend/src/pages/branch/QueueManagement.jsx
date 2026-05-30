@@ -31,6 +31,13 @@ const queueWindowLabels = {
   QW5: 'Queue Window 5',
 };
 
+const getQueueWindowLabel = (queueOrKey) => {
+  if (queueOrKey && typeof queueOrKey === 'object') {
+    return queueOrKey.window_label || queueWindowLabels[queueOrKey.service_window] || queueOrKey.service_window || 'MISC';
+  }
+  return queueWindowLabels[queueOrKey] || queueOrKey || 'MISC';
+};
+
 const BRANCH_QUEUE_UPDATED_EVENT = 'branch-queue-updated';
 
 const resolveReceiptCategory = (queue) => {
@@ -415,7 +422,7 @@ const QueueHistorySection = ({
                 <td className="px-6 py-4">
                   <p className="font-semibold text-primary">{queue.queue_number}</p>
                   <p className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-400">
-                    {queueWindowLabels[queue.service_window] || queue.service_window || 'MISC'}
+                    {getQueueWindowLabel(queue)}
                   </p>
                 </td>
                 <td className="px-6 py-4">
@@ -460,7 +467,8 @@ const QueueManagement = () => {
   const isSuperadminManagedBranch = Boolean(branchUser?.superadmin_managed_branch);
   const isQueueWindowAccount = branchUser?.account_scope === 'queue_window';
   const isBranchAdmin = !isSuperadminManagedBranch && (branchUser?.role === 'branch_admin' || branchUser?.internal_role === 'branch_admin');
-  const assignedWindowLabel = branchUser?.service_window === 'BUSINESS' ? 'BT' : (branchUser?.service_window || '');
+  const assignedWindowLabel = branchUser?.window_label || branchUser?.service_window_label || (branchUser?.service_window === 'BUSINESS' ? 'BT' : (branchUser?.service_window || ''));
+  const assignedPhysicalWindowLabel = branchUser?.assigned_window_number ? `Window ${branchUser.assigned_window_number}` : '';
   const assignedWindowKey = branchUser?.service_window || 'MISC';
   const managedWindowAccounts = Array.isArray(branchUser?.window_accounts) ? branchUser.window_accounts : [];
   const [queues, setQueues] = useState([]);
@@ -486,6 +494,8 @@ const QueueManagement = () => {
     RPT: '',
     BUSINESS: '',
     MISC: '',
+    QW4: '',
+    QW5: '',
   });
   const [completionQueue, setCompletionQueue] = useState(null);
   const [completionMode, setCompletionMode] = useState('options');
@@ -570,7 +580,7 @@ const QueueManagement = () => {
   const windowOptions = useMemo(() => {
     const fromAccounts = managedWindowAccounts.map((account) => ({
       key: account.service_window,
-      label: account.window_label || queueWindowLabels[account.service_window] || account.service_window,
+      label: account.window_label || account.service_window_label || getQueueWindowLabel(account.service_window),
       username: account.username,
     })).filter((item) => item.key);
     const seen = new Set(fromAccounts.map((item) => item.key));
@@ -578,7 +588,7 @@ const QueueManagement = () => {
       const key = queue.service_window || 'MISC';
       if (!seen.has(key)) {
         seen.add(key);
-        fromAccounts.push({ key, label: queueWindowLabels[key] || key, username: '' });
+        fromAccounts.push({ key, label: getQueueWindowLabel(queue), username: '' });
       }
     });
     return fromAccounts;
@@ -775,6 +785,7 @@ const QueueManagement = () => {
             id: calledQueue.id,
             queue_number: calledQueue.queue_number,
             service_window: calledQueue.service_window || 'MISC',
+            assigned_window_number: calledQueue.assigned_window_number,
             status: calledQueue.status,
             timestamp: new Date().toISOString(),
           };
@@ -786,6 +797,7 @@ const QueueManagement = () => {
             queue_number: calledQueue.queue_number,
             queue_id: calledQueue.id,
             service_window: calledQueue.service_window || 'MISC',
+            assigned_window_number: calledQueue.assigned_window_number,
             recall: false,
             timestamp: Date.now(),
           }));
@@ -832,6 +844,7 @@ const QueueManagement = () => {
           queue_number: lastCalledQueue.queue_number,
           queue_id: lastCalledQueue.id,
           service_window: lastCalledQueue.service_window,
+          assigned_window_number: lastCalledQueue.assigned_window_number,
           recall: true,
           timestamp: Date.now(),
         }));
@@ -970,34 +983,22 @@ const QueueManagement = () => {
       return [
         {
           key: assignedWindowKey,
-          title: `Completed ${queueWindowLabels[assignedWindowKey] || assignedWindowKey} Queue History`,
-          description: `Completed ${(queueWindowLabels[assignedWindowKey] || assignedWindowKey)} queue transactions are archived here after branch staff finish servicing them.`,
+          title: `Completed ${assignedWindowLabel || getQueueWindowLabel(assignedWindowKey)} Queue History`,
+          description: `Completed ${(assignedWindowLabel || getQueueWindowLabel(assignedWindowKey))} queue transactions are archived here after branch staff finish servicing them.`,
           items: filteredQueueHistory[assignedWindowKey] || [],
         },
       ];
     }
 
-    return [
-      {
-        key: 'RPT',
-        title: 'Completed RPT Queue History',
-        description: 'Completed RPT queue transactions are archived here after branch staff finish servicing them.',
-        items: filteredQueueHistory.RPT || [],
-      },
-      {
-        key: 'BUSINESS',
-        title: 'Completed BT Queue History',
-        description: 'Completed BT queue transactions are archived here after branch staff finish servicing them.',
-        items: filteredQueueHistory.BUSINESS || [],
-      },
-      {
-        key: 'MISC',
-        title: 'Completed Misc Queue History',
-        description: 'Completed miscellaneous queue transactions are archived here after branch staff finish servicing them.',
-        items: filteredQueueHistory.MISC || [],
-      },
-    ];
-  }, [assignedWindowKey, filteredQueueHistory, isQueueWindowAccount]);
+    return windowOptions
+      .filter((option) => (filteredQueueHistory[option.key] || []).length > 0 || ['RPT', 'BUSINESS', 'MISC'].includes(option.key))
+      .map((option) => ({
+        key: option.key,
+        title: `Completed ${option.label} Queue History`,
+        description: `Completed ${option.label} queue transactions are archived here after branch staff finish servicing them.`,
+        items: filteredQueueHistory[option.key] || [],
+      }));
+  }, [assignedWindowKey, assignedWindowLabel, filteredQueueHistory, isQueueWindowAccount, windowOptions]);
 
   const summary = useMemo(() => ({
     immediate: immediateQueues.length,
@@ -1025,7 +1026,7 @@ const QueueManagement = () => {
         title="Queue Management"
         subtitle={
           isQueueWindowAccount && assignedWindowLabel
-            ? `Manage only the ${assignedWindowLabel} service window queue for this branch.`
+            ? `Manage only the ${assignedWindowLabel} service queue for this branch${assignedPhysicalWindowLabel ? ` at ${assignedPhysicalWindowLabel}` : ''}.`
             : isBranchAdmin
               ? 'Review skipped queue records and pull taxpayers back to the current window when they return.'
             : 'Manage immediate and appointment queues in separate sections with quick status visibility, search tools, and clean paging.'
@@ -1062,7 +1063,7 @@ const QueueManagement = () => {
 
       {isQueueWindowAccount && assignedWindowLabel ? (
         <div className="rounded-xl border border-blue-200 bg-blue-50 px-5 py-4 text-blue-900 shadow-sm">
-          <p className="font-semibold">Queue-only branch staff account active for the {assignedWindowLabel} window.</p>
+          <p className="font-semibold">Queue-only branch staff account active for the {assignedWindowLabel} service queue{assignedPhysicalWindowLabel ? ` at ${assignedPhysicalWindowLabel}` : ''}.</p>
           <p className="mt-1 text-sm text-blue-700">
             Other branch modules are hidden, and queue actions are limited to this assigned service window.
           </p>
