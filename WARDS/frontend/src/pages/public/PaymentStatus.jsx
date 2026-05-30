@@ -385,30 +385,6 @@ const PaymentStatus = () => {
             </div>
       </div>
 
-      {(isQueueLinkedReceiptPayment || isStandaloneReceiptPayment) ? (
-        <div className="mt-8 rounded-xl border border-slate-200 bg-slate-50 px-6 py-5">
-          <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-            {isQueueLinkedReceiptPayment ? (
-              <button
-                type="button"
-                onClick={() => navigate('/?modal=ticket')}
-                className="w-full rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-700 sm:w-auto"
-              >
-                View My Ticket
-              </button>
-            ) : null}
-            {isStandaloneReceiptPayment ? (
-              <button
-                type="button"
-                onClick={() => navigate('/request-receipt?new=1')}
-                className="w-full rounded-lg bg-slate-900 px-5 py-3 font-semibold text-white transition hover:bg-slate-800 sm:w-auto"
-              >
-                Request Another Copy
-              </button>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
 
       {showPostPaymentInstructions ? (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/55 px-4 py-6">
@@ -532,34 +508,81 @@ const PaymentStatus = () => {
             </div>
           )}
 
-          <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="mt-8 space-y-4">
+            {/* Primary Action - Download Receipt */}
             <button
               onClick={handleDownloadReceipt}
               disabled={downloadingReceipt}
-              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded-lg font-semibold transition-all duration-300 shadow-md hover:shadow-lg disabled:opacity-60"
+              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-4 rounded-lg font-semibold transition-all duration-300 shadow-md hover:shadow-lg disabled:opacity-60 flex items-center justify-center gap-2 text-lg"
             >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
               {downloadingReceipt ? 'Preparing PDF...' : 'Download E-Receipt'}
             </button>
-            <button
-              onClick={() => navigate(
-                isRptPayment
-                  ? `/pay-taxes/rpt${shouldResetRptWorkflowOnReturn ? '?reset=1' : ''}`
-                  : isBusinessTaxPayment
-                    ? `/pay-taxes/bt/online${payment?.metadata?.tracking_number ? `?tracking=${encodeURIComponent(payment.metadata.tracking_number)}` : ''}`
-                    : isReceiptRequestPayment
-                      ? '/request-receipt'
-                      : '/pay-taxes'
-              )}
-              className="w-full bg-accent hover:bg-blue-600 text-white py-3 rounded-lg font-semibold transition-all duration-300 shadow-md hover:shadow-lg"
-            >
-              Return to Payment Page
-            </button>
-            <button
-              onClick={() => navigate('/')}
-              className="w-full bg-primary hover:bg-blue-800 text-white py-3 rounded-lg font-semibold transition-all duration-300 shadow-md hover:shadow-lg"
-            >
-              Return to Home
-            </button>
+
+            {/* Secondary Actions Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button
+                onClick={() => navigate(
+                  isRptPayment
+                    ? `/pay-taxes/rpt${shouldResetRptWorkflowOnReturn ? '?reset=1' : ''}`
+                    : isBusinessTaxPayment
+                      ? `/pay-taxes/bt/online${payment?.metadata?.tracking_number ? `?tracking=${encodeURIComponent(payment.metadata.tracking_number)}` : ''}`
+                      : isReceiptRequestPayment
+                        ? '/request-receipt'
+                        : '/pay-taxes'
+                )}
+                className="w-full bg-accent hover:bg-blue-600 text-white py-3 rounded-lg font-semibold transition-all duration-300 shadow-md hover:shadow-lg flex items-center justify-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Return to Payment Page
+              </button>
+              <button
+                onClick={() => navigate('/')}
+                className="w-full bg-primary hover:bg-blue-800 text-white py-3 rounded-lg font-semibold transition-all duration-300 shadow-md hover:shadow-lg flex items-center justify-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                </svg>
+                Return to Home
+              </button>
+            </div>
+
+            {/* Tertiary Actions - Receipt-specific */}
+            {(isQueueLinkedReceiptPayment || isStandaloneReceiptPayment) && (
+              <div className="pt-4 border-t border-gray-200">
+                <p className="text-sm text-gray-600 mb-3 text-center font-medium">Additional Options</p>
+                <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                  {isQueueLinkedReceiptPayment && (
+                    <button
+                      type="button"
+                      onClick={() => navigate('/?modal=ticket')}
+                      className="w-full sm:w-auto bg-blue-100 hover:bg-blue-200 text-blue-700 px-5 py-2.5 rounded-lg font-semibold transition flex items-center justify-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" />
+                      </svg>
+                      View My Ticket
+                    </button>
+                  )}
+                  {isStandaloneReceiptPayment && (
+                    <button
+                      type="button"
+                      onClick={() => navigate('/request-receipt?new=1')}
+                      className="w-full sm:w-auto bg-gray-100 hover:bg-gray-200 text-gray-700 px-5 py-2.5 rounded-lg font-semibold transition flex items-center justify-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      Request Another Copy
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
