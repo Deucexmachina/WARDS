@@ -710,6 +710,7 @@ const GetQueue = () => {
                     serviceType: queueResult.service_type,
                     taxpayerName: normalizeCitizenFullName(formData.taxpayer_name),
                     email: formData.email,
+                    createdAt: queueResult.created_at,
                   };
                   sessionStorage.setItem(PENDING_RECEIPT_QUEUE_LINK_STORAGE_KEY, JSON.stringify(linkedQueuePayload));
                   navigate('/request-receipt?mode=queue-link', {

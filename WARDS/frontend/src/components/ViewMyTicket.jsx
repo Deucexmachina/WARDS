@@ -257,6 +257,7 @@ const ViewMyTicket = ({ onClose }) => {
                       <p className="text-sm font-semibold text-slate-900">{request.request_id}</p>
                       <p className="mt-1 text-sm text-slate-700">{request.tax_type} · {request.request_type}</p>
                       <p className="mt-1 text-xs text-slate-500">Status: {request.status}</p>
+                      <p className="mt-1 text-xs text-slate-500">Payment: {request.payment_status || (request.fee_paid ? 'Verified' : 'Pending')}</p>
                       <p className="mt-1 text-xs text-slate-500">Fee paid: {request.fee_paid ? 'Yes' : 'No'}</p>
                     </div>
                   ))}

@@ -65,6 +65,7 @@ const PaymentStatus = () => {
   const intervalIdRef = useRef(null);
 
   const refNumber = searchParams.get('ref');
+  const receiptFlow = searchParams.get('receiptFlow') || '';
   const isMerchantReturn = searchParams.get('merchant_return') === '1';
   const hasOpenerWindow = typeof window !== 'undefined' && window.opener && !window.opener.closed;
   const shouldHandOffMerchantReturn = isMerchantReturn && hasOpenerWindow;
@@ -83,6 +84,8 @@ const PaymentStatus = () => {
     (isRptPayment || isBusinessTaxPayment) &&
     (POST_PAYMENT_INSTRUCTION_STAGES.has(rawStatus) || BT_POST_PAYMENT_STAGES.has(rawStatus)) &&
     (SUCCESS_STATUSES.has(paymongoStatus) || SUCCESS_STATUSES.has(status) || rawStatus === 'PAYMENT_SUBMITTED');
+  const isQueueLinkedReceiptPayment = isReceiptRequestPayment && receiptFlow === 'queue-link';
+  const isStandaloneReceiptPayment = isReceiptRequestPayment && receiptFlow === 'standalone';
 
   useEffect(() => {
     if (shouldHandOffMerchantReturn) {
@@ -381,6 +384,31 @@ const PaymentStatus = () => {
               ) : null}
             </div>
       </div>
+
+      {(isQueueLinkedReceiptPayment || isStandaloneReceiptPayment) ? (
+        <div className="mt-8 rounded-xl border border-slate-200 bg-slate-50 px-6 py-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+            {isQueueLinkedReceiptPayment ? (
+              <button
+                type="button"
+                onClick={() => navigate('/?modal=ticket')}
+                className="w-full rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-700 sm:w-auto"
+              >
+                View My Ticket
+              </button>
+            ) : null}
+            {isStandaloneReceiptPayment ? (
+              <button
+                type="button"
+                onClick={() => navigate('/request-receipt?new=1')}
+                className="w-full rounded-lg bg-slate-900 px-5 py-3 font-semibold text-white transition hover:bg-slate-800 sm:w-auto"
+              >
+                Request Another Copy
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       {showPostPaymentInstructions ? (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/55 px-4 py-6">

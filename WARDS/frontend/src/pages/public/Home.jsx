@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useEffect, useMemo, useState } from 'react';
 import api from '../../services/api';
 import { buildAttachmentUrl } from '../../components/AnnouncementAttachments';
@@ -231,6 +231,8 @@ const buildPaginationItems = (totalPages, activePage) => {
 };
 
 const Home = () => {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [announcements, setAnnouncements] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedAnnouncement, setSelectedAnnouncement] = useState(null);
@@ -239,6 +241,12 @@ const Home = () => {
   useEffect(() => {
     fetchAnnouncements();
   }, []);
+
+  useEffect(() => {
+    if (searchParams.get('modal') === 'ticket') {
+      setShowTicketModal(true);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -297,6 +305,13 @@ const Home = () => {
 
   const closeAnnouncementModal = () => {
     setSelectedAnnouncement(null);
+  };
+
+  const closeTicketModal = () => {
+    setShowTicketModal(false);
+    if (searchParams.get('modal') === 'ticket') {
+      navigate('/', { replace: true });
+    }
   };
 
   return (
@@ -586,7 +601,7 @@ const Home = () => {
       )}
 
       {showTicketModal && (
-        <ViewMyTicket onClose={() => setShowTicketModal(false)} />
+        <ViewMyTicket onClose={closeTicketModal} />
       )}
     </>
   );

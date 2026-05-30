@@ -987,6 +987,11 @@ async def get_my_active_ticket(
                     "status": receipt_request_value(request, "status"),
                     "fee_paid": bool(request.fee_paid),
                     "payment_ref_number": receipt_request_value(request, "payment_ref_number"),
+                    "payment_status": "Verified" if request.fee_paid else ("Pending Over-the-Counter Payment" if any(
+                        (payment.payment_method or "").strip().lower() == "over_the_counter"
+                        and (payment.status or "").strip().lower() == "pending over-the-counter payment"
+                        for payment in db.query(Payment).filter(Payment.related_request_id == receipt_request_value(request, "request_id")).all()
+                    ) else "Pending"),
                     "created_at": serialize_manila_datetime(request.created_at),
                 }
                 for request in linked_receipt_requests

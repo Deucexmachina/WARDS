@@ -3,12 +3,13 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 
 import axios from 'axios';
 import { paymentAPI, receiptAPI } from '../../services/api';
-import { getStoredPublicUser } from '../../utils/publicSession';
+import { getStoredPublicUser, PUBLIC_USER_STORAGE_EVENT } from '../../utils/publicSession';
 import { getEmailValidationMessage } from '../../utils/validation';
 
 const DEFAULT_DISABLED_MESSAGE = 'This service is currently unavailable because it has been disabled by system administration.';
 const ACTIVE_RECEIPT_REQUEST_STORAGE_KEY_PREFIX = 'activeReceiptRequestId';
 const PENDING_RECEIPT_QUEUE_LINK_STORAGE_KEY = 'wardsPendingReceiptQueueLink';
+const VIEW_TICKET_MODAL_QUERY = '?modal=ticket';
 const getTodayDateValue = () =>
   new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Manila',
@@ -36,16 +37,33 @@ const formatAppointmentAvailabilityMessage = (availability) => {
   );
 };
 
+const deriveTaxTypeFromService = (serviceType) => {
+  const normalized = (serviceType || '').trim().toLowerCase();
+  if (normalized.includes('real property') || normalized.includes('rpt') || normalized.includes('amilyar')) {
+    return 'RPT';
+  }
+  if (normalized.includes('business') || normalized === 'bt' || normalized.includes('permit')) {
+    return 'BUSINESS';
+  }
+  return 'MISC';
+};
+
+const lockedFieldClasses = 'w-full px-4 py-3 border border-slate-200 rounded-lg bg-slate-100 text-slate-700 cursor-not-allowed';
+const buildReceiptRequestStorageKey = (email, workflow, queueNumber = '') => {
+  const normalizedEmail = (email || 'public-user').trim().toLowerCase();
+  const normalizedQueueNumber = (queueNumber || '').trim();
+  return workflow === 'queue-link'
+    ? `${ACTIVE_RECEIPT_REQUEST_STORAGE_KEY_PREFIX}:${normalizedEmail}:queue:${normalizedQueueNumber || 'unlinked'}`
+    : `${ACTIVE_RECEIPT_REQUEST_STORAGE_KEY_PREFIX}:${normalizedEmail}:standalone`;
+};
+
 const RequestReceipt = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
-  const storedUser = useMemo(() => getStoredPublicUser(), []);
-  const activeReceiptRequestStorageKey = useMemo(() => {
-    const normalizedEmail = (storedUser?.email || 'public-user').trim().toLowerCase();
-    return `${ACTIVE_RECEIPT_REQUEST_STORAGE_KEY_PREFIX}:${normalizedEmail}`;
-  }, [storedUser]);
+  const [storedUser, setStoredUser] = useState(() => getStoredPublicUser());
   const isQueueLinkMode = searchParams.get('mode') === 'queue-link';
+  const shouldStartNewStandaloneRequest = !isQueueLinkMode && searchParams.get('new') === '1';
   const linkedQueueFromNavigation = isQueueLinkMode ? (location.state?.linkedQueue || null) : null;
   const linkedQueueFromStorage = useMemo(() => {
     if (!isQueueLinkMode) {
@@ -68,18 +86,28 @@ const RequestReceipt = () => {
     }
   }, [isQueueLinkMode, storedUser]);
   const linkedQueue = linkedQueueFromNavigation || linkedQueueFromStorage;
+  const activeReceiptRequestStorageKey = useMemo(
+    () => buildReceiptRequestStorageKey(storedUser?.email, isQueueLinkMode ? 'queue-link' : 'standalone', linkedQueue?.queueNumber),
+    [storedUser, isQueueLinkMode, linkedQueue]
+  );
+  const standaloneReceiptRequestStorageKey = useMemo(
+    () => buildReceiptRequestStorageKey(storedUser?.email, 'standalone'),
+    [storedUser]
+  );
+  const authenticatedProfileName = (storedUser?.full_name || '').trim();
   const [branches, setBranches] = useState([]);
   const [formData, setFormData] = useState({
-    taxpayerName: '',
+    taxpayerName: authenticatedProfileName,
     taxType: 'RPT',
     requestType: 'Immediate',
     branchId: '',
-    txnDate: '',
+    txnDate: getTodayDateValue(),
     refNumber: '',
     email: '',
     appointmentDate: '',
     appointmentSlot: '',
   });
+  const [paymentOption, setPaymentOption] = useState('pay_online');
   const [paymentMethod, setPaymentMethod] = useState('gcash');
   const [requestStatus, setRequestStatus] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -98,6 +126,9 @@ const RequestReceipt = () => {
     [branches, formData.branchId]
   );
   const isLinkedToActiveQueue = Boolean(linkedQueue?.queueNumber);
+  const isStandaloneNameLocked = !isLinkedToActiveQueue && Boolean(authenticatedProfileName);
+  const shouldShowViewMyTicketAction = isQueueLinkMode && isLinkedToActiveQueue;
+  const canUseOverTheCounter = isQueueLinkMode && isLinkedToActiveQueue;
   const needsAppointmentBranch = formData.requestType === 'Appointment' && !selectedBranch;
   const appointmentTimeDisabledReason = useMemo(() => {
     if (formData.requestType !== 'Appointment') {
@@ -129,15 +160,16 @@ const RequestReceipt = () => {
 
   const resetForAnotherRequest = () => {
     setRequestStatus(null);
+    setPaymentOption('pay_online');
     setPaymentMethod('gcash');
     setError('');
     setNameError('');
     setFormData({
-      taxpayerName: '',
+      taxpayerName: authenticatedProfileName,
       taxType: 'RPT',
       requestType: 'Immediate',
       branchId: '',
-      txnDate: '',
+      txnDate: todayDate,
       refNumber: '',
       email: storedUser?.email || '',
       appointmentDate: '',
@@ -145,8 +177,36 @@ const RequestReceipt = () => {
     });
     setAppointmentError('');
     setAppointmentAvailability(null);
-    sessionStorage.removeItem(PENDING_RECEIPT_QUEUE_LINK_STORAGE_KEY);
+    localStorage.removeItem(standaloneReceiptRequestStorageKey);
+    navigate('/request-receipt', { replace: true });
   };
+
+  const handleViewMyTicket = () => {
+    sessionStorage.removeItem(PENDING_RECEIPT_QUEUE_LINK_STORAGE_KEY);
+    navigate(`/${VIEW_TICKET_MODAL_QUERY}`);
+  };
+
+  useEffect(() => {
+    const syncStoredUser = () => {
+      const latestUser = getStoredPublicUser();
+      setStoredUser(latestUser);
+      setFormData((current) => ({
+        ...current,
+        taxpayerName: isLinkedToActiveQueue
+          ? (current.taxpayerName || linkedQueue?.taxpayerName || '')
+          : ((latestUser?.full_name || '').trim()),
+        email: current.email || linkedQueue?.email || latestUser?.email || '',
+      }));
+    };
+
+    syncStoredUser();
+    window.addEventListener(PUBLIC_USER_STORAGE_EVENT, syncStoredUser);
+    window.addEventListener('focus', syncStoredUser);
+    return () => {
+      window.removeEventListener(PUBLIC_USER_STORAGE_EVENT, syncStoredUser);
+      window.removeEventListener('focus', syncStoredUser);
+    };
+  }, [isLinkedToActiveQueue, linkedQueue]);
 
   useEffect(() => {
     if (!isQueueLinkMode) {
@@ -165,6 +225,12 @@ const RequestReceipt = () => {
   }, [isQueueLinkMode, linkedQueueFromNavigation, linkedQueueFromStorage]);
 
   useEffect(() => {
+    if (!canUseOverTheCounter && paymentOption !== 'pay_online') {
+      setPaymentOption('pay_online');
+    }
+  }, [canUseOverTheCounter, paymentOption]);
+
+  useEffect(() => {
     const fetchBranches = async () => {
       try {
         const [branchesResponse, statusResponse] = await Promise.all([
@@ -180,29 +246,51 @@ const RequestReceipt = () => {
 
     setFormData((current) => ({
       ...current,
-      taxpayerName: current.taxpayerName || linkedQueue?.taxpayerName || '',
+      taxpayerName: linkedQueue?.taxpayerName || authenticatedProfileName || current.taxpayerName || '',
+      taxType: linkedQueue?.serviceType ? deriveTaxTypeFromService(linkedQueue.serviceType) : current.taxType,
       requestType: linkedQueue?.queueType === 'appointment' ? 'Appointment' : current.requestType,
       branchId: current.branchId || linkedQueue?.branchId || '',
+      txnDate: todayDate,
       email: current.email || linkedQueue?.email || storedUser?.email || '',
     }));
 
     fetchBranches();
-  }, [linkedQueue, storedUser]);
+  }, [linkedQueue, storedUser, todayDate, authenticatedProfileName]);
 
   useEffect(() => {
     const legacyRequestId = localStorage.getItem('activeReceiptRequestId');
-    if (legacyRequestId && !localStorage.getItem(activeReceiptRequestStorageKey)) {
-      localStorage.setItem(activeReceiptRequestStorageKey, legacyRequestId);
+    if (legacyRequestId && !isQueueLinkMode && !localStorage.getItem(standaloneReceiptRequestStorageKey)) {
+      localStorage.setItem(standaloneReceiptRequestStorageKey, legacyRequestId);
     }
     localStorage.removeItem('activeReceiptRequestId');
 
+    if (shouldStartNewStandaloneRequest) {
+      localStorage.removeItem(standaloneReceiptRequestStorageKey);
+      setRequestStatus(null);
+      navigate('/request-receipt', { replace: true });
+      return;
+    }
+
     const activeRequestId = localStorage.getItem(activeReceiptRequestStorageKey);
     if (!activeRequestId) {
+      setRequestStatus(null);
       return;
     }
 
     receiptAPI.getRequestStatus(activeRequestId)
       .then((response) => {
+        const responseQueueNumber = (response.data?.linkedQueueNumber || '').trim();
+        const activeQueueNumber = (linkedQueue?.queueNumber || '').trim();
+        const belongsToCurrentWorkflow = isQueueLinkMode
+          ? Boolean(responseQueueNumber) && responseQueueNumber === activeQueueNumber
+          : !responseQueueNumber;
+
+        if (!belongsToCurrentWorkflow) {
+          localStorage.removeItem(activeReceiptRequestStorageKey);
+          setRequestStatus(null);
+          return;
+        }
+
         setRequestStatus(response.data);
         if (['Released', 'Completed'].includes(response.data?.overallStatus || response.data?.status)) {
           localStorage.removeItem(activeReceiptRequestStorageKey);
@@ -210,8 +298,16 @@ const RequestReceipt = () => {
       })
       .catch(() => {
         localStorage.removeItem(activeReceiptRequestStorageKey);
+        setRequestStatus(null);
       });
-  }, [activeReceiptRequestStorageKey]);
+  }, [
+    activeReceiptRequestStorageKey,
+    isQueueLinkMode,
+    linkedQueue,
+    navigate,
+    shouldStartNewStandaloneRequest,
+    standaloneReceiptRequestStorageKey,
+  ]);
 
   useEffect(() => {
     if (formData.requestType !== 'Appointment') {
@@ -282,6 +378,12 @@ const RequestReceipt = () => {
 
   const handleInputChange = (event) => {
     const { name, value } = event.target;
+    if ((isLinkedToActiveQueue || isStandaloneNameLocked) && ['taxpayerName'].includes(name)) {
+      return;
+    }
+    if (isLinkedToActiveQueue && ['taxType', 'txnDate'].includes(name)) {
+      return;
+    }
     setFormData((current) => {
       const nextData = { ...current, [name]: value };
 
@@ -377,6 +479,10 @@ const RequestReceipt = () => {
       setError('Please choose an appointment time within branch operating hours.');
       return;
     }
+    if (paymentOption === 'over_the_counter' && !canUseOverTheCounter) {
+      setError('Over-the-counter payment is only available when this receipt request comes from a registered queue number.');
+      return;
+    }
 
     setLoading(true);
     setError('');
@@ -384,6 +490,7 @@ const RequestReceipt = () => {
     try {
       const response = await receiptAPI.requestCopy({
         ...formData,
+        txnDate: todayDate,
         linkedQueueNumber: linkedQueue?.queueNumber || null,
         linkToActiveQueue: isLinkedToActiveQueue && isQueueLinkMode,
         appointmentDate: formData.requestType === 'Appointment' ? todayDate : null,
@@ -392,6 +499,30 @@ const RequestReceipt = () => {
       setRequestStatus(response.data);
       localStorage.setItem(activeReceiptRequestStorageKey, response.data.requestId);
       sessionStorage.removeItem(PENDING_RECEIPT_QUEUE_LINK_STORAGE_KEY);
+      if (paymentOption === 'over_the_counter' && canUseOverTheCounter) {
+        const otcResponse = await receiptAPI.payRequestFee(response.data.requestId, { paymentMethod: 'over_the_counter' });
+        setRequestStatus((current) => (
+          current
+            ? {
+                ...current,
+                paymentStatus: otcResponse.data.status,
+                payment: {
+                  ...(current.payment || {}),
+                  refNumber: otcResponse.data.paymentRefNumber,
+                  status: otcResponse.data.status,
+                  amount: otcResponse.data.amount,
+                  paymentMethod: otcResponse.data.paymentMethod,
+                },
+                paymentRefNumber: otcResponse.data.paymentRefNumber,
+                nextAction: 'Pay at Branch Counter',
+              }
+            : current
+        ));
+        return;
+      }
+      if (canUseOverTheCounter && paymentOption === 'pay_online') {
+        await handlePayFee(response.data.requestId);
+      }
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to submit receipt request.');
     } finally {
@@ -399,13 +530,14 @@ const RequestReceipt = () => {
     }
   };
 
-  const handlePayFee = async () => {
+  const handlePayFee = async (requestIdOverride = null) => {
     if (!systemStatus?.paymentGatewayEnabled) {
       setError(systemStatus?.disabledMessage || DEFAULT_DISABLED_MESSAGE);
       return;
     }
 
-    if (!requestStatus?.requestId) {
+    const resolvedRequestId = requestIdOverride || requestStatus?.requestId;
+    if (!resolvedRequestId) {
       return;
     }
 
@@ -431,16 +563,45 @@ const RequestReceipt = () => {
         checkoutWindow.document.close();
       }
 
-      const initiateResponse = await receiptAPI.payRequestFee(requestStatus.requestId, { paymentMethod });
+      const paymentContext = requestStatus || {};
+      const initiateResponse = await receiptAPI.payRequestFee(resolvedRequestId, {
+        paymentMethod,
+        email: paymentContext.email || formData.email,
+        taxpayerName: paymentContext.taxpayerName || formData.taxpayerName,
+        transactionDate: paymentContext.transactionDate || formData.txnDate,
+        branchId: paymentContext.branchId || Number(formData.branchId) || null,
+        taxType: paymentContext.taxType || formData.taxType,
+      });
+      setRequestStatus((current) => (
+        current
+          ? {
+              ...current,
+              requestId: initiateResponse.data.requestId || current.requestId,
+              paymentRefNumber: initiateResponse.data.paymentRefNumber || current.paymentRefNumber,
+              paymentStatus: initiateResponse.data.status || current.paymentStatus,
+              payment: {
+                ...(current.payment || {}),
+                refNumber: initiateResponse.data.paymentRefNumber || current.payment?.refNumber,
+                status: initiateResponse.data.status || current.payment?.status,
+                amount: initiateResponse.data.amount ?? current.payment?.amount,
+                paymentMethod: paymentMethod,
+              },
+            }
+          : current
+      ));
+      if (initiateResponse.data.requestId) {
+        localStorage.setItem(activeReceiptRequestStorageKey, initiateResponse.data.requestId);
+      }
       const paymentResponse = await paymentAPI.processPayment({
         refNumber: initiateResponse.data.paymentRefNumber,
         paymentMethod,
       });
 
       if (paymentResponse.data.checkoutUrl) {
+        const paymentStatusPath = `/payment/status?ref=${encodeURIComponent(paymentResponse.data.refNumber || initiateResponse.data.paymentRefNumber)}&receiptFlow=${encodeURIComponent(isQueueLinkMode ? 'queue-link' : 'standalone')}`;
         if (checkoutWindow && !checkoutWindow.closed) {
           checkoutWindow.location.replace(paymentResponse.data.checkoutUrl);
-          navigate(`/payment/status?ref=${encodeURIComponent(paymentResponse.data.refNumber || initiateResponse.data.paymentRefNumber)}`);
+          navigate(paymentStatusPath);
           return;
         }
 
@@ -489,16 +650,16 @@ const RequestReceipt = () => {
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <label className="block text-gray-700 font-semibold mb-2">Taxpayer Name</label>
+                <label className="block text-gray-700 font-semibold mb-2">{isLinkedToActiveQueue ? 'Name' : 'Full Name'}</label>
                 <input
                   type="text"
                   name="taxpayerName"
                   value={formData.taxpayerName}
                   onChange={handleInputChange}
                   disabled={systemStatus && (!systemStatus.receiptRequestEnabled || systemStatus.maintenanceMode)}
-                  readOnly={isLinkedToActiveQueue}
+                  readOnly={isLinkedToActiveQueue || isStandaloneNameLocked}
                   placeholder="Enter your full name"
-                  className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent ${nameError ? 'border-red-400' : 'border-gray-300'}`}
+                  className={(isLinkedToActiveQueue || isStandaloneNameLocked) ? lockedFieldClasses : `w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent ${nameError ? 'border-red-400' : 'border-gray-300'}`}
                 />
                 {nameError && <p className="mt-2 text-sm text-red-600">{nameError}</p>}
               </div>
@@ -509,9 +670,10 @@ const RequestReceipt = () => {
                   name="txnDate"
                   value={formData.txnDate}
                   onChange={handleInputChange}
-                  disabled={systemStatus && (!systemStatus.receiptRequestEnabled || systemStatus.maintenanceMode)}
+                  disabled={Boolean(systemStatus && (!systemStatus.receiptRequestEnabled || systemStatus.maintenanceMode)) || isLinkedToActiveQueue}
+                  readOnly={isLinkedToActiveQueue}
                   max={todayDate}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
+                  className={isLinkedToActiveQueue ? lockedFieldClasses : 'w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent'}
                 />
               </div>
             </div>
@@ -523,8 +685,8 @@ const RequestReceipt = () => {
                   name="taxType"
                   value={formData.taxType}
                   onChange={handleInputChange}
-                  disabled={systemStatus && (!systemStatus.receiptRequestEnabled || systemStatus.maintenanceMode)}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
+                  disabled={Boolean(systemStatus && (!systemStatus.receiptRequestEnabled || systemStatus.maintenanceMode)) || isLinkedToActiveQueue}
+                  className={isLinkedToActiveQueue ? lockedFieldClasses : 'w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent'}
                 >
                   <option value="RPT">RPT</option>
                   <option value="BUSINESS">BT</option>
@@ -682,12 +844,94 @@ const RequestReceipt = () => {
               {emailError && <p className="mt-2 text-sm font-semibold text-red-600">{emailError}</p>}
             </div>
 
+            <div className="rounded-xl border border-slate-200 bg-white px-5 py-5 shadow-sm">
+              <h3 className="text-base font-semibold text-slate-900">Payment Method</h3>
+              {canUseOverTheCounter ? (
+                <>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Choose whether to pay at the branch counter or continue to the online payment gateway after submitting this queue-linked receipt request.
+                  </p>
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    <label
+                      className={`rounded-xl border px-4 py-4 transition cursor-pointer ${
+                        paymentOption === 'over_the_counter'
+                          ? 'border-amber-500 bg-amber-50'
+                          : 'border-slate-200 bg-white hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <input
+                          type="radio"
+                          name="payment_option"
+                          value="over_the_counter"
+                          checked={paymentOption === 'over_the_counter'}
+                          onChange={(event) => setPaymentOption(event.target.value)}
+                          className="mt-1 h-4 w-4 border-slate-300 text-amber-600 focus:ring-amber-500"
+                        />
+                        <div>
+                          <p className="font-semibold text-slate-900">Over the Counter</p>
+                          <p className="mt-1 text-sm text-slate-600">Pay directly at the assigned branch.</p>
+                          <p className="mt-1 text-sm text-slate-600">Receipt request is submitted without online payment.</p>
+                        </div>
+                      </div>
+                    </label>
+                    <label
+                      className={`rounded-xl border px-4 py-4 transition cursor-pointer ${
+                        paymentOption === 'pay_online'
+                          ? 'border-blue-500 bg-blue-50'
+                          : 'border-slate-200 bg-white hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <input
+                          type="radio"
+                          name="payment_option"
+                          value="pay_online"
+                          checked={paymentOption === 'pay_online'}
+                          onChange={(event) => setPaymentOption(event.target.value)}
+                          className="mt-1 h-4 w-4 border-slate-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <div>
+                          <p className="font-semibold text-slate-900">Pay Online</p>
+                          <p className="mt-1 text-sm text-slate-600">Proceed to the payment gateway after submitting the receipt request.</p>
+                        </div>
+                      </div>
+                    </label>
+                  </div>
+                </>
+              ) : (
+                <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-4">
+                  <p className="font-semibold text-blue-900">Pay Online</p>
+                  <p className="mt-1 text-sm text-blue-800">This standalone receipt request flow uses online payment only.</p>
+                  <p className="mt-1 text-sm text-blue-800">You will proceed to the payment gateway after submitting the receipt request.</p>
+                </div>
+              )}
+              <div className="mt-4">
+                <label className="block text-gray-700 font-semibold mb-2">Online Payment Channel</label>
+                <select
+                  value={paymentMethod}
+                  onChange={(event) => setPaymentMethod(event.target.value)}
+                  disabled={paymentOption !== 'pay_online'}
+                  className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent ${
+                    paymentOption === 'pay_online'
+                      ? 'border-gray-300 bg-white'
+                      : 'border-slate-200 bg-slate-100 text-slate-500 cursor-not-allowed'
+                  }`}
+                >
+                  <option value="gcash">GCash</option>
+                  <option value="maya">Maya</option>
+                  <option value="card">Card</option>
+                  <option value="banking">Online Banking</option>
+                </select>
+              </div>
+            </div>
+
             <button
               onClick={handleSubmitRequest}
               disabled={loading || (systemStatus && (!systemStatus.receiptRequestEnabled || systemStatus.maintenanceMode))}
               className="w-full bg-accent hover:bg-blue-600 text-white py-4 rounded-lg font-semibold transition duration-300 shadow-lg text-lg disabled:opacity-50"
             >
-              {loading ? 'Submitting...' : 'Submit Request'}
+              {loading ? 'Submitting...' : paymentOption === 'pay_online' ? 'Submit Request and Pay Online' : 'Submit Request'}
             </button>
           </div>
 
@@ -719,6 +963,12 @@ const RequestReceipt = () => {
                   <span className="text-gray-700 font-medium">Payment Status:</span>
                   <span className="font-semibold text-gray-900">{requestStatus.paymentStatus || 'Pending'}</span>
                 </div>
+                {requestStatus.payment?.paymentMethod && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-700 font-medium">Payment Method:</span>
+                    <span className="font-semibold text-gray-900 capitalize">{String(requestStatus.payment.paymentMethod).replaceAll('_', ' ')}</span>
+                  </div>
+                )}
                 <div className="flex justify-between items-center">
                   <span className="text-gray-700 font-medium">Release Status:</span>
                   <span className="font-semibold text-gray-900">{requestStatus.releaseStatus || 'Not Ready for Release'}</span>
@@ -741,7 +991,7 @@ const RequestReceipt = () => {
                 )}
               </div>
 
-              {!requestStatus.feePaid && (
+              {!requestStatus.feePaid && requestStatus.paymentStatus !== 'Pending Over-the-Counter Payment' && (
                 <div className="mt-6 border-t pt-6">
                   <div className="flex justify-between items-center mb-4">
                     <span className="text-gray-700 font-medium">Request Fee Amount:</span>
@@ -783,12 +1033,18 @@ const RequestReceipt = () => {
                 </div>
               )}
 
-              {!requestStatus.feePaid ? (
+              {!requestStatus.feePaid && requestStatus.paymentStatus === 'Pending Over-the-Counter Payment' && (
+                <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-900">
+                  This request has been recorded for over-the-counter payment. Please present your linked queue number and request ID at the branch to settle the receipt request fee.
+                </div>
+              )}
+
+              {shouldShowViewMyTicketAction ? (
                 <button
-                  onClick={() => navigate('/request-receipt')}
-                  className="mt-6 w-full bg-blue-50 hover:bg-blue-100 text-blue-900 py-3 rounded-lg font-semibold transition duration-300 border border-blue-200"
+                  onClick={handleViewMyTicket}
+                  className="mt-6 w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-semibold transition duration-300"
                 >
-                  Continue Request Receipt
+                  View My Ticket
                 </button>
               ) : null}
 
@@ -801,12 +1057,6 @@ const RequestReceipt = () => {
                 </button>
               ) : null}
 
-              <button
-                onClick={resetForAnotherRequest}
-                className="mt-6 w-full bg-gray-100 hover:bg-gray-200 text-gray-800 py-3 rounded-lg font-semibold transition duration-300 border border-gray-300"
-              >
-                Request Another Copy
-              </button>
             </div>
           )}
         </div>
