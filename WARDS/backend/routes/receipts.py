@@ -1306,7 +1306,8 @@ async def release_receipt_request(request_id: str, current_staff=Depends(get_cur
     if receipt_request.branch_id and receipt_request.branch_id != current_staff.branch_id:
         raise HTTPException(status_code=403, detail="Request belongs to another branch")
 
-    if not receipt_request.fee_paid:
+    payment = get_latest_receipt_request_payment(db, receipt_request_value(receipt_request, "request_id"))
+    if not receipt_request.fee_paid and not is_verified_receipt_payment(payment):
         raise HTTPException(status_code=400, detail="Receipt request fee has not been paid")
 
     current_release_copy_path = receipt_request_value(receipt_request, "release_copy_path")
