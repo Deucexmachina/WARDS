@@ -845,15 +845,6 @@ def find_linked_queue_receipt_request(
     if active_request:
         return ("active", receipt_request_value(active_request, "request_id"))
 
-    archived_request = (
-        db.query(ReceiptRequestHistory)
-        .filter(hash_aware_match(ReceiptRequestHistory, "linked_queue_number", normalized_queue_number))
-        .order_by(ReceiptRequestHistory.archived_at.desc(), ReceiptRequestHistory.id.desc())
-        .first()
-    )
-    if archived_request:
-        return ("archived", receipt_request_history_value(archived_request, "request_id"))
-
     return None
 
 
@@ -1530,8 +1521,9 @@ async def create_receipt_request(
             raise HTTPException(
                 status_code=409,
                 detail=(
-                    f"This queue number already has a linked receipt request ({existing_request_id}). "
-                    f"Only one receipt copy request is allowed per queue transaction, even after it has been {request_stage}."
+                    f"This queue number already has an active receipt request ({existing_request_id}). "
+                    f"Only one receipt copy request is allowed per queue transaction at a time. "
+                    f"Please complete or cancel the existing request before creating a new one."
                 ),
             )
     else:
