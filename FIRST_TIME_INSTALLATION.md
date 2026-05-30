@@ -740,3 +740,17 @@ Docker and DigitalOcean deployment will be configured when the project is ready 
 [ ] Recovery History records automatic restoration.
 [ ] Wazuh Agent service is running.
 ```
+## 15. Redis Rate Limiter Setup
+
+1. Download Redis for Windows:
+
+   https://github.com/microsoftarchive/redis/releases
+
+2. Install and run Redis-x64-3.0.504.msi
+3. On Wards\backend> pip install -r requirements.txt
+4. Then go to cmd and type:
+
+python -c "import redis; r = redis.Redis(host='localhost', port=6379); print(r.ping())"
+
+5. Expected response: True 
+7. Then start the backend.
