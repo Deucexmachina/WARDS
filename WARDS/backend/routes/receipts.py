@@ -1159,6 +1159,10 @@ async def delete_receipt_record(
         request.matched_receipt_id = None
         sync_request_status(request)
 
+    linked_history = db.query(ReceiptRequestHistory).filter(ReceiptRequestHistory.matched_receipt_id == record.id).all()
+    for history in linked_history:
+        history.matched_receipt_id = None
+
     record_label = receipt_record_value(record, "ref_number") or receipt_record_value(record, "receipt_number") or str(record.id)
     db.delete(record)
     db.add(ActivityLog(

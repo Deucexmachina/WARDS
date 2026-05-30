@@ -852,7 +852,7 @@ const ReceiptManagement = () => {
           ) : null}
         </div>
         <div className="flex flex-wrap gap-2">
-          {releaseDraft ? (
+          {releaseDraft && (
             <>
               <button
                 type="button"
@@ -871,14 +871,6 @@ const ReceiptManagement = () => {
                 Cancel
               </button>
             </>
-          ) : (
-            <button
-              type="button"
-              onClick={() => document.getElementById(`release-file-${request.requestId}`)?.click()}
-              className={`bg-slate-100 text-slate-600 hover:bg-slate-200 ${buttonClassName}`}
-            >
-              Select Image
-            </button>
           )}
           <button
             type="button"
