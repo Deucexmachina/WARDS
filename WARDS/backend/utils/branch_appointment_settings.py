@@ -56,28 +56,7 @@ def _format_time_window(opening_time: str, closing_time: str) -> str:
 
 
 def _get_effective_time_settings_for_date(time_settings: dict, selected_date: date) -> dict:
-    effective = dict(time_settings or {})
-
-    if selected_date.weekday() == 5:
-        effective["opening_time"] = "08:00"
-        effective["closing_time"] = "12:00"
-        effective["last_appointment_time"] = "12:00"
-
-        break_start = (effective.get("break_start") or "").strip()
-        break_end = (effective.get("break_end") or "").strip()
-        if break_start and break_end:
-            try:
-                break_start_time = datetime.strptime(break_start, "%H:%M").time()
-                break_end_time = datetime.strptime(break_end, "%H:%M").time()
-                saturday_close = datetime.strptime("12:00", "%H:%M").time()
-                if break_start_time >= saturday_close or break_end_time > saturday_close:
-                    effective["break_start"] = ""
-                    effective["break_end"] = ""
-            except ValueError:
-                effective["break_start"] = ""
-                effective["break_end"] = ""
-
-    return effective
+    return dict(time_settings or {})
 
 
 def _append_reason(reasons: list[dict], code: str, label: str, detail: str):

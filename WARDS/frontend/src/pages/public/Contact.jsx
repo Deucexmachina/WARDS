@@ -134,7 +134,7 @@ const Contact = () => {
               <div>
                 <p className="font-semibold mb-1">{language === 'en' ? 'Office Hours' : 'Oras ng Tanggapan'}</p>
                 <p className="text-blue-100">Monday - Friday: 8:00 AM - 5:00 PM</p>
-                <p className="text-blue-100">Saturday: 8:00 AM - 12:00 PM</p>
+                <p className="text-blue-100">Weekend schedules may vary based on the branch&apos;s published operating hours.</p>
               </div>
             </div>
           </div>

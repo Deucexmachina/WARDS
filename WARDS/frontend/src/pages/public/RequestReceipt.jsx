@@ -643,7 +643,7 @@ const RequestReceipt = () => {
                 </div>
                 {appointmentAvailability?.is_available && appointmentAvailability?.time_settings && (
                   <div className="md:col-span-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-                    Choose only from branch operating hours: Monday to Friday, 8:00 AM to 5:00 PM; Saturday, 8:00 AM to 12:00 PM.
+                    Choose only from the selected branch's published operating hours for that day.
                     If a time becomes unavailable before submission, the system will block it and ask you to choose another valid slot.
                   </div>
                 )}
