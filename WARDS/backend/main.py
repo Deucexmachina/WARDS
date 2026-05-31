@@ -341,6 +341,10 @@ def ensure_auth_extensions():
             conn.execute(text("ALTER TABLE receipt_requests ADD COLUMN payment_ref_number VARCHAR(255)"))
         if "tax_type" not in receipt_request_columns:
             conn.execute(text("ALTER TABLE receipt_requests ADD COLUMN tax_type VARCHAR(255)"))
+        if "request_reason" not in receipt_request_columns:
+            conn.execute(text("ALTER TABLE receipt_requests ADD COLUMN request_reason VARCHAR(255)"))
+        if "request_reason_other" not in receipt_request_columns:
+            conn.execute(text("ALTER TABLE receipt_requests ADD COLUMN request_reason_other TEXT"))
         if "request_type" not in receipt_request_columns:
             conn.execute(text("ALTER TABLE receipt_requests ADD COLUMN request_type VARCHAR(255)"))
         if "appointment_time" not in receipt_request_columns:
@@ -360,6 +364,10 @@ def ensure_auth_extensions():
             ("taxpayer_name_enc", "TEXT"),
             ("tax_type_hash", "VARCHAR(255)"),
             ("tax_type_enc", "TEXT"),
+            ("request_reason_hash", "VARCHAR(255)"),
+            ("request_reason_enc", "TEXT"),
+            ("request_reason_other_hash", "VARCHAR(255)"),
+            ("request_reason_other_enc", "TEXT"),
             ("request_type_hash", "VARCHAR(255)"),
             ("request_type_enc", "TEXT"),
             ("transaction_date_hash", "VARCHAR(255)"),
@@ -384,6 +392,12 @@ def ensure_auth_extensions():
 
         receipt_request_history_columns = {column["name"] for column in inspector.get_columns("receipt_request_history")}
         for column_name, column_type in (
+            ("request_reason", "VARCHAR(255)"),
+            ("request_reason_hash", "VARCHAR(255)"),
+            ("request_reason_enc", "TEXT"),
+            ("request_reason_other", "TEXT"),
+            ("request_reason_other_hash", "VARCHAR(255)"),
+            ("request_reason_other_enc", "TEXT"),
             ("request_id_hash", "VARCHAR(255)"),
             ("request_id_enc", "TEXT"),
             ("taxpayer_name_hash", "VARCHAR(255)"),

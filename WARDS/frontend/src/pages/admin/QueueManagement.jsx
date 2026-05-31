@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { formatUtc8Time } from '../../utils/dateTime';
+import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 const DEFAULT_DISABLED_MESSAGE = 'This service is currently unavailable because it has been disabled by system administration.';
+
+const getRelevantQueueTimestamp = (queue) =>
+  queue?.completed_at || queue?.served_at || queue?.appointment_time || queue?.created_at;
 
 const QueueManagement = () => {
   const [queues, setQueues] = useState([]);
@@ -176,7 +179,7 @@ const QueueManagement = () => {
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {formatUtc8Time(queue.created_at)}
+                    {formatUtc8DateTime(getRelevantQueueTimestamp(queue))}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">
                     {(queue.status || '').toLowerCase() === 'waiting' && (

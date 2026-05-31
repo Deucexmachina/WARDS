@@ -15,7 +15,6 @@ import {
 const DEFAULT_DISABLED_MESSAGE = 'This service is currently unavailable because it has been disabled by system administration.';
 const ACTIVE_QUEUE_MESSAGE = 'You already have an active queue request. Please complete or cancel your current queue before registering for another one.';
 const ACTIVE_QUEUE_CONTEXT_STORAGE_KEY = 'wardsActiveQueueContext';
-const PENDING_RECEIPT_QUEUE_LINK_STORAGE_KEY = 'wardsPendingReceiptQueueLink';
 
 const formatAppointmentAvailabilityMessage = (availability) => {
   if (!availability) {
@@ -698,31 +697,7 @@ const GetQueue = () => {
 
             <p className="text-gray-600 mb-6">{queueResult.message}</p>
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <button
-                onClick={() => {
-                  const linkedQueuePayload = {
-                    queueNumber: queueResult.queue_number,
-                    queueType: queueResult.queue_type,
-                    appointmentTime: queueResult.appointment_time,
-                    branchId: selectedBranch?.id,
-                    branchName: queueResult.branch_name,
-                    serviceType: queueResult.service_type,
-                    taxpayerName: normalizeCitizenFullName(formData.taxpayer_name),
-                    email: formData.email,
-                    createdAt: queueResult.created_at,
-                  };
-                  sessionStorage.setItem(PENDING_RECEIPT_QUEUE_LINK_STORAGE_KEY, JSON.stringify(linkedQueuePayload));
-                  navigate('/request-receipt?mode=queue-link', {
-                    state: {
-                      linkedQueue: linkedQueuePayload,
-                    },
-                  });
-                }}
-                className="w-full bg-amber-500 px-4 py-3 rounded-lg font-semibold text-white hover:bg-amber-600"
-              >
-                {language === 'en' ? 'Request for a Receipt' : 'Humiling ng Resibo'}
-              </button>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <button
                 onClick={() => navigate('/')}
                 className="w-full bg-blue-600 px-4 py-3 rounded-lg font-semibold text-white hover:bg-blue-700"

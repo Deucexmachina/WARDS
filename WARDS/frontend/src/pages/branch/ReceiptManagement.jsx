@@ -140,8 +140,7 @@ const ReceiptManagement = () => {
   const [releasing, setReleasing] = useState(false);
   const [releaseUploadDrafts, setReleaseUploadDrafts] = useState({});
   const [sectionPages, setSectionPages] = useState({
-    immediate: 1,
-    appointment: 1,
+    online: 1,
     completedRPT: 1,
     completedBUSINESS: 1,
     completedMISC: 1,
@@ -225,8 +224,10 @@ const ReceiptManagement = () => {
     };
 
     window.addEventListener('branch-payment-updated', handleBranchPaymentUpdated);
+    window.addEventListener('receipt-payment-updated', handleBranchPaymentUpdated);
     return () => {
       window.removeEventListener('branch-payment-updated', handleBranchPaymentUpdated);
+      window.removeEventListener('receipt-payment-updated', handleBranchPaymentUpdated);
     };
   }, []);
 
@@ -237,20 +238,8 @@ const ReceiptManagement = () => {
     [normalizedActiveRequests]
   );
 
-  const immediateRequests = useMemo(
+  const onlineReceiptRequests = useMemo(
     () => pendingRequests
-      .filter((request) => (request.requestType || 'Immediate') !== 'Appointment')
-      .sort((left, right) => {
-        const leftDate = new Date(left.createdAt || left.created_at || 0).getTime();
-        const rightDate = new Date(right.createdAt || right.created_at || 0).getTime();
-        return leftDate - rightDate;
-      }),
-    [pendingRequests]
-  );
-
-  const appointmentRequests = useMemo(
-    () => pendingRequests
-      .filter((request) => (request.requestType || '') === 'Appointment')
       .sort((left, right) => {
         const leftDate = new Date(left.createdAt || left.created_at || 0).getTime();
         const rightDate = new Date(right.createdAt || right.created_at || 0).getTime();
@@ -422,8 +411,7 @@ const ReceiptManagement = () => {
   useEffect(() => {
     setSectionPages((current) => ({
       ...current,
-      immediate: Math.min(current.immediate, Math.max(1, Math.ceil(immediateRequests.length / SECTION_PAGE_SIZE))),
-      appointment: Math.min(current.appointment, Math.max(1, Math.ceil(appointmentRequests.length / SECTION_PAGE_SIZE))),
+      online: Math.min(current.online, Math.max(1, Math.ceil(onlineReceiptRequests.length / SECTION_PAGE_SIZE))),
       completedRPT: Math.min(current.completedRPT, Math.max(1, Math.ceil(releasedRptRequests.length / SECTION_PAGE_SIZE))),
       completedBUSINESS: Math.min(current.completedBUSINESS, Math.max(1, Math.ceil(releasedBusinessRequests.length / SECTION_PAGE_SIZE))),
       completedMISC: Math.min(current.completedMISC, Math.max(1, Math.ceil(releasedMiscRequests.length / SECTION_PAGE_SIZE))),
@@ -432,8 +420,7 @@ const ReceiptManagement = () => {
       recordsMISC: Math.min(current.recordsMISC, Math.max(1, Math.ceil(miscRecords.length / SECTION_PAGE_SIZE))),
     }));
   }, [
-    immediateRequests.length,
-    appointmentRequests.length,
+    onlineReceiptRequests.length,
     releasedRptRequests.length,
     releasedBusinessRequests.length,
     releasedMiscRequests.length,
@@ -441,19 +428,6 @@ const ReceiptManagement = () => {
     businessTaxRecords.length,
     miscRecords.length,
   ]);
-
-  const formatAppointmentSchedule = (appointmentTime) => {
-    if (!appointmentTime) {
-      return 'N/A';
-    }
-
-    return new Intl.DateTimeFormat('en-PH', {
-      timeZone: 'Asia/Manila',
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    }).format(new Date(appointmentTime));
-  };
 
   const handleFileSelect = (event) => {
     const file = event.target.files[0];
@@ -861,28 +835,40 @@ const ReceiptManagement = () => {
     const buttonClassName = compact
       ? 'rounded-lg px-2.5 py-1.5 text-xs font-semibold transition'
       : 'rounded-lg px-3 py-1.5 font-semibold transition';
+    const paymentStatus = request.paymentStatus || (request.feePaid ? 'Verified' : 'Pending');
+    const canRelease = paymentStatus === 'Verified';
 
     return (
       <div className={`space-y-3 ${compact ? 'max-w-[24rem]' : ''}`}>
-        <div className="mb-4 flex flex-wrap gap-2">
-          <input
-            type="file"
-            id={`release-file-${request.requestId}`}
-            accept=".jpg,.jpeg,.png,.webp"
-            onChange={(event) => handleSelectReleaseCopy(request.requestId, event)}
-            className="cursor-pointer rounded-xl border border-dashed border-slate-300 bg-white px-4 py-2 text-sm shadow-sm file:mr-4 file:rounded-lg file:border-0 file:bg-[#0f2f5f] file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-white hover:border-blue-400 hover:bg-slate-50 focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-slate-200 transition"
-          />
-          {request.hasReleaseCopy ? (
-            <button
-              onClick={() => handlePreviewUploadedReleaseCopy(request.requestId)}
-              className={`bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50 ${buttonClassName}`}
-            >
-              View Image
-            </button>
-          ) : null}
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+          <div className="space-y-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Release Copy</p>
+              <input
+                key={releaseDraft?.fileName ? `release-selected-${request.requestId}` : `release-empty-${request.requestId}`}
+                type="file"
+                accept=".jpg,.jpeg,.png,.webp"
+                onChange={(event) => handleSelectReleaseCopy(request.requestId, event)}
+                className="mt-2 w-full cursor-pointer rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm shadow-sm file:mr-4 file:rounded-xl file:border-0 file:bg-[#0f2f5f] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:border-blue-400 hover:bg-slate-50 focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-slate-200 transition"
+              />
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="min-w-0 truncate text-sm font-medium text-slate-700">
+                {releaseDraft?.fileName || request.releaseCopyFilename || 'No file selected'}
+              </p>
+              {request.hasReleaseCopy ? (
+                <button
+                  onClick={() => handlePreviewUploadedReleaseCopy(request.requestId)}
+                  className={`bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50 ${buttonClassName}`}
+                >
+                  View Image
+                </button>
+              ) : null}
+            </div>
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {releaseDraft && (
+        <div className="flex flex-wrap items-center gap-2">
+          {releaseDraft ? (
             <>
               <button
                 type="button"
@@ -901,11 +887,11 @@ const ReceiptManagement = () => {
                 Cancel
               </button>
             </>
-          )}
+          ) : null}
           <button
             type="button"
             onClick={() => handleReleaseClick(request)}
-            disabled={!request.hasReleaseCopy || request.paymentStatus !== 'Verified' || releasing}
+            disabled={!request.hasReleaseCopy || !canRelease || releasing}
             className={`bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed ${buttonClassName}`}
           >
             Release Copy
@@ -947,13 +933,11 @@ const ReceiptManagement = () => {
           </div>
         ) : null}
         <div className="basis-full text-xs text-slate-500">
-          {request.paymentStatus === 'Pending'
-            ? 'Citizen payment is still pending.'
-            : request.paymentStatus === 'Declined'
-              ? 'The latest payment attempt was declined. The request stays active until a new verified payment is received.'
-              : request.releaseStatus === 'Ready for Release'
-                ? 'Payment is verified and the request is ready for branch release.'
-                : 'Payment is verified. Upload the finished copy to continue the release flow.'}
+          {!canRelease
+            ? 'Receipt copy release stays locked until Payment Management marks the request fee as verified.'
+            : request.releaseStatus === 'Ready for Release'
+              ? 'Payment is verified and the request is ready for branch release.'
+              : 'Payment is verified. Upload the finished copy to continue the release flow.'}
         </div>
         <div className="basis-full text-xs text-slate-500">
           After release, this request is marked done and transferred to its completed table.
@@ -1141,7 +1125,7 @@ const ReceiptManagement = () => {
               <tr>
                 <th className="px-4 py-3.5 text-left">Request ID</th>
                 <th className="px-4 py-3.5 text-left">Taxpayer</th>
-                <th className="px-4 py-3.5 text-left">Request Type</th>
+                <th className="px-4 py-3.5 text-left">Reason</th>
                 <th className="px-4 py-3.5 text-left">Reference</th>
                 <th className="px-4 py-3.5 text-left">Status</th>
                 <th className="px-4 py-3.5 text-left">Processed</th>
@@ -1154,7 +1138,7 @@ const ReceiptManagement = () => {
                 <tr key={request.requestId} className="transition hover:bg-slate-50">
                   <td className="px-4 py-4 font-semibold text-slate-900">{request.requestId}</td>
                   <td className="px-4 py-4 font-medium text-slate-900">{request.taxpayerName || 'N/A'}</td>
-                  <td className="px-4 py-4">{request.requestType || 'Immediate'}</td>
+                  <td className="px-4 py-4">{request.requestReason === 'Other' ? (request.requestReasonOther || 'Other') : (request.requestReason || 'N/A')}</td>
                   <td className="px-4 py-4 font-mono text-xs text-slate-600">{request.refNumber || 'N/A'}</td>
                   <td className="px-4 py-4">
                     <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
@@ -1370,151 +1354,71 @@ const ReceiptManagement = () => {
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div className="space-y-1">
-            <h2 className="text-xl font-bold text-slate-900">Immediate Receipt Requests</h2>
-            <p className="text-sm text-slate-500">{immediateRequests.length} active request{immediateRequests.length === 1 ? '' : 's'}</p>
+            <h2 className="text-xl font-bold text-slate-900">Online Receipt Request</h2>
+            <p className="text-sm text-slate-500">{onlineReceiptRequests.length} active request{onlineReceiptRequests.length === 1 ? '' : 's'}</p>
           </div>
         </div>
         {(() => {
-          const totalPages = Math.max(1, Math.ceil(immediateRequests.length / SECTION_PAGE_SIZE));
-          const visibleRows = paginateRows(immediateRequests, sectionPages.immediate);
+          const totalPages = Math.max(1, Math.ceil(onlineReceiptRequests.length / SECTION_PAGE_SIZE));
+          const visibleRows = paginateRows(onlineReceiptRequests, sectionPages.online);
           return (
             <>
-        <div className="overflow-hidden rounded-2xl border border-slate-200">
-          <div className="overflow-x-auto">
-            <table className="min-w-[1180px] w-full text-sm text-slate-700">
-              <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                <tr>
-                  <th className="px-4 py-3.5 text-left">Request ID</th>
-                  <th className="px-4 py-3.5 text-left">Taxpayer</th>
-                  <th className="px-4 py-3.5 text-left">Tax Type</th>
-                  <th className="px-4 py-3.5 text-left">Request Type</th>
-                  <th className="px-4 py-3.5 text-left">Transaction Date</th>
-                  <th className="px-4 py-3.5 text-left">Reference</th>
-                  <th className="px-4 py-3.5 text-left">Payment Status</th>
-                  <th className="px-4 py-3.5 text-left">Release Status</th>
-                  <th className="px-4 py-3.5 text-left">Matched Record</th>
-                  <th className="px-4 py-3.5 text-left">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 bg-white">
-                {visibleRows.map((request) => (
-                  <tr key={request.requestId} className="align-top transition hover:bg-slate-50">
-                    <td className="px-4 py-4 font-semibold text-slate-900">{request.requestId}</td>
-                    <td className="px-4 py-4 font-medium text-slate-900">{request.taxpayerName}</td>
-                    <td className="px-4 py-4">{request.taxType || 'N/A'}</td>
-                    <td className="px-4 py-4">{request.requestType || 'Immediate'}</td>
-                    <td className="px-4 py-4">{request.transactionDate || 'N/A'}</td>
-                    <td className="px-4 py-4 font-mono text-xs text-slate-600">{request.refNumber}</td>
-                    <td className="px-4 py-4">
-                      <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${getPaymentStatusTone(request.paymentStatus)}`}>
+        <div className="space-y-4">
+          {visibleRows.map((request) => (
+            <article key={request.requestId} className="rounded-3xl border border-slate-200 bg-slate-50/70 p-4 shadow-sm">
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                <div className="min-w-0 flex-1 space-y-4">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Request ID</p>
+                      <p className="mt-1 break-words text-lg font-bold text-slate-900">{request.requestId}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ${getPaymentStatusTone(request.paymentStatus || 'Pending')}`}>
                         {request.paymentStatus || 'Pending'}
                       </span>
-                    </td>
-                    <td className="px-4 py-4">
-                      <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${getReleaseStatusTone(request.releaseStatus)}`}>
+                      <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ${getReleaseStatusTone(request.releaseStatus)}`}>
                         {request.releaseStatus || 'Not Ready for Release'}
                       </span>
-                    </td>
-                    <td className="max-w-[12rem] px-4 py-4 text-slate-600">
-                      {request.hasReleaseCopy
-                        ? `Uploaded: ${request.releaseCopyFilename || 'receipt copy'}`
-                        : request.matchedReceipt
-                          ? request.matchedReceipt.receipt_number || 'Matched'
-                          : 'Waiting for receipt upload'}
-                    </td>
-                    <td className="w-[24rem] min-w-[24rem] px-4 py-4">{renderRequestWorkflowActions(request)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {immediateRequests.length === 0 && (
-            <div className="border-t border-slate-100 bg-slate-50 px-6 py-8 text-center text-sm text-slate-500">No immediate receipt requests for this branch.</div>
-          )}
-        </div>
-        <PaginationControls
-          page={sectionPages.immediate}
-          totalPages={totalPages}
-          totalItems={immediateRequests.length}
-          onPageChange={(nextPage) => setSectionPages((current) => ({ ...current, immediate: nextPage }))}
-        />
-            </>
-          );
-        })()}
-      </div>
+                    </div>
+                  </div>
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-          <div className="space-y-1">
-            <h2 className="text-xl font-bold text-slate-900">Appointment Receipt Requests</h2>
-            <p className="text-sm text-slate-500">{appointmentRequests.length} scheduled request{appointmentRequests.length === 1 ? '' : 's'}</p>
-          </div>
-        </div>
-        {(() => {
-          const totalPages = Math.max(1, Math.ceil(appointmentRequests.length / SECTION_PAGE_SIZE));
-          const visibleRows = paginateRows(appointmentRequests, sectionPages.appointment);
-          return (
-            <>
-        <div className="overflow-hidden rounded-2xl border border-slate-200">
-          <div className="overflow-x-auto">
-            <table className="min-w-[1320px] w-full table-fixed text-sm text-slate-700">
-              <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                <tr>
-                  <th className="w-[10rem] px-4 py-3.5 text-left">Request ID</th>
-                  <th className="w-[12rem] px-4 py-3.5 text-left">Taxpayer</th>
-                  <th className="w-[8rem] px-4 py-3.5 text-left">Tax Type</th>
-                  <th className="w-[8rem] px-4 py-3.5 text-left">Request Type</th>
-                  <th className="w-[9rem] px-4 py-3.5 text-left">Transaction Date</th>
-                  <th className="w-[9rem] px-4 py-3.5 text-left">Appointment Time</th>
-                  <th className="w-[10rem] px-4 py-3.5 text-left">Reference</th>
-                  <th className="w-[9rem] px-4 py-3.5 text-left">Payment Status</th>
-                  <th className="w-[9rem] px-4 py-3.5 text-left">Release Status</th>
-                  <th className="w-[11rem] px-4 py-3.5 text-left">Matched Record</th>
-                  <th className="w-[25rem] px-4 py-3.5 text-left">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 bg-white">
-                {visibleRows.map((request) => (
-                  <tr key={request.requestId} className="align-top transition hover:bg-slate-50">
-                    <td className="break-words px-4 py-4 font-semibold text-slate-900">{request.requestId}</td>
-                    <td className="break-words px-4 py-4 font-medium text-slate-900">{request.taxpayerName}</td>
-                    <td className="px-4 py-4">{request.taxType || 'N/A'}</td>
-                    <td className="px-4 py-4">{request.requestType || 'Appointment'}</td>
-                    <td className="px-4 py-4">{request.transactionDate || 'N/A'}</td>
-                    <td className="px-4 py-4">{formatAppointmentSchedule(request.appointmentTime)}</td>
-                    <td className="break-words px-4 py-4 font-mono text-xs text-slate-600">{request.refNumber}</td>
-                    <td className="px-4 py-4">
-                      <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${getPaymentStatusTone(request.paymentStatus)}`}>
-                        {request.paymentStatus || 'Pending'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-4">
-                      <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${getReleaseStatusTone(request.releaseStatus)}`}>
-                        {request.releaseStatus || 'Not Ready for Release'}
-                      </span>
-                    </td>
-                    <td className="break-words px-4 py-4 text-slate-600">
-                      {request.hasReleaseCopy
+                  <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+                    {[
+                      ['Taxpayer', request.taxpayerName || 'N/A'],
+                      ['Tax Type', request.taxType || 'N/A'],
+                      ['Reason', request.requestReason === 'Other' ? (request.requestReasonOther || 'Other') : (request.requestReason || 'N/A')],
+                      ['Transaction Date', request.transactionDate || 'N/A'],
+                      ['Reference', request.refNumber || 'N/A'],
+                      ['Matched Record', request.hasReleaseCopy
                         ? `Uploaded: ${request.releaseCopyFilename || 'receipt copy'}`
                         : request.matchedReceipt
                           ? request.matchedReceipt.receipt_number || 'Matched'
-                          : 'Waiting for receipt upload'}
-                    </td>
-                    <td className="px-4 py-4">{renderRequestWorkflowActions(request, { compact: true })}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {appointmentRequests.length === 0 && (
-            <div className="border-t border-slate-100 bg-slate-50 px-6 py-8 text-center text-sm text-slate-500">No appointment receipt requests for this branch.</div>
+                          : 'Waiting for receipt upload'],
+                    ].map(([label, value]) => (
+                      <div key={`${request.requestId}-${label}`} className="rounded-2xl border border-white bg-white px-4 py-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">{label}</p>
+                        <p className="mt-1 break-words text-sm font-semibold text-slate-900">{value}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="w-full xl:w-[26rem] xl:min-w-[26rem]">
+                  {renderRequestWorkflowActions(request, { compact: true })}
+                </div>
+              </div>
+            </article>
+          ))}
+          {onlineReceiptRequests.length === 0 && (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-6 py-8 text-center text-sm text-slate-500">No online receipt requests for this branch.</div>
           )}
         </div>
         <PaginationControls
-          page={sectionPages.appointment}
+          page={sectionPages.online}
           totalPages={totalPages}
-          totalItems={appointmentRequests.length}
-          onPageChange={(nextPage) => setSectionPages((current) => ({ ...current, appointment: nextPage }))}
+          totalItems={onlineReceiptRequests.length}
+          onPageChange={(nextPage) => setSectionPages((current) => ({ ...current, online: nextPage }))}
         />
             </>
           );
@@ -1644,7 +1548,7 @@ const ReceiptManagement = () => {
               {[
                 ['Taxpayer', selectedCompletedRequest.taxpayerName],
                 ['Tax Type', selectedCompletedRequest.taxType],
-                ['Request Type', selectedCompletedRequest.requestType],
+                ['Reason for Request', selectedCompletedRequest.requestReason === 'Other' ? (selectedCompletedRequest.requestReasonOther || 'Other') : selectedCompletedRequest.requestReason],
                 ['Reference Number', selectedCompletedRequest.refNumber],
                 ['Status', selectedCompletedRequest.status],
                 ['Branch', selectedCompletedRequest.branchName],

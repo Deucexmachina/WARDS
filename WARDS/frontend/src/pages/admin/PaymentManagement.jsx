@@ -263,6 +263,8 @@ const PaymentManagement = () => {
   const handleVerifyPayment = async (paymentId) => {
     try {
       await axios.put(`${API_BASE_URL}/payments/${paymentId}/verify`);
+      window.dispatchEvent(new CustomEvent('receipt-payment-updated', { detail: { action: 'verified', paymentId } }));
+      window.dispatchEvent(new CustomEvent('branch-payment-updated', { detail: { action: 'verified', paymentId } }));
       alert('Payment verified successfully');
       fetchPayments();
     } catch (error) {
@@ -785,7 +787,6 @@ const PaymentManagement = () => {
                       <th className="px-5 py-4">Taxpayer</th>
                       <th className="px-5 py-4">Branch</th>
                       <th className="px-5 py-4 text-right">Amount</th>
-                      <th className="px-5 py-4">Method</th>
                       <th className="px-5 py-4">Status</th>
                       <th className="px-5 py-4">Created</th>
                       <th className="px-5 py-4">Verified</th>
@@ -801,7 +802,6 @@ const PaymentManagement = () => {
                           <td className="px-5 py-4 font-semibold text-slate-900">{payment.taxpayer_name || 'N/A'}</td>
                           <td className="px-5 py-4 text-slate-600">{branchName}</td>
                           <td className="px-5 py-4 text-right font-bold text-slate-950">{formatCurrency(payment.amount)}</td>
-                          <td className="px-5 py-4 text-slate-600">{payment.payment_method || 'N/A'}</td>
                           <td className="px-5 py-4">
                             <span className={`rounded-full px-3 py-1 text-xs font-bold ${statusStyles[status] || statusStyles.failed}`}>
                               {getStatusLabel(payment.status)}

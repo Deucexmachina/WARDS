@@ -39,7 +39,6 @@ const ViewMyTicket = ({ onClose }) => {
   };
 
   const handlePrint = () => {
-    const linkedReceiptRequests = ticket.linked_receipt_requests || [];
     printQueueTicket({
       title: 'Queue Ticket',
       queueNumber: ticket.queue_number,
@@ -52,7 +51,7 @@ const ViewMyTicket = ({ onClose }) => {
       createdAt: ticket.created_at,
       taxpayerName: ticket.taxpayer_name,
       contactNumber: ticket.contact_number,
-      message: `Status: ${ticket.status}${ticket.position > 0 ? ` | Position in queue: #${ticket.position}` : ''}${linkedReceiptRequests.length ? ` | Linked receipt requests: ${linkedReceiptRequests.length}` : ''}`,
+      message: `Status: ${ticket.status}${ticket.position > 0 ? ` | Position in queue: #${ticket.position}` : ''}`,
     });
   };
 

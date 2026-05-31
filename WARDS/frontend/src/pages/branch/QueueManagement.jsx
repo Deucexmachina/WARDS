@@ -108,6 +108,7 @@ const formatTimeLabel = (value) => {
     return 'N/A';
   }
   return parsed.toLocaleTimeString('en-PH', {
+    timeZone: 'Asia/Manila',
     hour: 'numeric',
     minute: '2-digit',
   });
@@ -119,6 +120,7 @@ const formatAppointmentDateTimeLabel = (value) => {
     return 'N/A';
   }
   return parsed.toLocaleString('en-PH', {
+    timeZone: 'Asia/Manila',
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -535,6 +537,29 @@ const QueueManagement = () => {
     }));
   };
 
+  const applyQueueSnapshot = (nextQueues) => {
+    const normalizedQueues = Array.isArray(nextQueues) ? nextQueues : [];
+    setQueues(normalizedQueues);
+    dispatchQueueStateUpdate(normalizedQueues);
+    return normalizedQueues;
+  };
+
+  const updateQueuesLocally = (updater) => {
+    setQueues((currentQueues) => {
+      const nextQueues = typeof updater === 'function' ? updater(currentQueues) : updater;
+      dispatchQueueStateUpdate(nextQueues);
+      return nextQueues;
+    });
+  };
+
+  const clearLastCalledQueue = (queueId = null) => {
+    if (queueId !== null && lastCalledQueueRef.current?.id !== queueId && lastCalledQueue?.id !== queueId) {
+      return;
+    }
+    setLastCalledQueue(null);
+    lastCalledQueueRef.current = null;
+  };
+
   const fetchQueues = async () => {
     try {
       const [queueResponse, historyResponse, statusResponse] = await Promise.all([
@@ -543,13 +568,14 @@ const QueueManagement = () => {
         api.get('/public/system-status'),
       ]);
       const nextQueues = queueResponse.data || [];
-      setQueues(nextQueues);
+      applyQueueSnapshot(nextQueues);
       setQueueHistory(historyResponse.data || []);
       setSystemStatus(statusResponse.data);
       setError('');
-      dispatchQueueStateUpdate(nextQueues);
+      return nextQueues;
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to load queue.');
+      return [];
     } finally {
       setLoading(false);
     }
@@ -648,6 +674,8 @@ const QueueManagement = () => {
       setCompletionError('');
       setCompletionNotice('');
       await api.post(`/branch/queue/${queue.id}/complete`);
+      updateQueuesLocally((currentQueues) => currentQueues.filter((entry) => entry.id !== queue.id));
+      clearLastCalledQueue(queue.id);
       await fetchQueues();
       resetCompletionFlow();
       return true;
@@ -787,7 +815,24 @@ const QueueManagement = () => {
 
     try {
       if (action === 'call-next') {
-        const response = await api.post('/branch/queue/call-next');
+        let response;
+        try {
+          response = await api.post('/branch/queue/call-next');
+        } catch (err) {
+          if (err.response?.status === 409) {
+            const refreshedQueues = await fetchQueues();
+            const refreshedActiveQueue = (refreshedQueues || []).find((entry) =>
+              ['called', 'serving'].includes((entry.status || '').toLowerCase()),
+            );
+            if (!refreshedActiveQueue) {
+              response = await api.post('/branch/queue/call-next');
+            } else {
+              throw err;
+            }
+          } else {
+            throw err;
+          }
+        }
         const calledQueue = response.data;
         await fetchQueues();
         
@@ -870,11 +915,7 @@ const QueueManagement = () => {
       
       // Clear lastCalledQueue if the queue was completed, deleted, skipped, or cancelled
       if (['complete', 'skip', 'delete'].includes(action) && queue) {
-        if (lastCalledQueue && lastCalledQueue.id === queue.id) {
-          console.log('Clearing lastCalledQueue after action:', action);
-          setLastCalledQueue(null);
-          lastCalledQueueRef.current = null;
-        }
+        clearLastCalledQueue(queue.id);
       }
       
       if (action === 'delete' || action === 'delete-history') {

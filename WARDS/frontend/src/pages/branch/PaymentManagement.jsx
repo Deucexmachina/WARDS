@@ -577,6 +577,7 @@ const PaymentManagement = () => {
       setPaymentToVerify(null);
       setFeedback({ type: 'success', message: 'Payment verified successfully.' });
       window.dispatchEvent(new CustomEvent('branch-payment-updated', { detail: { action: 'verified', paymentId: paymentToVerify.id } }));
+      window.dispatchEvent(new CustomEvent('receipt-payment-updated', { detail: { action: 'verified', paymentId: paymentToVerify.id } }));
       fetchPayments();
     } catch (error) {
       console.error('Failed to verify payment:', error);
@@ -639,6 +640,7 @@ const PaymentManagement = () => {
       setPaymentToDecline(null);
       setFeedback({ type: 'success', message: 'Payment declined successfully.' });
       window.dispatchEvent(new CustomEvent('branch-payment-updated', { detail: { action: 'declined', paymentId: paymentToDecline.id } }));
+      window.dispatchEvent(new CustomEvent('receipt-payment-updated', { detail: { action: 'declined', paymentId: paymentToDecline.id } }));
       fetchPayments();
     } catch (error) {
       console.error('Failed to decline payment:', error);
@@ -908,7 +910,6 @@ const PaymentManagement = () => {
                   <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Citizen Name</th>
                   <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Branch</th>
                   <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">TIN</th>
-                  <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Payment Method</th>
                   <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Tax Type</th>
                   <th className="px-5 py-4 text-right font-semibold uppercase tracking-[0.12em]">Amount</th>
                   <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Status</th>
@@ -934,7 +935,6 @@ const PaymentManagement = () => {
                     </td>
                     <td className="px-5 py-4 align-top text-slate-700">{payment.branch || 'Unassigned Branch'}</td>
                     <td className="px-5 py-4 align-top text-slate-700">{payment.tin || 'N/A'}</td>
-                    <td className="px-5 py-4 align-top text-slate-700">{normalizePaymentMethodLabel(payment.payment_method)}</td>
                     <td className="px-5 py-4 align-top text-slate-700">{payment.tax_type || 'N/A'}</td>
                     <td className="px-5 py-4 text-right align-top font-semibold text-slate-900">{formatCurrency(payment.amount)}</td>
                     <td className="px-5 py-4 align-top">

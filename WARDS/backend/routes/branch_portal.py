@@ -61,8 +61,27 @@ def serialize_manila_datetime(value: Optional[datetime]) -> Optional[str]:
     if value is None:
         return None
     if value.tzinfo is None:
+        utc_time = value.replace(tzinfo=timezone.utc)
+        return utc_time.astimezone(MANILA_TIMEZONE).isoformat()
+    return value.astimezone(MANILA_TIMEZONE).isoformat()
+
+
+def serialize_manila_native_datetime(value: Optional[datetime]) -> Optional[str]:
+    if value is None:
+        return None
+    if value.tzinfo is None:
         return value.replace(tzinfo=MANILA_TIMEZONE).isoformat()
     return value.astimezone(MANILA_TIMEZONE).isoformat()
+
+
+def serialize_queue_schedule_datetime(value: Optional[datetime], queue_type: Optional[str]) -> Optional[str]:
+    if (queue_type or "").strip().lower() == "appointment":
+        return serialize_manila_native_datetime(value)
+    return serialize_manila_datetime(value)
+
+
+def get_current_manila_naive() -> datetime:
+    return datetime.now(MANILA_TIMEZONE).replace(tzinfo=None)
 
 
 class BranchAnnouncementPayload(BaseModel):
@@ -156,7 +175,7 @@ def status_label(status_value: str) -> str:
 def get_queue_display_status(queue: Queue) -> str:
     normalized_status = ((queue_value(queue, "status") or "").strip().lower())
     if queue_value(queue, "queue_type") == "appointment" and normalized_status == "waiting":
-        if queue.appointment_time and queue.appointment_time > datetime.now():
+        if queue.appointment_time and queue.appointment_time > get_current_manila_naive():
             return "Appointment"
         return "Waiting"
     return status_label(queue_value(queue, "status") or "Waiting")
@@ -198,7 +217,7 @@ def serialize_queue(queue: Queue, assigned_window_number: Optional[int] = None, 
         "service_window": service_window,
         "assigned_window_number": assigned_window_number or default_assigned_window_number(service_window),
         "window_label": window_label or SERVICE_WINDOW_DEFAULT_LABELS.get(service_window, service_window),
-        "appointment_time": serialize_manila_datetime(queue.appointment_time),
+        "appointment_time": serialize_queue_schedule_datetime(queue.appointment_time, queue_value(queue, "queue_type")),
         "estimated_wait_time": queue.estimated_wait_time,
         "recommended_arrival": serialize_manila_datetime(queue.recommended_arrival),
         "created_at": serialize_manila_datetime(queue.created_at),
@@ -230,7 +249,7 @@ def serialize_queue_history(queue: QueueHistory):
         "status": (queue.final_status or "").lower(),
         "status_label": status_label(queue.final_status or "Completed"),
         "queue_type": (queue.queue_type or "immediate").lower(),
-        "appointment_time": serialize_manila_datetime(queue.appointment_time),
+        "appointment_time": serialize_queue_schedule_datetime(queue.appointment_time, queue.queue_type),
         "estimated_wait_time": queue.estimated_wait_time,
         "recommended_arrival": serialize_manila_datetime(queue.recommended_arrival),
         "created_at": serialize_manila_datetime(queue.created_at),
@@ -1094,6 +1113,7 @@ async def call_next_queue(
     if active_queue:
         raise HTTPException(status_code=409, detail="Only one queue can be active at a time. Complete or skip the current queue before calling the next one.")
 
+    current_manila_time = get_current_manila_naive()
     waiting_queues = (
         db.query(Queue)
         .filter(
@@ -1101,7 +1121,7 @@ async def call_next_queue(
                 hash_aware_match(Queue, "status", "Waiting"),
                 or_(
                     hash_aware_match(Queue, "queue_type", "immediate"),
-                    and_(hash_aware_match(Queue, "queue_type", "appointment"), Queue.appointment_time <= datetime.now()),
+                    and_(hash_aware_match(Queue, "queue_type", "appointment"), Queue.appointment_time <= current_manila_time),
                     and_(Queue.queue_type.is_(None), Queue.appointment_time.is_(None)),
                 ),
             )

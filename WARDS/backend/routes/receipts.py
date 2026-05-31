@@ -43,6 +43,15 @@ ALLOWED_RELEASE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 ALLOWED_RELEASE_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MAX_RELEASE_FILE_SIZE = 5 * 1024 * 1024
 RECEIPT_REQUEST_FEE = 200.0
+RECEIPT_REQUEST_REASON_OPTIONS = {
+    "Lost original receipt",
+    "Damaged receipt",
+    "Personal record keeping",
+    "Accounting requirement",
+    "Bank or loan requirement",
+    "Government compliance",
+    "Other",
+}
 
 
 def unique_receipt_request_id() -> str:
@@ -57,15 +66,12 @@ def unique_receipt_payment_refs() -> tuple[str, str]:
 class PublicReceiptRequestCreate(BaseModel):
     taxpayerName: str
     taxType: str
-    requestType: str
+    requestReason: str
+    requestReasonOther: str | None = None
     branchId: int
     txnDate: str
     refNumber: str | None = None
     email: str
-    appointmentDate: str | None = None
-    appointmentSlot: str | None = None
-    linkedQueueNumber: str | None = None
-    linkToActiveQueue: bool = False
 
 
 class ReceiptFeePaymentRequest(BaseModel):
@@ -109,9 +115,6 @@ class MobileReceiptUploadSessionCreate(BaseModel):
 def normalize_receipt_payment_method(payment_method: str | None) -> str:
     normalized = (payment_method or "gcash").strip().lower().replace(" ", "_")
     method_aliases = {
-        "over_the_counter": "over_the_counter",
-        "over-the-counter": "over_the_counter",
-        "otc": "over_the_counter",
         "gcash": "gcash",
         "maya": "maya",
         "paymaya": "maya",
@@ -185,9 +188,9 @@ def serialize_receipt_request(request: ReceiptRequest, db: Session):
         "requestId": receipt_request_value(request, "request_id"),
         "taxpayerName": receipt_request_value(request, "taxpayer_name"),
         "taxType": receipt_request_value(request, "tax_type"),
-        "requestType": receipt_request_value(request, "request_type"),
+        "requestReason": receipt_request_value(request, "request_reason"),
+        "requestReasonOther": receipt_request_value(request, "request_reason_other"),
         "transactionDate": receipt_request_value(request, "transaction_date"),
-        "appointmentTime": request.appointment_time.isoformat() if request.appointment_time else None,
         "refNumber": receipt_request_value(request, "ref_number"),
         "email": receipt_request_value(request, "email"),
         "status": overall_status,
@@ -198,7 +201,6 @@ def serialize_receipt_request(request: ReceiptRequest, db: Session):
         "feePaid": request.fee_paid,
         "branchId": request.branch_id,
         "branchName": branch_name,
-        "linkedQueueNumber": receipt_request_value(request, "linked_queue_number"),
         "matchedReceiptId": request.matched_receipt_id,
         "paymentRefNumber": payment.ref_number if payment else receipt_request_value(request, "payment_ref_number"),
         "releaseCopyFilename": receipt_request_value(request, "release_copy_filename"),
@@ -234,9 +236,9 @@ def serialize_receipt_request_history(history: ReceiptRequestHistory, db: Sessio
         "requestId": receipt_request_history_value(history, "request_id"),
         "taxpayerName": receipt_request_history_value(history, "taxpayer_name"),
         "taxType": receipt_request_history_value(history, "tax_type"),
-        "requestType": receipt_request_history_value(history, "request_type"),
+        "requestReason": receipt_request_history_value(history, "request_reason"),
+        "requestReasonOther": receipt_request_history_value(history, "request_reason_other"),
         "transactionDate": receipt_request_history_value(history, "transaction_date"),
-        "appointmentTime": history.appointment_time.isoformat() if history.appointment_time else None,
         "refNumber": receipt_request_history_value(history, "ref_number"),
         "email": receipt_request_history_value(history, "email"),
         "status": receipt_request_history_value(history, "final_status"),
@@ -246,7 +248,6 @@ def serialize_receipt_request_history(history: ReceiptRequestHistory, db: Sessio
         "feePaid": history.fee_paid,
         "branchId": history.branch_id,
         "branchName": branch_name,
-        "linkedQueueNumber": receipt_request_history_value(history, "linked_queue_number"),
         "matchedReceiptId": history.matched_receipt_id,
         "paymentRefNumber": receipt_request_history_value(history, "payment_ref_number"),
         "releaseCopyFilename": receipt_request_history_value(history, "release_copy_filename"),
@@ -288,6 +289,25 @@ def validate_transaction_date(value: str) -> str:
         raise HTTPException(status_code=400, detail="Transaction date cannot be in the future.")
 
     return normalized
+
+
+def validate_receipt_request_reason(reason: str | None, custom_reason: str | None) -> tuple[str, str | None]:
+    normalized_reason = (reason or "").strip()
+    if not normalized_reason:
+        raise HTTPException(status_code=400, detail="Reason for request is required.")
+    if normalized_reason not in RECEIPT_REQUEST_REASON_OPTIONS:
+        raise HTTPException(status_code=400, detail="Please select a valid reason for request.")
+
+    normalized_custom_reason = (custom_reason or "").strip() or None
+    if normalized_reason == "Other":
+        if not normalized_custom_reason:
+            raise HTTPException(status_code=400, detail="Please provide your custom reason for request.")
+        if len(normalized_custom_reason) > 255:
+            raise HTTPException(status_code=400, detail="Custom reason must be 255 characters or less.")
+    else:
+        normalized_custom_reason = None
+
+    return normalized_reason, normalized_custom_reason
 
 
 def find_matching_receipt(db: Session, branch_id: int, ref_number: str, taxpayer_name: str, transaction_date: str, tax_type: str):
@@ -422,8 +442,6 @@ def get_receipt_request_payment_status(request: ReceiptRequest, payment: Payment
         return "Verified"
     if is_declined_receipt_payment(payment):
         return "Declined"
-    if payment and (payment.payment_method or "").strip().lower() == "over_the_counter":
-        return "Pending Over-the-Counter Payment"
     return "Pending"
 
 
@@ -458,8 +476,6 @@ def get_receipt_request_overall_status(request: ReceiptRequest, payment: Payment
 def get_receipt_request_next_action(request: ReceiptRequest, payment: Payment | None) -> str:
     payment_status = get_receipt_request_payment_status(request, payment)
     release_status = get_receipt_request_release_status(request)
-    if payment_status == "Pending Over-the-Counter Payment":
-        return "Pay at Branch Counter"
     if payment_status in {"Pending", "Declined"}:
         return "Pay Request Fee"
     if release_status == "Ready for Release":
@@ -482,6 +498,8 @@ def archive_receipt_request(
     history_record.branch_id = receipt_request.branch_id
     history_record.taxpayer_name = receipt_request_value(receipt_request, "taxpayer_name")
     history_record.tax_type = receipt_request_value(receipt_request, "tax_type")
+    history_record.request_reason = receipt_request_value(receipt_request, "request_reason")
+    history_record.request_reason_other = receipt_request_value(receipt_request, "request_reason_other")
     history_record.request_type = receipt_request_value(receipt_request, "request_type")
     history_record.transaction_date = receipt_request_value(receipt_request, "transaction_date")
     history_record.ref_number = receipt_request_value(receipt_request, "ref_number")
@@ -1487,73 +1505,17 @@ async def create_receipt_request(
     credentials: HTTPAuthorizationCredentials | None = Depends(optional_user_security),
 ):
     taxpayer_name = validate_taxpayer_name(request.taxpayerName)
-    transaction_date = (request.txnDate or "").strip()
+    transaction_date = validate_transaction_date((request.txnDate or "").strip())
     normalized_email = normalize_email(request.email, check_deliverability=True)
     normalized_ref_number = normalize_reference_number(request.refNumber)
-    current_citizen = resolve_authenticated_citizen(credentials, db)
-    linked_queue = None
+    request_reason, request_reason_other = validate_receipt_request_reason(request.requestReason, request.requestReasonOther)
+    _ = resolve_authenticated_citizen(credentials, db)
     tax_type = normalize_receipt_category(request.taxType)
-    if request.linkToActiveQueue:
-        normalized_linked_queue_number = (request.linkedQueueNumber or "").strip()
-        if not normalized_linked_queue_number:
-            raise HTTPException(status_code=400, detail="A queue number is required before this receipt request can be linked to an active queue.")
-        if not current_citizen:
-            raise HTTPException(status_code=401, detail="Please sign in again before linking a receipt request to your active queue.")
-        linked_queue = resolve_linked_active_queue(
-            db,
-            current_citizen=current_citizen,
-            linked_queue_number=normalized_linked_queue_number,
-        )
-        if not linked_queue:
-            raise HTTPException(status_code=404, detail="The queue linked to this request was not found under your active account session or is no longer active.")
-        if request.branchId != linked_queue.branch_id:
-            raise HTTPException(status_code=400, detail="Additional receipt requests must stay attached to the same branch as the active queue number.")
-        linked_queue_email = normalize_email(queue_value(linked_queue, "email"), check_deliverability=True) if queue_value(linked_queue, "email") else None
-        if linked_queue_email and normalized_email != linked_queue_email:
-            raise HTTPException(status_code=400, detail="Linked receipt requests must use the same email address as the active queue number.")
-        linked_queue_taxpayer = (queue_value(linked_queue, "taxpayer_name") or "").strip().lower()
-        if linked_queue_taxpayer and taxpayer_name.strip().lower() != linked_queue_taxpayer:
-            raise HTTPException(status_code=400, detail="Linked receipt requests must use the same taxpayer name as the active queue number.")
-        taxpayer_name = validate_taxpayer_name(queue_value(linked_queue, "taxpayer_name") or request.taxpayerName)
-        transaction_date = get_current_manila_date_value()
-        tax_type = derive_tax_type_from_queue_service(queue_value(linked_queue, "service_type"))
-        existing_linked_request = find_linked_queue_receipt_request(
-            db,
-            queue_value(linked_queue, "queue_number") or normalized_linked_queue_number,
-        )
-        if existing_linked_request:
-            request_stage, existing_request_id = existing_linked_request
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"This queue number already has an active receipt request ({existing_request_id}). "
-                    f"Only one receipt copy request is allowed per queue transaction at a time. "
-                    f"Please complete or cancel the existing request before creating a new one."
-                ),
-            )
-    else:
-        transaction_date = validate_transaction_date(transaction_date)
-
-    branch_id = linked_queue.branch_id if linked_queue else request.branchId
+    branch_id = request.branchId
     ensure_receipt_requests_enabled(db, branch_id)
     branch = db.query(Branch).filter(Branch.id == branch_id, Branch.status == "Active").first()
     if not branch:
         raise HTTPException(status_code=404, detail="Selected branch not found")
-
-    request_type = normalize_request_type(
-        queue_value(linked_queue, "queue_type") if linked_queue else request.requestType
-    )
-    appointment_time = (
-        linked_queue.appointment_time
-        if linked_queue and request_type == "Appointment"
-        else validate_receipt_appointment_datetime(
-            db,
-            branch=branch,
-            request_type=request_type,
-            appointment_date=request.appointmentDate,
-            appointment_slot=request.appointmentSlot,
-        )
-    )
     request_id = unique_receipt_request_id()
     matched_receipt = find_matching_receipt(db, branch_id, normalized_ref_number, taxpayer_name, transaction_date, tax_type)
 
@@ -1561,15 +1523,14 @@ async def create_receipt_request(
         request_id=request_id,
         taxpayer_name=taxpayer_name,
         tax_type=tax_type,
-        request_type=request_type,
+        request_reason=request_reason,
+        request_reason_other=request_reason_other,
         transaction_date=transaction_date,
         ref_number=normalized_ref_number,
         email=normalized_email,
         fee_paid=False,
         branch_id=branch_id,
         matched_receipt_id=matched_receipt.id if matched_receipt else None,
-        linked_queue_number=queue_value(linked_queue, "queue_number") if linked_queue else None,
-        appointment_time=appointment_time,
     )
     sync_request_status(receipt_request)
     apply_receipt_request_security(receipt_request)
@@ -1629,12 +1590,6 @@ async def pay_request_fee(
 
     payment_ref, txn_id = unique_receipt_payment_refs()
     normalized_payment_method = normalize_receipt_payment_method(payment_data.paymentMethod)
-    if normalized_payment_method == "over_the_counter" and not receipt_request_value(receipt_request, "linked_queue_number"):
-        raise HTTPException(
-            status_code=400,
-            detail="Over-the-counter payment is only available for receipt requests created from an active queue registration.",
-        )
-    initial_status = "Pending Over-the-Counter Payment" if normalized_payment_method == "over_the_counter" else "Pending"
     payment = Payment(
         ref_number=payment_ref,
         txn_id=txn_id,
@@ -1646,7 +1601,7 @@ async def pay_request_fee(
         branch_id=receipt_request.branch_id,
         branch=branch_name,
         email=receipt_request_value(receipt_request, "email"),
-        status=initial_status,
+        status="Pending",
         source_module="receipt_request",
         related_request_id=resolved_request_id,
     )
@@ -1666,7 +1621,7 @@ async def pay_request_fee(
         "paymentRefNumber": payment_ref,
         "txnId": txn_id,
         "amount": RECEIPT_REQUEST_FEE,
-        "status": initial_status,
+        "status": "Pending",
         "paymentMethod": normalized_payment_method,
         "placeholderGateway": "PayMongo Placeholder",
     }

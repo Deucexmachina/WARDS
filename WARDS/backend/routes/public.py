@@ -685,7 +685,10 @@ async def get_branch_queues(branch_id: int, db: Session = Depends(get_db)):
             "status": queue_value(q, "status"),
             "queue_type": queue_value(q, "queue_type"),
             "estimated_wait_time": q.estimated_wait_time,
-            "created_at": q.created_at.isoformat() if q.created_at else None
+            "appointment_time": serialize_queue_schedule_datetime(q.appointment_time, queue_value(q, "queue_type")),
+            "created_at": serialize_manila_datetime(q.created_at),
+            "served_at": serialize_manila_datetime(q.served_at),
+            "completed_at": serialize_manila_datetime(q.completed_at),
         }
         for q in queues
     ]
@@ -986,15 +989,12 @@ async def get_my_active_ticket(
                 {
                     "request_id": receipt_request_value(request, "request_id"),
                     "tax_type": receipt_request_value(request, "tax_type"),
-                    "request_type": receipt_request_value(request, "request_type"),
+                    "request_reason": receipt_request_value(request, "request_reason"),
+                    "request_reason_other": receipt_request_value(request, "request_reason_other"),
                     "status": receipt_request_value(request, "status"),
                     "fee_paid": bool(request.fee_paid),
                     "payment_ref_number": receipt_request_value(request, "payment_ref_number"),
-                    "payment_status": "Verified" if request.fee_paid else ("Pending Over-the-Counter Payment" if any(
-                        (payment.payment_method or "").strip().lower() == "over_the_counter"
-                        and (payment.status or "").strip().lower() == "pending over-the-counter payment"
-                        for payment in db.query(Payment).filter(Payment.related_request_id == receipt_request_value(request, "request_id")).all()
-                    ) else "Pending"),
+                    "payment_status": "Verified" if request.fee_paid else "Pending",
                     "created_at": serialize_manila_datetime(request.created_at),
                 }
                 for request in linked_receipt_requests
