@@ -1115,7 +1115,18 @@ async def call_next_queue(
         ]
     queue = waiting_queues[0] if waiting_queues else None
     if not queue:
-        raise HTTPException(status_code=404, detail="No ready queue numbers are available to call yet.")
+        # Debug: Check if there are any waiting queues at all
+        all_waiting = db.query(Queue).filter(
+            Queue.branch_id == current_staff.branch_id,
+            hash_aware_match(Queue, "status", "Waiting"),
+        ).count()
+        
+        detail_msg = f"No ready queue numbers are available to call yet. (Total waiting queues: {all_waiting}"
+        if is_queue_window_staff(current_staff):
+            detail_msg += f", Window: {current_staff.service_window}"
+        detail_msg += ")"
+        
+        raise HTTPException(status_code=404, detail=detail_msg)
 
     queue.status = "Called"
     apply_queue_security(queue)
