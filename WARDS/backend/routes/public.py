@@ -673,7 +673,7 @@ async def get_branch_immediate_queue_service_availability(
 @router.get("/queue/branch/{branch_id}")
 async def get_branch_queues(branch_id: int, db: Session = Depends(get_db)):
     """Get all queues for a specific branch"""
-    queues = db.query(Queue).filter(Queue.branch_id == branch_id).order_by(Queue.created_at.desc()).all()
+    queues = db.query(Queue).filter(Queue.branch_id == branch_id).order_by(Queue.created_at.asc()).all()
     
     return [
         {

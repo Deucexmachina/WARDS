@@ -178,9 +178,21 @@ const sortQueues = (queues, now) => {
     }
   });
 
+  // Sort active queues by status priority (serving > called > waiting > appointment), then by creation time
+  const statusPriority = { serving: 0, called: 1, waiting: 2, appointment: 3 };
   activeQueues.sort((left, right) => {
-    const rightDate = parseDate(getRelevantDateTime(right))?.getTime() || 0;
-    const leftDate = parseDate(getRelevantDateTime(left))?.getTime() || 0;
+    const leftStatus = getDerivedStatus(left, now);
+    const rightStatus = getDerivedStatus(right, now);
+    const leftPriority = statusPriority[leftStatus] ?? 999;
+    const rightPriority = statusPriority[rightStatus] ?? 999;
+    
+    if (leftPriority !== rightPriority) {
+      return leftPriority - rightPriority;
+    }
+    
+    // Same status, sort by creation time (oldest first)
+    const leftDate = parseDate(left.created_at)?.getTime() || 0;
+    const rightDate = parseDate(right.created_at)?.getTime() || 0;
     return leftDate - rightDate;
   });
 

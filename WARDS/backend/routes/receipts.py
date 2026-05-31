@@ -1207,7 +1207,7 @@ async def list_receipt_requests(current_staff=Depends(get_current_branch_staff),
     requests = (
         db.query(ReceiptRequest)
         .filter(ReceiptRequest.branch_id == current_staff.branch_id)
-        .order_by(ReceiptRequest.created_at.desc())
+        .order_by(ReceiptRequest.created_at.asc())
         .all()
     )
     return [serialize_receipt_request(request, db) for request in requests]
@@ -1218,7 +1218,7 @@ async def list_receipt_request_history(current_staff=Depends(get_current_branch_
     requests = (
         db.query(ReceiptRequestHistory)
         .filter(ReceiptRequestHistory.branch_id == current_staff.branch_id)
-        .order_by(ReceiptRequestHistory.archived_at.desc(), ReceiptRequestHistory.created_at.desc())
+        .order_by(ReceiptRequestHistory.archived_at.asc(), ReceiptRequestHistory.created_at.asc())
         .all()
     )
     return [serialize_receipt_request_history(request, db) for request in requests]

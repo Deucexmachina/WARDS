@@ -2711,7 +2711,7 @@ async def reject_main_remittance(
 
 @router.get("/transactions")
 async def get_transactions(db: Session = Depends(get_db)):
-    payments = db.query(Payment).order_by(Payment.created_at.desc()).limit(50).all()
+    payments = db.query(Payment).order_by(Payment.created_at.asc()).limit(50).all()
     return [serialize_payment(payment) for payment in payments]
 
 
@@ -2720,7 +2720,7 @@ async def get_all_payments(branch: str = None, db: Session = Depends(get_db)):
     query = db.query(Payment)
     if branch:
         query = query_payments_for_branch_name(db, branch)
-    payments = query.order_by(Payment.created_at.desc()).all()
+    payments = query.order_by(Payment.created_at.asc()).all()
     return [serialize_payment(payment) for payment in payments]
 
 

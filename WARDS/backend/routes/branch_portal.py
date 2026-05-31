@@ -574,7 +574,7 @@ def payment_belongs_to_branch(payment: Payment, branch: Branch, current_staff: B
 def get_branch_payments(current_staff: BranchStaff, branch: Branch, db: Session) -> list[Payment]:
     candidate_payments = (
         db.query(Payment)
-        .order_by(Payment.created_at.desc(), Payment.id.desc())
+        .order_by(Payment.created_at.asc(), Payment.id.asc())
         .all()
     )
     matched_payments = [

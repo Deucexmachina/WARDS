@@ -238,12 +238,24 @@ const ReceiptManagement = () => {
   );
 
   const immediateRequests = useMemo(
-    () => pendingRequests.filter((request) => (request.requestType || 'Immediate') !== 'Appointment'),
+    () => pendingRequests
+      .filter((request) => (request.requestType || 'Immediate') !== 'Appointment')
+      .sort((left, right) => {
+        const leftDate = new Date(left.createdAt || left.created_at || 0).getTime();
+        const rightDate = new Date(right.createdAt || right.created_at || 0).getTime();
+        return leftDate - rightDate;
+      }),
     [pendingRequests]
   );
 
   const appointmentRequests = useMemo(
-    () => pendingRequests.filter((request) => (request.requestType || '') === 'Appointment'),
+    () => pendingRequests
+      .filter((request) => (request.requestType || '') === 'Appointment')
+      .sort((left, right) => {
+        const leftDate = new Date(left.createdAt || left.created_at || 0).getTime();
+        const rightDate = new Date(right.createdAt || right.created_at || 0).getTime();
+        return leftDate - rightDate;
+      }),
     [pendingRequests]
   );
 
@@ -355,37 +367,55 @@ const ReceiptManagement = () => {
 
   const releasedRptRequests = useMemo(
     () =>
-      normalizedRequestHistory.filter((request) => {
-        const searchTerm = historySearch.RPT.trim().toLowerCase();
-        if (request.normalized_tax_type !== 'RPT') {
-          return false;
-        }
-        return !searchTerm || (request.taxpayerName || '').toLowerCase().includes(searchTerm);
-      }),
+      normalizedRequestHistory
+        .filter((request) => {
+          const searchTerm = historySearch.RPT.trim().toLowerCase();
+          if (request.normalized_tax_type !== 'RPT') {
+            return false;
+          }
+          return !searchTerm || (request.taxpayerName || '').toLowerCase().includes(searchTerm);
+        })
+        .sort((left, right) => {
+          const leftDate = new Date(left.createdAt || left.created_at || left.archived_at || 0).getTime();
+          const rightDate = new Date(right.createdAt || right.created_at || right.archived_at || 0).getTime();
+          return leftDate - rightDate;
+        }),
     [normalizedRequestHistory, historySearch.RPT]
   );
 
   const releasedBusinessRequests = useMemo(
     () =>
-      normalizedRequestHistory.filter((request) => {
-        const searchTerm = historySearch.BUSINESS.trim().toLowerCase();
-        if (request.normalized_tax_type !== 'BUSINESS') {
-          return false;
-        }
-        return !searchTerm || (request.taxpayerName || '').toLowerCase().includes(searchTerm);
-      }),
+      normalizedRequestHistory
+        .filter((request) => {
+          const searchTerm = historySearch.BUSINESS.trim().toLowerCase();
+          if (request.normalized_tax_type !== 'BUSINESS') {
+            return false;
+          }
+          return !searchTerm || (request.taxpayerName || '').toLowerCase().includes(searchTerm);
+        })
+        .sort((left, right) => {
+          const leftDate = new Date(left.createdAt || left.created_at || left.archived_at || 0).getTime();
+          const rightDate = new Date(right.createdAt || right.created_at || right.archived_at || 0).getTime();
+          return leftDate - rightDate;
+        }),
     [normalizedRequestHistory, historySearch.BUSINESS]
   );
 
   const releasedMiscRequests = useMemo(
     () =>
-      normalizedRequestHistory.filter((request) => {
-        const searchTerm = historySearch.MISC.trim().toLowerCase();
-        if (request.normalized_tax_type !== 'MISC') {
-          return false;
-        }
-        return !searchTerm || (request.taxpayerName || '').toLowerCase().includes(searchTerm);
-      }),
+      normalizedRequestHistory
+        .filter((request) => {
+          const searchTerm = historySearch.MISC.trim().toLowerCase();
+          if (request.normalized_tax_type !== 'MISC') {
+            return false;
+          }
+          return !searchTerm || (request.taxpayerName || '').toLowerCase().includes(searchTerm);
+        })
+        .sort((left, right) => {
+          const leftDate = new Date(left.createdAt || left.created_at || left.archived_at || 0).getTime();
+          const rightDate = new Date(right.createdAt || right.created_at || right.archived_at || 0).getTime();
+          return leftDate - rightDate;
+        }),
     [normalizedRequestHistory, historySearch.MISC]
   );
 
