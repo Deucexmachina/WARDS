@@ -41,6 +41,14 @@ const DETAIL_GROUP_META = {
   },
 };
 
+const DETAIL_CATEGORY_OPTIONS = [
+  { key: 'all', label: 'All Categories' },
+  { key: 'queue_services', label: 'Queue Services' },
+  { key: 'receipt_requests', label: 'Receipt Requests' },
+  { key: 'payment_transactions', label: 'Payment Transactions' },
+  { key: 'other_service_categories', label: 'Other Categories' },
+];
+
 const getReportReference = (report) => `WARDS-RPT-${String(report?.id || 0).padStart(5, '0')}`;
 
 const ReportSection = ({ title, subtitle, children, action }) => (
@@ -295,6 +303,19 @@ const buildSectionSummary = (rows) => ({
 
 const isQueueServiceSection = (sectionKey) => ['rpt_transactions', 'bt_transactions', 'misc_transactions'].includes(sectionKey);
 
+const getDetailSectionCategory = (sectionKey) => {
+  if (isQueueServiceSection(sectionKey)) {
+    return 'queue_services';
+  }
+  if (sectionKey === 'receipt_requests') {
+    return 'receipt_requests';
+  }
+  if (sectionKey === 'payment_transactions') {
+    return 'payment_transactions';
+  }
+  return 'other_service_categories';
+};
+
 const buildGroupedDetailSections = (rows) => {
   const grouped = DETAIL_GROUP_ORDER.reduce((accumulator, key) => {
     accumulator[key] = [];
@@ -315,124 +336,117 @@ const buildGroupedDetailSections = (rows) => {
     }));
 };
 
-const buildPaginatedDetailSections = (sections, pageSize = DETAIL_ROWS_PER_PAGE) => {
-  if (!sections.length) {
-    return [];
-  }
-
-  const pages = [];
-  let currentSections = [];
-  let remainingSlots = pageSize;
-
-  sections.forEach((section) => {
-    let startIndex = 0;
-    while (startIndex < section.rows.length) {
-      if (remainingSlots === 0) {
-        pages.push(currentSections);
-        currentSections = [];
-        remainingSlots = pageSize;
-      }
-
-      const endIndex = Math.min(startIndex + remainingSlots, section.rows.length);
-      const pageRows = section.rows.slice(startIndex, endIndex);
-
-      currentSections.push({
-        ...section,
-        rows: pageRows,
-        isContinued: startIndex > 0,
-        remainingCount: section.rows.length - endIndex,
-      });
-
-      remainingSlots -= pageRows.length;
-      startIndex = endIndex;
-    }
-  });
-
-  if (currentSections.length) {
-    pages.push(currentSections);
-  }
-
-  return pages;
-};
-
 const DetailSectionCard = ({ section }) => (
-  <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70 shadow-sm">
-    <div className="border-b border-slate-200 bg-white px-5 py-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div>
+  <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
+    <div className="border-b border-slate-200 bg-gradient-to-r from-slate-50 via-white to-slate-50 px-5 py-5 sm:px-6">
+      <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+        <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h4 className="text-base font-bold text-slate-900">{section.title}</h4>
-            {section.isContinued ? (
-              <span className="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-sky-700">
-                Continued
-              </span>
-            ) : null}
+            <span className="rounded-full bg-primary/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">
+              Detailed View
+            </span>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+              {section.key.replaceAll('_', ' ')}
+            </span>
           </div>
-          <p className="mt-1 text-sm text-slate-500">{section.subtitle}</p>
+          <h4 className="mt-3 text-lg font-bold leading-snug text-slate-900">{section.title}</h4>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">{section.subtitle}</p>
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <div className="rounded-xl bg-slate-100 px-3 py-2 text-center">
+        <div className={`grid gap-2 ${isQueueServiceSection(section.key) ? 'grid-cols-3' : 'grid-cols-2 sm:grid-cols-4'}`}>
+          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-center shadow-sm">
             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Records</p>
-            <p className="mt-1 text-sm font-bold text-slate-900">{formatNumber(section.summary.totalRecords)}</p>
+            <p className="mt-1 text-base font-bold text-slate-900">{formatNumber(section.summary.totalRecords)}</p>
           </div>
-          <div className="rounded-xl bg-emerald-50 px-3 py-2 text-center">
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-center shadow-sm">
             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-500">Completed</p>
-            <p className="mt-1 text-sm font-bold text-emerald-700">{formatNumber(section.summary.completedCount)}</p>
+            <p className="mt-1 text-base font-bold text-emerald-700">{formatNumber(section.summary.completedCount)}</p>
           </div>
-          <div className="rounded-xl bg-amber-50 px-3 py-2 text-center">
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-center shadow-sm">
             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-500">Pending</p>
-            <p className="mt-1 text-sm font-bold text-amber-700">{formatNumber(section.summary.pendingCount)}</p>
+            <p className="mt-1 text-base font-bold text-amber-700">{formatNumber(section.summary.pendingCount)}</p>
           </div>
           {!isQueueServiceSection(section.key) ? (
-            <div className="rounded-xl bg-sky-50 px-3 py-2 text-center">
+            <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-center shadow-sm">
               <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-sky-500">Amount</p>
-              <p className="mt-1 text-sm font-bold text-sky-700">{formatCurrency(section.summary.totalAmount)}</p>
+              <p className="mt-1 text-base font-bold text-sky-700">{formatCurrency(section.summary.totalAmount)}</p>
             </div>
           ) : null}
         </div>
       </div>
     </div>
 
-    <div className="overflow-x-auto">
-      <table className="min-w-full text-sm">
-        <thead className="bg-slate-100/80">
-          <tr>
-            <th className="px-4 py-3 text-left font-semibold text-slate-600">Reference No.</th>
-            <th className="px-4 py-3 text-left font-semibold text-slate-600">Date</th>
-            <th className="px-4 py-3 text-left font-semibold text-slate-600">Time</th>
-            <th className="px-4 py-3 text-left font-semibold text-slate-600">Service Type</th>
-            <th className="px-4 py-3 text-left font-semibold text-slate-600">Category</th>
-            <th className="px-4 py-3 text-left font-semibold text-slate-600">Status</th>
-            {!isQueueServiceSection(section.key) ? (
-              <th className="px-4 py-3 text-right font-semibold text-slate-600">Amount / Fee</th>
-            ) : null}
-            <th className="px-4 py-3 text-left font-semibold text-slate-600">Notes / Remarks</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-200 bg-white">
-          {section.rows.map((row) => (
-            <tr key={`${section.key}-${row.source_type}-${row.reference}-${row.timestamp || row.date || ''}`} className="align-top">
-              <td className="px-4 py-3 font-semibold text-primary">{row.reference}</td>
-              <td className="px-4 py-3 text-slate-700">{row.timestamp ? formatUtc8Date(row.timestamp) : row.date || 'N/A'}</td>
-              <td className="px-4 py-3 text-slate-700">{row.timestamp ? formatUtc8Time(row.timestamp) : row.time || 'N/A'}</td>
-              <td className="px-4 py-3 text-slate-700">{row.service_type || 'N/A'}</td>
-              <td className="px-4 py-3 text-slate-700">{row.category || 'N/A'}</td>
-              <td className="px-4 py-3"><StatusBadge status={row.status} /></td>
-              {!isQueueServiceSection(section.key) ? (
-                <td className="px-4 py-3 text-right text-slate-700">{row.amount !== null && row.amount !== undefined ? formatCurrency(row.amount) : 'N/A'}</td>
-              ) : null}
-              <td className="px-4 py-3 text-slate-500">{row.notes || 'N/A'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-
-    {section.remainingCount > 0 ? (
-      <div className="border-t border-slate-200 bg-white px-5 py-3 text-xs font-medium text-slate-500">
-        {formatNumber(section.remainingCount)} more record(s) continue on the next page.
+    <div className="px-4 py-4 sm:px-6 sm:py-5">
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70">
+        <div className="overflow-x-auto">
+          <table className="min-w-[980px] w-full table-fixed text-sm">
+            <colgroup>
+              <col className="w-[16%]" />
+              <col className="w-[11%]" />
+              <col className="w-[10%]" />
+              <col className="w-[16%]" />
+              <col className="w-[14%]" />
+              <col className="w-[11%]" />
+              {!isQueueServiceSection(section.key) ? <col className="w-[12%]" /> : null}
+              <col className="w-[22%]" />
+            </colgroup>
+            <thead className="bg-slate-100/90">
+              <tr className="text-left">
+                <th className="px-4 py-3.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Reference No.</th>
+                <th className="px-4 py-3.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Date</th>
+                <th className="px-4 py-3.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Time</th>
+                <th className="px-4 py-3.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Service Type</th>
+                <th className="px-4 py-3.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Category</th>
+                <th className="px-4 py-3.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Status</th>
+                {!isQueueServiceSection(section.key) ? (
+                  <th className="px-4 py-3.5 text-right text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Amount / Fee</th>
+                ) : null}
+                <th className="px-4 py-3.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Notes / Remarks</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200 bg-white">
+              {section.rows.map((row, index) => (
+                <tr
+                  key={`${section.key}-${row.source_type}-${row.reference}-${row.timestamp || row.date || ''}`}
+                  className={`align-top transition hover:bg-slate-50 ${index % 2 === 0 ? 'bg-white' : 'bg-slate-50/35'}`}
+                >
+                  <td className="px-4 py-4">
+                    <div className="space-y-1">
+                      <p className="break-words font-semibold leading-5 text-primary">{row.reference || 'N/A'}</p>
+                      <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{row.source_type || 'record'}</p>
+                    </div>
+                  </td>
+                  <td className="px-4 py-4 text-sm font-medium text-slate-700">
+                    {row.timestamp ? formatUtc8Date(row.timestamp) : row.date || 'N/A'}
+                  </td>
+                  <td className="px-4 py-4 text-sm text-slate-600">
+                    {row.timestamp ? formatUtc8Time(row.timestamp) : row.time || 'N/A'}
+                  </td>
+                  <td className="px-4 py-4">
+                    <p className="break-words font-medium leading-5 text-slate-800">{row.service_type || 'N/A'}</p>
+                  </td>
+                  <td className="px-4 py-4">
+                    <p className="break-words leading-5 text-slate-700">{row.category || 'N/A'}</p>
+                  </td>
+                  <td className="px-4 py-4">
+                    <div className="flex justify-start">
+                      <StatusBadge status={row.status} />
+                    </div>
+                  </td>
+                  {!isQueueServiceSection(section.key) ? (
+                    <td className="px-4 py-4 text-right text-sm font-semibold text-slate-800">
+                      {row.amount !== null && row.amount !== undefined ? formatCurrency(row.amount) : 'N/A'}
+                    </td>
+                  ) : null}
+                  <td className="px-4 py-4">
+                    <p className="break-words whitespace-pre-wrap leading-6 text-slate-500">{row.notes || 'N/A'}</p>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
-    ) : null}
+    </div>
   </div>
 );
 
@@ -466,7 +480,9 @@ const buildTopKpis = (report, metrics) => {
 };
 
 export default function GeneratedReportContent({ report, metrics, contextLabel = 'Generated Report' }) {
-  const [detailPage, setDetailPage] = useState(1);
+  const [detailCategoryFilter, setDetailCategoryFilter] = useState('all');
+  const [selectedDetailSectionIndex, setSelectedDetailSectionIndex] = useState(0);
+  const [detailRowPage, setDetailRowPage] = useState(1);
   const historical = metrics?.historical_comparison || {};
   const operationalStats = metrics?.operational_statistics || {};
   const serviceItems = Object.entries(metrics?.service_utilization || {})
@@ -490,24 +506,55 @@ export default function GeneratedReportContent({ report, metrics, contextLabel =
   const receiptTransactionRows = metrics?.receipt_transaction_summary || [];
   const insights = metrics?.insights || {};
   const groupedDetailSections = useMemo(() => buildGroupedDetailSections(detailRows), [detailRows]);
-  const paginatedDetailSections = useMemo(() => buildPaginatedDetailSections(groupedDetailSections), [groupedDetailSections]);
-  const currentDetailSections = paginatedDetailSections[detailPage - 1] || [];
+  const filteredDetailSections = useMemo(() => {
+    if (detailCategoryFilter === 'all') {
+      return groupedDetailSections;
+    }
+    return groupedDetailSections.filter((section) => getDetailSectionCategory(section.key) === detailCategoryFilter);
+  }, [groupedDetailSections, detailCategoryFilter]);
+  const currentDetailSection = filteredDetailSections[selectedDetailSectionIndex] || null;
+  const detailRowTotalPages = Math.max(1, Math.ceil((currentDetailSection?.rows.length || 0) / DETAIL_ROWS_PER_PAGE));
+  const currentDetailRows = useMemo(() => {
+    if (!currentDetailSection) {
+      return [];
+    }
+    const startIndex = (detailRowPage - 1) * DETAIL_ROWS_PER_PAGE;
+    return currentDetailSection.rows.slice(startIndex, startIndex + DETAIL_ROWS_PER_PAGE);
+  }, [currentDetailSection, detailRowPage]);
+  const visibleDetailSection = currentDetailSection
+    ? {
+        ...currentDetailSection,
+        rows: currentDetailRows,
+      }
+    : null;
 
   useEffect(() => {
-    setDetailPage(1);
+    setDetailCategoryFilter('all');
+    setSelectedDetailSectionIndex(0);
+    setDetailRowPage(1);
   }, [report?.id, detailRows.length]);
 
   useEffect(() => {
-    if (!paginatedDetailSections.length) {
-      if (detailPage !== 1) {
-        setDetailPage(1);
+    if (!filteredDetailSections.length) {
+      if (selectedDetailSectionIndex !== 0) {
+        setSelectedDetailSectionIndex(0);
       }
       return;
     }
-    if (detailPage > paginatedDetailSections.length) {
-      setDetailPage(paginatedDetailSections.length);
+    if (selectedDetailSectionIndex > filteredDetailSections.length - 1) {
+      setSelectedDetailSectionIndex(filteredDetailSections.length - 1);
     }
-  }, [detailPage, paginatedDetailSections.length]);
+  }, [filteredDetailSections, selectedDetailSectionIndex]);
+
+  useEffect(() => {
+    setDetailRowPage(1);
+  }, [selectedDetailSectionIndex, detailCategoryFilter]);
+
+  useEffect(() => {
+    if (detailRowPage > detailRowTotalPages) {
+      setDetailRowPage(detailRowTotalPages);
+    }
+  }, [detailRowPage, detailRowTotalPages]);
 
   return (
     <div className="space-y-6 print:space-y-4">
@@ -630,43 +677,126 @@ export default function GeneratedReportContent({ report, metrics, contextLabel =
         action={(
           <div className="flex flex-wrap items-center gap-3 text-sm font-semibold text-slate-500">
             <span>{detailRows.length} records</span>
-            <span>Page {Math.min(detailPage, Math.max(paginatedDetailSections.length, 1))} of {Math.max(paginatedDetailSections.length, 1)}</span>
+            <span>{filteredDetailSections.length} visible service type{filteredDetailSections.length === 1 ? '' : 's'}</span>
           </div>
         )}
       >
         <div className="space-y-5">
-          {currentDetailSections.length ? currentDetailSections.map((section) => (
-            <DetailSectionCard key={`${section.key}-${section.isContinued ? 'continued' : 'start'}-${section.rows[0]?.reference || 'empty'}`} section={section} />
-          )) : (
-            <EmptyChartState message="No detailed operational records are available for the selected report scope." />
-          )}
-        </div>
+          <div className="rounded-[28px] border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-200 bg-slate-50/80 px-5 py-4">
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Table Controls</p>
+                  <h4 className="mt-2 text-lg font-bold text-slate-900">Category, Service Type, And Pagination</h4>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Switch report categories first, then choose a visible service type and move through its transaction pages below.
+                  </p>
+                </div>
+                <label className="flex w-full flex-col gap-2 xl:w-80">
+                  <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Category</span>
+                  <select
+                    value={detailCategoryFilter}
+                    onChange={(event) => setDetailCategoryFilter(event.target.value)}
+                    className="rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-700 outline-none transition focus:border-accent focus:ring-2 focus:ring-blue-100"
+                  >
+                    {DETAIL_CATEGORY_OPTIONS.map((option) => (
+                      <option key={option.key} value={option.key}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </div>
+            <div className="space-y-4 px-5 py-5">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Service Type</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {filteredDetailSections.map((section, index) => (
+                    <button
+                      key={section.key}
+                      type="button"
+                      onClick={() => setSelectedDetailSectionIndex(index)}
+                      className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                        index === selectedDetailSectionIndex
+                          ? 'bg-primary text-white shadow-sm'
+                          : 'bg-white text-slate-700 ring-1 ring-inset ring-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      {section.title}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-        {paginatedDetailSections.length > 1 ? (
-          <div className="mt-6 flex flex-col gap-3 border-t border-slate-200 pt-5 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-slate-500">
-              Showing grouped report page {detailPage} of {paginatedDetailSections.length}
-            </p>
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={() => setDetailPage((current) => Math.max(current - 1, 1))}
-                disabled={detailPage <= 1}
-                className="rounded-xl bg-slate-200 px-4 py-2 font-semibold text-slate-700 transition hover:bg-slate-300 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Previous
-              </button>
-              <button
-                type="button"
-                onClick={() => setDetailPage((current) => Math.min(current + 1, paginatedDetailSections.length))}
-                disabled={detailPage >= paginatedDetailSections.length}
-                className="rounded-xl bg-primary px-4 py-2 font-semibold text-white transition hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Next
-              </button>
+              <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Current Selection</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-800">{currentDetailSection?.title || 'No service type selected'}</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {filteredDetailSections.length
+                      ? `Service type ${Math.min(selectedDetailSectionIndex + 1, filteredDetailSections.length)} of ${filteredDetailSections.length}`
+                      : 'No matching service types in this category.'}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDetailSectionIndex((current) => Math.max(current - 1, 0))}
+                    disabled={selectedDetailSectionIndex <= 0 || filteredDetailSections.length <= 1}
+                    className="rounded-2xl bg-slate-200 px-4 py-2.5 font-semibold text-slate-700 transition hover:bg-slate-300 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDetailSectionIndex((current) => Math.min(current + 1, filteredDetailSections.length - 1))}
+                    disabled={selectedDetailSectionIndex >= filteredDetailSections.length - 1 || filteredDetailSections.length <= 1}
+                    className="rounded-2xl bg-primary px-4 py-2.5 font-semibold text-white transition hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
-        ) : null}
+
+          {visibleDetailSection ? (
+            <>
+              <DetailSectionCard section={visibleDetailSection} />
+              <div className="rounded-[28px] border border-slate-200 bg-white shadow-sm">
+                <div className="flex flex-col gap-4 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Transaction Pagination</p>
+                    <p className="mt-2 text-sm font-semibold text-slate-800">Max of 5 queue type/service type transactions per pagination.</p>
+                    <p className="mt-1 text-xs text-slate-500">This pagination only affects the currently selected service type/category.</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setDetailRowPage((current) => Math.max(current - 1, 1))}
+                      disabled={detailRowPage <= 1}
+                      className="rounded-2xl bg-slate-200 px-4 py-2.5 font-semibold text-slate-700 transition hover:bg-slate-300 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Previous
+                    </button>
+                    <span className="min-w-[148px] rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-center text-sm font-semibold text-slate-700">
+                      Page {detailRowPage} of {detailRowTotalPages}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setDetailRowPage((current) => Math.min(current + 1, detailRowTotalPages))}
+                      disabled={detailRowPage >= detailRowTotalPages}
+                      className="rounded-2xl bg-primary px-4 py-2.5 font-semibold text-white transition hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : (
+            <EmptyChartState message="No detailed operational records are available for the selected category or report scope." />
+          )}
+        </div>
       </ReportSection>
 
       <ReportSection title="Insights And Summary" subtitle="Concise operational interpretation for easier decision-making.">

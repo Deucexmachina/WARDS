@@ -118,6 +118,24 @@ const getPaymentBucket = (payment) => {
 
 const isProcessingPayment = (payment) => getPaymentBucket(payment) === 'pending';
 
+const comparePaymentsByQueueOrder = (left, right) => {
+  const leftDate = parsePaymentDate(left?.created_at)?.getTime() || 0;
+  const rightDate = parsePaymentDate(right?.created_at)?.getTime() || 0;
+  if (leftDate !== rightDate) {
+    return leftDate - rightDate;
+  }
+  return Number(left?.id || 0) - Number(right?.id || 0);
+};
+
+const compareProcessedPayments = (left, right) => {
+  const leftDate = parsePaymentDate(left?.verified_at || left?.created_at)?.getTime() || 0;
+  const rightDate = parsePaymentDate(right?.verified_at || right?.created_at)?.getTime() || 0;
+  if (leftDate !== rightDate) {
+    return rightDate - leftDate;
+  }
+  return Number(right?.id || 0) - Number(left?.id || 0);
+};
+
 const STATUS_CONFIG = {
   confirmed: { bg: 'bg-emerald-100', text: 'text-emerald-800', label: 'Verified' },
   pending: { bg: 'bg-amber-100', text: 'text-amber-800', label: 'Pending' },
@@ -486,13 +504,7 @@ const PaymentManagement = () => {
         api.get('/branch/payments/remittances/summary'),
         api.get('/branch/payments/remittances'),
       ]);
-      const normalizedPayments = [...(response.data || [])].sort((left, right) => {
-        const leftTime = parsePaymentDate(left.verified_at || left.created_at)?.getTime() || 0;
-        const rightTime = parsePaymentDate(right.verified_at || right.created_at)?.getTime() || 0;
-        return rightTime - leftTime;
-      });
-
-      setPayments(normalizedPayments);
+      setPayments([...(response.data || [])]);
       setRemittanceSummary(summaryResponse.data || null);
       setRemittances(remittanceResponse.data || []);
       setSelectedRemittancePayments((current) => {
@@ -735,15 +747,15 @@ const PaymentManagement = () => {
   }, [baseFilteredPayments, appliedFilters.status]);
 
   const pendingTransactions = useMemo(
-    () => filteredPayments.filter((payment) => getPaymentBucket(payment) === 'pending'),
+    () => [...filteredPayments.filter((payment) => getPaymentBucket(payment) === 'pending')].sort(comparePaymentsByQueueOrder),
     [filteredPayments]
   );
   const verifiedTransactions = useMemo(
-    () => filteredPayments.filter((payment) => getPaymentBucket(payment) === 'confirmed'),
+    () => [...filteredPayments.filter((payment) => getPaymentBucket(payment) === 'confirmed')].sort(compareProcessedPayments),
     [filteredPayments]
   );
   const declinedTransactions = useMemo(
-    () => filteredPayments.filter((payment) => getPaymentBucket(payment) === 'failed'),
+    () => [...filteredPayments.filter((payment) => getPaymentBucket(payment) === 'failed')].sort(compareProcessedPayments),
     [filteredPayments]
   );
 

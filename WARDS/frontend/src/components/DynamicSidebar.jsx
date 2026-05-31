@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import api from '../services/api';
 import { announcementAPI, branchAnnouncementAPI, discrepancyAPI } from '../services/api';
 import {
+  getUnreadAdminReportCount,
   BRANCH_REPORT_VIEWED_EVENT,
   BRANCH_REPORTS_UPDATED_EVENT,
   getUnreadBranchReportCount,
@@ -50,6 +51,25 @@ const DynamicSidebar = () => {
       const remainingResponses = await Promise.all(
         Array.from({ length: totalPages - 1 }, (_, index) =>
           api.get('/branch/reports', { params: { page: index + 2, page_size: 5 } })
+        )
+      );
+      remainingResponses.forEach((response) => {
+        items = items.concat(response.data?.items || []);
+      });
+    }
+
+    return items;
+  };
+  const fetchAllAdminReports = async () => {
+    const firstResponse = await api.get('/reports', { params: { page: 1, page_size: 5 } });
+    const firstPageData = firstResponse.data || {};
+    const totalPages = Number(firstPageData.total_pages || 1);
+    let items = [...(firstPageData.items || [])];
+
+    if (totalPages > 1) {
+      const remainingResponses = await Promise.all(
+        Array.from({ length: totalPages - 1 }, (_, index) =>
+          api.get('/reports', { params: { page: index + 2, page_size: 5 } })
         )
       );
       remainingResponses.forEach((response) => {
@@ -227,11 +247,13 @@ const DynamicSidebar = () => {
         ] = await Promise.allSettled([
           announcementAPI.getUnreadCount(),
           api.get('/alerts'),
-          api.get('/reports', { params: { page: 1, page_size: 1 } }),
+          fetchAllAdminReports(),
           api.get('/accounts', { params: { page: 1, page_size: 1 } }),
           api.get('/security/dashboard'),
           api.get('/activity-logs'),
         ]);
+
+        const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}');
 
         setModuleCounts({
           announcements: announcementsResult.status === 'fulfilled' ? Number(announcementsResult.value.data?.unread_count || 0) : 0,
@@ -239,7 +261,7 @@ const DynamicSidebar = () => {
           receipts: 0,
           payments: 0,
           queue: 0,
-          reports: reportsResult.status === 'fulfilled' ? Number(reportsResult.value.data?.total || 0) : 0,
+          reports: reportsResult.status === 'fulfilled' ? getUnreadAdminReportCount(reportsResult.value || [], adminUser) : 0,
           accounts: accountsResult.status === 'fulfilled' ? Number(accountsResult.value.data?.total || 0) : 0,
           backup: backupResult.status === 'fulfilled' ? Number(backupResult.value.data?.active_incidents || 0) : 0,
           logs: logsResult.status === 'fulfilled' ? (logsResult.value.data || []).length : 0,

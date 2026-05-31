@@ -171,12 +171,93 @@ const buildRemittanceBars = (rankedBranches) => rankedBranches.slice(0, 8).map((
 
 const csvCell = (value) => `"${String(value ?? '').replaceAll('"', '""')}"`;
 
+const RemittanceActionModal = ({
+  open,
+  title,
+  message,
+  details = [],
+  confirmLabel,
+  loadingLabel,
+  isLoading,
+  errorMessage,
+  confirmClassName = 'bg-emerald-600 hover:bg-emerald-700',
+  onConfirm,
+  onCancel,
+}) => {
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur-sm">
+      <div className="w-full max-w-xl rounded-3xl bg-white p-6 shadow-2xl md:p-8">
+        <div className="flex items-start gap-4">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-100 text-amber-700">
+            <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v4m0 4h.01M10.29 3.86l-8.082 14A1 1 0 003.082 19h17.836a1 1 0 00.874-1.5l-8.082-14a1 1 0 00-1.74 0z"></path>
+            </svg>
+          </div>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-amber-500">Confirmation Required</p>
+            <h3 className="mt-2 text-2xl font-bold text-primary">{title}</h3>
+            <p className="mt-3 text-sm leading-6 text-slate-600">{message}</p>
+          </div>
+        </div>
+
+        {details.length > 0 ? (
+          <div className="mt-6 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3">
+            <div className="space-y-3">
+              {details.map((detail) => (
+                <div key={`${detail.label}-${detail.value || 'empty'}`}>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{detail.label}</p>
+                  <p className="mt-1 text-sm font-medium text-slate-700">{detail.value || 'N/A'}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {errorMessage ? (
+          <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            {errorMessage}
+          </div>
+        ) : null}
+
+        <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={isLoading}
+            className="rounded-2xl bg-slate-200 px-5 py-3 font-semibold text-slate-700 transition hover:bg-slate-300 disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={isLoading}
+            className={`rounded-2xl px-5 py-3 font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-70 ${confirmClassName}`}
+          >
+            {isLoading ? loadingLabel : confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const PaymentManagement = () => {
   const [payments, setPayments] = useState([]);
   const [branches, setBranches] = useState([]);
   const [remittanceData, setRemittanceData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
+  const [showCollectionReportModal, setShowCollectionReportModal] = useState(false);
+  const [remittanceActionModal, setRemittanceActionModal] = useState({ action: null, remittance: null });
+  const [remittanceActionLoading, setRemittanceActionLoading] = useState(false);
+  const [remittanceActionError, setRemittanceActionError] = useState('');
+  const [pageError, setPageError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
   const currentMonthValue = useMemo(() => getMonthValueFromDate(), []);
   const [selectedMonth, setSelectedMonth] = useState(() => getMonthValueFromDate());
   const collectionMonthLabel = useMemo(() => getCollectionMonthLabelFromValue(selectedMonth), [selectedMonth]);
@@ -190,8 +271,17 @@ const PaymentManagement = () => {
     fetchPayments();
   }, []);
 
+  const closeRemittanceActionModal = () => {
+    if (remittanceActionLoading) {
+      return;
+    }
+    setRemittanceActionModal({ action: null, remittance: null });
+    setRemittanceActionError('');
+  };
+
   const fetchPayments = async () => {
     try {
+      setPageError('');
       const user = JSON.parse(localStorage.getItem('user') || '{}');
       let url = `${API_BASE_URL}/payments`;
 
@@ -212,6 +302,7 @@ const PaymentManagement = () => {
       await fetchRemittances();
     } catch (error) {
       console.error('Failed to fetch payments:', error);
+      setPageError('Failed to load tax collection records.');
     } finally {
       setLoading(false);
     }
@@ -219,10 +310,15 @@ const PaymentManagement = () => {
 
   const fetchRemittances = async () => {
     const token = localStorage.getItem('adminToken');
-    const response = await axios.get(`${API_BASE_URL}/payments/remittances`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    setRemittanceData(response.data);
+    try {
+      const response = await axios.get(`${API_BASE_URL}/payments/remittances`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      setRemittanceData(response.data);
+    } catch (error) {
+      console.error('Failed to fetch remittances:', error);
+      setPageError(error.response?.data?.detail || 'Failed to load remittance records.');
+    }
   };
 
   const reviewRemittance = async (remittanceId, action) => {
@@ -231,11 +327,11 @@ const PaymentManagement = () => {
       await axios.post(`${API_BASE_URL}/payments/remittances/${remittanceId}/${action}`, {}, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
-      alert(`Remittance ${action === 'accept' ? 'accepted' : 'rejected'} successfully`);
-      fetchRemittances();
+      setSuccessMessage(`Remittance ${action === 'accept' ? 'accepted' : 'rejected'} successfully.`);
+      await fetchRemittances();
     } catch (error) {
       console.error('Failed to review remittance:', error);
-      alert(error.response?.data?.detail || 'Failed to review remittance');
+      throw new Error(error.response?.data?.detail || 'Failed to review remittance');
     }
   };
 
@@ -256,7 +352,7 @@ const PaymentManagement = () => {
       window.URL.revokeObjectURL(blobUrl);
     } catch (error) {
       console.error('Failed to download remittance report:', error);
-      alert(error.response?.data?.detail || 'Failed to download remittance report');
+      setPageError(error.response?.data?.detail || 'Failed to download remittance report');
     }
   };
 
@@ -407,14 +503,9 @@ const PaymentManagement = () => {
     };
   }, [branchSummaries, rankedBranches, acceptedRemittanceAmount, pendingRemittanceAmount]);
 
-  const exportCollectionPdf = () => {
+  const buildCollectionReportHtml = ({ includeToolbar = true } = {}) => {
     const generatedAt = new Date().toLocaleString('en-PH', { timeZone: PAYMENT_TIME_ZONE });
-    const reportWindow = window.open('', '_blank', 'width=1100,height=800');
-    if (!reportWindow) {
-      alert('Allow pop-ups to generate the Tax Collection PDF.');
-      return;
-    }
-    reportWindow.document.write(`
+    return `
       <!doctype html>
       <html>
         <head>
@@ -481,6 +572,7 @@ const PaymentManagement = () => {
         </head>
         <body>
           <div class="preview-shell">
+            ${includeToolbar ? `
             <div class="preview-toolbar">
               <div class="toolbar-copy">
                 <span>WARDS Main Admin</span>
@@ -491,7 +583,7 @@ const PaymentManagement = () => {
                 <button class="toolbar-button secondary" type="button" onclick="window.close()">Close Preview</button>
                 <button class="toolbar-button primary" type="button" onclick="window.print()">Print Report</button>
               </div>
-            </div>
+            </div>` : ''}
             <main class="report-page">
               <div class="header">
                 <div class="eyebrow">WARDS Main Admin</div>
@@ -553,7 +645,16 @@ const PaymentManagement = () => {
           </div>
         </body>
       </html>
-    `);
+    `;
+  };
+
+  const handlePrintCollectionReport = () => {
+    const reportWindow = window.open('', '_blank', 'width=1100,height=800');
+    if (!reportWindow) {
+      setPageError('Allow pop-ups to print the Tax Collection Report.');
+      return;
+    }
+    reportWindow.document.write(buildCollectionReportHtml({ includeToolbar: true }));
     reportWindow.document.close();
   };
 
@@ -592,6 +693,33 @@ const PaymentManagement = () => {
     window.URL.revokeObjectURL(blobUrl);
   };
 
+  const openRemittanceActionModal = (remittance, action) => {
+    setRemittanceActionError('');
+    setSuccessMessage('');
+    setPageError('');
+    setRemittanceActionModal({ action, remittance });
+  };
+
+  const handleConfirmRemittanceAction = async () => {
+    if (!remittanceActionModal.remittance || !remittanceActionModal.action) {
+      return;
+    }
+
+    setRemittanceActionLoading(true);
+    setRemittanceActionError('');
+    setPageError('');
+    setSuccessMessage('');
+
+    try {
+      await reviewRemittance(remittanceActionModal.remittance.id, remittanceActionModal.action);
+      closeRemittanceActionModal();
+    } catch (error) {
+      setRemittanceActionError(error.message || 'Failed to review remittance.');
+    } finally {
+      setRemittanceActionLoading(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -624,7 +752,11 @@ const PaymentManagement = () => {
             </label>
             <button
               type="button"
-              onClick={exportCollectionPdf}
+              onClick={() => {
+                setPageError('');
+                setSuccessMessage('');
+                setShowCollectionReportModal(true);
+              }}
               className="rounded-2xl border border-[#0f2f5f] bg-white px-5 py-3 text-sm font-semibold text-[#0f2f5f] shadow-sm transition hover:bg-slate-50"
             >
               View Tax Collection Report
@@ -646,6 +778,18 @@ const PaymentManagement = () => {
           </div>
         )}
       />
+
+      {pageError ? (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">
+          {pageError}
+        </div>
+      ) : null}
+
+      {successMessage ? (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700">
+          {successMessage}
+        </div>
+      ) : null}
 
       <section className="overflow-hidden rounded-3xl border border-[#b9c9dd] bg-[#0f2f5f] text-white shadow-xl shadow-blue-950/10">
         <div className="grid gap-6 p-7 xl:grid-cols-[1.2fr,0.8fr]">
@@ -698,7 +842,11 @@ const PaymentManagement = () => {
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={exportCollectionPdf}
+              onClick={() => {
+                setPageError('');
+                setSuccessMessage('');
+                setShowCollectionReportModal(true);
+              }}
               className="rounded-2xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-200"
             >
               View Tax Collection Report
@@ -923,17 +1071,17 @@ const PaymentManagement = () => {
                       <div className="flex flex-wrap gap-2">
                         <button
                           type="button"
-                          onClick={() => reviewRemittance(remittance.id, 'accept')}
+                          onClick={() => openRemittanceActionModal(remittance, 'accept')}
                           className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-emerald-700"
                         >
                           Accept
                         </button>
                         <button
                           type="button"
-                          onClick={() => reviewRemittance(remittance.id, 'reject')}
+                          onClick={() => openRemittanceActionModal(remittance, 'reject')}
                           className="rounded-xl bg-rose-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-rose-700"
                         >
-                          Reject
+                          Delete
                         </button>
                       </div>
                     ) : (
@@ -949,6 +1097,64 @@ const PaymentManagement = () => {
           ) : null}
         </div>
       </section>
+
+      <RemittanceActionModal
+        open={Boolean(remittanceActionModal.remittance && remittanceActionModal.action)}
+        title={remittanceActionModal.action === 'accept' ? 'Accept this remittance batch?' : 'Delete this remittance batch from review?'}
+        message={remittanceActionModal.action === 'accept'
+          ? 'Accepting this remittance adds the batch to the Main collection account and marks the review as complete.'
+          : 'Deleting this remittance from the Main review queue will reject the batch and return it to the branch workflow.'}
+        details={[
+          { label: 'Remittance No.', value: remittanceActionModal.remittance?.remittance_number || 'N/A' },
+          { label: 'Branch', value: remittanceActionModal.remittance ? (branchLookup[remittanceActionModal.remittance.branch_id] || formatBranchLabel(remittanceActionModal.remittance.branch_name, remittanceActionModal.remittance.branch_id)) : 'N/A' },
+          { label: 'Payments', value: remittanceActionModal.remittance?.payment_count || '0' },
+          { label: 'Amount', value: formatCurrency(remittanceActionModal.remittance?.total_amount) },
+        ]}
+        confirmLabel={remittanceActionModal.action === 'accept' ? 'Yes, Accept' : 'Yes, Delete'}
+        loadingLabel={remittanceActionModal.action === 'accept' ? 'Accepting...' : 'Deleting...'}
+        isLoading={remittanceActionLoading}
+        errorMessage={remittanceActionError}
+        confirmClassName={remittanceActionModal.action === 'accept' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700'}
+        onConfirm={handleConfirmRemittanceAction}
+        onCancel={closeRemittanceActionModal}
+      />
+
+      {showCollectionReportModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+          <div className="flex h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-[2rem] bg-white shadow-2xl">
+            <div className="flex flex-col gap-4 border-b border-slate-200 bg-slate-50 px-6 py-5 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Tax Collection Report</p>
+                <h2 className="mt-1 text-2xl font-bold text-primary">{collectionReportTitle}</h2>
+                <p className="mt-1 text-sm text-slate-500">Review the report inside this modal. Scroll if content overflows, then print when ready.</p>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={handlePrintCollectionReport}
+                  className="rounded-2xl bg-[#0f2f5f] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#19498d]"
+                >
+                  Print Report
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowCollectionReportModal(false)}
+                  className="rounded-2xl bg-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-300"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+            <div className="min-h-0 flex-1 overflow-hidden bg-slate-100">
+              <iframe
+                title="Tax Collection Report Preview"
+                srcDoc={buildCollectionReportHtml({ includeToolbar: false })}
+                className="h-full w-full border-0"
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };

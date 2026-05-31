@@ -4,6 +4,13 @@ import { formatUtc8Date, formatUtc8DateTime } from '../../utils/dateTime';
 import GeneratedReportContent from '../../components/reports/GeneratedReportContent';
 import WardsPageHero from '../../components/WardsPageHero';
 import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
+import {
+  applyAdminReportViewedState,
+  BRANCH_REPORT_VIEWED_EVENT,
+  BRANCH_REPORTS_UPDATED_EVENT,
+  getUnreadAdminReportCount,
+  markAdminReportViewed,
+} from '../../utils/branchReportViews';
 
 const PAGE_SIZE = 5;
 const SERVICE_TYPE_OPTIONS = ['All Services', 'Real Property Tax', 'Business Tax', 'Miscellaneous Tax', 'Document Request'];
@@ -103,6 +110,7 @@ const ReportDetailModal = ({ report, metrics, onClose, onExport, exportingFormat
 };
 
 const Reports = () => {
+  const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}');
   const [filters, setFilters] = useState(initialFilters);
   const [appliedFilters, setAppliedFilters] = useState(initialFilters);
   const [reportsState, setReportsState] = useState({ items: [], page: 1, page_size: PAGE_SIZE, total: 0, total_pages: 1 });
@@ -135,7 +143,15 @@ const Reports = () => {
         page,
         page_size: PAGE_SIZE,
       });
-      setReportsState(response.data);
+      setReportsState({
+        ...response.data,
+        items: applyAdminReportViewedState(response.data?.items || [], adminUser),
+      });
+      window.dispatchEvent(new CustomEvent(BRANCH_REPORTS_UPDATED_EVENT, {
+        detail: {
+          unreadCount: getUnreadAdminReportCount(response.data?.items || [], adminUser),
+        },
+      }));
     } catch (fetchError) {
       console.error('Failed to fetch reports:', fetchError);
       setError(fetchError.response?.data?.detail || 'Failed to load submitted branch reports.');
@@ -189,8 +205,19 @@ const Reports = () => {
       setDetailsLoading(true);
       setError('');
       const response = await reportAPI.getDetails(reportId);
-      setSelectedReport(response.data.report);
+      const viewedIds = markAdminReportViewed(adminUser, reportId);
+      setSelectedReport({
+        ...response.data.report,
+        is_viewed: viewedIds.includes(Number(reportId)),
+      });
       setSelectedMetrics(response.data.metrics);
+      setReportsState((current) => ({
+        ...current,
+        items: (current.items || []).map((report) =>
+          report.id === reportId ? { ...report, is_viewed: true } : report
+        ),
+      }));
+      window.dispatchEvent(new CustomEvent(BRANCH_REPORT_VIEWED_EVENT, { detail: { reportId } }));
     } catch (viewError) {
       console.error('Failed to load report details:', viewError);
       setError(viewError.response?.data?.detail || 'Failed to load report details.');
@@ -236,6 +263,7 @@ const Reports = () => {
         fetchReports(nextPage, appliedFilters);
       }
       setReportToDelete(null);
+      window.dispatchEvent(new CustomEvent(BRANCH_REPORTS_UPDATED_EVENT, { detail: { deletedReportId: reportToDelete.id } }));
     } catch (deleteError) {
       console.error('Failed to delete report:', deleteError);
       setError(deleteError.response?.data?.detail || 'Failed to delete the report.');
