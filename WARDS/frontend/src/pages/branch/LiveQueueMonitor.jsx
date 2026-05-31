@@ -414,30 +414,6 @@ const LiveQueueMonitor = () => {
                           )}
                         </div>
                       </div>
-                      
-                      {/* RECENTLY COMPLETED Section */}
-                      <div className="p-6">
-                        <div className="mb-4">
-                          <p className="text-lg font-semibold text-gray-700">Recently Completed</p>
-                          <p className="text-sm text-gray-500">Last {completedQueues.length} served</p>
-                        </div>
-                        <div className="grid grid-cols-2 gap-3">
-                          {completedQueues.length > 0 ? (
-                            completedQueues.map((queue, index) => (
-                              <div
-                                key={index}
-                                className="bg-green-50 rounded-lg p-3 text-center border border-green-200"
-                              >
-                                <p className="text-sm font-bold text-green-800">{queue.queue_number}</p>
-                              </div>
-                            ))
-                          ) : (
-                            <div className="col-span-2 text-center py-4">
-                              <p className="text-sm text-gray-500">No completed queues</p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
                     </div>
                   );
                 })}
