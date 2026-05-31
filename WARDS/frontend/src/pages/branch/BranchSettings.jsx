@@ -805,24 +805,6 @@ const BranchSettings = () => {
 
         <div className="space-y-6 xl:sticky xl:top-6 xl:self-start">
           <div className="rounded-2xl bg-white p-6 shadow">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Branch Controls</p>
-            <h2 className="mt-2 text-xl font-bold text-primary">Save Branch System Settings</h2>
-            <p className="mt-2 text-sm leading-6 text-gray-500">
-              These queue, service, and operational settings apply only to this branch and are the same controls followed by this branch&apos;s staff accounts.
-            </p>
-            <button
-              onClick={handleSaveBranchSystemSettings}
-              disabled={!isBranchAdmin || systemSaving}
-              className="mt-5 w-full rounded-2xl bg-primary px-5 py-4 font-semibold text-white transition duration-300 hover:bg-secondary disabled:opacity-60"
-            >
-              {systemSaving ? 'Saving Branch System Settings...' : 'Save Branch System Settings'}
-            </button>
-            {!isBranchAdmin ? (
-              <p className="mt-3 text-sm text-slate-500">Only Branch Admin accounts can save branch-only system settings.</p>
-            ) : null}
-          </div>
-
-          <div className="rounded-2xl bg-white p-6 shadow">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Account Protection</p>
             <h2 className="mt-2 text-xl font-bold text-primary">Branch Admin Security</h2>
             <p className="mt-2 text-sm leading-6 text-gray-500">
