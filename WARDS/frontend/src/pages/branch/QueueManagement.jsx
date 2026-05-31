@@ -181,13 +181,13 @@ const sortQueues = (queues, now) => {
   activeQueues.sort((left, right) => {
     const rightDate = parseDate(getRelevantDateTime(right))?.getTime() || 0;
     const leftDate = parseDate(getRelevantDateTime(left))?.getTime() || 0;
-    return rightDate - leftDate;
+    return leftDate - rightDate;
   });
 
   archivedQueues.sort((left, right) => {
     const rightDate = parseDate(right.completed_at || right.served_at || right.created_at)?.getTime() || 0;
     const leftDate = parseDate(left.completed_at || left.served_at || left.created_at)?.getTime() || 0;
-    return rightDate - leftDate;
+    return leftDate - rightDate;
   });
 
   return [...activeQueues, ...archivedQueues];
@@ -1263,22 +1263,22 @@ const QueueManagement = () => {
       {!isBranchAdmin ? (
         <div className="space-y-6">
           <QueueSection
-            title="Immediate Queue"
-            description="Immediate queue taxpayers are grouped here with active records shown first and completed history moved below them."
-            queues={immediateQueues}
-            page={immediatePage}
-            onPageChange={setImmediatePage}
+            title="Appointment Queue"
+            description="Appointment queue taxpayers stay separate so branch admins can clearly distinguish scheduled appointments from ready, called, serving, completed, or skipped records."
+            queues={appointmentQueues}
+            page={appointmentPage}
+            onPageChange={setAppointmentPage}
             queueUnavailable={queueUnavailable}
             onAction={performAction}
             onDeleteRequest={openDeleteModal}
             now={now}
           />
           <QueueSection
-            title="Appointment Queue"
-            description="Appointment queue taxpayers stay separate so branch admins can clearly distinguish scheduled appointments from ready, called, serving, completed, or skipped records."
-            queues={appointmentQueues}
-            page={appointmentPage}
-            onPageChange={setAppointmentPage}
+            title="Immediate Queue"
+            description="Immediate queue taxpayers are grouped here with active records shown first and completed history moved below them."
+            queues={immediateQueues}
+            page={immediatePage}
+            onPageChange={setImmediatePage}
             queueUnavailable={queueUnavailable}
             onAction={performAction}
             onDeleteRequest={openDeleteModal}
