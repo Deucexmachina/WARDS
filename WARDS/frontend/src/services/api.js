@@ -76,7 +76,18 @@ api.interceptors.response.use(
       url.includes('/accounts') ||
       url.includes('/rbac');
 
+    // Check if this is a password confirmation error (incorrect password, not session expiration)
+    const errorDetail = error?.response?.data?.detail || '';
+    const isPasswordConfirmationError = 
+      errorDetail.toLowerCase().includes('incorrect') && 
+      (errorDetail.toLowerCase().includes('password') || errorDetail.toLowerCase().includes('super admin') || errorDetail.toLowerCase().includes('main admin'));
+
     if (hasAdminToken && isAdminRequest && (!error.response || [401, 403].includes(error.response.status))) {
+      // Don't redirect if it's a password confirmation error - let the component handle it
+      if (isPasswordConfirmationError) {
+        return Promise.reject(error);
+      }
+      
       localStorage.removeItem('adminToken');
       localStorage.removeItem('adminUser');
       localStorage.removeItem('adminAuthenticatedAt');

@@ -6,6 +6,8 @@ import {
   normalizePhilippineContactDigits,
   validatePhilippineContactDigits,
   validateStrongPassword,
+  validateCitizenFullName,
+  normalizeCitizenFullName,
 } from '../../utils/validation';
 
 const DEFAULT_PROFILE = {
@@ -80,6 +82,7 @@ const AccountManagement = () => {
   const [error, setError] = useState('');
   const [emailError, setEmailError] = useState('');
   const [contactError, setContactError] = useState('');
+  const [fullNameError, setFullNameError] = useState('');
   const [confirmProfilePassword, setConfirmProfilePassword] = useState('');
   const [showProfileConfirm, setShowProfileConfirm] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -152,6 +155,10 @@ const AccountManagement = () => {
     if (name === 'email') {
       setEmailError(getEmailValidationMessage(value));
     }
+    if (name === 'full_name') {
+      const normalized = normalizeCitizenFullName(value);
+      setFullNameError(validateCitizenFullName(normalized));
+    }
     if (name === 'taxpayer_type') {
       setIdentifierForm((current) => ({ ...current, taxpayer_type: value }));
     }
@@ -183,6 +190,13 @@ const AccountManagement = () => {
     if (nextContactError) {
       setContactError(nextContactError);
       setError('Correct the highlighted contact number field before saving.');
+      return;
+    }
+
+    const nextFullNameError = validateCitizenFullName(profile.full_name);
+    if (nextFullNameError) {
+      setFullNameError(nextFullNameError);
+      setError('Correct the highlighted full name field before saving.');
       return;
     }
 
@@ -229,6 +243,7 @@ const AccountManagement = () => {
     setProfile(originalProfile);
     setEmailError('');
     setContactError('');
+    setFullNameError('');
     setIsProfileLocked(true);
     setMessage('');
     setError('');
@@ -402,7 +417,8 @@ const AccountManagement = () => {
                 <div className="grid gap-5 md:grid-cols-2">
                   <label className="block">
                     <span className="mb-2 block text-sm font-semibold text-slate-700">Full Name</span>
-                    <input name="full_name" value={profile.full_name} onChange={handleProfileChange} disabled={isProfileLocked} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 focus:border-[#0f5b83] focus:ring-2 focus:ring-[#0f5b83]/10" required />
+                    <input name="full_name" value={profile.full_name} onChange={handleProfileChange} disabled={isProfileLocked} className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 focus:ring-2 focus:ring-[#0f5b83]/10 ${fullNameError ? 'border-rose-400 bg-rose-50 focus:border-rose-500' : 'border-slate-300 focus:border-[#0f5b83]'}`} required />
+                    {fullNameError ? <span className="mt-2 block text-xs font-medium text-rose-600">{fullNameError}</span> : null}
                   </label>
                   <label className="block">
                     <span className="mb-2 block text-sm font-semibold text-slate-700">Email Address</span>

@@ -33,6 +33,7 @@ from utils.field_crypto import apply_citizen_user_security, apply_tax_assessment
 from utils.security_validation import (
     ensure_email_is_unique,
     ensure_tin_is_unique,
+    normalize_citizen_full_name,
     normalize_email,
     normalize_identity_name,
     normalize_ph_contact_number,
@@ -501,9 +502,7 @@ async def update_public_account_profile(
     ensure_email_is_unique(db, normalized_email, exclude_citizen_id=current_user.id)
     taxpayer_type = normalize_taxpayer_type(payload.taxpayer_type)
     mobile_number = normalize_mobile_number(payload.mobile_number)
-    full_name = re.sub(r"\s+", " ", (payload.full_name or "").strip())
-    if not full_name:
-        raise HTTPException(status_code=400, detail="Full Name is required.")
+    full_name = normalize_citizen_full_name(payload.full_name)
 
     normalized_tin = None
     if (payload.tin or "").strip():

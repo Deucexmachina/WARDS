@@ -14,6 +14,7 @@ from utils.security_validation import (
     ensure_username_is_unique,
     normalize_email,
     normalize_username,
+    normalize_citizen_full_name,
     validate_strong_password,
 )
 
@@ -133,10 +134,11 @@ async def create_user(
         requested_username = normalize_username(user_data.username) if user_data.username else None
         username = unique_username(db, BranchStaff, email, requested_username)
         ensure_username_is_unique(db, username)
+        full_name = normalize_citizen_full_name(user_data.full_name or email.split("@", 1)[0])
         user = BranchStaff(
             username=username,
             email=email,
-            full_name=user_data.full_name or email.split("@", 1)[0],
+            full_name=full_name,
             hashed_password=hashed_password,
             branch_id=user_data.branch_id,
             role="branch_staff",
@@ -144,9 +146,10 @@ async def create_user(
             is_verified=True,
         )
     else:
+        full_name = normalize_citizen_full_name(user_data.full_name or email.split("@", 1)[0])
         user = CitizenUser(
             email=email,
-            full_name=user_data.full_name or email.split("@", 1)[0],
+            full_name=full_name,
             contact_number="",
             hashed_password=hashed_password,
             role="public",
@@ -196,10 +199,12 @@ async def update_user(
         ensure_username_is_unique(db, username, exclude_admin_id=exclude_admin_id, exclude_branch_staff_id=exclude_branch_staff_id)
         user.username = username
     if role == "branch":
-        user.full_name = user_data.full_name or user.full_name
+        if user_data.full_name:
+            user.full_name = normalize_citizen_full_name(user_data.full_name)
         user.branch_id = user_data.branch_id
     if role == "public":
-        user.full_name = user_data.full_name or user.full_name
+        if user_data.full_name:
+            user.full_name = normalize_citizen_full_name(user_data.full_name)
         apply_citizen_user_security(user)
 
     db.add(ActivityLog(

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { accountAPI, branchAPI } from '../../services/api';
-import { getEmailValidationMessage, validateStrongPassword } from '../../utils/validation';
+import { getEmailValidationMessage, validateStrongPassword, validateCitizenFullName, normalizeCitizenFullName } from '../../utils/validation';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 import PasswordField from '../../components/PasswordField';
@@ -67,6 +67,8 @@ const Accounts = () => {
   });
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [emailError, setEmailError] = useState('');
+  const [fullNameError, setFullNameError] = useState('');
+  const [authPasswordError, setAuthPasswordError] = useState('');
 
   const getServiceWindowLabel = (value) => {
     if (value === 'BUSINESS') return 'BT';
@@ -167,6 +169,10 @@ const Accounts = () => {
     if (name === 'email') {
       setEmailError(getAccountEmailValidationMessage(value, formData.role));
     }
+    if (name === 'full_name') {
+      const normalized = normalizeCitizenFullName(value);
+      setFullNameError(validateCitizenFullName(normalized));
+    }
     if (error) {
       setError('');
     }
@@ -176,6 +182,8 @@ const Accounts = () => {
     setEditingAccount(null);
     setFormData(EMPTY_FORM);
     setEmailError('');
+    setFullNameError('');
+    setAuthPasswordError('');
     setError('');
     setSuccessMessage('');
     setShowModal(true);
@@ -196,6 +204,8 @@ const Accounts = () => {
     });
     setError('');
     setEmailError('');
+    setFullNameError('');
+    setAuthPasswordError('');
     setSuccessMessage('');
     setShowModal(true);
   };
@@ -214,6 +224,16 @@ const Accounts = () => {
       setEmailError(nextEmailError);
       setError('Please correct the highlighted email field.');
       return;
+    }
+
+    if (formData.full_name) {
+      const normalizedFullName = normalizeCitizenFullName(formData.full_name);
+      const nextFullNameError = validateCitizenFullName(normalizedFullName);
+      if (nextFullNameError) {
+        setFullNameError(nextFullNameError);
+        setError('Please correct the highlighted full name field.');
+        return;
+      }
     }
 
     if (!editingAccount && !formData.password) {
@@ -304,15 +324,20 @@ const Accounts = () => {
 
   const closeAuthModal = () => {
     setError('');
+    setAuthPasswordError('');
     setAuthModal({ mode: null, account: null, password: '' });
     setPendingAccountSave(null);
   };
 
   const handleConfirmProtectedAction = async () => {
     if (!authModal.password) {
-      setError(`Please enter your ${verifierLabelLower} password to continue.`);
+      setAuthPasswordError(`Please enter your ${verifierLabelLower} password to continue.`);
+      setError('');
       return;
     }
+
+    setAuthPasswordError('');
+    setError('');
 
     try {
       setLoading(true);
@@ -354,7 +379,19 @@ const Accounts = () => {
       closeAuthModal();
     } catch (actionError) {
       console.error('Failed to complete protected account action:', actionError);
-      setError(actionError.response?.data?.detail || 'Failed to complete account action.');
+      const errorDetail = actionError.response?.data?.detail || 'Failed to complete account action.';
+      
+      // Check if this is a password confirmation error
+      if (errorDetail.toLowerCase().includes('incorrect') && 
+          (errorDetail.toLowerCase().includes('password') || 
+           errorDetail.toLowerCase().includes('super admin') || 
+           errorDetail.toLowerCase().includes('main admin'))) {
+        setAuthPasswordError('Incorrect password. Please try again.');
+        setError('');
+      } else {
+        setError(errorDetail);
+        setAuthPasswordError('');
+      }
     } finally {
       setLoading(false);
     }
@@ -662,9 +699,21 @@ const Accounts = () => {
                           name="full_name"
                           value={formData.full_name}
                           onChange={handleInputChange}
-                          className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm font-medium text-slate-900 placeholder-slate-400 shadow-sm transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:outline-none"
+                          className={`w-full rounded-xl border px-4 py-3 text-sm font-medium placeholder-slate-400 shadow-sm transition-colors focus:ring-2 focus:outline-none ${
+                            fullNameError 
+                              ? 'border-red-300 bg-red-50 text-red-900 placeholder-red-300 focus:border-red-500 focus:ring-red-500/20' 
+                              : 'border-slate-300 text-slate-900 focus:border-blue-500 focus:ring-blue-500/20'
+                          }`}
                           placeholder="Enter full name"
                         />
+                        {fullNameError && (
+                          <p className="mt-2 flex items-center gap-1 text-sm font-medium text-red-600">
+                            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            {fullNameError}
+                          </p>
+                        )}
                       </div>
                     ) : (
                       <div>
@@ -714,9 +763,21 @@ const Accounts = () => {
                           name="full_name"
                           value={formData.full_name}
                           onChange={handleInputChange}
-                          className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm font-medium text-slate-900 placeholder-slate-400 shadow-sm transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:outline-none"
+                          className={`w-full rounded-xl border px-4 py-3 text-sm font-medium placeholder-slate-400 shadow-sm transition-colors focus:ring-2 focus:outline-none ${
+                            fullNameError 
+                              ? 'border-red-300 bg-red-50 text-red-900 placeholder-red-300 focus:border-red-500 focus:ring-red-500/20' 
+                              : 'border-slate-300 text-slate-900 focus:border-blue-500 focus:ring-blue-500/20'
+                          }`}
                           placeholder="Enter full name (optional)"
                         />
+                        {fullNameError && (
+                          <p className="mt-2 flex items-center gap-1 text-sm font-medium text-red-600">
+                            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            {fullNameError}
+                          </p>
+                        )}
                       </div>
                     )}
                   </div>
@@ -956,10 +1017,27 @@ const Accounts = () => {
                 <label className="block text-sm font-semibold text-slate-700 mb-2">{verifierLabel} Password</label>
                 <PasswordField
                   value={authModal.password}
-                  onChange={(event) => setAuthModal((previous) => ({ ...previous, password: event.target.value }))}
-                  className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm font-medium text-slate-900 placeholder-slate-400 shadow-sm transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:outline-none"
+                  onChange={(event) => {
+                    setAuthModal((previous) => ({ ...previous, password: event.target.value }));
+                    if (authPasswordError) {
+                      setAuthPasswordError('');
+                    }
+                  }}
+                  className={`w-full rounded-xl border px-4 py-3 text-sm font-medium placeholder-slate-400 shadow-sm transition-colors focus:ring-2 focus:outline-none ${
+                    authPasswordError 
+                      ? 'border-red-300 bg-red-50 text-red-900 placeholder-red-300 focus:border-red-500 focus:ring-red-500/20' 
+                      : 'border-slate-300 text-slate-900 focus:border-blue-500 focus:ring-blue-500/20'
+                  }`}
                   placeholder="Enter your password"
                 />
+                {authPasswordError && (
+                  <p className="mt-2 flex items-center gap-1 text-sm font-medium text-red-600">
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    {authPasswordError}
+                  </p>
+                )}
               </div>
 
               {error && (

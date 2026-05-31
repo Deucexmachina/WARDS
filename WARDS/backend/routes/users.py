@@ -14,6 +14,7 @@ from utils.security_validation import (
     ensure_username_is_unique,
     normalize_email,
     normalize_username,
+    normalize_citizen_full_name,
     validate_strong_password,
 )
 from utils.rbac import require_permission
@@ -286,7 +287,7 @@ async def create_user(
         account = BranchStaff(
             username=username,
             email=email,
-            full_name=user.full_name or username,
+            full_name=normalize_citizen_full_name(user.full_name or username),
             hashed_password=pwd_context.hash(user.password),
             branch_id=user.branch_id,
             role=user.role,
@@ -302,7 +303,7 @@ async def create_user(
     elif user.role == "public":
         account = CitizenUser(
             email=email,
-            full_name=user.full_name or email.split("@", 1)[0],
+            full_name=normalize_citizen_full_name(user.full_name or email.split("@", 1)[0]),
             contact_number="",
             hashed_password=pwd_context.hash(user.password),
             role="public",
@@ -384,7 +385,8 @@ async def update_user(
         account.username = username
         account.role = user.role
         account.branch_id = user.branch_id
-        account.full_name = user.full_name or account.full_name or username
+        if user.full_name:
+            account.full_name = normalize_citizen_full_name(user.full_name)
         if user.role == "branch_staff":
             account.service_window = normalize_branch_service_window(user.service_window)
             account.service_window_label = SERVICE_WINDOW_LABELS.get(account.service_window, account.service_window)
@@ -400,7 +402,8 @@ async def update_user(
     else:
         if user.role != "public":
             raise HTTPException(status_code=400, detail="Citizen accounts must keep a public role")
-        account.full_name = user.full_name or account.full_name
+        if user.full_name:
+            account.full_name = normalize_citizen_full_name(user.full_name)
         apply_citizen_user_security(account)
         branch_name = "Public Portal"
 
