@@ -3,6 +3,7 @@ import api, { memoAPI } from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
+import { UNREAD_CARD_HIGHLIGHT_CLASS, UNREAD_STATUS_BADGE_CLASS } from '../../utils/notificationUI';
 
 const EMPTY_FORM = {
   title: '',
@@ -74,7 +75,6 @@ const Memos = () => {
     targeted: memos.filter((memo) => memo.recipient_type === 'specific_branches').length,
     highPriority: memos.filter((memo) => memo.priority === 'high').length,
   }), [memos]);
-  const newestMemoId = useMemo(() => memos[0]?.id || null, [memos]);
 
   const openCreateModal = () => {
     setEditingMemo(null);
@@ -102,10 +102,15 @@ const Memos = () => {
     if (!memo.is_viewed) {
       try {
         await memoAPI.markViewed(memo.id);
-        setMemos((currentMemos) => currentMemos.map((item) => (
-          item.id === memo.id ? { ...item, is_viewed: true } : item
-        )));
-        window.dispatchEvent(new Event('admin-memo-read'));
+        let unreadCount = 0;
+        setMemos((currentMemos) => {
+          const nextMemos = currentMemos.map((item) => (
+            item.id === memo.id ? { ...item, is_viewed: true } : item
+          ));
+          unreadCount = nextMemos.filter((item) => !item.is_viewed).length;
+          return nextMemos;
+        });
+        window.dispatchEvent(new CustomEvent('admin-memo-read', { detail: { unreadCount } }));
       } catch (viewError) {
         console.error('Failed to mark memo as viewed:', viewError);
       }
@@ -239,7 +244,7 @@ const Memos = () => {
   }
 
   const MemoCard = ({ memo }) => (
-    <div className={`rounded-xl shadow-md p-5 hover:shadow-lg transition duration-300 border-l-4 ${!memo.is_viewed ? 'bg-blue-50/40 border-l-primary ring-1 ring-blue-100' : 'bg-white border-l-primary'}`}>
+    <div className={`rounded-xl border-l-4 p-5 shadow-md transition duration-300 hover:shadow-lg ${!memo.is_viewed ? `${UNREAD_CARD_HIGHLIGHT_CLASS} border-l-primary` : 'bg-white border-l-primary'}`}>
       <div className="flex items-start justify-between gap-4 mb-3">
         <div className="flex-1">
           <div className="flex items-center gap-3 mb-2">
@@ -248,8 +253,8 @@ const Memos = () => {
               {(memo.priority || 'normal').toUpperCase()}
             </span>
             {!memo.is_viewed ? (
-              <span className="px-2 py-1 rounded-full text-xs font-semibold bg-primary text-white">
-                {memo.id === newestMemoId ? 'Recently Added' : 'New'}
+              <span className={UNREAD_STATUS_BADGE_CLASS}>
+                Unread
               </span>
             ) : null}
           </div>

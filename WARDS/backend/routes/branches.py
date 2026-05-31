@@ -269,6 +269,11 @@ class BranchUpdate(BaseModel):
 class BranchDeleteRequest(BaseModel):
     current_admin_password: str
 
+
+def verify_branch_admin_password(current_user: Admin, provided_password: str):
+    if not provided_password or not pwd_context.verify(provided_password, current_user.hashed_password):
+        raise HTTPException(status_code=401, detail="Incorrect password. Please try again.")
+
 @router.get("/")
 async def get_all_branches(db: Session = Depends(get_db)):
     branches = db.query(Branch).all()
@@ -587,8 +592,7 @@ async def update_branch(
     if not db_branch:
         raise HTTPException(status_code=404, detail="Branch not found")
 
-    if not branch.current_admin_password or not pwd_context.verify(branch.current_admin_password, current_user.hashed_password):
-        raise HTTPException(status_code=401, detail="Incorrect main admin password")
+    verify_branch_admin_password(current_user, branch.current_admin_password)
 
     normalized_name = normalize_branch_name(branch.name)
     ensure_branch_name_is_unique(db, normalized_name, exclude_branch_id=db_branch.id)
@@ -629,8 +633,7 @@ async def delete_branch(
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
 
-    if not payload.current_admin_password or not pwd_context.verify(payload.current_admin_password, current_user.hashed_password):
-        raise HTTPException(status_code=401, detail="Incorrect main admin password")
+    verify_branch_admin_password(current_user, payload.current_admin_password)
 
     # Delete records from child tables first to satisfy MySQL foreign keys.
     branch_users = db.query(BranchStaff).filter(BranchStaff.branch_id == branch_id).all()

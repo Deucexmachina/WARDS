@@ -7,6 +7,7 @@ import {
   BRANCH_REPORTS_UPDATED_EVENT,
   getUnreadBranchReportCount,
 } from '../utils/branchReportViews';
+import { formatUnreadCount, UNREAD_COUNT_BADGE_CLASS } from '../utils/notificationUI';
 
 const BRANCH_QUEUE_UPDATED_EVENT = 'branch-queue-updated';
 const BRANCH_RECEIPT_UPDATED_EVENT = 'branch-receipt-updated';
@@ -58,6 +59,14 @@ const DynamicSidebar = () => {
 
     return items;
   };
+  const resolveUnreadCount = (event, currentCount) => {
+    const explicitCount = event?.detail?.unreadCount;
+    if (Number.isFinite(explicitCount)) {
+      return Math.max(0, Number(explicitCount));
+    }
+    const delta = Number(event?.detail?.delta || 0);
+    return Math.max(0, currentCount + delta);
+  };
 
   useEffect(() => {
     fetchSidebarModules();
@@ -72,13 +81,28 @@ const DynamicSidebar = () => {
       fetchUnreadDiscrepancyCount();
       fetchSidebarModuleCounts();
     }, 60000);
-    const handleAdminMemoRead = () => fetchUnreadMemoCount();
-    const handleAdminPolicyRead = () => fetchUnreadPolicyCount();
+    const handleAdminMemoRead = (event) => {
+      setUnreadMemoCount((current) => resolveUnreadCount(event, current));
+      fetchUnreadMemoCount();
+    };
+    const handleAdminPolicyRead = (event) => {
+      setUnreadPolicyCount((current) => resolveUnreadCount(event, current));
+      fetchUnreadPolicyCount();
+    };
     const handleAdminPolicyUpdated = () => fetchUnreadPolicyCount();
     const handleBranchDiscrepancyViewed = () => fetchUnreadDiscrepancyCount();
     const handleAdminDiscrepancyReviewed = () => fetchUnreadDiscrepancyCount();
     const handleAdminDiscrepancyViewed = () => fetchUnreadDiscrepancyCount();
-    const handleAnnouncementViewed = () => fetchSidebarModuleCounts();
+    const handleAnnouncementViewed = (event) => {
+      const explicitCount = event?.detail?.unreadCount;
+      if (Number.isFinite(explicitCount)) {
+        setModuleCounts((current) => ({
+          ...current,
+          announcements: Math.max(0, Number(explicitCount)),
+        }));
+      }
+      fetchSidebarModuleCounts();
+    };
     const handleBranchPaymentUpdated = () => fetchSidebarModuleCounts();
     const handleBranchReportViewed = () => fetchSidebarModuleCounts();
     const handleBranchReportsUpdated = () => fetchSidebarModuleCounts();
@@ -469,23 +493,23 @@ const DynamicSidebar = () => {
                 <span className="text-sm font-medium leading-5">{module.name}</span>
               </div>
               {showMemoBadge && (
-                <span className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full min-w-[1.5rem] text-center">
-                  {unreadMemoCount > 99 ? '99+' : unreadMemoCount}
+                <span className={UNREAD_COUNT_BADGE_CLASS}>
+                  {formatUnreadCount(unreadMemoCount)}
                 </span>
               )}
               {showPolicyBadge && (
-                <span className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full min-w-[1.5rem] text-center">
-                  {unreadPolicyCount > 99 ? '99+' : unreadPolicyCount}
+                <span className={UNREAD_COUNT_BADGE_CLASS}>
+                  {formatUnreadCount(unreadPolicyCount)}
                 </span>
               )}
               {showDiscrepancyBadge && (
-                <span className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full min-w-[1.5rem] text-center">
-                  {unreadDiscrepancyCount > 99 ? '99+' : unreadDiscrepancyCount}
+                <span className={UNREAD_COUNT_BADGE_CLASS}>
+                  {formatUnreadCount(unreadDiscrepancyCount)}
                 </span>
               )}
               {showGenericBadge && (
-                <span className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full min-w-[1.5rem] text-center">
-                  {genericBadgeCount > 99 ? '99+' : genericBadgeCount}
+                <span className={UNREAD_COUNT_BADGE_CLASS}>
+                  {formatUnreadCount(genericBadgeCount)}
                 </span>
               )}
             </Link>

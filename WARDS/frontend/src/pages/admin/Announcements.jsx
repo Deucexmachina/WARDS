@@ -6,6 +6,7 @@ import {
   AnnouncementAttachmentsList,
 } from '../../components/AnnouncementAttachments';
 import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
+import { UNREAD_CARD_HIGHLIGHT_CLASS, UNREAD_STATUS_BADGE_CLASS } from '../../utils/notificationUI';
 
 const defaultForm = {
   title: '',
@@ -50,18 +51,22 @@ const Announcements = () => {
   };
 
   const markAnnouncementViewedLocally = (announcementId) => {
-    setAnnouncements((previous) =>
-      previous.map((announcement) =>
+    let unreadCount = 0;
+    setAnnouncements((previous) => {
+      const nextAnnouncements = previous.map((announcement) =>
         announcement.id === announcementId
           ? { ...announcement, is_viewed: true }
           : announcement
-      )
-    );
+      );
+      unreadCount = nextAnnouncements.filter((announcement) => !announcement.is_viewed).length;
+      return nextAnnouncements;
+    });
     if (selectedAnnouncement?.id === announcementId) {
       setSelectedAnnouncement((previous) => (
         previous ? { ...previous, is_viewed: true } : previous
       ));
     }
+    return unreadCount;
   };
 
   const handleInputChange = (event) => {
@@ -107,9 +112,9 @@ const Announcements = () => {
       setPageError('');
       setSuccessMessage('');
       await announcementAPI.markViewed(announcement.id);
-      markAnnouncementViewedLocally(announcement.id);
+      const unreadCount = markAnnouncementViewedLocally(announcement.id);
       setSelectedAnnouncement({ ...announcement, is_viewed: true });
-      window.dispatchEvent(new CustomEvent('admin-announcement-viewed'));
+      window.dispatchEvent(new CustomEvent('admin-announcement-viewed', { detail: { unreadCount } }));
     } catch (error) {
       console.error('Failed to mark announcement as viewed:', error);
       setSelectedAnnouncement(announcement);
@@ -301,7 +306,7 @@ const Announcements = () => {
           </div>
         ) : (
           announcements.map((announcement) => (
-            <div key={announcement.id} className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition duration-300">
+            <div key={announcement.id} className={`rounded-xl bg-white p-6 shadow-lg transition duration-300 hover:shadow-xl ${!announcement.is_viewed ? UNREAD_CARD_HIGHLIGHT_CLASS : ''}`}>
               <div className="flex justify-between items-start mb-4 gap-4">
                 <div className="flex items-start gap-4 flex-1">
                   <div className={`${getColorClasses(announcement.icon_color).bg} p-3 rounded-full flex-shrink-0`}>
@@ -318,7 +323,7 @@ const Announcements = () => {
                         </span>
                       )}
                       {!announcement.is_viewed && (
-                        <span className="inline-flex items-center rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700 border border-red-200">
+                        <span className={UNREAD_STATUS_BADGE_CLASS}>
                           Unread
                         </span>
                       )}

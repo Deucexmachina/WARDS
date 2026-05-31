@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import api from '../../services/api';
 import { formatUtc8Date, formatUtc8Time, isSameUtc8Day } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
+import { UNREAD_CARD_HIGHLIGHT_CLASS, UNREAD_STATUS_BADGE_CLASS } from '../../utils/notificationUI';
 
 const CATEGORY_STYLES = {
   Operations: 'bg-blue-100 text-blue-700',
@@ -99,10 +100,15 @@ const BranchPolicies = () => {
     if (!policy.is_viewed) {
       try {
         await api.post(`/branch/policies/${policy.id}/mark-viewed`);
-        setPolicies((currentPolicies) => currentPolicies.map((item) => (
-          item.id === policy.id ? { ...item, is_viewed: true } : item
-        )));
-        window.dispatchEvent(new Event('branch-policy-read'));
+        let unreadCount = 0;
+        setPolicies((currentPolicies) => {
+          const nextPolicies = currentPolicies.map((item) => (
+            item.id === policy.id ? { ...item, is_viewed: true } : item
+          ));
+          unreadCount = nextPolicies.filter((item) => !item.is_viewed).length;
+          return nextPolicies;
+        });
+        window.dispatchEvent(new CustomEvent('branch-policy-read', { detail: { unreadCount } }));
       } catch (error) {
         console.error('Failed to mark branch policy as viewed:', error);
       }
@@ -203,7 +209,7 @@ const BranchPolicies = () => {
                 const showNewBadge = isUnread && CONFIG_POLICY_CATEGORIES.has(policy.category);
 
                 return (
-                  <article key={policy.id} className={`overflow-hidden rounded-2xl border bg-white shadow-sm transition duration-300 hover:shadow-md ${showNewBadge ? 'border-emerald-300 bg-emerald-50/30' : 'border-slate-200'}`}>
+                  <article key={policy.id} className={`overflow-hidden rounded-2xl border bg-white shadow-sm transition duration-300 hover:shadow-md ${isUnread ? UNREAD_CARD_HIGHLIGHT_CLASS : showNewBadge ? 'border-emerald-300 bg-emerald-50/30' : 'border-slate-200'}`}>
                     <div className="border-b border-slate-100 bg-slate-50/80 px-5 py-4">
                       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                         <div className="min-w-0 flex-1">
@@ -211,6 +217,9 @@ const BranchPolicies = () => {
                             <span className={`rounded-full px-3 py-1 text-xs font-semibold ${CATEGORY_STYLES[policy.category] || 'bg-slate-200 text-slate-700'}`}>
                               {policy.category || 'Uncategorized'}
                             </span>
+                            {isUnread ? (
+                              <span className={UNREAD_STATUS_BADGE_CLASS}>Unread</span>
+                            ) : null}
                             <span className="text-xs font-medium uppercase tracking-[0.2em] text-slate-400">Published Record</span>
                             {showNewBadge ? (
                               <span className="rounded-full bg-emerald-600 px-3 py-1 text-xs font-semibold text-white">New</span>

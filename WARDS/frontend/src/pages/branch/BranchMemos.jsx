@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import api from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
+import { UNREAD_CARD_HIGHLIGHT_CLASS, UNREAD_STATUS_BADGE_CLASS } from '../../utils/notificationUI';
 
 const priorityStyles = {
   low: 'bg-slate-100 text-slate-700',
@@ -53,8 +54,6 @@ const BranchMemos = () => {
     highPriority: memos.filter(memo => memo.priority === 'high').length,
     orgWide: memos.filter(memo => memo.recipient_type === 'all').length,
   }), [memos]);
-  const newestMemoId = useMemo(() => memos[0]?.id || null, [memos]);
-
   const openViewModal = async (memo) => {
     setViewingMemo(memo);
     setExpandedContent(false);
@@ -63,12 +62,15 @@ const BranchMemos = () => {
     if (!memo.is_viewed) {
       try {
         await api.post(`/branch/memos/${memo.id}/mark-viewed`);
-        setMemos(prevMemos => 
-          prevMemos.map(m => 
+        let unreadCount = 0;
+        setMemos((prevMemos) => {
+          const nextMemos = prevMemos.map((m) =>
             m.id === memo.id ? { ...m, is_viewed: true } : m
-          )
-        );
-        window.dispatchEvent(new Event('branch-memo-read'));
+          );
+          unreadCount = nextMemos.filter((item) => !item.is_viewed).length;
+          return nextMemos;
+        });
+        window.dispatchEvent(new CustomEvent('branch-memo-read', { detail: { unreadCount } }));
       } catch (err) {
         console.error('Failed to mark memo as viewed:', err);
       }
@@ -112,7 +114,7 @@ const BranchMemos = () => {
   }
 
   const MemoCard = ({ memo }) => (
-    <div className={`rounded-xl shadow-md p-5 hover:shadow-lg transition duration-300 border-l-4 ${!memo.is_viewed ? 'bg-purple-50/40 border-l-purple-600 ring-1 ring-purple-100' : 'bg-white border-l-purple-500'}`}>
+    <div className={`rounded-xl border-l-4 p-5 shadow-md transition duration-300 hover:shadow-lg ${!memo.is_viewed ? `${UNREAD_CARD_HIGHLIGHT_CLASS} border-l-purple-600` : 'bg-white border-l-purple-500'}`}>
       <div className="flex items-start justify-between gap-4 mb-3">
         <div className="flex-1">
           <div className="flex items-center gap-3 mb-2">
@@ -121,8 +123,8 @@ const BranchMemos = () => {
               {(memo.priority || 'normal').toUpperCase()}
             </span>
             {!memo.is_viewed ? (
-              <span className="px-2 py-1 rounded-full text-xs font-semibold bg-purple-600 text-white">
-                {memo.id === newestMemoId ? 'Recently Added' : 'New'}
+              <span className={UNREAD_STATUS_BADGE_CLASS}>
+                Unread
               </span>
             ) : null}
           </div>

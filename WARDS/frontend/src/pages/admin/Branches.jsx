@@ -150,6 +150,8 @@ const EMPTY_AUTH_MODAL = {
 const Branches = () => {
   const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}');
   const isSuperadmin = adminUser?.internal_role === 'superadmin';
+  const verifierLabel = isSuperadmin ? 'Super Admin' : 'Main Admin';
+  const verifierLabelLower = verifierLabel.toLowerCase();
   const [branches, setBranches] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [editingBranch, setEditingBranch] = useState(null);
@@ -161,6 +163,8 @@ const Branches = () => {
   const [successMessage, setSuccessMessage] = useState('');
   const [pendingNotice, setPendingNotice] = useState('');
   const [authModal, setAuthModal] = useState(EMPTY_AUTH_MODAL);
+  const [authModalError, setAuthModalError] = useState('');
+  const [isProtectedActionLoading, setIsProtectedActionLoading] = useState(false);
   const [pendingBranchSave, setPendingBranchSave] = useState(null);
   const [adminEmailError, setAdminEmailError] = useState('');
   const [windowAccounts, setWindowAccounts] = useState(EMPTY_WINDOW_ACCOUNTS);
@@ -425,6 +429,7 @@ const Branches = () => {
             status: formData.status,
           },
         });
+        setAuthModalError('');
         setAuthModal({
           mode: 'edit',
           branchId: editingBranch.id,
@@ -613,6 +618,7 @@ const Branches = () => {
     setPageError('');
     setSuccessMessage('');
     setPendingNotice('');
+    setAuthModalError('');
     setAuthModal({
       mode: 'delete',
       branchId: id,
@@ -622,21 +628,23 @@ const Branches = () => {
   };
 
   const closeAuthModal = () => {
+    setAuthModalError('');
     setAuthModal(EMPTY_AUTH_MODAL);
     setPendingBranchSave(null);
   };
 
   const handleConfirmProtectedAction = async () => {
     if (!authModal.password) {
-      setPageError('Please enter your main admin password to continue.');
+      setAuthModalError(`Please enter your ${verifierLabelLower} password to continue.`);
       return;
     }
 
     try {
-      setLoading(true);
+      setIsProtectedActionLoading(true);
       setPageError('');
       setSuccessMessage('');
       setPendingNotice('');
+      setAuthModalError('');
 
       if (authModal.mode === 'edit' && pendingBranchSave) {
         await api.put(`/branches/${pendingBranchSave.branchId}`, {
@@ -666,9 +674,16 @@ const Branches = () => {
       closeAuthModal();
     } catch (error) {
       console.error('Failed to complete protected branch action:', error);
-      setPageError(error.response?.data?.detail || 'Failed to complete branch action.');
+      const errorDetail = error.response?.data?.detail || 'Failed to complete branch action.';
+      if (errorDetail.toLowerCase().includes('incorrect') && errorDetail.toLowerCase().includes('password')) {
+        setAuthModalError('Incorrect password. Please try again.');
+        setPageError('');
+      } else {
+        setAuthModalError('');
+        setPageError(errorDetail);
+      }
     } finally {
-      setLoading(false);
+      setIsProtectedActionLoading(false);
     }
   };
 
@@ -1173,14 +1188,24 @@ const Branches = () => {
               {authModal.mode === 'edit' ? 'Verify Branch Edit' : 'Verify Branch Deletion'}
             </h3>
             <p className="text-sm text-gray-600 mb-5">
-              Enter your main admin password to {authModal.mode} the branch
+              Enter your {verifierLabelLower} password to {authModal.mode} the branch
               {authModal.branchName ? ` "${authModal.branchName}"` : ''}.
             </p>
+            {authModalError && (
+              <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+                {authModalError}
+              </div>
+            )}
             <div>
-              <label className="block text-gray-700 font-semibold mb-2">Main Admin Password</label>
+              <label className="block text-gray-700 font-semibold mb-2">{verifierLabel} Password</label>
               <PasswordField
                 value={authModal.password}
-                onChange={(e) => setAuthModal((previous) => ({ ...previous, password: e.target.value }))}
+                onChange={(e) => {
+                  if (authModalError) {
+                    setAuthModalError('');
+                  }
+                  setAuthModal((previous) => ({ ...previous, password: e.target.value }));
+                }}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
                 placeholder="Enter your password"
               />
@@ -1194,10 +1219,10 @@ const Branches = () => {
               </button>
               <button
                 onClick={handleConfirmProtectedAction}
-                disabled={loading}
+                disabled={isProtectedActionLoading}
                 className="flex-1 bg-primary hover:bg-secondary text-white py-3 rounded-lg font-semibold transition duration-300 disabled:opacity-50"
               >
-                {loading ? 'Verifying...' : 'Confirm'}
+                {isProtectedActionLoading ? 'Verifying...' : 'Confirm'}
               </button>
             </div>
           </div>

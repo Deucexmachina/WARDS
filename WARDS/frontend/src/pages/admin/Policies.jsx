@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { policyAPI } from '../../services/api';
 import { formatUtc8Date, formatUtc8Time, isSameUtc8Day } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
+import { UNREAD_CARD_HIGHLIGHT_CLASS, UNREAD_STATUS_BADGE_CLASS } from '../../utils/notificationUI';
 
 const POLICY_PREVIEW_LENGTH = 180;
 const POLICY_MODAL_PREVIEW_LENGTH = 720;
@@ -141,10 +142,15 @@ const Policies = () => {
     if (!policy.is_viewed) {
       try {
         await policyAPI.markViewed(policy.id);
-        setPolicies((currentPolicies) => currentPolicies.map((item) => (
-          item.id === policy.id ? { ...item, is_viewed: true } : item
-        )));
-        window.dispatchEvent(new Event('admin-policy-read'));
+        let unreadCount = 0;
+        setPolicies((currentPolicies) => {
+          const nextPolicies = currentPolicies.map((item) => (
+            item.id === policy.id ? { ...item, is_viewed: true } : item
+          ));
+          unreadCount = nextPolicies.filter((item) => !item.is_viewed).length;
+          return nextPolicies;
+        });
+        window.dispatchEvent(new CustomEvent('admin-policy-read', { detail: { unreadCount } }));
       } catch (viewError) {
         console.error('Failed to mark policy as viewed:', viewError);
       }
@@ -339,7 +345,7 @@ const Policies = () => {
                 const showNewBadge = isUnread && CONFIG_POLICY_CATEGORIES.has(policy.category);
 
                 return (
-                  <article key={policy.id} className={`rounded-3xl border bg-gradient-to-br p-5 shadow-sm transition duration-300 hover:border-slate-300 hover:shadow-md ${showNewBadge ? 'border-emerald-300 from-white via-emerald-50 to-slate-50' : 'border-slate-200 from-white via-slate-50 to-slate-100/80'}`}>
+                  <article key={policy.id} className={`rounded-3xl border bg-gradient-to-br p-5 shadow-sm transition duration-300 hover:border-slate-300 hover:shadow-md ${isUnread ? UNREAD_CARD_HIGHLIGHT_CLASS : showNewBadge ? 'border-emerald-300 from-white via-emerald-50 to-slate-50' : 'border-slate-200 from-white via-slate-50 to-slate-100/80'}`}>
                     <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
                       <div className="min-w-0 flex-1">
                         <div className="mb-4 flex flex-wrap items-center gap-3">
@@ -349,6 +355,9 @@ const Policies = () => {
                           <span className={`rounded-full px-3 py-1 text-xs font-semibold ${CATEGORY_STYLES[policy.category] || 'bg-slate-200 text-slate-700'}`}>
                             {policy.category || 'Uncategorized'}
                           </span>
+                          {isUnread ? (
+                            <span className={UNREAD_STATUS_BADGE_CLASS}>Unread</span>
+                          ) : null}
                           {showNewBadge ? (
                             <span className="rounded-full bg-emerald-600 px-3 py-1 text-xs font-semibold text-white">Recently Published</span>
                           ) : null}

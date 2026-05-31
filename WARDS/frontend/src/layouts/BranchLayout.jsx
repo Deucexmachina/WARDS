@@ -11,6 +11,7 @@ import {
   BRANCH_REPORTS_UPDATED_EVENT,
   getUnreadBranchReportCount,
 } from '../utils/branchReportViews';
+import { formatUnreadCount, UNREAD_COUNT_BADGE_CLASS } from '../utils/notificationUI';
 
 const BRANCH_QUEUE_UPDATED_EVENT = 'branch-queue-updated';
 const BRANCH_RECEIPT_UPDATED_EVENT = 'branch-receipt-updated';
@@ -68,6 +69,14 @@ const BranchLayout = () => {
   const getActiveReceiptCount = (items) => (
     (items || []).filter((item) => !['Released', 'Completed'].includes(item.status)).length
   );
+  const resolveUnreadCount = (event, currentCount) => {
+    const explicitCount = event?.detail?.unreadCount;
+    if (Number.isFinite(explicitCount)) {
+      return Math.max(0, Number(explicitCount));
+    }
+    const delta = Number(event?.detail?.delta || 0);
+    return Math.max(0, currentCount + delta);
+  };
   const navItems = isQueueWindowAccount
     ? [{ label: `${assignedWindowLabel || 'Queue Window'} Queue Management`, path: queueOnlyPath }]
     : [
@@ -198,11 +207,23 @@ const BranchLayout = () => {
         fetchReportCount();
       }
     }, 60000);
-    const handleMemoRead = () => fetchUnreadMemoCount();
-    const handlePolicyRead = () => fetchUnreadPolicyCount();
+    const handleMemoRead = (event) => {
+      setUnreadMemoCount((current) => resolveUnreadCount(event, current));
+      fetchUnreadMemoCount();
+    };
+    const handlePolicyRead = (event) => {
+      setUnreadPolicyCount((current) => resolveUnreadCount(event, current));
+      fetchUnreadPolicyCount();
+    };
     const handlePolicyUpdated = () => fetchUnreadPolicyCount();
     const handleDiscrepancyViewed = () => fetchUnreadDiscrepancyCount();
-    const handleAnnouncementViewed = () => fetchAnnouncementCount();
+    const handleAnnouncementViewed = (event) => {
+      const explicitCount = event?.detail?.unreadCount;
+      if (Number.isFinite(explicitCount)) {
+        setAnnouncementCount(Math.max(0, Number(explicitCount)));
+      }
+      fetchAnnouncementCount();
+    };
     const handleBranchPaymentUpdated = () => {
       fetchPaymentCount();
       fetchReceiptCount();
@@ -310,36 +331,36 @@ const BranchLayout = () => {
             >
               <span>{item.label}</span>
               {item.label === 'Internal Memos' && unreadMemoCount > 0 ? (
-                <span className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full min-w-[1.5rem] text-center">
-                  {unreadMemoCount > 99 ? '99+' : unreadMemoCount}
+                <span className={UNREAD_COUNT_BADGE_CLASS}>
+                  {formatUnreadCount(unreadMemoCount)}
                 </span>
               ) : item.label === 'Policies & SOPs' && unreadPolicyCount > 0 ? (
-                <span className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full min-w-[1.5rem] text-center">
-                  {unreadPolicyCount > 99 ? '99+' : unreadPolicyCount}
+                <span className={UNREAD_COUNT_BADGE_CLASS}>
+                  {formatUnreadCount(unreadPolicyCount)}
                 </span>
               ) : item.label === 'Discrepancy Reports' && unreadDiscrepancyCount > 0 ? (
-                <span className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full min-w-[1.5rem] text-center">
-                  {unreadDiscrepancyCount > 99 ? '99+' : unreadDiscrepancyCount}
+                <span className={UNREAD_COUNT_BADGE_CLASS}>
+                  {formatUnreadCount(unreadDiscrepancyCount)}
                 </span>
               ) : item.label === 'Announcements' && announcementCount > 0 ? (
-                <span className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full min-w-[1.5rem] text-center">
-                  {announcementCount > 99 ? '99+' : announcementCount}
+                <span className={UNREAD_COUNT_BADGE_CLASS}>
+                  {formatUnreadCount(announcementCount)}
                 </span>
               ) : (item.label.includes('Queue Management') || item.label === 'Window Staff Accounts') && queueCount > 0 ? (
-                <span className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full min-w-[1.5rem] text-center">
-                  {queueCount > 99 ? '99+' : queueCount}
+                <span className={UNREAD_COUNT_BADGE_CLASS}>
+                  {formatUnreadCount(queueCount)}
                 </span>
               ) : item.label === 'Receipt Management' && receiptCount > 0 ? (
-                <span className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full min-w-[1.5rem] text-center">
-                  {receiptCount > 99 ? '99+' : receiptCount}
+                <span className={UNREAD_COUNT_BADGE_CLASS}>
+                  {formatUnreadCount(receiptCount)}
                 </span>
               ) : item.label === 'Payment Management' && paymentCount > 0 ? (
-                <span className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full min-w-[1.5rem] text-center">
-                  {paymentCount > 99 ? '99+' : paymentCount}
+                <span className={UNREAD_COUNT_BADGE_CLASS}>
+                  {formatUnreadCount(paymentCount)}
                 </span>
               ) : item.label === 'Branch Reports' && reportCount > 0 ? (
-                <span className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full min-w-[1.5rem] text-center">
-                  {reportCount > 99 ? '99+' : reportCount}
+                <span className={UNREAD_COUNT_BADGE_CLASS}>
+                  {formatUnreadCount(reportCount)}
                 </span>
               ) : null}
             </NavLink>

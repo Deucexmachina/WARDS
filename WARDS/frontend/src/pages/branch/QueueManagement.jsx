@@ -425,7 +425,7 @@ const QueueHistorySection = ({
               <th className="px-6 py-3 font-semibold">Queue Type</th>
               <th className="px-6 py-3 font-semibold">Service</th>
               <th className="px-6 py-3 font-semibold">Status</th>
-              <th className="px-6 py-3 font-semibold">Completed</th>
+              <th className="px-6 py-3 font-semibold">Completed At</th>
               <th className="px-6 py-3 font-semibold">Completed By</th>
               <th className="px-6 py-3 font-semibold">Action</th>
             </tr>

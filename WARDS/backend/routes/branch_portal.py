@@ -237,6 +237,7 @@ def serialize_branch_queue(db: Session, queue: Queue, branch_id: int, assigned_w
 
 
 def serialize_queue_history(queue: QueueHistory):
+    completed_by = resolve_completed_by_display_name(queue)
     return {
         "id": queue.id,
         "queue_number": queue.queue_number,
@@ -255,7 +256,7 @@ def serialize_queue_history(queue: QueueHistory):
         "created_at": serialize_manila_datetime(queue.created_at),
         "served_at": serialize_manila_datetime(queue.served_at),
         "completed_at": serialize_manila_datetime(queue.completed_at),
-        "completed_by": queue.completed_by,
+        "completed_by": completed_by,
         "archived_at": serialize_manila_datetime(queue.archived_at),
     }
 
@@ -267,6 +268,24 @@ def log_branch_action(db: Session, staff: BranchStaff, action: str, details: str
         details=f"Branch {staff.branch_id}: {details}",
         type="branch_portal",
     ))
+
+
+def get_staff_display_name(staff: BranchStaff) -> str:
+    return (staff.full_name or "").strip() or staff.username
+
+
+def resolve_completed_by_display_name(queue: QueueHistory) -> str | None:
+    completed_by = (queue.completed_by or "").strip()
+    if not completed_by:
+        return None
+
+    branch_staff = getattr(queue, "branch", None)
+    if branch_staff is not None:
+        for staff in getattr(branch_staff, "branch_staff", []) or []:
+            if staff.username == completed_by and (staff.full_name or "").strip():
+                return staff.full_name.strip()
+
+    return completed_by
 
 
 def normalize_service_window(service_type: Optional[str]) -> str:
@@ -1275,7 +1294,7 @@ async def complete_queue(
     queue.status = "Completed"
     queue.completed_at = datetime.utcnow()
     apply_queue_security(queue)
-    archive_completed_queue(db, queue, current_staff.username)
+    archive_completed_queue(db, queue, get_staff_display_name(current_staff))
     queue_number = queue_value(queue, "queue_number")
     db.delete(queue)
     log_branch_action(db, current_staff, "Queue Completed", f"Completed queue {queue_number}")
