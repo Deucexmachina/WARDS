@@ -149,7 +149,12 @@ def update_branch_system_settings(
         changed = True
 
     if not changed:
-        raise HTTPException(status_code=400, detail="No branch system setting changes were detected.")
+        # No changes detected, but return success anyway
+        return {
+            "branch_id": branch.id,
+            "settings": get_branch_settings_payload(db, branch.id),
+            "message": "No changes were needed - settings are already up to date.",
+        }
 
     db.add(ActivityLog(
         action="Branch System Settings Updated",
