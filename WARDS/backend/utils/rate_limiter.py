@@ -26,6 +26,10 @@ RATE_LIMITS = {
         "max_requests": int(os.getenv("RATE_LIMIT_PAYMENT_INITIATE", "3")),
         "window": int(os.getenv("RATE_LIMIT_PAYMENT_WINDOW", "60")),  # seconds
     },
+    "ocr_process": {
+        "max_requests": int(os.getenv("RATE_LIMIT_OCR_PROCESS", "5")),
+        "window": int(os.getenv("RATE_LIMIT_OCR_WINDOW", "60")),  # seconds
+    },
 }
 
 # Global Redis client

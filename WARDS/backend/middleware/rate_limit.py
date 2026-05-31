@@ -112,6 +112,7 @@ def rate_limit_dependency(endpoint: str):
 # Pre-configured dependencies for common endpoints
 queue_register_limiter = rate_limit_dependency("queue_register")
 payment_initiate_limiter = rate_limit_dependency("payment_initiate")
+ocr_process_limiter = rate_limit_dependency("ocr_process")
 
 
 class RateLimitMiddleware:

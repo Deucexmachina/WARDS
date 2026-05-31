@@ -1,9 +1,10 @@
 import os
 from datetime import datetime
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 
 from services.ocr_service import ocr_service
+from middleware.rate_limit import ocr_process_limiter
 
 router = APIRouter()
 
@@ -12,8 +13,10 @@ UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads",
 
 @router.post("/process")
 async def process_receipt_ocr(
+    request: Request,
     file: UploadFile = File(...),
     category: str = Form("RPT"),
+    _: None = Depends(ocr_process_limiter),
 ):
     image_data = await file.read()
     os.makedirs(UPLOAD_DIR, exist_ok=True)
