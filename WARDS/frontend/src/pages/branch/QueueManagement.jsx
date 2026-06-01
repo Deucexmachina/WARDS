@@ -1418,28 +1418,31 @@ const QueueManagement = () => {
                     </p>
                   </button>
                 ) : null}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCompletionError('');
-                    setCompletionNotice('');
-                    setCompletionMode('file');
-                  }}
-                  disabled={receiptSavedForCompletion}
-                  className="rounded-2xl border border-blue-200 bg-blue-50 px-5 py-6 text-left transition hover:border-blue-400 hover:bg-blue-100"
-                >
-                  <p className="text-lg font-bold text-blue-900">File Upload</p>
-                  <p className="mt-2 text-sm leading-6 text-blue-700">Upload a receipt image from this computer and run OCR.</p>
-                </button>
-                <button
-                  type="button"
-                  onClick={startMobileReceiptUpload}
-                  disabled={processingReceipt || receiptSavedForCompletion}
-                  className="rounded-2xl border border-purple-200 bg-purple-50 px-5 py-6 text-left transition hover:border-purple-400 hover:bg-purple-100 disabled:opacity-60"
-                >
-                  <p className="text-lg font-bold text-purple-900">Via Mobile QR</p>
-                  <p className="mt-2 text-sm leading-6 text-purple-700">Scan a QR code and take the receipt photo from a phone.</p>
-                </button>
+                {!receiptSavedForCompletion ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCompletionError('');
+                        setCompletionNotice('');
+                        setCompletionMode('file');
+                      }}
+                      className="rounded-2xl border border-blue-200 bg-blue-50 px-5 py-6 text-left transition hover:border-blue-400 hover:bg-blue-100"
+                    >
+                      <p className="text-lg font-bold text-blue-900">File Upload</p>
+                      <p className="mt-2 text-sm leading-6 text-blue-700">Upload a receipt image from this computer and run OCR.</p>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={startMobileReceiptUpload}
+                      disabled={processingReceipt}
+                      className="rounded-2xl border border-purple-200 bg-purple-50 px-5 py-6 text-left transition hover:border-purple-400 hover:bg-purple-100 disabled:opacity-60"
+                    >
+                      <p className="text-lg font-bold text-purple-900">Via Mobile QR</p>
+                      <p className="mt-2 text-sm leading-6 text-purple-700">Scan a QR code and take the receipt photo from a phone.</p>
+                    </button>
+                  </>
+                ) : null}
               </div>
             ) : null}
 

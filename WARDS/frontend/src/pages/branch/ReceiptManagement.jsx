@@ -571,12 +571,13 @@ const ReceiptManagement = () => {
         const iframe = document.createElement('iframe');
         iframe.setAttribute('title', 'Receipt Print Frame');
         iframe.style.position = 'fixed';
-        iframe.style.right = '0';
-        iframe.style.bottom = '0';
-        iframe.style.width = '0';
-        iframe.style.height = '0';
+        iframe.style.left = '-10000px';
+        iframe.style.top = '0';
+        iframe.style.width = '900px';
+        iframe.style.height = '1300px';
         iframe.style.border = '0';
-        iframe.style.visibility = 'hidden';
+        iframe.style.opacity = '0';
+        iframe.style.pointerEvents = 'none';
 
         const cleanup = () => {
           setTimeout(() => {
@@ -621,10 +622,10 @@ const ReceiptManagement = () => {
                 }
                 img {
                   display: block;
-                  max-width: 100%;
-                  max-height: 100vh;
                   width: auto;
-                  height: auto;
+                  height: 95vh;
+                  max-width: 95vw;
+                  max-height: 95vh;
                   object-fit: contain;
                   margin: 0 auto;
                 }
@@ -636,13 +637,20 @@ const ReceiptManagement = () => {
                   body {
                     margin: 0;
                     padding: 0;
+                    display: flex;
+                    justify-content: center;
+                    align-items: flex-start;
                   }
                   .print-container {
                     padding: 0;
+                    width: 100%;
+                    max-width: 100%;
                   }
                   img {
-                    max-width: 100%;
-                    max-height: 100%;
+                    width: auto;
+                    height: 95vh;
+                    max-width: 95vw;
+                    max-height: 95vh;
                     page-break-inside: avoid;
                   }
                 }
@@ -682,6 +690,36 @@ const ReceiptManagement = () => {
       reader.readAsDataURL(blob);
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to open receipt record image.');
+    }
+  };
+
+  const handleDownloadRecordImage = async (recordId, taxpayerName) => {
+    try {
+      const response = await receiptAPI.downloadRecordImage(recordId);
+      const contentType = response.headers?.['content-type'] || response.data?.type || 'image/png';
+      const blob = response.data instanceof Blob ? response.data : new Blob([response.data], { type: contentType });
+      const extensionMap = {
+        'image/jpeg': 'jpg',
+        'image/jpg': 'jpg',
+        'image/png': 'png',
+        'image/webp': 'webp',
+      };
+      const extension = extensionMap[contentType.toLowerCase()] || 'png';
+      const safeTaxpayerName = (taxpayerName || 'receipt')
+        .trim()
+        .replace(/[^A-Za-z0-9]+/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_|_$/g, '') || 'receipt';
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = downloadUrl;
+      anchor.download = `${safeTaxpayerName}.${extension}`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to download receipt record image.');
     }
   };
 
@@ -1007,6 +1045,12 @@ const ReceiptManagement = () => {
                   <td className="px-4 py-4 text-slate-500">{record.created_at ? formatUtc8DateTime(record.created_at) : 'N/A'}</td>
                   <td className="px-4 py-4">
                     <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => handleDownloadRecordImage(record.id, record.taxpayer_name)}
+                        className="rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white transition hover:bg-blue-700"
+                      >
+                        Download
+                      </button>
                       <button
                         onClick={() => handlePrintRecordImage(record.id)}
                         className="rounded-lg bg-purple-600 px-3 py-1.5 font-semibold text-white transition hover:bg-purple-700"

@@ -549,6 +549,36 @@ def compute_image_ahash(image_bytes: bytes) -> str:
     return f"{int(bits, 2):016x}"
 
 
+def sanitize_receipt_filename_component(value: str | None) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9]+", "_", (value or "").strip())
+    normalized = re.sub(r"_+", "_", normalized).strip("_")
+    return normalized or "receipt"
+
+
+def rename_receipt_source_image(source_image_path: str | None, taxpayer_name: str | None) -> str | None:
+    if not source_image_path or not os.path.exists(source_image_path):
+        return source_image_path
+
+    directory, original_filename = os.path.split(source_image_path)
+    extension = os.path.splitext(original_filename)[1].lower() or ".jpg"
+    base_name = sanitize_receipt_filename_component(taxpayer_name)
+    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    candidate_name = f"{base_name}_{timestamp}{extension}"
+    candidate_path = os.path.join(directory, candidate_name)
+    suffix = 1
+
+    while os.path.exists(candidate_path) and os.path.abspath(candidate_path) != os.path.abspath(source_image_path):
+        candidate_name = f"{base_name}_{timestamp}_{suffix}{extension}"
+        candidate_path = os.path.join(directory, candidate_name)
+        suffix += 1
+
+    if os.path.abspath(candidate_path) == os.path.abspath(source_image_path):
+        return source_image_path
+
+    os.replace(source_image_path, candidate_path)
+    return candidate_path
+
+
 def ensure_valid_image_upload(image_bytes: bytes):
     if not image_bytes:
         raise HTTPException(status_code=400, detail="Uploaded image is empty")
@@ -678,6 +708,8 @@ def save_receipt_record_payload(
                 ),
             )
 
+    renamed_source_image_path = rename_receipt_source_image(payload.source_image_path, payload.taxpayer_name)
+
     record = ReceiptRecord(
         branch_id=branch_id,
         receipt_number=payload.receipt_number,
@@ -691,7 +723,7 @@ def save_receipt_record_payload(
         source_image_ahash=payload.source_image_ahash,
         selected_category=selected_category,
         detected_category=detected_category,
-        source_image_path=payload.source_image_path,
+        source_image_path=renamed_source_image_path,
         raw_ocr_text=payload.raw_text,
         verification_status="Verified",
         confidence=payload.confidence or 0.0,
