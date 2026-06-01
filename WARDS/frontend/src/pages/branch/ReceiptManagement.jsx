@@ -293,7 +293,12 @@ const ReceiptManagement = () => {
     effectiveDetectedCategory &&
     effectiveDetectedCategory !== effectiveSelectedCategory
   );
-  const saveBlocked = Boolean(ocrDraft?.save_blocked || categoryMismatch || ocrDraft?.duplicate_detected);
+  const filenameMismatchBlocked = Boolean(
+    ocrDraft?.filename_matches_taxpayer === false && !ocrDraft?.auto_rename_source_image
+  );
+  const saveBlocked = Boolean(
+    ocrDraft?.save_blocked || categoryMismatch || ocrDraft?.duplicate_detected || filenameMismatchBlocked
+  );
   const duplicateWarning = ocrDraft?.duplicate_warning || '';
 
   useEffect(() => {
@@ -314,7 +319,15 @@ const ReceiptManagement = () => {
       setSuccessMessage('');
       return;
     }
-  }, [ocrDraft, categoryMismatch, effectiveDetectedCategory, effectiveSelectedCategory, duplicateWarning]);
+
+    if (filenameMismatchBlocked) {
+      setError(
+        ocrDraft?.file_name_validation_message ||
+        'The uploaded file name must match the extracted taxpayer name before it can be saved.'
+      );
+      setSuccessMessage('');
+    }
+  }, [ocrDraft, categoryMismatch, effectiveDetectedCategory, effectiveSelectedCategory, duplicateWarning, filenameMismatchBlocked]);
 
   const normalizedRecords = useMemo(
     () =>
@@ -508,7 +521,8 @@ const ReceiptManagement = () => {
       setOcrDraft(null);
       await refreshData({ emitReceiptEvent: true });
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to save verified receipt record.');
+      const detail = err.response?.data?.detail;
+      setError((typeof detail === 'object' ? detail?.message : detail) || 'Failed to save verified receipt record.');
     } finally {
       setSaving(false);
     }
@@ -707,9 +721,9 @@ const ReceiptManagement = () => {
       const extension = extensionMap[contentType.toLowerCase()] || 'png';
       const safeTaxpayerName = (taxpayerName || 'receipt')
         .trim()
-        .replace(/[^A-Za-z0-9]+/g, '_')
-        .replace(/_+/g, '_')
-        .replace(/^_|_$/g, '') || 'receipt';
+        .replace(/[\\/:*?"<>|]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim() || 'receipt';
       const downloadUrl = window.URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = downloadUrl;
@@ -771,6 +785,28 @@ const ReceiptManagement = () => {
           file,
           fileName: file.name,
           previewUrl: URL.createObjectURL(file),
+          autoRename: false,
+          validationMessage: '',
+          suggestedFilename: '',
+          extractedTaxpayerName: '',
+        },
+      };
+    });
+  };
+
+  const handleAutoRenameDraft = (requestId) => {
+    setReleaseUploadDrafts((current) => {
+      const draft = current[requestId];
+      if (!draft) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [requestId]: {
+          ...draft,
+          autoRename: true,
+          validationMessage: '',
         },
       };
     });
@@ -791,6 +827,7 @@ const ReceiptManagement = () => {
     try {
       const formData = new FormData();
       formData.append('file', draft.file);
+      formData.append('auto_rename', draft.autoRename ? 'true' : 'false');
       const response = await receiptAPI.uploadReleaseCopy(requestId, formData);
       clearReleaseUploadDraft(requestId);
       setSuccessMessage(
@@ -800,7 +837,22 @@ const ReceiptManagement = () => {
       );
       await refreshData({ emitReceiptEvent: true });
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to upload finished receipt copy.');
+      const detail = err.response?.data?.detail;
+      if (detail?.code === 'receipt_filename_mismatch') {
+        setReleaseUploadDrafts((current) => ({
+          ...current,
+          [requestId]: {
+            ...(current[requestId] || {}),
+            autoRename: false,
+            validationMessage: detail.message,
+            suggestedFilename: detail.suggested_filename || '',
+            extractedTaxpayerName: detail.extracted_taxpayer_name || '',
+          },
+        }));
+        setError(detail.message || 'The file name must match the taxpayer name before release.');
+      } else {
+        setError(detail || 'Failed to upload finished receipt copy.');
+      }
     } finally {
       setUploadingReleaseId(null);
     }
@@ -955,6 +1007,22 @@ const ReceiptManagement = () => {
         <div className="basis-full rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
           Send to: {request.email || 'No requester email'}
         </div>
+        {releaseDraft?.validationMessage ? (
+          <div className="basis-full rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+            <p className="font-semibold">File name needs correction</p>
+            <p className="mt-1">{releaseDraft.validationMessage}</p>
+            {releaseDraft.suggestedFilename ? (
+              <p className="mt-1">Suggested file name: {releaseDraft.suggestedFilename}</p>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => handleAutoRenameDraft(request.requestId)}
+              className="mt-3 rounded-lg bg-blue-600 px-3 py-2 font-semibold text-white transition hover:bg-blue-700"
+            >
+              Use Extracted Taxpayer Name
+            </button>
+          </div>
+        ) : null}
         {releaseDraft ? (
           <div className="basis-full rounded-xl border border-slate-200 bg-white p-3">
             <div className="mb-2 flex items-center justify-between gap-3">
@@ -1351,6 +1419,26 @@ const ReceiptManagement = () => {
                       {ocrDraft.duplicate_record.ref_number ? ` (${ocrDraft.duplicate_record.ref_number})` : ''}
                     </p>
                   ) : null}
+                </div>
+              )}
+              {filenameMismatchBlocked && (
+                <div className="rounded-lg border border-blue-300 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+                  <p className="font-semibold">File name needs correction</p>
+                  <p>{ocrDraft.file_name_validation_message || 'The uploaded file name must match the extracted taxpayer name.'}</p>
+                  {ocrDraft.source_image_suggested_filename ? (
+                    <p className="mt-2">Suggested file name: {ocrDraft.source_image_suggested_filename}</p>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => setOcrDraft((current) => ({
+                      ...current,
+                      auto_rename_source_image: true,
+                      filename_matches_taxpayer: true,
+                    }))}
+                    className="mt-3 rounded-lg bg-blue-600 px-3 py-2 font-semibold text-white transition hover:bg-blue-700"
+                  >
+                    Use Extracted Taxpayer Name
+                  </button>
                 </div>
               )}
               <div className="grid md:grid-cols-2 gap-4">

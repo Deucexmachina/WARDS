@@ -64,6 +64,7 @@ const defaultReceiptDraft = (queue) => ({
   category_match: true,
   confidence: 0,
   raw_text: '',
+  auto_rename_source_image: false,
 });
 
 const parseDate = (value) => {
@@ -793,6 +794,7 @@ const QueueManagement = () => {
         selected_category: receiptDraft.selected_category || category,
         detected_category: receiptDraft.detected_category || category,
         category_match: receiptDraft.category_match !== false,
+        auto_rename_source_image: receiptDraft.auto_rename_source_image === true,
       });
       setReceiptSavedForCompletion(true);
       setCompletionNotice('Receipt uploaded and saved to Receipt Management. You can now complete this queue.');
@@ -800,7 +802,8 @@ const QueueManagement = () => {
       setReceiptUploadFile(null);
       setCompletionMode('options');
     } catch (err) {
-      setCompletionError(err.response?.data?.detail || 'Failed to save receipt.');
+      const detail = err.response?.data?.detail;
+      setCompletionError((typeof detail === 'object' ? detail?.message : detail) || 'Failed to save receipt.');
     } finally {
       setSavingReceipt(false);
     }
@@ -1518,6 +1521,26 @@ const QueueManagement = () => {
                     {receiptDraft.duplicate_warning || receiptDraft.category_warning}
                   </div>
                 ) : null}
+                {receiptDraft.filename_matches_taxpayer === false && !receiptDraft.auto_rename_source_image ? (
+                  <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+                    <p className="font-semibold">File name needs correction</p>
+                    <p className="mt-1">{receiptDraft.file_name_validation_message || 'The uploaded file name must match the extracted taxpayer name.'}</p>
+                    {receiptDraft.source_image_suggested_filename ? (
+                      <p className="mt-1">Suggested file name: {receiptDraft.source_image_suggested_filename}</p>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => setReceiptDraft((current) => ({
+                        ...current,
+                        auto_rename_source_image: true,
+                        filename_matches_taxpayer: true,
+                      }))}
+                      className="mt-3 rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white transition hover:bg-blue-700"
+                    >
+                      Use Extracted Taxpayer Name
+                    </button>
+                  </div>
+                ) : null}
                 <div className="grid gap-4 md:grid-cols-2">
                   <label className="block">
                     <span className="mb-2 block text-sm font-semibold text-slate-700">Reference Number</span>
@@ -1547,8 +1570,8 @@ const QueueManagement = () => {
                   }} disabled={savingReceipt} className="rounded-xl bg-slate-200 px-5 py-3 font-semibold text-slate-700 transition hover:bg-slate-300 disabled:opacity-60">
                     Back
                   </button>
-                  <button type="button" onClick={saveReceiptAndCompleteQueue} disabled={savingReceipt || receiptDraft.save_blocked} className="rounded-xl bg-emerald-600 px-5 py-3 font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60">
-                    {savingReceipt ? 'Saving...' : receiptDraft.save_blocked ? 'Review Blocked' : 'Save Receipt'}
+                  <button type="button" onClick={saveReceiptAndCompleteQueue} disabled={savingReceipt || receiptDraft.save_blocked || (receiptDraft.filename_matches_taxpayer === false && !receiptDraft.auto_rename_source_image)} className="rounded-xl bg-emerald-600 px-5 py-3 font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60">
+                    {savingReceipt ? 'Saving...' : (receiptDraft.save_blocked || (receiptDraft.filename_matches_taxpayer === false && !receiptDraft.auto_rename_source_image)) ? 'Review Blocked' : 'Save Receipt'}
                   </button>
                 </div>
               </div>

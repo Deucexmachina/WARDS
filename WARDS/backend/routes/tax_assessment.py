@@ -18,6 +18,8 @@ from database.models import (
     Branch,
     BusinessRegistry,
     CitizenUser,
+    Queue,
+    QueueHistory,
     TaxAssessmentRecord,
     TaxpayerIdentifierSubmission,
     get_db,
@@ -265,6 +267,7 @@ def sync_citizen_profile_to_related_records(
     email: str,
     mobile_number: str,
     address: str | None,
+    previous_email: str | None = None,
 ):
     submissions = (
         db.query(TaxpayerIdentifierSubmission)
@@ -289,6 +292,77 @@ def sync_citizen_profile_to_related_records(
         assessment.mobile_number = mobile_number
         assessment.address = address
         apply_tax_assessment_record_security(assessment)
+
+    queues = (
+        db.query(Queue)
+        .filter(Queue.citizen_user_id == citizen_user_id)
+        .all()
+    )
+    for queue in queues:
+        queue.taxpayer_name = full_name
+        queue.email = email
+        queue.contact_number = mobile_number
+
+    history_records = (
+        db.query(QueueHistory)
+        .filter(QueueHistory.citizen_user_id == citizen_user_id)
+        .all()
+    )
+    if previous_email and previous_email != email:
+        previous_email_matches = (
+            db.query(QueueHistory)
+            .filter(QueueHistory.email == previous_email)
+            .all()
+        )
+        history_records.extend(previous_email_matches)
+    seen_history_ids: set[int] = set()
+    for history in history_records:
+        if history.id in seen_history_ids:
+            continue
+        seen_history_ids.add(history.id)
+        history.citizen_user_id = citizen_user_id
+        history.taxpayer_name = full_name
+        history.email = email
+        history.contact_number = mobile_number
+
+
+def ensure_identifier_submission_not_duplicated_for_user(
+    db: Session,
+    *,
+    submission_type: str,
+    citizen_user_id: int,
+    tdn: str | None = None,
+    mayor_permit_number: str | None = None,
+    sec_dti_cda_number: str | None = None,
+):
+    submission_query = db.query(TaxpayerIdentifierSubmission).filter(
+        TaxpayerIdentifierSubmission.citizen_user_id == citizen_user_id,
+    )
+    assessment_query = db.query(TaxAssessmentRecord).filter(
+        TaxAssessmentRecord.citizen_user_id == citizen_user_id,
+    )
+
+    if submission_type == "RPT" and tdn:
+        existing_submission = submission_query.filter(
+            hash_aware_match(TaxpayerIdentifierSubmission, "tdn", tdn),
+        ).order_by(TaxpayerIdentifierSubmission.created_at.desc()).first()
+        if existing_submission and taxpayer_submission_value(existing_submission, "status") != "Rejected":
+            raise HTTPException(status_code=400, detail="You already have an RPT verification record for this Tax Declaration Number.")
+        if assessment_query.filter(hash_aware_match(TaxAssessmentRecord, "tdn", tdn)).first():
+            raise HTTPException(status_code=400, detail="An RPT assessment for this Tax Declaration Number is already linked to your account.")
+
+    if submission_type == "BT" and mayor_permit_number and sec_dti_cda_number:
+        existing_submission = submission_query.filter(
+            hash_aware_match(TaxpayerIdentifierSubmission, "mayor_permit_number", mayor_permit_number),
+            hash_aware_match(TaxpayerIdentifierSubmission, "sec_dti_cda_number", sec_dti_cda_number),
+        ).order_by(TaxpayerIdentifierSubmission.created_at.desc()).first()
+        if existing_submission and taxpayer_submission_value(existing_submission, "status") != "Rejected":
+            raise HTTPException(status_code=400, detail="You already have a BT verification record for this business identifier.")
+        if assessment_query.filter(
+            hash_aware_match(TaxAssessmentRecord, "mayor_permit_number", mayor_permit_number),
+            hash_aware_match(TaxAssessmentRecord, "sec_dti_cda_number", sec_dti_cda_number),
+        ).first():
+            raise HTTPException(status_code=400, detail="A BT assessment for this business identifier is already linked to your account.")
 
 
 def verify_citizen_password(user: CitizenUser, password: str | None):
@@ -527,6 +601,7 @@ async def update_public_account_profile(
         email=normalized_email,
         mobile_number=mobile_number,
         address=current_user.address,
+        previous_email=previous_email,
     )
 
     db.add(ActivityLog(
@@ -633,6 +708,14 @@ async def create_taxpayer_identifier_submission(
         identifier_value = f"{normalized_permit} / {normalized_registration}"
 
     ensure_identifier_not_owned_by_another_user(
+        db,
+        submission_type=normalized_submission_type,
+        citizen_user_id=current_user.id,
+        tdn=normalized_tdn,
+        mayor_permit_number=normalized_permit,
+        sec_dti_cda_number=normalized_registration,
+    )
+    ensure_identifier_submission_not_duplicated_for_user(
         db,
         submission_type=normalized_submission_type,
         citizen_user_id=current_user.id,

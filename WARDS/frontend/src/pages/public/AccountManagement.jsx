@@ -40,6 +40,15 @@ const statusTone = {
   Rejected: 'bg-rose-100 text-rose-800 border-rose-200',
   Active: 'bg-blue-100 text-blue-800 border-blue-200',
   Inactive: 'bg-slate-100 text-slate-700 border-slate-200',
+  Pending: 'bg-amber-100 text-amber-800 border-amber-200',
+  Waiting: 'bg-sky-100 text-sky-800 border-sky-200',
+  Called: 'bg-violet-100 text-violet-800 border-violet-200',
+  Serving: 'bg-indigo-100 text-indigo-800 border-indigo-200',
+  Completed: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  Cancelled: 'bg-rose-100 text-rose-800 border-rose-200',
+  Expired: 'bg-slate-100 text-slate-700 border-slate-200',
+  Missed: 'bg-orange-100 text-orange-800 border-orange-200',
+  'No Show': 'bg-orange-100 text-orange-800 border-orange-200',
 };
 
 const formatCurrency = (value) =>

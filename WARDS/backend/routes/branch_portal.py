@@ -371,6 +371,7 @@ def archive_completed_queue(db: Session, queue: Queue, completed_by: str) -> Que
         .first()
     )
     history_record = existing_history or QueueHistory(queue_number=decrypted_queue_number)
+    history_record.citizen_user_id = queue.citizen_user_id
     history_record.branch_id = queue.branch_id
     history_record.service_type = queue_value(queue, "service_type")
     history_record.service_window = normalize_service_window_for_branch(db, queue.branch_id, queue_value(queue, "service_type"))

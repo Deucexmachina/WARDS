@@ -263,6 +263,7 @@ class BranchUpdate(BaseModel):
     contact: str
     counters: int
     status: str
+    window_accounts: List[BranchWindowAccountCreate] = []
     current_admin_password: str
 
 
@@ -273,6 +274,39 @@ class BranchDeleteRequest(BaseModel):
 def verify_branch_admin_password(current_user: Admin, provided_password: str):
     if not provided_password or not pwd_context.verify(provided_password, current_user.hashed_password):
         raise HTTPException(status_code=401, detail="Incorrect password. Please try again.")
+
+
+def normalize_window_accounts_payload(
+    requested_window_accounts: List[BranchWindowAccountCreate],
+    normalized_counter_count: int,
+) -> list[dict]:
+    normalized_window_accounts = []
+    used_service_windows: set[str] = set()
+    for index in range(normalized_counter_count):
+        requested = requested_window_accounts[index] if index < len(requested_window_accounts) else None
+        assigned_window_number = normalize_assigned_window_number(
+            requested.assigned_window_number if requested else index + 1,
+            SERVICE_WINDOW_SEQUENCE[index],
+        )
+        requested_role = (requested.service_window if requested else SERVICE_WINDOW_SEQUENCE[index] or "").strip().upper()
+        if requested_role == "OTHER":
+            if assigned_window_number not in (4, 5):
+                raise HTTPException(status_code=400, detail="Other queue windows are only available for Window 4 and Window 5.")
+            service_window = f"QW{assigned_window_number}"
+            window_label = normalize_custom_window_label(requested.custom_label if requested else None, assigned_window_number)
+        else:
+            service_window = normalize_service_window(requested.service_window) if requested else SERVICE_WINDOW_SEQUENCE[index]
+            window_label = SERVICE_WINDOW_LABELS.get(service_window, service_window)
+        if service_window in used_service_windows:
+            role_label = SERVICE_ROLE_LABELS.get(service_window, window_label)
+            raise HTTPException(status_code=400, detail=f"{role_label} is already assigned to another window in this branch setup.")
+        used_service_windows.add(service_window)
+        normalized_window_accounts.append({
+            "service_window": service_window,
+            "assigned_window_number": assigned_window_number,
+            "window_label": window_label,
+        })
+    return normalized_window_accounts
 
 @router.get("/")
 async def get_all_branches(db: Session = Depends(get_db)):
@@ -410,32 +444,7 @@ async def create_branch(
     if branch.admin_email:
         reserved_emails.add(normalize_email(branch.admin_email, check_deliverability=True))
     requested_window_accounts = branch.window_accounts or []
-    normalized_window_accounts = []
-    used_service_windows: set[str] = set()
-    for index in range(normalized_counter_count):
-        requested = requested_window_accounts[index] if index < len(requested_window_accounts) else None
-        assigned_window_number = normalize_assigned_window_number(
-            requested.assigned_window_number if requested else index + 1,
-            SERVICE_WINDOW_SEQUENCE[index],
-        )
-        requested_role = (requested.service_window if requested else SERVICE_WINDOW_SEQUENCE[index] or "").strip().upper()
-        if requested_role == "OTHER":
-            if assigned_window_number not in (4, 5):
-                raise HTTPException(status_code=400, detail="Other queue windows are only available for Window 4 and Window 5.")
-            service_window = f"QW{assigned_window_number}"
-            window_label = normalize_custom_window_label(requested.custom_label if requested else None, assigned_window_number)
-        else:
-            service_window = normalize_service_window(requested.service_window) if requested else SERVICE_WINDOW_SEQUENCE[index]
-            window_label = SERVICE_WINDOW_LABELS.get(service_window, service_window)
-        if service_window in used_service_windows:
-            role_label = SERVICE_ROLE_LABELS.get(service_window, window_label)
-            raise HTTPException(status_code=400, detail=f"{role_label} is already assigned to another window in this branch setup.")
-        used_service_windows.add(service_window)
-        normalized_window_accounts.append({
-            "service_window": service_window,
-            "assigned_window_number": assigned_window_number,
-            "window_label": window_label,
-        })
+    normalized_window_accounts = normalize_window_accounts_payload(requested_window_accounts, normalized_counter_count)
 
     # Create admin account if credentials provided
     if branch.admin_username and branch.admin_email and branch.admin_password:
@@ -596,15 +605,44 @@ async def update_branch(
 
     normalized_name = normalize_branch_name(branch.name)
     ensure_branch_name_is_unique(db, normalized_name, exclude_branch_id=db_branch.id)
+    normalized_counter_count = normalize_counter_count(branch.counters)
+    normalized_window_accounts = normalize_window_accounts_payload(branch.window_accounts or [], normalized_counter_count)
 
     # Update only provided fields
     update_data = branch.dict(exclude_unset=True)
     update_data.pop("current_admin_password", None)
+    update_data.pop("window_accounts", None)
     update_data["name"] = normalized_name
-    update_data["counters"] = normalize_counter_count(update_data.get("counters", db_branch.counters))
+    update_data["counters"] = normalized_counter_count
     for key, value in update_data.items():
         setattr(db_branch, key, value)
     db_branch.dashboard_url = build_branch_dashboard_url(db_branch.name)
+
+    existing_window_accounts = (
+        db.query(BranchStaff)
+        .filter(
+            BranchStaff.branch_id == db_branch.id,
+            BranchStaff.role == "branch_staff",
+            BranchStaff.account_scope == "queue_window",
+        )
+        .order_by(BranchStaff.assigned_window_number.asc(), BranchStaff.id.asc())
+        .all()
+    )
+    if len(existing_window_accounts) < normalized_counter_count:
+        raise HTTPException(status_code=400, detail="This branch is missing queue window staff accounts. Please recreate the branch windows before editing assignments.")
+
+    for index, window_account in enumerate(normalized_window_accounts):
+        staff_account = existing_window_accounts[index]
+        staff_account.service_window = window_account["service_window"]
+        staff_account.service_window_label = window_account["window_label"]
+        staff_account.assigned_window_number = window_account["assigned_window_number"]
+        staff_account.status = "Active"
+
+    for index, staff_account in enumerate(existing_window_accounts):
+        if index < normalized_counter_count:
+            continue
+        staff_account.status = "Inactive"
+
     apply_branch_security_fields(db_branch)
     
     log = ActivityLog(

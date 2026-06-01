@@ -12,7 +12,7 @@ import random
 import re
 
 from database.models import (
-    Branch, CitizenUser, Queue, Service, BranchService, FAQ, TaxpayerGuide,
+    Branch, CitizenUser, Queue, QueueHistory, Service, BranchService, FAQ, TaxpayerGuide,
     BranchOperatingHours, Announcement, QueueActivity, ReceiptRequest,
     Payment, get_db
 )
@@ -1002,6 +1002,85 @@ async def get_my_active_ticket(
         }
     }
 
+@router.get("/queue/history")
+async def get_my_queue_history(
+    db: Session = Depends(get_db),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_user_security),
+):
+    """Get the authenticated citizen's queue records across active and archived sources."""
+    current_citizen = resolve_authenticated_citizen(credentials, db)
+    if not current_citizen:
+        raise HTTPException(status_code=401, detail="Authentication required to view your history")
+
+    citizen_email = (get_decrypted_or_raw(current_citizen, "email") or current_citizen.email or "").strip().lower()
+
+    queue_records = (
+        db.query(Queue)
+        .filter(
+            Queue.citizen_user_id == current_citizen.id,
+        )
+        .order_by(Queue.created_at.desc())
+        .limit(50)
+        .all()
+    )
+
+    archived_records = (
+        db.query(QueueHistory)
+        .filter(QueueHistory.citizen_user_id == current_citizen.id)
+        .all()
+    )
+    if citizen_email:
+        archived_records.extend(
+            db.query(QueueHistory)
+            .filter(func.lower(QueueHistory.email) == citizen_email)
+            .all()
+        )
+
+    items_by_queue_number: dict[str, dict] = {}
+
+    for queue in queue_records:
+        branch = db.query(Branch).filter(Branch.id == queue.branch_id).first()
+        queue_number = queue_value(queue, "queue_number")
+        items_by_queue_number[queue_number] = {
+            "id": queue.id,
+            "queue_number": queue_number,
+            "branch_name": (get_decrypted_or_raw(branch, "name") or branch.name) if branch else "Unknown",
+            "service_type": queue_value(queue, "service_type"),
+            "queue_type": queue_value(queue, "queue_type"),
+            "status": queue_value(queue, "status"),
+            "created_at": serialize_manila_datetime(queue.created_at),
+            "completed_at": serialize_manila_datetime(queue.completed_at),
+            "served_at": serialize_manila_datetime(queue.served_at),
+        }
+
+    for history in archived_records:
+        queue_number = (history.queue_number or "").strip()
+        if not queue_number or queue_number in items_by_queue_number:
+            continue
+        branch = db.query(Branch).filter(Branch.id == history.branch_id).first()
+        items_by_queue_number[queue_number] = {
+            "id": f"history-{history.id}",
+            "queue_number": queue_number,
+            "branch_name": (get_decrypted_or_raw(branch, "name") or branch.name) if branch else "Unknown",
+            "service_type": history.service_type,
+            "queue_type": history.queue_type,
+            "status": history.final_status,
+            "created_at": serialize_manila_datetime(history.created_at),
+            "completed_at": serialize_manila_datetime(history.completed_at),
+            "served_at": serialize_manila_datetime(history.served_at),
+        }
+
+    history_items = sorted(
+        items_by_queue_number.values(),
+        key=lambda item: item.get("completed_at") or item.get("served_at") or item.get("created_at") or "",
+        reverse=True,
+    )[:50]
+
+    return {
+        "history": history_items,
+        "total": len(history_items)
+    }
+
 @router.get("/queue/{queue_number}")
 async def check_queue_status(queue_number: str, db: Session = Depends(get_db)):
     """Check queue status by queue number"""
@@ -1028,50 +1107,6 @@ async def check_queue_status(queue_number: str, db: Session = Depends(get_db)):
         "position": position,
         "estimated_wait_time": queue.estimated_wait_time,
         "created_at": queue.created_at.isoformat()
-    }
-
-@router.get("/queue/history")
-async def get_my_queue_history(
-    db: Session = Depends(get_db),
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_user_security),
-):
-    """Get the authenticated citizen's queue history (completed, expired, cancelled)"""
-    current_citizen = resolve_authenticated_citizen(credentials, db)
-    if not current_citizen:
-        raise HTTPException(status_code=401, detail="Authentication required to view your history")
-    
-    # Statuses that should be in history (not active)
-    history_statuses = ["Completed", "Cancelled", "Expired", "Missed", "No Show"]
-    
-    history_queues = (
-        db.query(Queue)
-        .filter(
-            Queue.citizen_user_id == current_citizen.id,
-            hash_aware_any(Queue, "status", history_statuses)
-        )
-        .order_by(Queue.created_at.desc())
-        .limit(50)
-        .all()
-    )
-    
-    history_items = []
-    for queue in history_queues:
-        branch = db.query(Branch).filter(Branch.id == queue.branch_id).first()
-        history_items.append({
-            "id": queue.id,
-            "queue_number": queue_value(queue, "queue_number"),
-            "branch_name": (get_decrypted_or_raw(branch, "name") or branch.name) if branch else "Unknown",
-            "service_type": queue_value(queue, "service_type"),
-            "queue_type": queue_value(queue, "queue_type"),
-            "status": queue_value(queue, "status"),
-            "created_at": serialize_manila_datetime(queue.created_at),
-            "completed_at": serialize_manila_datetime(queue.completed_at),
-            "served_at": serialize_manila_datetime(queue.served_at),
-        })
-    
-    return {
-        "history": history_items,
-        "total": len(history_items)
     }
 
 # ============= Receipt Requisition Module =============

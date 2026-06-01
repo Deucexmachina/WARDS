@@ -1142,6 +1142,7 @@ class QueueHistory(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     queue_number = Column(String, unique=True, index=True)
+    citizen_user_id = Column(Integer, ForeignKey("citizen_users.id"), nullable=True, index=True)
     branch_id = Column(Integer, ForeignKey("branches.id"), index=True)
     service_type = Column(String, nullable=True)
     service_window = Column(String, nullable=True, index=True)

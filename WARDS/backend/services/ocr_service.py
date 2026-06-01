@@ -331,7 +331,7 @@ class OCRService:
         detected_category = max(scores, key=scores.get)
         max_score = scores[detected_category]
         if max_score <= 0:
-            detected_category = "MISC"
+            detected_category = "UNKNOWN"
 
         confidence = 0.45
         if max_score >= 4:

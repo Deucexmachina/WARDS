@@ -635,6 +635,17 @@ def ensure_auth_extensions():
             if "ix_queues_appointment_reservation_key_unique" not in queue_indexes:
                 conn.execute(text("CREATE UNIQUE INDEX ix_queues_appointment_reservation_key_unique ON queues (appointment_reservation_key)"))
 
+        queue_history_columns = {column["name"] for column in inspector.get_columns("queue_history")}
+        if "citizen_user_id" not in queue_history_columns:
+            if engine.dialect.name == "sqlite":
+                conn.execute(text("ALTER TABLE queue_history ADD COLUMN citizen_user_id INTEGER"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_queue_history_citizen_user_id ON queue_history (citizen_user_id)"))
+            else:
+                conn.execute(text("ALTER TABLE queue_history ADD COLUMN citizen_user_id INTEGER NULL"))
+                queue_history_indexes = {index["name"] for index in inspect(conn).get_indexes("queue_history")}
+                if "ix_queue_history_citizen_user_id" not in queue_history_indexes:
+                    conn.execute(text("CREATE INDEX ix_queue_history_citizen_user_id ON queue_history (citizen_user_id)"))
+
         business_registry_columns = {column["name"] for column in inspector.get_columns("business_registry")}
         for column_name, column_type in (
             ("business_name_hash", "VARCHAR(255)"),

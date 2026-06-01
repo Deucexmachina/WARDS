@@ -105,6 +105,10 @@ class ReceiptRecordPayload(BaseModel):
     selected_category: str | None = None
     detected_category: str | None = None
     category_match: bool | None = None
+    source_image_original_filename: str | None = None
+    source_image_suggested_filename: str | None = None
+    filename_matches_taxpayer: bool | None = None
+    auto_rename_source_image: bool | None = None
 
 
 class MobileReceiptUploadSessionCreate(BaseModel):
@@ -550,25 +554,64 @@ def compute_image_ahash(image_bytes: bytes) -> str:
 
 
 def sanitize_receipt_filename_component(value: str | None) -> str:
-    normalized = re.sub(r"[^A-Za-z0-9]+", "_", (value or "").strip())
-    normalized = re.sub(r"_+", "_", normalized).strip("_")
+    normalized = re.sub(r"[\\\\/:*?\"<>|]+", " ", (value or "").strip())
+    normalized = re.sub(r"\s+", " ", normalized).strip()
     return normalized or "receipt"
 
 
-def rename_receipt_source_image(source_image_path: str | None, taxpayer_name: str | None) -> str | None:
+def normalize_receipt_filename_for_compare(value: str | None) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (value or "").strip().lower())
+
+
+def build_receipt_filename(filename: str | None, taxpayer_name: str | None) -> str:
+    extension = os.path.splitext(filename or "")[1].lower() or ".jpg"
+    base_name = (taxpayer_name or "").strip() or "receipt"
+    return f"{base_name}{extension}"
+
+
+def build_receipt_filename_validation(
+    *,
+    filename: str | None,
+    taxpayer_name: str | None,
+) -> dict:
+    original_filename = os.path.basename(filename or "receipt.jpg")
+    suggested_filename = build_receipt_filename(original_filename, taxpayer_name)
+    filename_stem = os.path.splitext(original_filename)[0]
+    suggested_stem = os.path.splitext(suggested_filename)[0]
+    filename_matches_taxpayer = (
+        bool(taxpayer_name)
+        and normalize_receipt_filename_for_compare(filename_stem) == normalize_receipt_filename_for_compare(suggested_stem)
+    )
+    return {
+        "original_filename": original_filename,
+        "suggested_filename": suggested_filename,
+        "filename_matches_taxpayer": filename_matches_taxpayer,
+        "message": (
+            ""
+            if filename_matches_taxpayer or not taxpayer_name
+            else (
+                f"The uploaded file name must match the taxpayer name. "
+                f"Rename it to {suggested_filename} or use auto rename."
+            )
+        ),
+    }
+
+
+def rename_receipt_source_image(source_image_path: str | None, target_filename: str | None) -> str | None:
     if not source_image_path or not os.path.exists(source_image_path):
         return source_image_path
 
     directory, original_filename = os.path.split(source_image_path)
     extension = os.path.splitext(original_filename)[1].lower() or ".jpg"
-    base_name = sanitize_receipt_filename_component(taxpayer_name)
-    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-    candidate_name = f"{base_name}_{timestamp}{extension}"
+    raw_target_filename = (target_filename or "").strip() or f"receipt{extension}"
+    target_stem = os.path.splitext(raw_target_filename)[0]
+    base_name = sanitize_receipt_filename_component(target_stem)
+    candidate_name = f"{base_name}{extension}"
     candidate_path = os.path.join(directory, candidate_name)
     suffix = 1
 
     while os.path.exists(candidate_path) and os.path.abspath(candidate_path) != os.path.abspath(source_image_path):
-        candidate_name = f"{base_name}_{timestamp}_{suffix}{extension}"
+        candidate_name = f"{base_name}_{suffix}{extension}"
         candidate_path = os.path.join(directory, candidate_name)
         suffix += 1
 
@@ -588,6 +631,48 @@ def ensure_valid_image_upload(image_bytes: bytes):
             image.verify()
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Uploaded file is not a valid image") from exc
+
+
+def validate_receipt_document_analysis(
+    *,
+    raw_text: str | None,
+    ref_number: str | None,
+    taxpayer_name: str | None,
+    transaction_date: str | None,
+    amount: float | None,
+):
+    normalized_text = (raw_text or "").upper()
+    receipt_keywords = [
+        "OFFICIAL RECEIPT",
+        "REPUBLIC OF THE PHILIPPINES",
+        "CITY TREASURER",
+        "MACHINE VALIDATION",
+        "BILL NUMBER",
+        "RECEIVED",
+        "TOTAL",
+        "AMOUNT",
+        "PAYOR",
+        "ACCOUNT CODE",
+    ]
+    matched_keywords = [keyword for keyword in receipt_keywords if keyword in normalized_text]
+    populated_fields = sum(
+        1 for value in [ref_number, taxpayer_name, transaction_date, amount] if value not in ("", None)
+    )
+    if len(matched_keywords) >= 2 or populated_fields >= 3:
+        return
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            "The uploaded file does not appear to be a valid receipt document. "
+            "Please upload a legitimate receipt image with readable receipt details."
+        ),
+    )
+
+
+def compare_taxpayer_names(left: str | None, right: str | None) -> bool:
+    if not left or not right:
+        return False
+    return normalize_receipt_filename_for_compare(left) == normalize_receipt_filename_for_compare(right)
 
 
 def ahash_distance(hash_a: str | None, hash_b: str | None) -> int:
@@ -708,7 +793,34 @@ def save_receipt_record_payload(
                 ),
             )
 
-    renamed_source_image_path = rename_receipt_source_image(payload.source_image_path, payload.taxpayer_name)
+    validate_receipt_document_analysis(
+        raw_text=payload.raw_text,
+        ref_number=normalized_ref_number,
+        taxpayer_name=payload.taxpayer_name,
+        transaction_date=payload.transaction_date,
+        amount=payload.amount,
+    )
+
+    filename_validation = build_receipt_filename_validation(
+        filename=payload.source_image_original_filename or payload.source_image_suggested_filename or payload.source_image_path,
+        taxpayer_name=payload.taxpayer_name,
+    )
+    if payload.taxpayer_name and not filename_validation["filename_matches_taxpayer"] and not payload.auto_rename_source_image:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "receipt_filename_mismatch",
+                "message": filename_validation["message"],
+                "extracted_taxpayer_name": payload.taxpayer_name,
+                "suggested_filename": filename_validation["suggested_filename"],
+                "original_filename": filename_validation["original_filename"],
+            },
+        )
+
+    renamed_source_image_path = rename_receipt_source_image(
+        payload.source_image_path,
+        filename_validation["suggested_filename"],
+    )
 
     record = ReceiptRecord(
         branch_id=branch_id,
@@ -781,7 +893,16 @@ def build_receipt_ocr_result(
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    detected_category = normalize_receipt_category(result.get("detected_category") or normalized_category)
+    raw_detected_category = (result.get("detected_category") or normalized_category).strip().upper()
+    if raw_detected_category == "UNKNOWN":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "The uploaded file does not appear to be a valid receipt document. "
+                "Please upload a legitimate receipt image with readable receipt details."
+            ),
+        )
+    detected_category = normalize_receipt_category(raw_detected_category)
     category_match = result.get("category_match", True)
     if detected_category != normalized_category or category_match is False:
         raise HTTPException(
@@ -801,6 +922,21 @@ def build_receipt_ocr_result(
             "Please upload a different receipt image."
         )
 
+    validate_receipt_document_analysis(
+        raw_text=result.get("raw_text"),
+        ref_number=result.get("ref_number"),
+        taxpayer_name=result.get("taxpayer_name"),
+        transaction_date=result.get("transaction_date"),
+        amount=result.get("amount"),
+    )
+
+    filename_validation = build_receipt_filename_validation(
+        filename=file.filename or os.path.basename(file_path),
+        taxpayer_name=result.get("taxpayer_name"),
+    )
+    if result.get("taxpayer_name") and not filename_validation["filename_matches_taxpayer"]:
+        save_blocked = True
+
     result["source_image_path"] = file_path
     result["source_image_sha256"] = image_sha256
     result["source_image_ahash"] = image_ahash
@@ -813,6 +949,11 @@ def build_receipt_ocr_result(
     result["duplicate_record"] = serialize_duplicate_record(duplicate_record)
     result["duplicate_warning"] = duplicate_warning
     result["save_blocked"] = save_blocked
+    result["source_image_original_filename"] = os.path.basename(file.filename or os.path.basename(file_path))
+    result["source_image_suggested_filename"] = filename_validation["suggested_filename"]
+    result["filename_matches_taxpayer"] = filename_validation["filename_matches_taxpayer"]
+    result["file_name_validation_message"] = filename_validation["message"]
+    result["auto_rename_source_image"] = False
     return result
 
 
@@ -988,15 +1129,23 @@ async def upload_receipt_for_ocr(
     with open(file_path, "wb") as output_file:
         output_file.write(image_data)
 
-    return build_receipt_ocr_result(
-        db=db,
-        image_data=image_data,
-        file=file,
-        file_path=file_path,
-        category=normalized_category,
-        branch_id=current_staff.branch_id,
-        uploaded_by=current_staff.username,
-    )
+    try:
+        return build_receipt_ocr_result(
+            db=db,
+            image_data=image_data,
+            file=file,
+            file_path=file_path,
+            category=normalized_category,
+            branch_id=current_staff.branch_id,
+            uploaded_by=current_staff.username,
+        )
+    except HTTPException:
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+        raise
 
 
 @router.post("/records/mobile-upload-sessions")
@@ -1118,7 +1267,7 @@ async def upload_mobile_receipt_for_ocr(
         )
     except HTTPException as exc:
         session["status"] = "error"
-        session["error"] = str(exc.detail)
+        session["error"] = exc.detail.get("message") if isinstance(exc.detail, dict) else str(exc.detail)
         raise
 
     session["status"] = "processed"
@@ -1459,6 +1608,7 @@ async def complete_appointment_request(request_id: str, current_staff=Depends(ge
 async def upload_release_copy(
     request_id: str,
     file: UploadFile = File(...),
+    auto_rename: bool = Form(False),
     current_staff=Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
@@ -1485,9 +1635,68 @@ async def upload_release_copy(
     with open(file_path, "wb") as output_file:
         output_file.write(file_bytes)
 
+    expected_tax_type = normalize_receipt_category(receipt_request_value(receipt_request, "tax_type") or "RPT")
+    try:
+        analysis = build_receipt_ocr_result(
+            db=db,
+            image_data=file_bytes,
+            file=file,
+            file_path=file_path,
+            category=expected_tax_type,
+            branch_id=current_staff.branch_id,
+            uploaded_by=current_staff.username,
+        )
+    except HTTPException:
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+        raise
+
+    expected_taxpayer_name = receipt_request_value(receipt_request, "taxpayer_name")
+    extracted_taxpayer_name = (analysis.get("taxpayer_name") or "").strip() or expected_taxpayer_name
+    if analysis.get("taxpayer_name") and expected_taxpayer_name and not compare_taxpayer_names(analysis.get("taxpayer_name"), expected_taxpayer_name):
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"This receipt belongs to {analysis.get('taxpayer_name')}, but the request expects "
+                f"{expected_taxpayer_name}. Please upload the correct taxpayer receipt."
+            ),
+        )
+
+    filename_validation = build_receipt_filename_validation(
+        filename=file.filename or safe_name,
+        taxpayer_name=extracted_taxpayer_name,
+    )
+    if extracted_taxpayer_name and not filename_validation["filename_matches_taxpayer"] and not auto_rename:
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "receipt_filename_mismatch",
+                "message": filename_validation["message"],
+                "extracted_taxpayer_name": extracted_taxpayer_name,
+                "suggested_filename": filename_validation["suggested_filename"],
+                "original_filename": filename_validation["original_filename"],
+            },
+        )
+
+    renamed_release_copy_path = rename_receipt_source_image(file_path, filename_validation["suggested_filename"])
+    final_release_copy_filename = os.path.basename(renamed_release_copy_path or file_path)
+
     previous_release_copy_path = receipt_request_value(receipt_request, "release_copy_path")
-    receipt_request.release_copy_path = file_path
-    receipt_request.release_copy_filename = file.filename or safe_name
+    receipt_request.release_copy_path = renamed_release_copy_path
+    receipt_request.release_copy_filename = final_release_copy_filename
     sync_request_status(receipt_request)
     apply_receipt_request_security(receipt_request)
     db.add(ActivityLog(

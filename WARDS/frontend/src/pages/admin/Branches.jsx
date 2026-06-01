@@ -128,6 +128,36 @@ const EMPTY_WINDOW_ACCOUNTS = {
   W5: { service_window: 'OTHER', custom_label: '' },
 };
 
+const buildWindowAccountsState = (windowAccounts = []) => {
+  const nextState = {
+    ...EMPTY_WINDOW_ACCOUNTS,
+    W1: { ...EMPTY_WINDOW_ACCOUNTS.W1 },
+    W2: { ...EMPTY_WINDOW_ACCOUNTS.W2 },
+    W3: { ...EMPTY_WINDOW_ACCOUNTS.W3 },
+    W4: { ...EMPTY_WINDOW_ACCOUNTS.W4 },
+    W5: { ...EMPTY_WINDOW_ACCOUNTS.W5 },
+  };
+
+  windowAccounts.forEach((account) => {
+    const windowKey = `W${account.assigned_window_number}`;
+    if (!nextState[windowKey]) {
+      return;
+    }
+
+    const serviceWindow = account.service_window === 'QW4' || account.service_window === 'QW5'
+      ? 'OTHER'
+      : account.service_window;
+
+    nextState[windowKey] = {
+      ...nextState[windowKey],
+      service_window: serviceWindow,
+      custom_label: serviceWindow === 'OTHER' ? (account.service_window_label || '') : '',
+    };
+  });
+
+  return nextState;
+};
+
 const EMPTY_BRANCH_FORM = {
   name: BRANCH_PRESETS[0]?.name || '',
   location: BRANCH_PRESETS[0]?.location || '',
@@ -190,6 +220,24 @@ const Branches = () => {
 
   const getSelectedServiceWindow = (windowKey) => (
     windowAccounts[windowKey]?.service_window || DEFAULT_SERVICE_BY_WINDOW[windowKey] || 'MISC'
+  );
+
+  const getUsedServiceWindows = (currentWindowKey) => {
+    const used = new Set();
+    getActiveWindowOptions().forEach((option) => {
+      if (option.key === currentWindowKey) {
+        return;
+      }
+      const selectedServiceWindow = getSelectedServiceWindow(option.key);
+      if (selectedServiceWindow && selectedServiceWindow !== 'OTHER') {
+        used.add(selectedServiceWindow);
+      }
+    });
+    return used;
+  };
+
+  const isServiceChoiceUnavailable = (windowKey, choiceKey) => (
+    choiceKey !== 'OTHER' && getUsedServiceWindows(windowKey).has(choiceKey)
   );
 
   const handleWindowAccountChange = (windowKey, field, value) => {
@@ -337,7 +385,7 @@ const Branches = () => {
     });
     setModalError('');
     setAdminEmailError('');
-    setWindowAccounts(EMPTY_WINDOW_ACCOUNTS);
+    setWindowAccounts(buildWindowAccountsState(branch.window_accounts || []));
     setSuccessMessage('');
     setPendingNotice('');
     setSelectedMapLocation(null);
@@ -419,6 +467,13 @@ const Branches = () => {
     try {
       let response;
       if (editingBranch) {
+        const editWindowAccounts = buildWindowAccountPayload(getNormalizedCounterCount(formData.counters));
+        const windowValidationError = validateWindowAccountPayload(editWindowAccounts);
+        if (windowValidationError) {
+          setModalError(windowValidationError);
+          setLoading(false);
+          return;
+        }
         setPendingBranchSave({
           branchId: editingBranch.id,
           payload: {
@@ -427,6 +482,7 @@ const Branches = () => {
             contact: formData.contact,
             counters: formData.counters,
             status: formData.status,
+            window_accounts: editWindowAccounts,
           },
         });
         setAuthModalError('');
@@ -1043,7 +1099,11 @@ const Branches = () => {
                               className="w-full rounded-lg border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-800 focus:border-transparent focus:ring-2 focus:ring-accent"
                             >
                               {serviceChoices.map((choice) => (
-                                <option key={choice.key} value={choice.key}>
+                                <option
+                                  key={choice.key}
+                                  value={choice.key}
+                                  disabled={isServiceChoiceUnavailable(option.key, choice.key)}
+                                >
                                   {choice.label}
                                 </option>
                               ))}
