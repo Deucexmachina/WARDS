@@ -75,6 +75,22 @@ SERVICE_ROLE_LABELS = {
     "BUSINESS": "BT",
     "MISC": "MISC",
 }
+RESERVED_CUSTOM_WINDOW_LABELS = {
+    "RPT",
+    "RPT_WINDOW",
+    "REAL_PROPERTY_TAX",
+    "REAL_PROPERTY_TAX_WINDOW",
+    "BT",
+    "BT_WINDOW",
+    "BUSINESS",
+    "BUSINESS_WINDOW",
+    "BUSINESS_TAX",
+    "BUSINESS_TAX_WINDOW",
+    "MISC",
+    "MISC_WINDOW",
+    "MISCELLANEOUS",
+    "MISCELLANEOUS_WINDOW",
+}
 MAX_QUEUE_WINDOW_ACCOUNTS = 5
 
 
@@ -184,6 +200,15 @@ def normalize_custom_window_label(value: Optional[str], assigned_window_number: 
         raise HTTPException(status_code=400, detail=f"Please enter a name for Window {assigned_window_number}.")
     if len(label) > 80:
         raise HTTPException(status_code=400, detail="Window name must be 80 characters or less.")
+    normalized_label = re.sub(r"[^A-Za-z0-9]+", "_", label.upper()).strip("_")
+    if normalized_label in RESERVED_CUSTOM_WINDOW_LABELS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f'Window {assigned_window_number} custom name cannot be "{label}". '
+                "Please use a unique custom transaction name instead of RPT, BT, or MISC."
+            ),
+        )
     return label
 
 

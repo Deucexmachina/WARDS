@@ -71,6 +71,22 @@ const SERVICE_WINDOW_CHOICES = [
   { key: 'BUSINESS', label: 'BT' },
   { key: 'MISC', label: 'MISC' },
 ];
+const RESERVED_CUSTOM_WINDOW_LABELS = new Set([
+  'RPT',
+  'RPT_WINDOW',
+  'REAL_PROPERTY_TAX',
+  'REAL_PROPERTY_TAX_WINDOW',
+  'BT',
+  'BT_WINDOW',
+  'BUSINESS',
+  'BUSINESS_WINDOW',
+  'BUSINESS_TAX',
+  'BUSINESS_TAX_WINDOW',
+  'MISC',
+  'MISC_WINDOW',
+  'MISCELLANEOUS',
+  'MISCELLANEOUS_WINDOW',
+]);
 const DEFAULT_SERVICE_BY_WINDOW = {
   W1: 'RPT',
   W2: 'BUSINESS',
@@ -158,6 +174,14 @@ const buildWindowAccountsState = (windowAccounts = []) => {
 
   return nextState;
 };
+
+const normalizeCustomWindowLabelKey = (value) => (
+  (value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+);
 
 const EMPTY_BRANCH_FORM = {
   name: BRANCH_PRESETS[0]?.name || '',
@@ -304,6 +328,9 @@ const Branches = () => {
         }
         if (!account.custom_label) {
           return `Please enter a name for Window ${account.assigned_window_number}.`;
+        }
+        if (RESERVED_CUSTOM_WINDOW_LABELS.has(normalizeCustomWindowLabelKey(account.custom_label))) {
+          return `Window ${account.assigned_window_number} custom name cannot be "${account.custom_label}". Please use a unique custom transaction name instead of RPT, BT, or MISC.`;
         }
         continue;
       }
