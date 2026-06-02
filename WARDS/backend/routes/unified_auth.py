@@ -705,6 +705,7 @@ async def unified_setup_mfa(request: Request, credentials: UnifiedSetupMFAReques
 
 
 @router.post("/request-password-reset")
+@limiter.limit("5/hour")
 async def unified_request_password_reset(
     request: Request,
     reset_request: UnifiedPasswordResetRequest,
@@ -738,6 +739,7 @@ async def unified_request_password_reset(
 
 
 @router.post("/reset-password")
+@limiter.limit("5/minute")
 async def unified_reset_password(
     request: Request,
     reset_data: UnifiedPasswordResetConfirm,
