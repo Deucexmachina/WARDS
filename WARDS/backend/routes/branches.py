@@ -282,12 +282,16 @@ def normalize_window_accounts_payload(
 ) -> list[dict]:
     normalized_window_accounts = []
     used_service_windows: set[str] = set()
+    used_assigned_window_numbers: set[int] = set()
     for index in range(normalized_counter_count):
         requested = requested_window_accounts[index] if index < len(requested_window_accounts) else None
         assigned_window_number = normalize_assigned_window_number(
             requested.assigned_window_number if requested else index + 1,
             SERVICE_WINDOW_SEQUENCE[index],
         )
+        if assigned_window_number in used_assigned_window_numbers:
+            raise HTTPException(status_code=400, detail=f"Window {assigned_window_number} is already assigned to another queue window staff account.")
+        used_assigned_window_numbers.add(assigned_window_number)
         requested_role = (requested.service_window if requested else SERVICE_WINDOW_SEQUENCE[index] or "").strip().upper()
         if requested_role == "OTHER":
             if assigned_window_number not in (4, 5):

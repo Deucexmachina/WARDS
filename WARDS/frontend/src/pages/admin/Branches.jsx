@@ -121,11 +121,11 @@ const fetchMapTilerJson = async (url) => {
 };
 
 const EMPTY_WINDOW_ACCOUNTS = {
-  W1: { service_window: 'RPT' },
-  W2: { service_window: 'BUSINESS' },
-  W3: { service_window: 'MISC' },
-  W4: { service_window: 'OTHER', custom_label: '' },
-  W5: { service_window: 'OTHER', custom_label: '' },
+  W1: { assigned_window_number: 1, service_window: 'RPT' },
+  W2: { assigned_window_number: 2, service_window: 'BUSINESS' },
+  W3: { assigned_window_number: 3, service_window: 'MISC' },
+  W4: { assigned_window_number: 4, service_window: 'OTHER', custom_label: '' },
+  W5: { assigned_window_number: 5, service_window: 'OTHER', custom_label: '' },
 };
 
 const buildWindowAccountsState = (windowAccounts = []) => {
@@ -150,6 +150,7 @@ const buildWindowAccountsState = (windowAccounts = []) => {
 
     nextState[windowKey] = {
       ...nextState[windowKey],
+      assigned_window_number: account.assigned_window_number || nextState[windowKey].assigned_window_number,
       service_window: serviceWindow,
       custom_label: serviceWindow === 'OTHER' ? (account.service_window_label || '') : '',
     };
@@ -222,6 +223,11 @@ const Branches = () => {
     windowAccounts[windowKey]?.service_window || DEFAULT_SERVICE_BY_WINDOW[windowKey] || 'MISC'
   );
 
+  const getSelectedAssignedWindowNumber = (windowKey, fallbackNumber) => {
+    const parsed = Number(windowAccounts[windowKey]?.assigned_window_number);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : fallbackNumber;
+  };
+
   const getUsedServiceWindows = (currentWindowKey) => {
     const used = new Set();
     getActiveWindowOptions().forEach((option) => {
@@ -236,8 +242,23 @@ const Branches = () => {
     return used;
   };
 
+  const getUsedAssignedWindowNumbers = (currentWindowKey) => {
+    const used = new Set();
+    getActiveWindowOptions().forEach((option) => {
+      if (option.key === currentWindowKey) {
+        return;
+      }
+      used.add(getSelectedAssignedWindowNumber(option.key, option.number));
+    });
+    return used;
+  };
+
   const isServiceChoiceUnavailable = (windowKey, choiceKey) => (
     choiceKey !== 'OTHER' && getUsedServiceWindows(windowKey).has(choiceKey)
+  );
+
+  const isAssignedWindowNumberUnavailable = (windowKey, windowNumber) => (
+    getUsedAssignedWindowNumbers(windowKey).has(windowNumber)
   );
 
   const handleWindowAccountChange = (windowKey, field, value) => {
@@ -262,7 +283,7 @@ const Branches = () => {
         const serviceWindow = account.service_window || DEFAULT_SERVICE_BY_WINDOW[option.key] || 'MISC';
         return {
           service_window: serviceWindow,
-          assigned_window_number: option.number,
+          assigned_window_number: getSelectedAssignedWindowNumber(option.key, option.number),
           custom_label: serviceWindow === 'OTHER' ? (account.custom_label || '').trim() : undefined,
         };
       })
@@ -270,7 +291,13 @@ const Branches = () => {
 
   const validateWindowAccountPayload = (windowAccountPayload) => {
     const usedServiceWindows = new Set();
+    const usedAssignedWindowNumbers = new Set();
     for (const account of windowAccountPayload) {
+      if (usedAssignedWindowNumbers.has(account.assigned_window_number)) {
+        return `Window ${account.assigned_window_number} is already assigned to another queue window staff account.`;
+      }
+      usedAssignedWindowNumbers.add(account.assigned_window_number);
+
       if (account.service_window === 'OTHER') {
         if (![4, 5].includes(account.assigned_window_number)) {
           return 'Other queue windows are only available for Window 4 and Window 5.';
@@ -1015,68 +1042,74 @@ const Branches = () => {
                   <option value="Inactive">Inactive</option>
                 </select>
               </div>
-              
-              {!editingBranch && (
+              {(
                 <>
-                  <div className="md:col-span-2 mt-2 border-t pt-5">
-                    <h4 className="text-lg font-bold text-gray-700 mb-3">Branch Admin Account</h4>
-                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                      Branch admin access stays in <span className="font-semibold">Pending Verification</span> until the recipient verifies the email from the branch access message.
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-gray-700 font-semibold mb-2">Admin Username</label>
-                    <input 
-                      type="text" 
-                      name="admin_username"
-                      value={formData.admin_username}
-                      onChange={handleInputChange}
-                      placeholder="e.g., galas_admin"
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
-                      required={!editingBranch}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-gray-700 font-semibold mb-2">Admin Email</label>
-                    <input 
-                      type="email" 
-                      name="admin_email"
-                      value={formData.admin_email}
-                      onChange={handleInputChange}
-                      placeholder="admin@branch.gov"
-                      pattern="^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$"
-                      className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent ${
-                        adminEmailError ? 'border-red-500 bg-red-50' : 'border-gray-300'
-                      }`}
-                      required={!editingBranch}
-                    />
-                    {adminEmailError ? (
-                      <p className="mt-2 text-sm font-semibold text-red-600">{adminEmailError}</p>
-                    ) : null}
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className="block text-gray-700 font-semibold mb-2">Admin Password</label>
-                    <PasswordField
-                      name="admin_password"
-                      value={formData.admin_password}
-                      onChange={handleInputChange}
-                      placeholder="More than 12 chars with uppercase, lowercase, and number or special char"
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
-                      required={!editingBranch}
-                    />
-                    <p className="mt-2 text-sm text-gray-500">
-                      Password must be more than 12 characters with uppercase, lowercase, and a number or special character.
-                    </p>
-                  </div>
+                  {!editingBranch && (
+                    <>
+                      <div className="md:col-span-2 mt-2 border-t pt-5">
+                        <h4 className="text-lg font-bold text-gray-700 mb-3">Branch Admin Account</h4>
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                          Branch admin access stays in <span className="font-semibold">Pending Verification</span> until the recipient verifies the email from the branch access message.
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-gray-700 font-semibold mb-2">Admin Username</label>
+                        <input 
+                          type="text" 
+                          name="admin_username"
+                          value={formData.admin_username}
+                          onChange={handleInputChange}
+                          placeholder="e.g., galas_admin"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
+                          required={!editingBranch}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-gray-700 font-semibold mb-2">Admin Email</label>
+                        <input 
+                          type="email" 
+                          name="admin_email"
+                          value={formData.admin_email}
+                          onChange={handleInputChange}
+                          placeholder="admin@branch.gov"
+                          pattern="^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$"
+                          className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent ${
+                            adminEmailError ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                          }`}
+                          required={!editingBranch}
+                        />
+                        {adminEmailError ? (
+                          <p className="mt-2 text-sm font-semibold text-red-600">{adminEmailError}</p>
+                        ) : null}
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className="block text-gray-700 font-semibold mb-2">Admin Password</label>
+                        <PasswordField
+                          name="admin_password"
+                          value={formData.admin_password}
+                          onChange={handleInputChange}
+                          placeholder="More than 12 chars with uppercase, lowercase, and number or special char"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
+                          required={!editingBranch}
+                        />
+                        <p className="mt-2 text-sm text-gray-500">
+                          Password must be more than 12 characters with uppercase, lowercase, and a number or special character.
+                        </p>
+                      </div>
+                    </>
+                  )}
                   <div className="md:col-span-2 mt-2 border-t pt-5">
                     <h4 className="text-lg font-bold text-gray-700 mb-3">Service Counters / Queue Window Staff Accounts</h4>
                     <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-                      Service counters and queue window staff accounts are the same setup here. If you set {getNormalizedCounterCount(formData.counters)} service counter{getNormalizedCounterCount(formData.counters) > 1 ? 's' : ''}, the system will generate {getNormalizedCounterCount(formData.counters)} queue-only branch staff account{getNormalizedCounterCount(formData.counters) > 1 ? 's' : ''}. The system automatically generates the login email addresses, passwords, and staff names, then includes those credentials in the same branch admin email verification message. Every generated queue account uses Microsoft Authenticator MFA on first login.
+                      {editingBranch
+                        ? `Reassign each queue-only branch staff account to the correct physical window and transaction type here. Saving updates the connected window assignment, branch login behavior, and live queue routing so the existing credentials continue pointing to the correct window setup.`
+                        : `Service counters and queue window staff accounts are the same setup here. If you set ${getNormalizedCounterCount(formData.counters)} service counter${getNormalizedCounterCount(formData.counters) > 1 ? 's' : ''}, the system will generate ${getNormalizedCounterCount(formData.counters)} queue-only branch staff account${getNormalizedCounterCount(formData.counters) > 1 ? 's' : ''}. The system automatically generates the login email addresses, passwords, and staff names, then includes those credentials in the same branch admin email verification message. Every generated queue account uses Microsoft Authenticator MFA on first login.`}
                     </div>
                   </div>
                   {getActiveWindowOptions().map((option, index) => {
                     const selectedServiceWindow = getSelectedServiceWindow(option.key);
-                    const serviceChoices = option.number >= 4
+                    const selectedAssignedWindowNumber = getSelectedAssignedWindowNumber(option.key, option.number);
+                    const serviceChoices = selectedAssignedWindowNumber >= 4
                       ? [...SERVICE_WINDOW_CHOICES, { key: 'OTHER', label: 'Other' }]
                       : SERVICE_WINDOW_CHOICES;
                     return (
@@ -1091,38 +1124,60 @@ const Branches = () => {
                               <span className="mt-1 block text-sm text-slate-500">{option.description}</span>
                             </span>
                           </div>
-                          <div className="w-full lg:w-72">
-                            <label className="mb-2 block text-sm font-semibold text-slate-700">Assigned Service</label>
-                            <select
-                              value={selectedServiceWindow}
-                              onChange={(event) => handleWindowAccountChange(option.key, 'service_window', event.target.value)}
-                              className="w-full rounded-lg border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-800 focus:border-transparent focus:ring-2 focus:ring-accent"
-                            >
-                              {serviceChoices.map((choice) => (
-                                <option
-                                  key={choice.key}
-                                  value={choice.key}
-                                  disabled={isServiceChoiceUnavailable(option.key, choice.key)}
-                                >
-                                  {choice.label}
-                                </option>
-                              ))}
-                            </select>
+                          <div className="grid w-full gap-4 lg:w-[32rem] lg:grid-cols-2">
+                            <div>
+                              <label className="mb-2 block text-sm font-semibold text-slate-700">Assigned Window</label>
+                              <select
+                                value={selectedAssignedWindowNumber}
+                                onChange={(event) => handleWindowAccountChange(option.key, 'assigned_window_number', Number(event.target.value))}
+                                className="w-full rounded-lg border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-800 focus:border-transparent focus:ring-2 focus:ring-accent"
+                              >
+                                {getActiveWindowOptions().map((windowOption) => (
+                                  <option
+                                    key={windowOption.number}
+                                    value={windowOption.number}
+                                    disabled={isAssignedWindowNumberUnavailable(option.key, windowOption.number)}
+                                  >
+                                    Window {windowOption.number}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="mb-2 block text-sm font-semibold text-slate-700">Assigned Service</label>
+                              <select
+                                value={selectedServiceWindow}
+                                onChange={(event) => handleWindowAccountChange(option.key, 'service_window', event.target.value)}
+                                className="w-full rounded-lg border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-800 focus:border-transparent focus:ring-2 focus:ring-accent"
+                              >
+                                {serviceChoices.map((choice) => (
+                                  <option
+                                    key={choice.key}
+                                    value={choice.key}
+                                    disabled={isServiceChoiceUnavailable(option.key, choice.key)}
+                                  >
+                                    {choice.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
                             {selectedServiceWindow === 'OTHER' ? (
                               <input
                                 type="text"
                                 value={windowAccounts[option.key]?.custom_label || ''}
                                 onChange={(event) => handleWindowAccountChange(option.key, 'custom_label', event.target.value)}
-                                placeholder={`Window ${option.number} service name`}
+                                placeholder={`Window ${selectedAssignedWindowNumber} service name`}
                                 maxLength={80}
-                                className="mt-3 w-full rounded-lg border border-slate-300 px-4 py-3 text-sm text-slate-800 focus:border-transparent focus:ring-2 focus:ring-accent"
+                                className="lg:col-span-2 w-full rounded-lg border border-slate-300 px-4 py-3 text-sm text-slate-800 focus:border-transparent focus:ring-2 focus:ring-accent"
                               />
                             ) : null}
                           </div>
                         </div>
 
                         <div className="mt-4 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                          Login email address, temporary password, staff full name, queue-only access scope, Microsoft Authenticator MFA setup, and the voice announcement route to {option.label} will be generated automatically.
+                          {editingBranch
+                            ? `Saving will update this staff account to Window ${selectedAssignedWindowNumber} with ${selectedServiceWindow === 'OTHER' ? (windowAccounts[option.key]?.custom_label || 'custom service') : (SERVICE_WINDOW_CHOICES.find((choice) => choice.key === selectedServiceWindow)?.label || selectedServiceWindow)} routing while keeping connected branch logic in sync.`
+                            : `Login email address, temporary password, staff full name, queue-only access scope, Microsoft Authenticator MFA setup, and the voice announcement route to ${option.label} will be generated automatically.`}
                         </div>
                       </div>
                     );
