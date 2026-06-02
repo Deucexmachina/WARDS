@@ -63,6 +63,9 @@ RECAPTCHA_SECRET_KEY = os.getenv("RECAPTCHA_SECRET_KEY", "6LdOdsAsAAAAAHPw5OFtL7
 login_attempts = {}
 locked_accounts = {}
 password_reset_tokens = {}
+password_reset_rate_limits = {}  # Track password reset requests per email
+email_verification_rate_limits = {}  # Track email verification requests per email
+verification_confirm_rate_limits = {}  # Track verification confirm requests per email
 
 MAX_LOGIN_ATTEMPTS = 5
 LOCKOUT_DURATION = 300  # 5 minutes
@@ -309,6 +312,88 @@ def log_activity(db: Session, action: str, user: str, details: str, log_type: st
     db.add(log)
     db.commit()
 
+def check_password_reset_rate_limit(email: str) -> bool:
+    """Check if email has exceeded password reset rate limits (3/hour, 10/day)"""
+    current_time = time.time()
+    email_lower = email.lower()
+    
+    if email_lower not in password_reset_rate_limits:
+        password_reset_rate_limits[email_lower] = []
+    
+    # Clean up old requests (older than 24 hours)
+    password_reset_rate_limits[email_lower] = [
+        timestamp for timestamp in password_reset_rate_limits[email_lower]
+        if current_time - timestamp < 86400  # 24 hours
+    ]
+    
+    # Check hourly limit (3 per hour)
+    hourly_requests = [
+        timestamp for timestamp in password_reset_rate_limits[email_lower]
+        if current_time - timestamp < 3600  # 1 hour
+    ]
+    if len(hourly_requests) >= 3:
+        return False
+    
+    # Check daily limit (10 per day)
+    if len(password_reset_rate_limits[email_lower]) >= 10:
+        return False
+    
+    # Add current request
+    password_reset_rate_limits[email_lower].append(current_time)
+    return True
+
+def check_email_verification_rate_limit(email: str) -> bool:
+    """Check if email has exceeded email verification rate limits (3/hour, 10/day)"""
+    current_time = time.time()
+    email_lower = email.lower()
+    
+    if email_lower not in email_verification_rate_limits:
+        email_verification_rate_limits[email_lower] = []
+    
+    # Clean up old requests (older than 24 hours)
+    email_verification_rate_limits[email_lower] = [
+        timestamp for timestamp in email_verification_rate_limits[email_lower]
+        if current_time - timestamp < 86400  # 24 hours
+    ]
+    
+    # Check hourly limit (3 per hour)
+    hourly_requests = [
+        timestamp for timestamp in email_verification_rate_limits[email_lower]
+        if current_time - timestamp < 3600  # 1 hour
+    ]
+    if len(hourly_requests) >= 3:
+        return False
+    
+    # Check daily limit (10 per day)
+    if len(email_verification_rate_limits[email_lower]) >= 10:
+        return False
+    
+    # Add current request
+    email_verification_rate_limits[email_lower].append(current_time)
+    return True
+
+def check_verification_confirm_rate_limit(email: str) -> bool:
+    """Check if email has exceeded verification confirm rate limit (5/minute)"""
+    current_time = time.time()
+    email_lower = email.lower()
+    
+    if email_lower not in verification_confirm_rate_limits:
+        verification_confirm_rate_limits[email_lower] = []
+    
+    # Clean up old requests (older than 1 minute)
+    verification_confirm_rate_limits[email_lower] = [
+        timestamp for timestamp in verification_confirm_rate_limits[email_lower]
+        if current_time - timestamp < 60  # 1 minute
+    ]
+    
+    # Check per-minute limit (5 per minute)
+    if len(verification_confirm_rate_limits[email_lower]) >= 5:
+        return False
+    
+    # Add current request
+    verification_confirm_rate_limits[email_lower].append(current_time)
+    return True
+
 @router.post("/register", response_model=Token)
 @limiter.limit("5/minute;25/day")
 async def register_user(request: Request, user_data: UserRegisterRequest, db: Session = Depends(get_db)):
@@ -400,6 +485,14 @@ async def request_email_verification_otp(
     db: Session = Depends(get_db),
 ):
     normalized_email = normalize_email(payload.email)
+    
+    # Check email-based rate limits
+    if not check_email_verification_rate_limit(normalized_email):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many verification requests. Please try again later."
+        )
+    
     user = find_citizen_by_email(db, CitizenUser, normalized_email)
 
     if not user:
@@ -432,6 +525,14 @@ async def confirm_email_verification_otp(
     db: Session = Depends(get_db),
 ):
     normalized_email = normalize_email(payload.email)
+    
+    # Check rate limit (5 requests per minute per account)
+    if not check_verification_confirm_rate_limit(normalized_email):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many verification attempts. Please try again later."
+        )
+    
     user = find_citizen_by_email(db, CitizenUser, normalized_email)
 
     if not user:
@@ -471,6 +572,16 @@ async def confirm_email_verification_otp(
     if active_otp.code_hash != hash_email_verification_code(submitted_code):
         active_otp.attempts = (active_otp.attempts or 0) + 1
         db.commit()
+        
+        # Invalidate OTP after 5 failed attempts
+        if active_otp.attempts >= 5:
+            active_otp.consumed_at = datetime.utcnow()
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Too many failed attempts. Please request a new verification code.",
+            )
+        
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid verification code. Please try again.",
@@ -756,9 +867,17 @@ async def user_login(request: Request, credentials: UserLoginRequest, db: Sessio
     }
 
 @router.post("/request-password-reset")
+@limiter.limit("5/hour")
 async def request_password_reset(request: Request, reset_request: PasswordResetRequest, db: Session = Depends(get_db)):
     """Request password reset token"""
     client_ip = request.client.host
+    
+    # Check email-based rate limits
+    if not check_password_reset_rate_limit(reset_request.email):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many password reset requests. Please try again later."
+        )
     
     # Verify reCAPTCHA
     if not verify_recaptcha(reset_request.recaptcha_token, client_ip):
@@ -791,6 +910,7 @@ async def request_password_reset(request: Request, reset_request: PasswordResetR
     return {"message": "If the email exists, a password reset link has been sent."}
 
 @router.post("/reset-password")
+@limiter.limit("5/minute")
 async def reset_password(request: Request, reset_data: PasswordResetConfirm, db: Session = Depends(get_db)):
     """Reset password with token"""
     client_ip = request.client.host
