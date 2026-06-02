@@ -1125,7 +1125,7 @@ async def check_queue_status(request: Request, queue_number: str, db: Session = 
 # ============= Receipt Requisition Module =============
 
 @router.post("/receipt-request")
-@limiter.limit("3/minute;20/day")
+@limiter.limit("1/minute;10/day")
 async def create_receipt_request(request: Request, receipt_request: ReceiptRequestCreate, db: Session = Depends(get_db)):
     """Create a receipt request"""
     normalized_email = normalize_email(request.email, check_deliverability=True)
