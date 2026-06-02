@@ -6,12 +6,15 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, Request
 from fastapi.responses import FileResponse
 from passlib.context import CryptContext
 from pydantic import BaseModel, Field
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
+
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from database.models import (
     ActivityLog,
@@ -45,6 +48,17 @@ from utils.security_validation import (
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# Rate limiting configuration
+def get_rate_limit_key(request: Request) -> str:
+    """Get rate limit key - user-based if authenticated, otherwise IP-based"""
+    # Try to get user ID from request state (set by auth middleware)
+    if hasattr(request.state, 'user') and request.state.user:
+        return f"user:{request.state.user.id}"
+    # Fallback to IP
+    return get_remote_address(request)
+
+limiter = Limiter(key_func=get_rate_limit_key)
 
 UPLOAD_DIR = Path(__file__).resolve().parents[1] / "uploads" / "taxpayer_identifiers"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -666,7 +680,9 @@ async def change_public_account_password(
 
 
 @router.post("/user/account/submissions")
+@limiter.limit("5/hour;20/day")
 async def create_taxpayer_identifier_submission(
+    request: Request,
     submission_type: str = Form(...),
     taxpayer_type: str = Form(...),
     branch_id: int | None = Form(default=None),

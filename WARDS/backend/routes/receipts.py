@@ -8,7 +8,7 @@ import re
 import secrets
 import time
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from fastapi.responses import FileResponse, StreamingResponse
@@ -16,6 +16,9 @@ from PIL import Image
 import qrcode
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from database.models import ActivityLog, Branch, CitizenUser, Payment, Queue, ReceiptRecord, ReceiptRequest, ReceiptRequestHistory, get_db
 from middleware.branch_auth import get_current_branch_staff
@@ -37,6 +40,17 @@ optional_user_security = HTTPBearer(auto_error=False)
 MOBILE_RECEIPT_UPLOAD_SESSIONS: dict[str, dict] = {}
 MOBILE_RECEIPT_UPLOAD_TTL_SECONDS = 15 * 60
 MANILA_TIMEZONE = timezone(timedelta(hours=8))
+
+# Rate limiting configuration
+def get_rate_limit_key(request: Request) -> str:
+    """Get rate limit key - user-based if authenticated, otherwise IP-based"""
+    # Try to get user ID from request state (set by auth middleware)
+    if hasattr(request.state, 'user') and request.state.user:
+        return f"user:{request.state.user.id}"
+    # Fallback to IP
+    return get_remote_address(request)
+
+limiter = Limiter(key_func=get_rate_limit_key)
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads", "receipts")
 RELEASE_UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads", "released_receipts")
@@ -1129,7 +1143,9 @@ async def list_receipt_records(current_staff=Depends(get_current_branch_staff), 
 
 
 @router.post("/records/ocr-upload")
+@limiter.limit("20/hour;100/day")
 async def upload_receipt_for_ocr(
+    request: Request,
     file: UploadFile = File(...),
     category: str = Form("RPT"),
     current_staff=Depends(get_current_branch_staff),
@@ -1253,7 +1269,9 @@ async def get_mobile_receipt_upload_public_session(token: str):
 
 
 @router.post("/records/mobile-upload-sessions/{token}/upload")
+@limiter.limit("20/hour")
 async def upload_mobile_receipt_for_ocr(
+    request: Request,
     token: str,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
