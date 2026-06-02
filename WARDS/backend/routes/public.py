@@ -33,7 +33,6 @@ from utils.branch_system_settings import get_branch_setting_value
 from utils.system_settings import SYSTEM_DISABLED_MESSAGE, get_setting_value
 from utils.field_crypto import decrypt_optional_value
 from utils.announcement_attachments import serialize_attachments
-from middleware.rate_limit import queue_register_limiter, payment_initiate_limiter
 
 router = APIRouter()
 USER_SECRET_KEY = os.getenv("USER_SECRET_KEY", "your-user-secret-key-change-in-production")
@@ -716,7 +715,6 @@ async def register_queue(
     registration: QueueRegistration,
     db: Session = Depends(get_db),
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_user_security),
-    _: None = Depends(queue_register_limiter),
 ):
     """Register for queue (immediate or appointment)"""
     ensure_queue_registration_allowed(db, registration.branch_id)
@@ -1171,7 +1169,6 @@ async def initiate_payment(
     request: Request,
     payment: OnlinePaymentCreate,
     db: Session = Depends(get_db),
-    _: None = Depends(payment_initiate_limiter),
 ):
     """Initiate online payment"""
     ensure_payment_gateway_available(db)
