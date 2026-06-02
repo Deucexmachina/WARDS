@@ -11,6 +11,9 @@ from datetime import datetime, timedelta, timezone
 import random
 import re
 
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
 from database.models import (
     Branch, CitizenUser, Queue, QueueHistory, Service, BranchService, FAQ, TaxpayerGuide,
     BranchOperatingHours, Announcement, QueueActivity, ReceiptRequest,
@@ -42,6 +45,9 @@ ACTIVE_PUBLIC_QUEUE_STATUSES = ("Pending", "Waiting", "Called", "Serving")
 ACTIVE_QUEUE_MESSAGE = "You already have an active queue request. Please complete or cancel your current queue before registering for another one."
 optional_user_security = HTTPBearer(auto_error=False)
 MANILA_TIMEZONE = timezone(timedelta(hours=8))
+
+# Rate limiting configuration
+limiter = Limiter(key_func=get_remote_address)
 
 
 def serialize_manila_datetime(value: Optional[datetime]) -> Optional[str]:
@@ -325,7 +331,8 @@ class OnlinePaymentCreate(BaseModel):
 # ============= Branch Home Module =============
 
 @router.get("/branches")
-async def get_all_public_branches(db: Session = Depends(get_db)):
+@limiter.limit("60/minute")
+async def get_all_public_branches(request: Request, db: Session = Depends(get_db)):
     """Get all active branches for public view"""
     branches = db.query(Branch).filter(Branch.status == "Active").all()
     
@@ -440,7 +447,8 @@ async def get_branch_details(branch_id: int, db: Session = Depends(get_db)):
 # ============= Public Services Module =============
 
 @router.get("/queue-status")
-async def get_all_queue_status(db: Session = Depends(get_db)):
+@limiter.limit("30/minute")
+async def get_all_queue_status(request: Request, db: Session = Depends(get_db)):
     """Get queue status for all branches"""
     branches = db.query(Branch).filter(Branch.status == "Active").all()
     
@@ -670,7 +678,8 @@ async def get_branch_immediate_queue_service_availability(
     }
 
 @router.get("/queue/branch/{branch_id}")
-async def get_branch_queues(branch_id: int, db: Session = Depends(get_db)):
+@limiter.limit("30/minute")
+async def get_branch_queues(request: Request, branch_id: int, db: Session = Depends(get_db)):
     """Get all queues for a specific branch"""
     queues = db.query(Queue).filter(Queue.branch_id == branch_id).order_by(Queue.created_at.asc()).all()
     
@@ -710,6 +719,7 @@ async def update_queue_status(queue_id: int, status_update: dict, db: Session = 
     return {"message": "Queue status updated", "queue_number": queue_value(queue, "queue_number"), "status": queue_value(queue, "status")}
 
 @router.post("/queue/register")
+@limiter.limit("3/minute;20/day")
 async def register_queue(
     request: Request,
     registration: QueueRegistration,
@@ -911,7 +921,9 @@ async def register_queue(
     }
 
 @router.get("/queue/my-ticket")
+@limiter.limit("30/minute")
 async def get_my_active_ticket(
+    request: Request,
     db: Session = Depends(get_db),
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_user_security),
 ):
@@ -1001,7 +1013,9 @@ async def get_my_active_ticket(
     }
 
 @router.get("/queue/history")
+@limiter.limit("30/minute")
 async def get_my_queue_history(
+    request: Request,
     db: Session = Depends(get_db),
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_user_security),
 ):
@@ -1080,7 +1094,8 @@ async def get_my_queue_history(
     }
 
 @router.get("/queue/{queue_number}")
-async def check_queue_status(queue_number: str, db: Session = Depends(get_db)):
+@limiter.limit("30/minute")
+async def check_queue_status(request: Request, queue_number: str, db: Session = Depends(get_db)):
     """Check queue status by queue number"""
     queue = find_queue_by_queue_number(db, Queue, queue_number)
     if not queue:
@@ -1110,7 +1125,8 @@ async def check_queue_status(queue_number: str, db: Session = Depends(get_db)):
 # ============= Receipt Requisition Module =============
 
 @router.post("/receipt-request")
-async def create_receipt_request(request: ReceiptRequestCreate, db: Session = Depends(get_db)):
+@limiter.limit("3/minute;20/day")
+async def create_receipt_request(request: Request, receipt_request: ReceiptRequestCreate, db: Session = Depends(get_db)):
     """Create a receipt request"""
     normalized_email = normalize_email(request.email, check_deliverability=True)
     # Generate request ID
@@ -1165,6 +1181,7 @@ async def check_receipt_request(request_id: str, db: Session = Depends(get_db)):
 # ============= Online Payment Processing Module =============
 
 @router.post("/payment/initiate")
+@limiter.limit("5/minute")
 async def initiate_payment(
     request: Request,
     payment: OnlinePaymentCreate,
@@ -1229,7 +1246,8 @@ async def check_payment_status(ref_number: str, db: Session = Depends(get_db)):
     }
 
 @router.post("/payment/{ref_number}/verify")
-async def verify_payment(ref_number: str, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+async def verify_payment(request: Request, ref_number: str, db: Session = Depends(get_db)):
     """Simulate payment verification (for testing)"""
     payment = find_payment_by_ref_number(db, Payment, ref_number)
     
