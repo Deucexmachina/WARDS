@@ -680,9 +680,7 @@ async def change_public_account_password(
 
 
 @router.post("/user/account/submissions")
-@limiter.limit("5/hour;20/day")
 async def create_taxpayer_identifier_submission(
-    request: Request,
     submission_type: str = Form(...),
     taxpayer_type: str = Form(...),
     branch_id: int | None = Form(default=None),
