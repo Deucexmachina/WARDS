@@ -1434,6 +1434,7 @@ const ReceiptManagement = () => {
                       ...current,
                       auto_rename_source_image: true,
                       filename_matches_taxpayer: true,
+                      save_blocked: Boolean(current?.duplicate_detected),
                     }))}
                     className="mt-3 rounded-lg bg-blue-600 px-3 py-2 font-semibold text-white transition hover:bg-blue-700"
                   >

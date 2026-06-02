@@ -247,6 +247,7 @@ const MobileReceiptUpload = () => {
                       ...current,
                       auto_rename_source_image: true,
                       filename_matches_taxpayer: true,
+                      save_blocked: Boolean(current?.duplicate_detected),
                     }))}
                     className="mt-3 rounded-2xl bg-[#0f5b83] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#0c4d6f]"
                   >
