@@ -633,6 +633,17 @@ const QueueManagement = () => {
     return fromAccounts;
   }, [managedWindowAccounts, queues]);
 
+  const selectedCallNextWindow = isQueueWindowAccount
+    ? assignedWindowKey
+    : (isSuperadminManagedBranch && windowFilter !== 'all' ? windowFilter : null);
+
+  const buildCallNextRequestConfig = () => ({
+    params: {
+      ...(selectedCallNextWindow ? { service_window: selectedCallNextWindow } : {}),
+      ...(firstCallableQueue?.id ? { queue_id: firstCallableQueue.id } : {}),
+    },
+  });
+
   const openDeleteModal = (queue) => {
     setQueueToDelete(queue);
     setHistoryToDelete(null);
@@ -820,15 +831,16 @@ const QueueManagement = () => {
       if (action === 'call-next') {
         let response;
         try {
-          response = await api.post('/branch/queue/call-next');
+          response = await api.post('/branch/queue/call-next', null, buildCallNextRequestConfig());
         } catch (err) {
           if (err.response?.status === 409) {
             const refreshedQueues = await fetchQueues();
             const refreshedActiveQueue = (refreshedQueues || []).find((entry) =>
+              isSelectedCallNextWindowQueue(entry) &&
               ['called', 'serving'].includes((entry.status || '').toLowerCase()),
             );
             if (!refreshedActiveQueue) {
-              response = await api.post('/branch/queue/call-next');
+              response = await api.post('/branch/queue/call-next', null, buildCallNextRequestConfig());
             } else {
               throw err;
             }
@@ -941,9 +953,15 @@ const QueueManagement = () => {
 
   const now = useMemo(() => new Date(), [queues]);
   const queueUnavailable = systemStatus && (!systemStatus.queueEnabled || systemStatus.maintenanceMode);
+  const isSelectedCallNextWindowQueue = (queue) => (
+    !selectedCallNextWindow || (queue.service_window || 'MISC') === selectedCallNextWindow
+  );
   const activeQueue = useMemo(
-    () => queues.find((queue) => ['called', 'serving'].includes((queue.status || '').toLowerCase())),
-    [queues],
+    () => queues.find((queue) => (
+      isSelectedCallNextWindowQueue(queue) &&
+      ['called', 'serving'].includes((queue.status || '').toLowerCase())
+    )),
+    [queues, selectedCallNextWindow],
   );
 
   const serviceTypes = useMemo(
@@ -1006,6 +1024,10 @@ const QueueManagement = () => {
   );
   const skippedQueues = useMemo(
     () => sortQueues(filteredQueues.filter((queue) => getDerivedStatus(queue, now) === 'skipped'), now),
+    [filteredQueues, now],
+  );
+  const firstCallableQueue = useMemo(
+    () => sortQueues(filteredQueues.filter((queue) => getDerivedStatus(queue, now) === 'waiting'), now)[0] || null,
     [filteredQueues, now],
   );
 

@@ -1,9 +1,11 @@
 import os
+import asyncio
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 
-from services.ocr_service import ocr_service
+from services.ocr_runtime import run_ocr_in_executor
+from services.ocr_service import OCRProcessingError, ocr_service
 
 router = APIRouter()
 
@@ -27,12 +29,35 @@ async def process_receipt_ocr(
         output_file.write(image_data)
 
     try:
-        result = ocr_service.process_receipt(
+        result = await run_ocr_in_executor(
+            ocr_service.process_receipt,
             image_path=file_path,
             filename=original_name,
             category=category,
         )
+    except asyncio.TimeoutError as exc:
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+        raise HTTPException(
+            status_code=504,
+            detail="Receipt OCR timed out. Please try again with a clearer or smaller image.",
+        ) from exc
+    except OCRProcessingError as exc:
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
     except RuntimeError as exc:
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     result["source_image_path"] = file_path

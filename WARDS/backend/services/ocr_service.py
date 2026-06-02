@@ -1,13 +1,19 @@
 import json
 import os
 import re
+import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Dict
 
 from dotenv import dotenv_values, load_dotenv
 from PIL import Image
 import requests
+
+
+class OCRProcessingError(RuntimeError):
+    """Raised when OCR cannot complete within the configured safety limits."""
 
 
 class OCRService:
@@ -21,6 +27,13 @@ class OCRService:
         self._base_url = None
         self._api_error = None
         self._api_checked = False
+        self._config_lock = threading.Lock()
+        self._request_connect_timeout = self._env_int("OCR_REQUEST_CONNECT_TIMEOUT_SECONDS", 10)
+        self._request_read_timeout = self._env_int("OCR_REQUEST_READ_TIMEOUT_SECONDS", 30)
+        self._start_timeout = self._env_int("OCR_START_TIMEOUT_SECONDS", 45)
+        self._retrieve_timeout = self._env_int("OCR_RETRIEVE_TIMEOUT_SECONDS", 45)
+        self._poll_interval = max(1, self._env_int("OCR_POLL_INTERVAL_SECONDS", 2))
+        self._poll_timeout = self._env_int("OCR_TOTAL_TIMEOUT_SECONDS", 120)
 
     def process_receipt(
         self,
@@ -86,40 +99,53 @@ class OCRService:
         if self._api_checked:
             return
 
-        self._api_checked = True
-        wards_env_path = Path(__file__).resolve().parents[1] / ".env"
-        wards_env_values = dotenv_values(wards_env_path)
-        wards_key = self._clean_env_value(wards_env_values.get("LLMWHISPERER_API_KEY"))
-        wards_base_url = self._clean_env_value(wards_env_values.get("LLMWHISPERER_BASE_URL"))
-        ocr_env_values = {}
-        if self._ocr_backend_dir:
-            load_dotenv(self._ocr_backend_dir / ".env", override=False)
-            ocr_env_values = dotenv_values(self._ocr_backend_dir / ".env")
+        with self._config_lock:
+            if self._api_checked:
+                return
 
-        ocr_key = self._clean_env_value(ocr_env_values.get("LLMWHISPERER_API_KEY"))
-        env_key = self._clean_env_value(os.getenv("LLMWHISPERER_API_KEY"))
-        if not self._looks_placeholder(wards_key):
-            self._api_key = wards_key
-            self._api_key_source = "WARDS/backend/.env"
-        elif not self._looks_placeholder(ocr_key):
-            self._api_key = ocr_key
-            self._api_key_source = "OCR/backend/.env"
-        elif not self._looks_placeholder(env_key):
-            self._api_key = env_key
-            self._api_key_source = "process environment"
+            self._api_checked = True
+            wards_env_path = Path(__file__).resolve().parents[1] / ".env"
+            wards_env_values = dotenv_values(wards_env_path)
+            wards_key = self._clean_env_value(wards_env_values.get("LLMWHISPERER_API_KEY"))
+            wards_base_url = self._clean_env_value(wards_env_values.get("LLMWHISPERER_BASE_URL"))
+            ocr_env_values = {}
+            if self._ocr_backend_dir:
+                load_dotenv(self._ocr_backend_dir / ".env", override=False)
+                ocr_env_values = dotenv_values(self._ocr_backend_dir / ".env")
 
-        if not self._api_key:
-            self._api_error = (
-                "LLMWHISPERER_API_KEY is not configured. Set it in WARDS backend .env "
-                "or point OCR_PROJECT_DIR to the OCR project backend."
-            )
-            return
+            ocr_key = self._clean_env_value(ocr_env_values.get("LLMWHISPERER_API_KEY"))
+            env_key = self._clean_env_value(os.getenv("LLMWHISPERER_API_KEY"))
+            if not self._looks_placeholder(wards_key):
+                self._api_key = wards_key
+                self._api_key_source = "WARDS/backend/.env"
+            elif not self._looks_placeholder(ocr_key):
+                self._api_key = ocr_key
+                self._api_key_source = "OCR/backend/.env"
+            elif not self._looks_placeholder(env_key):
+                self._api_key = env_key
+                self._api_key_source = "process environment"
 
-        self._base_url = (
-            wards_base_url
-            or self._clean_env_value(ocr_env_values.get("LLMWHISPERER_BASE_URL"))
-            or "https://llmwhisperer-api.us-central.unstract.com/api/v2"
-        ).rstrip("/")
+            if not self._api_key:
+                self._api_error = (
+                    "LLMWHISPERER_API_KEY is not configured. Set it in WARDS backend .env "
+                    "or point OCR_PROJECT_DIR to the OCR project backend."
+                )
+                return
+
+            self._base_url = (
+                wards_base_url
+                or self._clean_env_value(ocr_env_values.get("LLMWHISPERER_BASE_URL"))
+                or "https://llmwhisperer-api.us-central.unstract.com/api/v2"
+            ).rstrip("/")
+
+    def _env_int(self, name: str, default: int) -> int:
+        try:
+            return max(1, int(os.getenv(name, str(default))))
+        except ValueError:
+            return default
+
+    def _request_timeout(self, read_timeout: int | None = None) -> tuple[int, int]:
+        return (self._request_connect_timeout, read_timeout or self._request_read_timeout)
 
     def _clean_env_value(self, value: str | None) -> str:
         return (value or "").strip().strip('"').strip("'")
@@ -156,25 +182,26 @@ class OCRService:
             raise RuntimeError(self._api_error or "LLMWhisperer configuration is unavailable.")
 
         pdf_path = self._image_to_pdf(image_path)
-        headers = {
-            "unstract-key": self._api_key,
-            "Content-Type": "application/octet-stream",
-        }
-        base_url = self._base_url or "https://llmwhisperer-api.us-central.unstract.com/api/v2"
-        params = {
-            "mode": "form",
-            "output_mode": "layout_preserving",
-            "file_name": pdf_path.name,
-        }
-
+        whisper = {}
         try:
+            started_at = time.monotonic()
+            headers = {
+                "unstract-key": self._api_key,
+                "Content-Type": "application/octet-stream",
+            }
+            base_url = self._base_url or "https://llmwhisperer-api.us-central.unstract.com/api/v2"
+            params = {
+                "mode": "form",
+                "output_mode": "layout_preserving",
+                "file_name": pdf_path.name,
+            }
             with open(pdf_path, "rb") as pdf_file:
                 whisper_start = requests.post(
                     f"{base_url}/whisper",
                     params=params,
                     headers=headers,
                     data=pdf_file.read(),
-                    timeout=60,
+                    timeout=self._request_timeout(self._start_timeout),
             )
             if whisper_start.status_code == 401:
                 raise RuntimeError(self._unauthorized_message("starting OCR"))
@@ -189,44 +216,57 @@ class OCRService:
             if not whisper_hash:
                 raise RuntimeError("LLMWhisperer did not return a whisper_hash.")
 
-            deadline = time.time() + 200
+            deadline = time.monotonic() + self._poll_timeout
             status_payload = {}
-            while time.time() < deadline:
-                status_response = requests.get(
-                    f"{base_url}/whisper-status",
+            with requests.Session() as session:
+                while time.monotonic() < deadline:
+                    status_response = session.get(
+                        f"{base_url}/whisper-status",
+                        params={"whisper_hash": whisper_hash},
+                        headers={"unstract-key": self._api_key},
+                        timeout=self._request_timeout(),
+                    )
+                    if status_response.status_code == 401:
+                        raise RuntimeError(self._unauthorized_message("checking OCR status"))
+                    status_response.raise_for_status()
+                    status_payload = status_response.json()
+                    status = (status_payload.get("status") or "").lower()
+
+                    if status == "processed":
+                        break
+                    if status == "error":
+                        raise RuntimeError(status_payload.get("message") or "LLMWhisperer reported an OCR error.")
+
+                    remaining = deadline - time.monotonic()
+                    time.sleep(min(self._poll_interval, max(0.1, remaining)))
+                else:
+                    elapsed = int(time.monotonic() - started_at)
+                    raise OCRProcessingError(f"Timed out waiting for LLMWhisperer OCR after {elapsed} seconds.")
+
+                retrieve_response = session.get(
+                    f"{base_url}/whisper-retrieve",
                     params={"whisper_hash": whisper_hash},
                     headers={"unstract-key": self._api_key},
-                    timeout=30,
+                    timeout=self._request_timeout(self._retrieve_timeout),
                 )
-                if status_response.status_code == 401:
-                    raise RuntimeError(self._unauthorized_message("checking OCR status"))
-                status_response.raise_for_status()
-                status_payload = status_response.json()
-                status = (status_payload.get("status") or "").lower()
-
-                if status == "processed":
-                    break
-                if status == "error":
-                    raise RuntimeError(status_payload.get("message") or "LLMWhisperer reported an OCR error.")
-
-                time.sleep(2)
-            else:
-                raise RuntimeError("Timed out waiting for LLMWhisperer OCR to finish.")
-
-            retrieve_response = requests.get(
-                f"{base_url}/whisper-retrieve",
-                params={"whisper_hash": whisper_hash},
-                headers={"unstract-key": self._api_key},
-                timeout=60,
-            )
-            if retrieve_response.status_code == 401:
-                raise RuntimeError(self._unauthorized_message("retrieving OCR output"))
-            retrieve_response.raise_for_status()
-            whisper = retrieve_response.json()
+                if retrieve_response.status_code == 401:
+                    raise RuntimeError(self._unauthorized_message("retrieving OCR output"))
+                retrieve_response.raise_for_status()
+                whisper = retrieve_response.json()
+        except requests.Timeout as exc:
+            raise OCRProcessingError("LLMWhisperer OCR request timed out. Please try again with a clearer or smaller image.") from exc
+        except OCRProcessingError:
+            raise
         except Exception as exc:
-            raise RuntimeError(f"LLMWhisperer OCR failed: {exc}") from exc
+            raise OCRProcessingError(f"LLMWhisperer OCR failed: {exc}") from exc
+        finally:
+            if pdf_path.exists():
+                try:
+                    pdf_path.unlink()
+                except OSError:
+                    pass
 
-        whisper_dump = self._output_dir / "whisperer.json"
+        whisper_dump = self._output_dir / f"whisperer_{uuid.uuid4().hex}.json"
         try:
             whisper_dump.write_text(json.dumps(whisper, indent=2), encoding="utf-8")
         except Exception:
@@ -237,7 +277,7 @@ class OCRService:
 
     def _image_to_pdf(self, image_path: str) -> Path:
         base_name = Path(image_path).stem
-        pdf_path = self._output_dir / f"{base_name}.pdf"
+        pdf_path = self._output_dir / f"{base_name}_{uuid.uuid4().hex}.pdf"
 
         with Image.open(image_path) as image:
             if image.mode != "RGB":

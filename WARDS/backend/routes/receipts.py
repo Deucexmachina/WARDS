@@ -1,5 +1,6 @@
 from datetime import datetime, date, timedelta, timezone
 from io import BytesIO
+import asyncio
 import hashlib
 import mimetypes
 import os
@@ -18,7 +19,8 @@ from sqlalchemy.orm import Session
 
 from database.models import ActivityLog, Branch, CitizenUser, Payment, Queue, ReceiptRecord, ReceiptRequest, ReceiptRequestHistory, get_db
 from middleware.branch_auth import get_current_branch_staff
-from services.ocr_service import ocr_service
+from services.ocr_runtime import run_ocr_in_executor
+from services.ocr_service import OCRProcessingError, ocr_service
 from services.email_service import send_receipt_release_email
 from utils.branch_appointment_settings import validate_branch_appointment_datetime
 from utils.branch_system_settings import get_branch_setting_value
@@ -891,6 +893,9 @@ def build_receipt_ocr_result(
             filename=os.path.basename(file.filename or "receipt.jpg"),
             category=normalized_category,
         )
+    except OCRProcessingError as exc:
+        status_code = 504 if "timed out" in str(exc).lower() else 500
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -956,6 +961,18 @@ def build_receipt_ocr_result(
     result["file_name_validation_message"] = filename_validation["message"]
     result["auto_rename_source_image"] = False
     return result
+
+
+async def build_receipt_ocr_result_async(**kwargs) -> dict:
+    try:
+        return await run_ocr_in_executor(build_receipt_ocr_result, **kwargs)
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(
+            status_code=504,
+            detail="Receipt OCR timed out. Please try again with a clearer or smaller image.",
+        ) from exc
+    except OCRProcessingError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 def is_appointment_request(request: ReceiptRequest) -> bool:
@@ -1131,7 +1148,7 @@ async def upload_receipt_for_ocr(
         output_file.write(image_data)
 
     try:
-        return build_receipt_ocr_result(
+        return await build_receipt_ocr_result_async(
             db=db,
             image_data=image_data,
             file=file,
@@ -1140,7 +1157,7 @@ async def upload_receipt_for_ocr(
             branch_id=current_staff.branch_id,
             uploaded_by=current_staff.username,
         )
-    except HTTPException:
+    except Exception:
         if os.path.exists(file_path):
             try:
                 os.remove(file_path)
@@ -1257,7 +1274,7 @@ async def upload_mobile_receipt_for_ocr(
 
     session["status"] = "processing"
     try:
-        result = build_receipt_ocr_result(
+        result = await build_receipt_ocr_result_async(
             db=db,
             image_data=image_data,
             file=file,
@@ -1269,7 +1286,21 @@ async def upload_mobile_receipt_for_ocr(
     except HTTPException as exc:
         session["status"] = "error"
         session["error"] = exc.detail.get("message") if isinstance(exc.detail, dict) else str(exc.detail)
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
         raise
+    except Exception as exc:
+        session["status"] = "error"
+        session["error"] = str(exc)
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+        raise HTTPException(status_code=500, detail="Receipt OCR processing failed.") from exc
 
     session["status"] = "processed"
     session["result"] = result
@@ -1638,7 +1669,7 @@ async def upload_release_copy(
 
     expected_tax_type = normalize_receipt_category(receipt_request_value(receipt_request, "tax_type") or "RPT")
     try:
-        analysis = build_receipt_ocr_result(
+        analysis = await build_receipt_ocr_result_async(
             db=db,
             image_data=file_bytes,
             file=file,
@@ -1648,7 +1679,7 @@ async def upload_release_copy(
             uploaded_by=current_staff.username,
             allow_exact_duplicate_match=True,
         )
-    except HTTPException:
+    except Exception:
         if os.path.exists(file_path):
             try:
                 os.remove(file_path)

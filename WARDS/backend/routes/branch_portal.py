@@ -8,11 +8,10 @@ from typing import Optional
 
 from typing import List
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_
 from sqlalchemy.exc import OperationalError
 
 from database.models import ActivityLog, Announcement, AnnouncementAttachment, AnnouncementView, Branch, BranchStaff, BusinessTaxApplication, CollectionAccount, Memo, MemoView, Payment, Policy, PolicyView, Queue, QueueHistory, ReceiptRequest, ReceiptRequestHistory, Remittance, RemittanceItem, get_db
@@ -415,6 +414,7 @@ def get_active_branch_queue(
     branch_id: int,
     exclude_queue_id: Optional[int] = None,
     current_staff: Optional[BranchStaff] = None,
+    service_window: Optional[str] = None,
 ) -> Optional[Queue]:
     queues = db.query(Queue).filter(
         Queue.branch_id == branch_id,
@@ -428,6 +428,11 @@ def get_active_branch_queue(
             queue for queue in queues
             if normalize_service_window_for_branch(db, current_staff.branch_id, queue_value(queue, "service_type")) == current_staff.service_window
         ]
+    elif service_window:
+        queues = [
+            queue for queue in queues
+            if normalize_service_window_for_branch(db, branch_id, queue_value(queue, "service_type")) == service_window
+        ]
     return queues[0] if queues else None
 
 
@@ -436,6 +441,7 @@ def get_active_branch_queues(
     branch_id: int,
     *,
     current_staff: Optional[BranchStaff] = None,
+    service_window: Optional[str] = None,
 ) -> list[Queue]:
     queues = db.query(Queue).filter(
         Queue.branch_id == branch_id,
@@ -447,14 +453,20 @@ def get_active_branch_queues(
             queue for queue in queues
             if normalize_service_window_for_branch(db, current_staff.branch_id, queue_value(queue, "service_type")) == current_staff.service_window
         ]
+    elif service_window:
+        queues = [
+            queue for queue in queues
+            if normalize_service_window_for_branch(db, branch_id, queue_value(queue, "service_type")) == service_window
+        ]
     return queues
 
 
 def reconcile_active_queue_state(
     db: Session,
     current_staff: BranchStaff,
+    service_window: Optional[str] = None,
 ) -> tuple[Optional[Queue], bool]:
-    active_queues = get_active_branch_queues(db, current_staff.branch_id, current_staff=current_staff)
+    active_queues = get_active_branch_queues(db, current_staff.branch_id, current_staff=current_staff, service_window=service_window)
     if not active_queues:
         return None, False
 
@@ -483,7 +495,7 @@ def reconcile_active_queue_state(
 
     if queue_changed:
         db.flush()
-        active_queues = get_active_branch_queues(db, current_staff.branch_id, current_staff=current_staff)
+        active_queues = get_active_branch_queues(db, current_staff.branch_id, current_staff=current_staff, service_window=service_window)
         if not active_queues:
             return None, True
 
@@ -519,25 +531,25 @@ def reconcile_active_queue_state(
 def get_next_waiting_queue_for_staff(
     db: Session,
     current_staff: BranchStaff,
+    service_window: Optional[str] = None,
 ) -> Optional[Queue]:
     current_manila_time = get_current_manila_naive()
-    candidate_ids = [
-        queue.id
-        for queue in (
-            db.query(Queue)
-            .filter(
-                Queue.branch_id == current_staff.branch_id,
-                hash_aware_match(Queue, "status", "Waiting"),
-                or_(
-                    hash_aware_match(Queue, "queue_type", "immediate"),
-                    and_(hash_aware_match(Queue, "queue_type", "appointment"), Queue.appointment_time <= current_manila_time),
-                    and_(Queue.queue_type.is_(None), Queue.appointment_time.is_(None)),
-                ),
-            )
-            .order_by(Queue.created_at.asc())
-            .all()
+    candidate_ids = []
+    for queue in (
+        db.query(Queue)
+        .filter(
+            Queue.branch_id == current_staff.branch_id,
+            hash_aware_match(Queue, "status", "Waiting"),
         )
-    ]
+        .order_by(Queue.created_at.asc())
+        .all()
+    ):
+        queue_type = (queue_value(queue, "queue_type") or "immediate").strip().lower()
+        is_immediate = queue_type != "appointment"
+        is_ready_appointment = queue_type == "appointment" and queue.appointment_time and queue.appointment_time <= current_manila_time
+        is_legacy_immediate = not queue_value(queue, "queue_type") and queue.appointment_time is None
+        if is_immediate or is_ready_appointment or is_legacy_immediate:
+            candidate_ids.append(queue.id)
 
     supports_row_locking = db.bind is not None and db.bind.dialect.name != "sqlite"
     for queue_id in candidate_ids:
@@ -551,9 +563,29 @@ def get_next_waiting_queue_for_staff(
             queue_window = normalize_service_window_for_branch(db, current_staff.branch_id, queue_value(queue, "service_type"))
             if queue_window != current_staff.service_window:
                 continue
+        elif service_window:
+            queue_window = normalize_service_window_for_branch(db, current_staff.branch_id, queue_value(queue, "service_type"))
+            if queue_window != service_window:
+                continue
         return queue
 
     return None
+
+
+def is_queue_ready_to_call(queue: Queue) -> bool:
+    queue_type = (queue_value(queue, "queue_type") or "immediate").strip().lower()
+    if queue_type != "appointment":
+        return True
+    return bool(queue.appointment_time and queue.appointment_time <= get_current_manila_naive())
+
+
+def normalize_requested_service_window(value: Optional[str]) -> Optional[str]:
+    normalized = (value or "").strip().upper()
+    if not normalized or normalized == "ALL":
+        return None
+    if normalized not in SERVICE_WINDOW_DEFAULT_WINDOW_NUMBERS:
+        raise HTTPException(status_code=400, detail="Invalid queue window selected.")
+    return normalized
 
 
 def to_utc_iso(value: Optional[datetime]) -> Optional[str]:
@@ -1252,19 +1284,41 @@ async def get_live_queue_monitor(
 
 @router.post("/queue/call-next")
 async def call_next_queue(
+    service_window: Optional[str] = Query(None),
+    queue_id: Optional[int] = Query(None),
     current_staff: BranchStaff = Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
     ensure_branch_queue_operations_enabled(db, current_staff.branch_id)
+    requested_service_window = normalize_requested_service_window(service_window)
+    if is_queue_window_staff(current_staff):
+        requested_service_window = current_staff.service_window
     for attempt in range(2):
         try:
-            active_queue, recovered_state = reconcile_active_queue_state(db, current_staff)
+            active_queue, recovered_state = reconcile_active_queue_state(db, current_staff, service_window=requested_service_window)
             if active_queue:
                 if recovered_state:
                     db.commit()
                 raise HTTPException(status_code=409, detail="Only one queue can be active at a time. Complete or skip the current queue before calling the next one.")
 
-            queue = get_next_waiting_queue_for_staff(db, current_staff)
+            queue = None
+            if queue_id is not None:
+                queue_query = db.query(Queue).filter(Queue.id == queue_id, Queue.branch_id == current_staff.branch_id)
+                if db.bind is not None and db.bind.dialect.name != "sqlite":
+                    queue_query = queue_query.with_for_update(skip_locked=True)
+                queue = queue_query.first()
+                if not queue:
+                    raise HTTPException(status_code=404, detail="Selected queue record was not found.")
+                ensure_queue_window_access(db, current_staff, queue)
+                selected_queue_window = normalize_service_window_for_branch(db, current_staff.branch_id, queue_value(queue, "service_type"))
+                if requested_service_window and selected_queue_window != requested_service_window:
+                    raise HTTPException(status_code=403, detail="Selected queue does not belong to the chosen queue window.")
+                if (queue_value(queue, "status") or "").strip().lower() != "waiting":
+                    raise HTTPException(status_code=409, detail="Selected queue is no longer waiting.")
+                if not is_queue_ready_to_call(queue):
+                    raise HTTPException(status_code=404, detail="Selected appointment queue is not ready to call yet.")
+            else:
+                queue = get_next_waiting_queue_for_staff(db, current_staff, service_window=requested_service_window)
             if not queue:
                 all_waiting = db.query(Queue).filter(
                     Queue.branch_id == current_staff.branch_id,
@@ -1272,8 +1326,8 @@ async def call_next_queue(
                 ).count()
 
                 detail_msg = f"No ready queue numbers are available to call yet. (Total waiting queues: {all_waiting}"
-                if is_queue_window_staff(current_staff):
-                    detail_msg += f", Window: {current_staff.service_window}"
+                if requested_service_window:
+                    detail_msg += f", Window: {requested_service_window}"
                 detail_msg += ")"
                 raise HTTPException(status_code=404, detail=detail_msg)
 
