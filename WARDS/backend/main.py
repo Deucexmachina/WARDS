@@ -1,8 +1,9 @@
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from datetime import datetime, timedelta
 from typing import Optional
@@ -14,6 +15,9 @@ import time
 from dotenv import load_dotenv
 from passlib.context import CryptContext
 from sqlalchemy import text, inspect, or_
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 load_dotenv(Path(__file__).resolve().with_name(".env"), override=True)
 
@@ -24,6 +28,21 @@ from utils.field_crypto import apply_citizen_user_security, apply_discrepancy_re
 from utils.system_settings import seed_system_settings
 
 app = FastAPI(title="WARDS API", version="1.0.0")
+
+# Rate limiting configuration
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+
+# Custom rate limit exceeded handler
+@app.exception_handler(RateLimitExceeded)
+async def custom_rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        content={
+            "detail": "Too many requests. Please try again later.",
+            "error": "rate_limit_exceeded"
+        }
+    )
 
 
 def build_allowed_origins() -> list[str]:

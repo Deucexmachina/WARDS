@@ -9,10 +9,15 @@ import pyotp
 import qrcode
 import requests
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
+
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from database.models import ActivityLog, Admin, BranchStaff, CitizenUser, MFASecret, get_db
 from services.email_service import (
@@ -23,6 +28,9 @@ from utils.field_crypto import apply_citizen_user_security, apply_mfa_secret_sec
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# Rate limiting configuration
+limiter = Limiter(key_func=get_remote_address)
 
 USER_SECRET_KEY = os.getenv("USER_SECRET_KEY", "your-user-secret-key-change-in-production")
 ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "your-admin-secret-key-change-in-production-immediately")
@@ -471,14 +479,9 @@ def generate_mfa_payload(portal: str, username: str, secret: str) -> dict:
 
 
 @router.post("/login", response_model=UnifiedToken)
+@limiter.limit("5/minute")
 async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: Session = Depends(get_db)):
     client_ip = request.client.host
-
-    if not check_rate_limit(client_ip):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many login attempts. Please try again later.",
-        )
 
     portal, account = find_account_for_portal(db, credentials.identifier, credentials.portal)
 

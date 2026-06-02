@@ -1,7 +1,7 @@
 import os
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from passlib.context import CryptContext
@@ -9,6 +9,10 @@ from jose import JWTError, jwt
 from datetime import datetime, timedelta
 from typing import Optional
 import secrets
+
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from database.models import EmailVerificationToken, PublicUser, get_db
 from services.email_service import send_citizen_verification_link_email, smtp_is_configured
@@ -23,6 +27,9 @@ from utils.security_validation import (
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# Rate limiting configuration
+limiter = Limiter(key_func=get_remote_address)
 
 # JWT settings
 SECRET_KEY = "your-secret-key-change-in-production"
@@ -57,7 +64,8 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     return encoded_jwt
 
 @router.post("/register", response_model=Token)
-async def register_public_user(user_data: PublicUserRegister, db: Session = Depends(get_db)):
+@limiter.limit("5/minute;25/day")
+async def register_public_user(request: Request, user_data: PublicUserRegister, db: Session = Depends(get_db)):
     """Register a new public user"""
     normalized_email = normalize_email(user_data.email, check_deliverability=True)
     normalized_full_name = normalize_citizen_full_name(user_data.full_name)

@@ -8,6 +8,7 @@ Security Level: HIGH
 - Comprehensive activity logging
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from passlib.context import CryptContext
@@ -22,12 +23,19 @@ import base64
 import requests
 import time
 
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
 from database.models import Admin, ActivityLog, MFASecret, get_db
 from utils.system_settings import get_setting_value
 from utils.field_crypto import apply_mfa_secret_security, find_mfa_secret_record, get_decrypted_or_raw
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# Rate limiting configuration
+limiter = Limiter(key_func=get_remote_address)
 
 SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "your-admin-secret-key-change-in-production-immediately")
 ALGORITHM = "HS256"
@@ -296,20 +304,13 @@ async def setup_mfa_authenticated(request: Request, db: Session = Depends(get_db
     }
 
 @router.post("/login", response_model=Token)
+@limiter.limit("3/minute")
 async def admin_login(request: Request, credentials: AdminLoginRequest, db: Session = Depends(get_db)):
     """
     Admin login with TOTP MFA and reCAPTCHA
     """
     client_ip = request.client.host
     normalized_email = normalize_admin_email(credentials.email)
-    
-    # Rate limiting
-    if not check_rate_limit(client_ip):
-        log_activity(db, "Login Rate Limited", normalized_email, f"IP: {client_ip}", "security")
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many login attempts. Please try again later."
-        )
     
     # Check account lockout
     if is_account_locked(normalized_email):

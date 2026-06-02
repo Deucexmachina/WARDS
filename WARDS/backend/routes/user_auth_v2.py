@@ -8,7 +8,7 @@ Security Level: STANDARD
 - Rate limiting
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr
 from passlib.context import CryptContext
@@ -20,6 +20,10 @@ import secrets
 import requests
 import time
 import hashlib
+
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from database.models import Admin, Branch, BranchStaff, CitizenUser, ActivityLog, EmailOTP, EmailVerificationToken, Invite, get_db
 from services.email_service import (
@@ -44,6 +48,9 @@ from utils.security_validation import (
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 SERVER_STARTED_AT = datetime.utcnow().isoformat()
+
+# Rate limiting configuration
+limiter = Limiter(key_func=get_remote_address)
 
 SECRET_KEY = os.getenv("USER_SECRET_KEY", "your-user-secret-key-change-in-production")
 ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "your-admin-secret-key-change-in-production-immediately")
@@ -303,15 +310,10 @@ def log_activity(db: Session, action: str, user: str, details: str, log_type: st
     db.commit()
 
 @router.post("/register", response_model=Token)
+@limiter.limit("5/minute;25/day")
 async def register_user(request: Request, user_data: UserRegisterRequest, db: Session = Depends(get_db)):
     """Register new citizen user"""
     client_ip = request.client.host
-    
-    if not check_rate_limit(client_ip):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many requests. Please try again later."
-        )
     
     # Verify reCAPTCHA for registration
     if user_data.recaptcha_token:
@@ -649,16 +651,10 @@ async def verify_email(token: str, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=Token)
+@limiter.limit("5/minute")
 async def user_login(request: Request, credentials: UserLoginRequest, db: Session = Depends(get_db)):
     """User login with email, password, and conditional reCAPTCHA"""
     client_ip = request.client.host
-    
-    if not check_rate_limit(client_ip):
-        log_activity(db, "Login Rate Limited", credentials.email, f"IP: {client_ip}", "security")
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many login attempts. Please try again later."
-        )
     
     if is_account_locked(credentials.email):
         remaining_time = int(LOCKOUT_DURATION - (time.time() - locked_accounts[credentials.email]["locked_at"]))
