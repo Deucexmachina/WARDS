@@ -869,13 +869,14 @@ def build_receipt_ocr_result(
     category: str,
     branch_id: int,
     uploaded_by: str,
+    allow_exact_duplicate_match: bool = False,
 ) -> dict:
     normalized_category = normalize_receipt_category(category)
     image_sha256 = compute_image_sha256(image_data)
     image_ahash = compute_image_ahash(image_data)
     duplicate_record, duplicate_type = find_duplicate_receipt_record(db, image_sha256, image_ahash)
 
-    if duplicate_type == "exact":
+    if duplicate_type == "exact" and not allow_exact_duplicate_match:
         raise HTTPException(
             status_code=409,
             detail=(
@@ -1645,6 +1646,7 @@ async def upload_release_copy(
             category=expected_tax_type,
             branch_id=current_staff.branch_id,
             uploaded_by=current_staff.username,
+            allow_exact_duplicate_match=True,
         )
     except HTTPException:
         if os.path.exists(file_path):
