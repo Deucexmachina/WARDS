@@ -104,6 +104,35 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
     return null;
   };
 
+  const getSubmissionPortal = (fallbackPortal = detectedPortal) => {
+    if (preferredPortal) {
+      return preferredPortal;
+    }
+
+    const explicitPortal = searchParams.get('portal');
+    if (explicitPortal) {
+      return explicitPortal;
+    }
+
+    if (fallbackPortal && fallbackPortal !== 'default' && fallbackPortal !== 'unknown') {
+      return fallbackPortal;
+    }
+
+    return undefined;
+  };
+
+  const lockDetectedPortal = (portal) => {
+    if (!portal || portal === 'default' || portal === 'unknown') {
+      return;
+    }
+
+    setDetectedPortal(portal);
+    sessionStorage.setItem('loginPortal', portal);
+    if (portal === 'public') {
+      sessionStorage.removeItem('redirectAfterLogin');
+    }
+  };
+
   const getTrackingKey = (value, portal = getActivePortal()) => {
     return `loginGuard:${portal || 'default'}:${value.trim().toLowerCase()}`;
   };
@@ -210,6 +239,12 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
     const requestedPortal = getRequestedPortal();
     const pendingRedirect = sessionStorage.getItem('redirectAfterLogin');
     const portal = getStoredPortal();
+    if (preferredPortal === 'public' || searchParams.get('portal') === 'public') {
+      sessionStorage.setItem('loginPortal', 'public');
+      sessionStorage.removeItem('redirectAfterLogin');
+      setDetectedPortal('public');
+      return;
+    }
     if (portal && !requestedPortal) {
       navigate(getPortalHome(portal), { replace: true });
       return;
@@ -290,9 +325,9 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
       });
 
       if (response.data.portal) {
-        setDetectedPortal(response.data.portal);
+        lockDetectedPortal(response.data.portal);
       } else if (requestedPortal) {
-        setDetectedPortal(requestedPortal);
+        lockDetectedPortal(requestedPortal);
       }
 
       clearGuardState(identifier, requestedPortal);
@@ -331,11 +366,11 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
       const response = await axios.post(`${API_URL}/api/auth/unified/login`, {
         identifier,
         password,
-        portal: preferredPortal === 'public' ? 'public' : undefined,
+        portal: getSubmissionPortal(),
         recaptcha_token: recaptchaToken || undefined,
       });
 
-      setDetectedPortal(response.data.portal);
+      lockDetectedPortal(response.data.portal);
 
       if (response.data.requires_mfa) {
         const latestGuardState = readGuardState(identifier, response.data.portal);
@@ -353,7 +388,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
       persistSession(response.data);
       redirectAfterLogin(response.data.portal);
     } catch (err) {
-      const portal = err.response?.headers?.['x-auth-portal'] || 'default';
+      const portal = err.response?.headers?.['x-auth-portal'] || getSubmissionPortal() || 'default';
       const detail = err.response?.data?.detail || 'Login failed. Please try again.';
       const requiresEmailVerification = err.response?.headers?.['x-requires-email-verification'] === 'true';
 
@@ -380,7 +415,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
         return;
       }
 
-      setDetectedPortal(portal);
+      lockDetectedPortal(portal);
       const updatedGuardState = registerFailedAttempt(identifier, portal || getActivePortal());
       setError(updatedGuardState.lockedUntil ? getLockMessage(updatedGuardState.lockedUntil) : detail);
 
@@ -420,7 +455,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
       const response = await axios.post(`${API_URL}/api/auth/unified/login`, {
         identifier,
         password,
-        portal: preferredPortal === 'public' ? 'public' : undefined,
+        portal: getSubmissionPortal(),
         totp_code: totpCode,
         recaptcha_token: recaptchaToken || undefined,
       });
@@ -429,8 +464,8 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
       persistSession(response.data);
       redirectAfterLogin(response.data.portal);
     } catch (err) {
-      const portal = err.response?.headers?.['x-auth-portal'] || detectedPortal;
-      setDetectedPortal(portal || 'default');
+      const portal = err.response?.headers?.['x-auth-portal'] || getSubmissionPortal() || detectedPortal;
+      lockDetectedPortal(portal);
       const detail = err.response?.data?.detail || 'Invalid TOTP code. Please try again.';
       const updatedGuardState = registerFailedAttempt(identifier, portal || getActivePortal());
       setError(updatedGuardState.lockedUntil ? getLockMessage(updatedGuardState.lockedUntil) : detail);

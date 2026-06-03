@@ -4,11 +4,11 @@ import axios from 'axios'
 import App from './App.jsx'
 import './index.css'
 import { sanitizeApiResponseData } from './utils/responseSanitizer'
-import { getFriendlyErrorMessage, getModalToneForError } from './utils/errorMessages'
+import { getFriendlyErrorMessage, getModalToneForError, shouldSuppressGlobalErrorModal } from './utils/errorMessages'
 
 const dispatchSystemErrorModal = (error) => {
   const status = error?.response?.status
-  if (!status) {
+  if (!status || shouldSuppressGlobalErrorModal(error)) {
     return
   }
 

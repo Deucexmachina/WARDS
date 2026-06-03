@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { sanitizeApiResponseData } from '../utils/responseSanitizer';
-import { getFriendlyErrorMessage, getModalToneForError } from '../utils/errorMessages';
+import { getFriendlyErrorMessage, getModalToneForError, shouldSuppressGlobalErrorModal } from '../utils/errorMessages';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 
@@ -61,7 +61,7 @@ api.interceptors.response.use(
   (error) => {
     const url = error?.config?.url || '';
     const status = error?.response?.status;
-    if (status) {
+    if (status && !shouldSuppressGlobalErrorModal(error)) {
       window.dispatchEvent(new CustomEvent('wards:system-message', {
         detail: {
           tone: getModalToneForError(error),

@@ -607,6 +607,9 @@ const ReceiptManagement = () => {
       await refreshData({ emitReceiptEvent: true });
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to release receipt request.');
+      if (err.response?.status === 404) {
+        await refreshData({ emitReceiptEvent: true });
+      }
     } finally {
       setReleasing(false);
     }

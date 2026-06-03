@@ -60,3 +60,15 @@ export const getFriendlyErrorMessage = (error, fallback = 'Something went wrong.
 export const getModalToneForError = (error) => (
   error?.response?.status === 429 ? 'warning' : 'error'
 );
+
+export const shouldSuppressGlobalErrorModal = (error) => {
+  const url = String(error?.config?.url || '').toLowerCase();
+  return (
+    url.includes('/auth/') ||
+    url.includes('_auth') ||
+    url.includes('/login') ||
+    url.includes('/setup-mfa') ||
+    url.includes('/verify-mfa') ||
+    url.includes('/receipts/')
+  );
+};
