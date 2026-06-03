@@ -26,6 +26,7 @@ from services import ocr_routes
 from database.models import Base, engine, SessionLocal, Admin, Announcement, AnnouncementAttachment, Branch, BusinessRegistry, BusinessTaxApplication, DiscrepancyReport, EmailOTP, EmailVerificationToken, FAQ, Invite, Memo, MemoView, MFASecret, Payment, Queue, QueueActivity, ReceiptRecord, ReceiptRequest, ReceiptRequestHistory, RPTPropertyRecord, Service, ServiceWindowConfig, TaxpayerGuide
 from utils.field_crypto import apply_citizen_user_security, apply_discrepancy_report_security, apply_email_otp_security, apply_email_verification_token_security, apply_faq_security, apply_invite_security, apply_memo_security, apply_memo_view_security, apply_mfa_secret_security, apply_payment_security, apply_queue_activity_security, apply_queue_security, apply_receipt_record_security, apply_receipt_request_history_security, apply_receipt_request_security, apply_rpt_property_record_security, apply_service_security, apply_service_window_config_security, apply_system_setting_security, apply_tax_assessment_record_security, apply_taxpayer_guide_security, apply_taxpayer_identifier_submission_security, build_redacted_text, get_decrypted_or_raw, hash_optional_value, set_encrypted_hash_companions
 from utils.system_settings import seed_system_settings
+from middleware.dos_protection import RequestSizeMiddleware, RequestTimeoutMiddleware, ConnectionLimitMiddleware, AbuseDetectionMiddleware
 
 app = FastAPI(title="WARDS API", version="1.0.0")
 
@@ -102,6 +103,12 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Requires-Captcha", "X-Requires-MFA-Setup", "X-Auth-Portal", "X-Requires-Email-Verification"],
 )
+
+# DoS Protection Middleware (order matters - size first, then timeout, then connection/abuse)
+app.add_middleware(RequestSizeMiddleware)
+app.add_middleware(RequestTimeoutMiddleware)
+app.add_middleware(ConnectionLimitMiddleware)
+app.add_middleware(AbuseDetectionMiddleware)
 
 Base.metadata.create_all(bind=engine)
 

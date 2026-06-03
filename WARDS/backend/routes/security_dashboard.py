@@ -12,8 +12,9 @@ MASTER_ROOT = Path(__file__).resolve().parents[3]
 if str(MASTER_ROOT) not in sys.path:
     sys.path.insert(0, str(MASTER_ROOT))
 
-from database.models import get_db
+from database.models import get_db, ActivityLog
 from routes.admin_auth_v2 import get_current_admin_from_token
+from middleware.dos_protection import get_blocked_ips, unblock_ip, block_ip
 from SECURITY.security_engine import (
     add_monitored_folder,
     add_ai_rule,
@@ -397,3 +398,69 @@ def admin_change(payload: AdminChangeRequest, request: Request, db: Session = De
         request.headers.get("User-Agent"),
     )
     return {"id": change.id, "message": "Admin change registered as legitimate."}
+
+
+# --- DoS Protection: Blocked IP Management ---
+
+
+class BlockIpRequest(BaseModel):
+    ip: str
+    duration: int = 300
+
+
+@router.get("/blocked-ips")
+def list_blocked_ips(db: Session = Depends(get_db), admin=Depends(current_admin)):
+    """View all currently blocked IPs with remaining block time."""
+    import time
+
+    blocked = get_blocked_ips()
+    current_time = time.time()
+    result = []
+    for ip, unblock_at in blocked.items():
+        result.append({
+            "ip": ip,
+            "blocked_until": unblock_at,
+            "remaining_seconds": max(0, int(unblock_at - current_time)),
+        })
+    return {"blocked_ips": result, "total": len(result)}
+
+
+@router.post("/blocked-ips")
+def manually_block_ip(payload: BlockIpRequest, request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
+    """Manually block an IP address for a specified duration (seconds)."""
+    if not payload.ip or not payload.ip.strip():
+        raise HTTPException(status_code=400, detail="IP address is required.")
+    if payload.duration < 10:
+        raise HTTPException(status_code=400, detail="Block duration must be at least 10 seconds.")
+    if payload.duration > 86400:
+        raise HTTPException(status_code=400, detail="Block duration cannot exceed 24 hours.")
+
+    block_ip(payload.ip.strip(), payload.duration)
+
+    db.add(ActivityLog(
+        action="Manual IP Block",
+        user=admin.username,
+        details=f"Blocked IP {payload.ip.strip()} for {payload.duration}s | Admin IP: {request.client.host if request.client else 'unknown'}",
+        type="security",
+    ))
+    db.commit()
+
+    return {"message": f"IP {payload.ip.strip()} blocked for {payload.duration} seconds.", "ip": payload.ip.strip(), "duration": payload.duration}
+
+
+@router.delete("/blocked-ips/{ip}")
+def manually_unblock_ip(ip: str, request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
+    """Manually unblock a blocked IP address."""
+    success = unblock_ip(ip)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"IP {ip} is not currently blocked.")
+
+    db.add(ActivityLog(
+        action="Manual IP Unblock",
+        user=admin.username,
+        details=f"Unblocked IP {ip} | Admin IP: {request.client.host if request.client else 'unknown'}",
+        type="security",
+    ))
+    db.commit()
+
+    return {"message": f"IP {ip} has been unblocked.", "ip": ip}

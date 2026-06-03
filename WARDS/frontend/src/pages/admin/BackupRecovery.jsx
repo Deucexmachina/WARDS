@@ -289,6 +289,9 @@ const BackupRecovery = () => {
     monitoringEnabled: true,
     aiRuleTemplate: '',
   });
+  const [blockedIps, setBlockedIps] = useState([]);
+  const [blockIpInput, setBlockIpInput] = useState('');
+  const [blockDuration, setBlockDuration] = useState(300);
   const navigate = useNavigate();
 
   const adminUser = useMemo(() => JSON.parse(localStorage.getItem('adminUser') || '{}'), []);
@@ -361,6 +364,36 @@ const BackupRecovery = () => {
     setAiRuleTemplates(templatesResponse.data || []);
   };
 
+  const refreshBlockedIps = async () => {
+    const response = await api.get('/security/blocked-ips');
+    setBlockedIps(response.data?.blocked_ips || []);
+  };
+
+  const blockIp = async () => {
+    if (!blockIpInput.trim()) {
+      setNotice('Please enter an IP address.');
+      return;
+    }
+    try {
+      await api.post('/security/blocked-ips', { ip: blockIpInput.trim(), duration: blockDuration });
+      setNotice(`IP ${blockIpInput.trim()} blocked for ${blockDuration} seconds.`);
+      setBlockIpInput('');
+      await refreshBlockedIps();
+    } catch (error) {
+      setNotice(error.response?.data?.detail || 'Failed to block IP.');
+    }
+  };
+
+  const unblockIp = async (ip) => {
+    try {
+      await api.delete(`/security/blocked-ips/${ip}`);
+      setNotice(`IP ${ip} unblocked.`);
+      await refreshBlockedIps();
+    } catch (error) {
+      setNotice(error.response?.data?.detail || 'Failed to unblock IP.');
+    }
+  };
+
   const refreshActiveTab = async (tab = activeTab) => {
     if (tab === 'File Status') {
       await refreshFiles();
@@ -380,6 +413,7 @@ const BackupRecovery = () => {
     }
     if (tab === 'Manual Controls') {
       await refreshAiRules();
+      await refreshBlockedIps();
     }
   };
 
@@ -1190,6 +1224,77 @@ const BackupRecovery = () => {
                       Open Manage AI Rules
                     </button>
                   )}
+                </div>
+              </Section>
+
+              <Section title="Blocked IPs">
+                <div className="space-y-4">
+                  <p className="text-sm leading-6 text-slate-600">
+                    View and manage IP addresses blocked by the DoS protection system. IPs are automatically blocked when they exceed the abuse threshold.
+                  </p>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-end">
+                      <div className="flex-1">
+                        <label className="text-sm font-semibold text-slate-700">Block IP Address</label>
+                        <input
+                          className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                          type="text"
+                          placeholder="e.g., 192.168.1.100"
+                          value={blockIpInput}
+                          onChange={(e) => setBlockIpInput(e.target.value)}
+                        />
+                      </div>
+                      <div className="w-full md:w-32">
+                        <label className="text-sm font-semibold text-slate-700">Duration (sec)</label>
+                        <input
+                          className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                          type="number"
+                          min="10"
+                          max="86400"
+                          value={blockDuration}
+                          onChange={(e) => setBlockDuration(Number(e.target.value))}
+                        />
+                      </div>
+                      <button disabled={busy} className={`rounded-xl bg-red-600 px-4 py-2 font-semibold text-white${disabledButtonClass}`} onClick={blockIp}>
+                        Block IP
+                      </button>
+                    </div>
+                    <p className="text-xs text-slate-500">Duration must be between 10 seconds and 24 hours (86400 seconds).</p>
+                  </div>
+                  <div className="max-h-80 overflow-auto rounded-xl border border-slate-200">
+                    {blockedIps.length > 0 ? (
+                      <table className="w-full text-sm">
+                        <thead className="bg-slate-50">
+                          <tr>
+                            <th className="px-4 py-3 text-left font-bold text-slate-700">IP Address</th>
+                            <th className="px-4 py-3 text-left font-bold text-slate-700">Remaining Time</th>
+                            <th className="px-4 py-3 text-right font-bold text-slate-700">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {blockedIps.map((item) => (
+                            <tr key={item.ip} className="border-t border-slate-100">
+                              <td className="px-4 py-3 font-mono text-slate-900">{item.ip}</td>
+                              <td className="px-4 py-3 text-slate-700">
+                                {item.remaining_seconds > 0 ? `${Math.floor(item.remaining_seconds / 60)}m ${item.remaining_seconds % 60}s` : 'Expired'}
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                <button
+                                  disabled={busy}
+                                  className={`rounded-lg bg-green-600 px-3 py-1 text-xs font-semibold text-white disabled:opacity-60${disabledButtonClass}`}
+                                  onClick={() => unblockIp(item.ip)}
+                                >
+                                  Unblock
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <div className="p-8 text-center text-sm text-slate-500">No IP addresses are currently blocked.</div>
+                    )}
+                  </div>
                 </div>
               </Section>
             </div>
