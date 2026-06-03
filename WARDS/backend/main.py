@@ -30,18 +30,35 @@ from utils.system_settings import seed_system_settings
 app = FastAPI(title="WARDS API", version="1.0.0")
 
 # Rate limiting configuration
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(key_func=get_remote_address, headers_enabled=True)
 app.state.limiter = limiter
+
+
+def _parse_retry_after(detail: str) -> int:
+    """Extract a Retry-After value (seconds) from the SlowAPI limit description."""
+    detail_lower = (detail or "").lower()
+    if "day" in detail_lower:
+        return 86400
+    if "hour" in detail_lower:
+        return 3600
+    # Default to 60 seconds (per-minute limits)
+    return 60
+
 
 # Custom rate limit exceeded handler
 @app.exception_handler(RateLimitExceeded)
 async def custom_rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+    retry_after = _parse_retry_after(str(exc.detail))
     return JSONResponse(
         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
         content={
             "detail": "Too many requests. Please try again later.",
             "error": "rate_limit_exceeded"
-        }
+        },
+        headers={
+            "Retry-After": str(retry_after),
+            "X-RateLimit-Limit": str(exc.detail),
+        },
     )
 
 

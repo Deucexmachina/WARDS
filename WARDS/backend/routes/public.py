@@ -1232,7 +1232,7 @@ async def check_queue_status(request: Request, queue_number: str, db: Session = 
 @limiter.limit("1/minute;10/day")
 async def create_receipt_request(request: Request, receipt_request: ReceiptRequestCreate, db: Session = Depends(get_db)):
     """Create a receipt request"""
-    normalized_email = normalize_email(request.email, check_deliverability=True)
+    normalized_email = normalize_email(receipt_request.email, check_deliverability=True)
     # Generate request ID
     today = datetime.now().strftime("%Y%m%d")
     count = db.query(ReceiptRequest).filter(
@@ -1242,9 +1242,9 @@ async def create_receipt_request(request: Request, receipt_request: ReceiptReque
     
     new_request = ReceiptRequest(
         request_id=request_id,
-        taxpayer_name=request.taxpayer_name,
-        transaction_date=request.transaction_date,
-        ref_number=request.ref_number,
+        taxpayer_name=receipt_request.taxpayer_name,
+        transaction_date=receipt_request.transaction_date,
+        ref_number=receipt_request.ref_number,
         email=normalized_email,
         status="Payment Required",
         fee_paid=False
@@ -1256,7 +1256,7 @@ async def create_receipt_request(request: Request, receipt_request: ReceiptReque
     
     return {
         "request_id": request_id,
-        "taxpayer_name": request.taxpayer_name,
+        "taxpayer_name": receipt_request.taxpayer_name,
         "status": "Payment Required",
         "message": "Receipt request created. Please complete payment to process your request.",
         "payment_amount": 50.00,  # Fixed fee
@@ -1293,17 +1293,46 @@ async def initiate_payment(
 ):
     """Initiate online payment"""
     ensure_payment_gateway_available(db)
-    # Generate reference number
-    today = datetime.now().strftime("%Y%m%d")
+
+    # Prevent duplicate pending payments for the same taxpayer/tax_type/branch today
     day_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     day_end = day_start + timedelta(days=1)
+    tin_hash = hash_optional_value(payment.tin)
+    tax_type_hash = hash_optional_value(payment.tax_type)
+    branch_record = resolve_public_branch_by_name(db, payment.branch)
+    existing_pending = (
+        db.query(Payment)
+        .filter(
+            Payment.status == "Pending",
+            Payment.created_at >= day_start,
+            Payment.created_at < day_end,
+            or_(Payment.tin == payment.tin, Payment.tin_hash == tin_hash),
+            or_(Payment.tax_type == payment.tax_type, Payment.tax_type_hash == tax_type_hash),
+            Payment.branch_id == (branch_record.id if branch_record else None),
+        )
+        .first()
+    )
+    if existing_pending:
+        existing_ref = get_decrypted_or_raw(existing_pending, "ref_number") or existing_pending.ref_number
+        existing_txn = get_decrypted_or_raw(existing_pending, "txn_id") or existing_pending.txn_id
+        return {
+            "ref_number": existing_ref,
+            "txn_id": existing_txn,
+            "amount": existing_pending.amount,
+            "status": "Pending",
+            "payment_url": f"https://payment-gateway.example.com/pay?ref={existing_ref}",
+            "message": "A pending payment already exists for this transaction. Please complete it or wait for it to expire.",
+            "duplicate": True,
+        }
+
+    # Generate reference number
+    today = datetime.now().strftime("%Y%m%d")
     count = db.query(Payment).filter(Payment.created_at >= day_start, Payment.created_at < day_end).count()
     ref_number = f"PAY-{today}-{count + 1:04d}"
     
     # Generate transaction ID (simulated)
     txn_id = f"TXN-{random.randint(100000, 999999)}"
     
-    branch_record = resolve_public_branch_by_name(db, payment.branch)
     new_payment = Payment(
         ref_number=ref_number,
         txn_id=txn_id,

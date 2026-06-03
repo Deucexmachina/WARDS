@@ -86,23 +86,38 @@ Once the server is running, visit:
 ## Endpoints
 
 ### Authentication
-- POST /api/auth/login - User login
-- POST /api/auth/logout - User logout
-- GET /api/auth/me - Get current user
+- POST /api/auth/unified/login - Unified login (all portals)
+- POST /api/auth/unified/request-password-reset - Request password reset
+- POST /api/auth/unified/reset-password - Reset password
+- POST /api/user/auth/login - Citizen user login
+- POST /api/user/auth/register - Citizen user registration
+- POST /api/user/auth/request-password-reset - User password reset request
+- POST /api/user/auth/logout - User logout
+- GET /api/user/auth/verify - Verify user token
+- POST /api/admin/auth/login - Admin login
+- POST /api/branch/auth/login - Branch staff login
 
-### Payments
-- POST /api/payments/generate-reference - Generate payment reference
-- POST /api/payments/process - Process payment
-- GET /api/payments/verify/{ref_number} - Verify payment
+### Public APIs
+- GET /api/public/branches - List active branches
+- GET /api/public/queue-status - Queue status overview
+- GET /api/public/queue/branch/{branch_id} - Branch queue status
+- POST /api/public/queue/register - Register for queue
+- GET /api/public/queue/my-ticket - Get current ticket
+- GET /api/public/queue/history - Queue history
+- GET /api/public/queue/{queue_number} - Lookup queue ticket
+- POST /api/public/receipt-request - Create receipt request
+- GET /api/public/receipt-request/{request_id} - Check receipt request status
+- POST /api/public/payment/initiate - Initiate online payment
+- GET /api/public/payment/{ref_number} - Check payment status
+- POST /api/public/payment/{ref_number}/verify - Verify payment
+
+### Payments (Admin)
 - GET /api/payments/transactions - Get all transactions
 
-### Receipts
-- POST /api/receipts/request - Request receipt copy
-- GET /api/receipts/request/{request_id} - Get request status
-- POST /api/receipts/request/{request_id}/pay - Pay request fee
-- POST /api/receipts/upload-proof - Upload proof of payment
+### Receipts (Admin)
+- GET /api/receipts - Get receipt records
 
-### Branches
+### Branches (Admin)
 - GET /api/branches - Get all branches
 - POST /api/branches - Create branch
 - PUT /api/branches/{id} - Update branch
@@ -120,3 +135,7 @@ Once the server is running, visit:
 - Activity Logs: /api/activity-logs
 - Backup: /api/backup
 - Accounts: /api/accounts
+- Discrepancies: /api/discrepancies
+- Tax Assessment: /api/tax-assessment
+- Settings: /api/settings
+- Dashboard: /api/dashboard

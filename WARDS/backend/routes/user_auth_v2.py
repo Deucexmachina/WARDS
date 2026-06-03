@@ -326,12 +326,12 @@ def check_password_reset_rate_limit(email: str) -> bool:
         if current_time - timestamp < 86400  # 24 hours
     ]
     
-    # Check hourly limit (3 per hour)
+    # Check hourly limit (5 per hour - aligned with SlowAPI limit)
     hourly_requests = [
         timestamp for timestamp in password_reset_rate_limits[email_lower]
         if current_time - timestamp < 3600  # 1 hour
     ]
-    if len(hourly_requests) >= 3:
+    if len(hourly_requests) >= 5:
         return False
     
     # Check daily limit (10 per day)
@@ -724,7 +724,6 @@ async def register_invited_user(invite_data: InviteRegisterRequest, db: Session 
         "requires_captcha": False,
     }
 
-@router.post("/login", response_model=Token)
 @router.get("/verify-email", response_class=HTMLResponse)
 async def verify_email(token: str, db: Session = Depends(get_db)):
     token_hash = hash_optional_value(token)

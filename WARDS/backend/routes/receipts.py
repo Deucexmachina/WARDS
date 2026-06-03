@@ -1791,19 +1791,21 @@ async def download_release_copy(
 
 
 @router.post("/request")
+@limiter.limit("5/hour")
 async def create_receipt_request(
-    request: PublicReceiptRequestCreate,
+    request: Request,
+    receipt_req: PublicReceiptRequestCreate,
     db: Session = Depends(get_db),
     credentials: HTTPAuthorizationCredentials | None = Depends(optional_user_security),
 ):
-    taxpayer_name = validate_taxpayer_name(request.taxpayerName)
-    transaction_date = validate_transaction_date((request.txnDate or "").strip())
-    normalized_email = normalize_email(request.email, check_deliverability=True)
-    normalized_ref_number = normalize_reference_number(request.refNumber)
-    request_reason, request_reason_other = validate_receipt_request_reason(request.requestReason, request.requestReasonOther)
+    taxpayer_name = validate_taxpayer_name(receipt_req.taxpayerName)
+    transaction_date = validate_transaction_date((receipt_req.txnDate or "").strip())
+    normalized_email = normalize_email(receipt_req.email, check_deliverability=True)
+    normalized_ref_number = normalize_reference_number(receipt_req.refNumber)
+    request_reason, request_reason_other = validate_receipt_request_reason(receipt_req.requestReason, receipt_req.requestReasonOther)
     _ = resolve_authenticated_citizen(credentials, db)
-    tax_type = normalize_receipt_category(request.taxType)
-    branch_id = request.branchId
+    tax_type = normalize_receipt_category(receipt_req.taxType)
+    branch_id = receipt_req.branchId
     ensure_receipt_requests_enabled(db, branch_id)
     branch = db.query(Branch).filter(Branch.id == branch_id, Branch.status == "Active").first()
     if not branch:
