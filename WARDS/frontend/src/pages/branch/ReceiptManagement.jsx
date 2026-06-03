@@ -10,6 +10,11 @@ const SECTION_PAGE_SIZE = 5;
 const MAX_RELEASE_IMAGE_SIZE = 5 * 1024 * 1024;
 const ALLOWED_RELEASE_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const BRANCH_RECEIPT_UPDATED_EVENT = 'branch-receipt-updated';
+const PROCESSING_SUCCESS_DELAY_MS = 1100;
+
+const wait = (ms) => new Promise((resolve) => {
+  window.setTimeout(resolve, ms);
+});
 
 const dedupeRequestsById = (items) => {
   const seen = new Set();
@@ -131,6 +136,7 @@ const ReceiptManagement = () => {
   const [deletingRequestId, setDeletingRequestId] = useState(null);
   const [deletingHistoryId, setDeletingHistoryId] = useState(null);
   const [uploadingReleaseId, setUploadingReleaseId] = useState(null);
+  const [processingFeedback, setProcessingFeedback] = useState(null);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -300,6 +306,37 @@ const ReceiptManagement = () => {
     ocrDraft?.save_blocked || categoryMismatch || ocrDraft?.duplicate_detected || filenameMismatchBlocked
   );
   const duplicateWarning = ocrDraft?.duplicate_warning || '';
+  const activeProcessingModal = useMemo(() => {
+    if (processingFeedback) {
+      return processingFeedback;
+    }
+
+    if (saving) {
+      return {
+        status: 'loading',
+        title: 'Verifying and Saving Receipt Record',
+        message: 'Please wait while the receipt record is being processed.',
+      };
+    }
+
+    if (uploading) {
+      return {
+        status: 'loading',
+        title: 'Processing OCR',
+        message: 'Extracting receipt data... Please wait.',
+      };
+    }
+
+    if (releasing) {
+      return {
+        status: 'loading',
+        title: 'Releasing Receipt Copy',
+        message: 'Please wait while WARDS sends the receipt copy and completes the branch release process.',
+      };
+    }
+
+    return null;
+  }, [processingFeedback, releasing, saving, uploading]);
 
   useEffect(() => {
     if (!ocrDraft) {
@@ -473,11 +510,16 @@ const ReceiptManagement = () => {
   };
 
   const handleUpload = async () => {
-    if (!selectedFile) {
+    if (!selectedFile || uploading || saving) {
       return;
     }
 
     setUploading(true);
+    setProcessingFeedback({
+      status: 'loading',
+      title: 'Processing OCR',
+      message: 'Extracting receipt data... Please wait.',
+    });
     setError('');
     setSuccessMessage('');
 
@@ -487,7 +529,15 @@ const ReceiptManagement = () => {
       formData.append('category', selectedCategory);
       const response = await receiptAPI.uploadForOCR(formData);
       setOcrDraft(response.data);
+      setProcessingFeedback({
+        status: 'success',
+        title: 'OCR Complete',
+        message: 'Run OCR completed successfully. Receipt data is ready for review.',
+      });
+      await wait(PROCESSING_SUCCESS_DELAY_MS);
+      setProcessingFeedback(null);
     } catch (err) {
+      setProcessingFeedback(null);
       setError(err.response?.data?.detail || 'Failed to process receipt image.');
     } finally {
       setUploading(false);
@@ -503,11 +553,16 @@ const ReceiptManagement = () => {
   };
 
   const handleSaveRecord = async () => {
-    if (!ocrDraft) {
+    if (!ocrDraft || saving || uploading || saveBlocked) {
       return;
     }
 
     setSaving(true);
+    setProcessingFeedback({
+      status: 'loading',
+      title: 'Verifying and Saving Receipt Record',
+      message: 'Please wait while the receipt record is being processed.',
+    });
     setError('');
     setSuccessMessage('');
 
@@ -520,7 +575,15 @@ const ReceiptManagement = () => {
       setPreviewUrl(null);
       setOcrDraft(null);
       await refreshData({ emitReceiptEvent: true });
+      setProcessingFeedback({
+        status: 'success',
+        title: 'Receipt Record Saved',
+        message: 'Verify and Save Receipt Record completed successfully.',
+      });
+      await wait(PROCESSING_SUCCESS_DELAY_MS);
+      setProcessingFeedback(null);
     } catch (err) {
+      setProcessingFeedback(null);
       const detail = err.response?.data?.detail;
       setError((typeof detail === 'object' ? detail?.message : detail) || 'Failed to save verified receipt record.');
     } finally {
@@ -1351,6 +1414,7 @@ const ReceiptManagement = () => {
             <select
               value={selectedCategory}
               onChange={(event) => setSelectedCategory(event.target.value)}
+              disabled={uploading || saving}
               className="w-full px-4 py-2 border rounded-lg"
             >
               <option value="RPT">RPT</option>
@@ -1362,6 +1426,7 @@ const ReceiptManagement = () => {
             type="file"
             accept="image/*"
             onChange={handleFileSelect}
+            disabled={uploading || saving}
             className="mb-4 w-full cursor-pointer rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm shadow-sm file:mr-4 file:rounded-xl file:border-0 file:bg-[#0f2f5f] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:border-blue-400 hover:bg-slate-50 focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-slate-200 transition"
           />
 
@@ -1373,7 +1438,7 @@ const ReceiptManagement = () => {
 
           <button
             onClick={handleUpload}
-            disabled={!selectedFile || uploading}
+            disabled={!selectedFile || uploading || saving}
             className="w-full bg-purple-600 hover:bg-purple-700 text-white py-3 rounded-lg font-semibold transition disabled:opacity-50"
           >
             {uploading ? 'Running OCR...' : 'Run OCR'}
@@ -1467,14 +1532,14 @@ const ReceiptManagement = () => {
 
               <button
                 onClick={handleSaveRecord}
-                disabled={saving || saveBlocked}
+                disabled={saving || uploading || saveBlocked}
                 className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg font-semibold transition disabled:opacity-50"
               >
                 {saving ? 'Saving...' : saveBlocked ? 'Save Blocked - Review Warnings' : 'Verify and Save Receipt Record'}
               </button>
               <button
                 onClick={handleCancelScan}
-                disabled={saving}
+                disabled={saving || uploading}
                 className="w-full bg-gray-500 hover:bg-gray-600 text-white py-3 rounded-lg font-semibold transition disabled:opacity-50"
               >
                 Cancel
@@ -1628,9 +1693,10 @@ const ReceiptManagement = () => {
       />
 
       <ProcessingModal
-        show={releasing}
-        title="Releasing Receipt Copy"
-        message="Please wait while WARDS sends the receipt copy and completes the branch release process."
+        show={Boolean(activeProcessingModal)}
+        title={activeProcessingModal?.title || 'Processing'}
+        message={activeProcessingModal?.message || 'Please wait.'}
+        status={activeProcessingModal?.status || 'loading'}
       />
 
       {selectedReleaseCopyPreview ? (

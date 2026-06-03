@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import axios from 'axios';
 import WardsPageHero from '../../components/WardsPageHero';
+import ProcessingModal from '../../components/ProcessingModal';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 
@@ -20,6 +21,10 @@ const ReceiptManagement = () => {
   };
 
   const handleUpload = async () => {
+    if (uploading) {
+      return;
+    }
+
     if (!selectedFile) {
       alert('Please select a file first');
       return;
@@ -70,6 +75,7 @@ const ReceiptManagement = () => {
                 type="file"
                 accept="image/*"
                 onChange={handleFileSelect}
+                disabled={uploading}
                 className="hidden"
                 id="receipt-upload"
               />
@@ -99,10 +105,11 @@ const ReceiptManagement = () => {
                 disabled={!selectedFile || uploading}
                 className="flex-1 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {uploading ? 'Uploading...' : 'Upload & Process'}
+                {uploading ? 'Running OCR...' : 'Run OCR'}
               </button>
               <button
                 onClick={handleClear}
+                disabled={uploading}
                 className="px-6 bg-gray-300 text-gray-700 py-2 rounded-lg hover:bg-gray-400"
               >
                 Clear
@@ -184,6 +191,12 @@ const ReceiptManagement = () => {
           </div>
         </div>
       )}
+
+      <ProcessingModal
+        show={uploading}
+        title="Processing OCR"
+        message="Processing OCR... Please wait."
+      />
     </div>
   );
 };
