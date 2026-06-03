@@ -1267,12 +1267,27 @@ class BranchAppointmentScheduleAudit(Base):
     id = Column(Integer, primary_key=True, index=True)
     branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
     action = Column(String, nullable=False)
-    change_summary = Column(Text, nullable=True)
-    previous_config = Column(Text, nullable=True)
-    new_config = Column(Text, nullable=False)
-    effective_date = Column(String, nullable=False)
-    changed_by = Column(String, nullable=False)
-    reason = Column(Text, nullable=True)
-    changed_at = Column(DateTime, default=datetime.utcnow, index=True)
 
-    branch = relationship("Branch", backref="appointment_schedule_audits")
+
+class PermanentIpBlock(Base):
+    __tablename__ = "permanent_ip_blocks"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    ip_address = Column(String(45), unique=True, index=True)  # IPv4 or IPv6
+    reason = Column(String(500), nullable=True)
+    blocked_by = Column(String(255), nullable=True)  # admin username
+    blocked_at = Column(DateTime, default=datetime.utcnow)
+    is_active = Column(Boolean, default=True)
+    abuse_count = Column(Integer, default=0)  # Track how many times this IP was auto-blocked
+
+
+class IpReputationCache(Base):
+    __tablename__ = "ip_reputation_cache"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    ip_address = Column(String(45), unique=True, index=True)
+    is_malicious = Column(Boolean, default=False)
+    confidence_score = Column(Integer, default=0)  # 0-100
+    last_checked = Column(DateTime, default=datetime.utcnow)
+    report_count = Column(Integer, default=0)  # Number of abuse reports
+    threat_types = Column(String(500), nullable=True)  # JSON array of threat types

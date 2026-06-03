@@ -292,6 +292,10 @@ const BackupRecovery = () => {
   const [blockedIps, setBlockedIps] = useState([]);
   const [blockIpInput, setBlockIpInput] = useState('');
   const [blockDuration, setBlockDuration] = useState(300);
+  const [permanentBlocks, setPermanentBlocks] = useState([]);
+  const [permanentBlockInput, setPermanentBlockInput] = useState('');
+  const [permanentBlockReason, setPermanentBlockReason] = useState('');
+  const [showPermanentBlocks, setShowPermanentBlocks] = useState(false);
   const navigate = useNavigate();
 
   const adminUser = useMemo(() => JSON.parse(localStorage.getItem('adminUser') || '{}'), []);
@@ -394,6 +398,41 @@ const BackupRecovery = () => {
     }
   };
 
+  const refreshPermanentBlocks = async () => {
+    const response = await api.get('/security/permanent-blocks');
+    setPermanentBlocks(response.data?.permanent_blocks || []);
+  };
+
+  const addPermanentBlock = async () => {
+    if (!permanentBlockInput.trim()) {
+      setNotice('Please enter an IP address.');
+      return;
+    }
+    if (!permanentBlockReason.trim()) {
+      setNotice('Please provide a reason for the permanent block.');
+      return;
+    }
+    try {
+      await api.post('/security/permanent-blocks', { ip: permanentBlockInput.trim(), reason: permanentBlockReason.trim() });
+      setNotice(`IP ${permanentBlockInput.trim()} permanently blocked.`);
+      setPermanentBlockInput('');
+      setPermanentBlockReason('');
+      await refreshPermanentBlocks();
+    } catch (error) {
+      setNotice(error.response?.data?.detail || 'Failed to permanently block IP.');
+    }
+  };
+
+  const removePermanentBlock = async (ip) => {
+    try {
+      await api.delete(`/security/permanent-blocks/${ip}`);
+      setNotice(`IP ${ip} removed from permanent blocklist.`);
+      await refreshPermanentBlocks();
+    } catch (error) {
+      setNotice(error.response?.data?.detail || 'Failed to remove permanent block.');
+    }
+  };
+
   const refreshActiveTab = async (tab = activeTab) => {
     if (tab === 'File Status') {
       await refreshFiles();
@@ -414,6 +453,7 @@ const BackupRecovery = () => {
     if (tab === 'Manual Controls') {
       await refreshAiRules();
       await refreshBlockedIps();
+      await refreshPermanentBlocks();
     }
   };
 
@@ -1232,10 +1272,11 @@ const BackupRecovery = () => {
                   <p className="text-sm leading-6 text-slate-600">
                     View and manage IP addresses blocked by the DoS protection system. IPs are automatically blocked when they exceed the abuse threshold.
                   </p>
+                  
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                     <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-end">
                       <div className="flex-1">
-                        <label className="text-sm font-semibold text-slate-700">Block IP Address</label>
+                        <label className="text-sm font-semibold text-slate-700">Block IP Address (Temporary)</label>
                         <input
                           className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
                           type="text"
@@ -1261,6 +1302,7 @@ const BackupRecovery = () => {
                     </div>
                     <p className="text-xs text-slate-500">Duration must be between 10 seconds and 24 hours (86400 seconds).</p>
                   </div>
+
                   <div className="max-h-80 overflow-auto rounded-xl border border-slate-200">
                     {blockedIps.length > 0 ? (
                       <table className="w-full text-sm">
@@ -1276,7 +1318,7 @@ const BackupRecovery = () => {
                             <tr key={item.ip} className="border-t border-slate-100">
                               <td className="px-4 py-3 font-mono text-slate-900">{item.ip}</td>
                               <td className="px-4 py-3 text-slate-700">
-                                {item.remaining_seconds > 0 ? `${Math.floor(item.remaining_seconds / 60)}m ${item.remaining_seconds % 60}s` : 'Expired'}
+                                {item.remaining_seconds === Infinity ? 'Permanent' : (item.remaining_seconds > 0 ? `${Math.floor(item.remaining_seconds / 60)}m ${item.remaining_seconds % 60}s` : 'Expired')}
                               </td>
                               <td className="px-4 py-3 text-right">
                                 <button
@@ -1295,6 +1337,89 @@ const BackupRecovery = () => {
                       <div className="p-8 text-center text-sm text-slate-500">No IP addresses are currently blocked.</div>
                     )}
                   </div>
+
+                  <div className="rounded-xl border border-orange-200 bg-orange-50 p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-bold text-orange-900">Permanent Blocklist</p>
+                        <p className="text-xs text-orange-700">Manage long-term IP blocks for repeat offenders.</p>
+                      </div>
+                      <button
+                        disabled={busy}
+                        className={`rounded-xl bg-orange-600 px-4 py-2 text-sm font-semibold text-white${disabledButtonClass}`}
+                        onClick={() => setShowPermanentBlocks((value) => !value)}
+                      >
+                        {showPermanentBlocks ? 'Hide' : 'Show'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {showPermanentBlocks && (
+                    <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+                        <div>
+                          <label className="text-sm font-semibold text-slate-700">IP Address</label>
+                          <input
+                            className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                            type="text"
+                            placeholder="e.g., 192.168.1.100"
+                            value={permanentBlockInput}
+                            onChange={(e) => setPermanentBlockInput(e.target.value)}
+                          />
+                        </div>
+                        <div className="flex items-end">
+                          <button disabled={busy} className={`rounded-xl bg-red-700 px-4 py-2 font-semibold text-white${disabledButtonClass}`} onClick={addPermanentBlock}>
+                            Add Permanent Block
+                          </button>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-sm font-semibold text-slate-700">Reason</label>
+                        <input
+                          className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                          type="text"
+                          placeholder="e.g., Repeat brute force attacks"
+                          value={permanentBlockReason}
+                          onChange={(e) => setPermanentBlockReason(e.target.value)}
+                        />
+                      </div>
+
+                      <div className="max-h-60 overflow-auto rounded-xl border border-slate-200">
+                        {permanentBlocks.length > 0 ? (
+                          <table className="w-full text-sm">
+                            <thead className="bg-slate-50">
+                              <tr>
+                                <th className="px-4 py-3 text-left font-bold text-slate-700">IP Address</th>
+                                <th className="px-4 py-3 text-left font-bold text-slate-700">Reason</th>
+                                <th className="px-4 py-3 text-left font-bold text-slate-700">Blocked By</th>
+                                <th className="px-4 py-3 text-right font-bold text-slate-700">Action</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {permanentBlocks.map((item) => (
+                                <tr key={item.id} className="border-t border-slate-100">
+                                  <td className="px-4 py-3 font-mono text-slate-900">{item.ip}</td>
+                                  <td className="px-4 py-3 text-slate-700">{item.reason}</td>
+                                  <td className="px-4 py-3 text-slate-700">{item.blocked_by}</td>
+                                  <td className="px-4 py-3 text-right">
+                                    <button
+                                      disabled={busy}
+                                      className={`rounded-lg bg-orange-600 px-3 py-1 text-xs font-semibold text-white disabled:opacity-60${disabledButtonClass}`}
+                                      onClick={() => removePermanentBlock(item.ip)}
+                                    >
+                                      Remove
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        ) : (
+                          <div className="p-8 text-center text-sm text-slate-500">No permanent blocks.</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </Section>
             </div>

@@ -12,9 +12,10 @@ MASTER_ROOT = Path(__file__).resolve().parents[3]
 if str(MASTER_ROOT) not in sys.path:
     sys.path.insert(0, str(MASTER_ROOT))
 
-from database.models import get_db, ActivityLog
+from database.models import get_db, ActivityLog, PermanentIpBlock
 from routes.admin_auth_v2 import get_current_admin_from_token
 from middleware.dos_protection import get_blocked_ips, unblock_ip, block_ip
+from services.ip_reputation import get_permanent_blocks, add_permanent_block, remove_permanent_block, check_ip_reputation
 from SECURITY.security_engine import (
     add_monitored_folder,
     add_ai_rule,
@@ -408,6 +409,11 @@ class BlockIpRequest(BaseModel):
     duration: int = 300
 
 
+class PermanentBlockRequest(BaseModel):
+    ip: str
+    reason: str
+
+
 @router.get("/blocked-ips")
 def list_blocked_ips(db: Session = Depends(get_db), admin=Depends(current_admin)):
     """View all currently blocked IPs with remaining block time."""
@@ -464,3 +470,74 @@ def manually_unblock_ip(ip: str, request: Request, db: Session = Depends(get_db)
     db.commit()
 
     return {"message": f"IP {ip} has been unblocked.", "ip": ip}
+
+
+@router.get("/permanent-blocks")
+def list_permanent_blocks(db: Session = Depends(get_db), admin=Depends(current_admin)):
+    """View all permanently blocked IPs."""
+    blocks = get_permanent_blocks(db, active_only=True)
+    return {
+        "permanent_blocks": [
+            {
+                "id": block.id,
+                "ip": block.ip_address,
+                "reason": block.reason,
+                "blocked_by": block.blocked_by,
+                "blocked_at": block.blocked_at.isoformat() if block.blocked_at else None,
+                "abuse_count": block.abuse_count,
+            }
+            for block in blocks
+        ],
+        "total": len(blocks)
+    }
+
+
+@router.post("/permanent-blocks")
+def add_permanent_block_endpoint(payload: PermanentBlockRequest, request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
+    """Permanently block an IP address."""
+    if not payload.ip or not payload.ip.strip():
+        raise HTTPException(status_code=400, detail="IP address is required.")
+    if not payload.reason or not payload.reason.strip():
+        raise HTTPException(status_code=400, detail="Reason is required.")
+
+    block = add_permanent_block(
+        ip=payload.ip.strip(),
+        reason=payload.reason.strip(),
+        blocked_by=admin.username,
+        db=db
+    )
+
+    db.add(ActivityLog(
+        action="Permanent IP Block",
+        user=admin.username,
+        details=f"Permanently blocked IP {payload.ip.strip()} - Reason: {payload.reason.strip()} | Admin IP: {request.client.host if request.client else 'unknown'}",
+        type="security",
+    ))
+    db.commit()
+
+    return {"message": f"IP {payload.ip.strip()} has been permanently blocked.", "ip": payload.ip.strip()}
+
+
+@router.delete("/permanent-blocks/{ip}")
+def remove_permanent_block_endpoint(ip: str, request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
+    """Remove a permanent IP block."""
+    success = remove_permanent_block(ip, db)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"IP {ip} is not in the permanent blocklist.")
+
+    db.add(ActivityLog(
+        action="Permanent IP Unblock",
+        user=admin.username,
+        details=f"Removed permanent block for IP {ip} | Admin IP: {request.client.host if request.client else 'unknown'}",
+        type="security",
+    ))
+    db.commit()
+
+    return {"message": f"IP {ip} has been removed from permanent blocklist.", "ip": ip}
+
+
+@router.get("/ip-reputation/{ip}")
+def check_ip_reputation_endpoint(ip: str, db: Session = Depends(get_db), admin=Depends(current_admin)):
+    """Check IP reputation using AbuseIPDB."""
+    reputation = check_ip_reputation(ip, db)
+    return reputation
