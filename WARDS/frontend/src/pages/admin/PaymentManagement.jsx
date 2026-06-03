@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect } from 'react';
 import axios from 'axios';
 import WardsPageHero from '../../components/WardsPageHero';
+import SystemMessageModal from '../../components/SystemMessageModal';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 const PAYMENT_TIME_ZONE = 'Asia/Manila';
@@ -257,6 +258,7 @@ const PaymentManagement = () => {
   const [remittanceActionLoading, setRemittanceActionLoading] = useState(false);
   const [remittanceActionError, setRemittanceActionError] = useState('');
   const [pageError, setPageError] = useState('');
+  const [messageModal, setMessageModal] = useState(null);
   const [successMessage, setSuccessMessage] = useState('');
   const currentMonthValue = useMemo(() => getMonthValueFromDate(), []);
   const [selectedMonth, setSelectedMonth] = useState(() => getMonthValueFromDate());
@@ -361,11 +363,14 @@ const PaymentManagement = () => {
       await axios.put(`${API_BASE_URL}/payments/${paymentId}/verify`);
       window.dispatchEvent(new CustomEvent('receipt-payment-updated', { detail: { action: 'verified', paymentId } }));
       window.dispatchEvent(new CustomEvent('branch-payment-updated', { detail: { action: 'verified', paymentId } }));
-      alert('Payment verified successfully');
+      setMessageModal({
+        tone: 'success',
+        title: 'Payment Verified',
+        message: 'The payment was verified successfully.',
+      });
       fetchPayments();
     } catch (error) {
       console.error('Failed to verify payment:', error);
-      alert('Failed to verify payment');
     }
   };
 
@@ -1155,6 +1160,14 @@ const PaymentManagement = () => {
           </div>
         </div>
       ) : null}
+
+      <SystemMessageModal
+        open={Boolean(messageModal)}
+        tone={messageModal?.tone}
+        title={messageModal?.title}
+        message={messageModal?.message}
+        onClose={() => setMessageModal(null)}
+      />
     </div>
   );
 };

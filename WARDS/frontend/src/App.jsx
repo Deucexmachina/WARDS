@@ -8,6 +8,7 @@ import UserProtectedRoute from './components/UserProtectedRoute'
 import BranchProtectedRoute from './components/BranchProtectedRoute'
 import SecurityProtectedRoute from './components/SecurityProtectedRoute'
 import BranchPortalRedirect from './components/BranchPortalRedirect'
+import GlobalSystemMessageModal from './components/GlobalSystemMessageModal'
 import HomeEntry from './components/HomeEntry'
 import UnifiedLogin from './pages/auth/UnifiedLogin'
 import ForgotPassword from './pages/auth/ForgotPassword'
@@ -61,6 +62,7 @@ const BackupRecovery = lazy(() => import('./pages/admin/BackupRecovery'))
 function App() {
   return (
     <Router>
+      <GlobalSystemMessageModal />
       <Routes>
         {/* Public Portal */}
         <Route path="/" element={<PublicLayout />}>

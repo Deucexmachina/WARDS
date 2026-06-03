@@ -10,6 +10,18 @@ const STATUS_OPTIONS = [
   { value: 'holiday', label: 'Holiday' },
   { value: 'special_operations', label: 'Special Operations Day' },
 ];
+const WEEKDAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const DEFAULT_SYSTEM_SETTINGS = {
+  queueEnabled: true,
+  maxQueuePerBranch: 100,
+  maxQueuePerWindow: 25,
+  queueTimeSlot: 15,
+  enabledServices: [],
+  paymentGatewayEnabled: true,
+  receiptRequestEnabled: true,
+  maintenanceMode: false,
+  serviceOptions: [],
+};
 
 const createEmptyOverride = () => ({
   date: '',
@@ -27,6 +39,65 @@ const getUtc8TodayDate = () => {
   });
   return formatter.format(new Date());
 };
+
+const createDefaultScheduleConfig = (effectiveDate) => ({
+  effective_date: effectiveDate,
+  weekly_schedule: WEEKDAY_NAMES.map((day) => ({
+    day,
+    is_available: day !== 'Sunday',
+  })),
+  date_overrides: [],
+  time_settings: {
+    opening_time: '08:00',
+    closing_time: '17:00',
+    break_start: '',
+    break_end: '',
+    last_appointment_time: '17:00',
+    slot_interval_minutes: 15,
+  },
+});
+
+const normalizeScheduleConfig = (config, effectiveDate) => {
+  const defaults = createDefaultScheduleConfig(effectiveDate);
+  const incoming = config || {};
+  const incomingWeeklySchedule = Array.isArray(incoming.weekly_schedule) ? incoming.weekly_schedule : [];
+  const weeklyLookup = incomingWeeklySchedule.reduce((lookup, entry) => ({
+    ...lookup,
+    [entry.day]: Boolean(entry.is_available),
+  }), {});
+  const incomingTimeSettings = incoming.time_settings || {};
+
+  return {
+    ...defaults,
+    ...incoming,
+    weekly_schedule: WEEKDAY_NAMES.map((day) => ({
+      day,
+      is_available: Object.prototype.hasOwnProperty.call(weeklyLookup, day)
+        ? weeklyLookup[day]
+        : defaults.weekly_schedule.find((entry) => entry.day === day)?.is_available,
+    })),
+    date_overrides: Array.isArray(incoming.date_overrides) ? incoming.date_overrides : [],
+    time_settings: {
+      ...defaults.time_settings,
+      ...incomingTimeSettings,
+    },
+  };
+};
+
+const normalizeSystemSettings = (settings) => ({
+  ...DEFAULT_SYSTEM_SETTINGS,
+  ...(settings || {}),
+  enabledServices: Array.isArray(settings?.enabledServices) ? settings.enabledServices : [],
+  serviceOptions: Array.isArray(settings?.serviceOptions) ? settings.serviceOptions : [],
+});
+
+const normalizeHistoryState = (history) => ({
+  items: Array.isArray(history?.items) ? history.items : [],
+  page: Number(history?.page || 1),
+  page_size: Number(history?.page_size || PAGE_SIZE),
+  total: Number(history?.total || 0),
+  total_pages: Number(history?.total_pages || 1),
+});
 
 const SummaryCard = ({ label, value, helper }) => (
   <div className="rounded-2xl bg-white p-5 shadow">
@@ -224,10 +295,15 @@ const BranchSettings = () => {
       branchSettingsAPI.getAppointmentHistory({ page: 1, page_size: PAGE_SIZE }),
       branchSettingsAPI.getSystemSettings(),
     ]);
-    setSchedule(settingsResponse.data?.draft);
-    setPublishedSchedule(settingsResponse.data?.published);
-    setSystemSettings(systemSettingsResponse.data);
-    setHistoryState(historyResponse.data);
+    const appointmentSettings = settingsResponse.data || {};
+    setSchedule(normalizeScheduleConfig(appointmentSettings.draft, todayDate));
+    setPublishedSchedule(
+      appointmentSettings.published
+        ? normalizeScheduleConfig(appointmentSettings.published, todayDate)
+        : null
+    );
+    setSystemSettings(normalizeSystemSettings(systemSettingsResponse.data));
+    setHistoryState(normalizeHistoryState(historyResponse.data));
   };
 
   useEffect(() => {
@@ -365,8 +441,13 @@ const BranchSettings = () => {
       setError('');
       setSuccessMessage('');
       const response = await branchSettingsAPI.saveAppointmentSettings(buildPayload());
-      setSchedule(response.data.schedule?.draft);
-      setPublishedSchedule(response.data.schedule?.published);
+      const appointmentSettings = response.data.schedule || {};
+      setSchedule(normalizeScheduleConfig(appointmentSettings.draft, todayDate));
+      setPublishedSchedule(
+        appointmentSettings.published
+          ? normalizeScheduleConfig(appointmentSettings.published, todayDate)
+          : null
+      );
       setSuccessMessage('Draft appointment schedule saved successfully.');
       await loadHistoryPage(1);
     } catch (saveError) {
@@ -383,8 +464,13 @@ const BranchSettings = () => {
       setError('');
       setSuccessMessage('');
       const response = await branchSettingsAPI.publishAppointmentSettings(buildPayload());
-      setSchedule(response.data.schedule?.draft);
-      setPublishedSchedule(response.data.schedule?.published);
+      const appointmentSettings = response.data.schedule || {};
+      setSchedule(normalizeScheduleConfig(appointmentSettings.draft, todayDate));
+      setPublishedSchedule(
+        appointmentSettings.published
+          ? normalizeScheduleConfig(appointmentSettings.published, todayDate)
+          : null
+      );
       setSuccessMessage(
         response.data.notice
           ? `Published successfully and posted to Policies & SOPs as "${response.data.notice.title}".`
@@ -489,13 +575,31 @@ const BranchSettings = () => {
     }
   };
 
-  if (loading || !schedule || !systemSettings) {
+  if (loading) {
     return (
       <div className="flex h-96 items-center justify-center">
         <div className="text-center">
           <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
           <p className="text-gray-600">Loading branch settings...</p>
         </div>
+      </div>
+    );
+  }
+
+  if (!schedule || !systemSettings) {
+    return (
+      <div className="mx-auto max-w-2xl rounded-2xl border border-red-200 bg-red-50 p-6 text-red-800 shadow-sm">
+        <p className="text-lg font-bold">Branch settings could not load</p>
+        <p className="mt-2 text-sm">
+          {error || 'The branch settings response was incomplete. Please reload the page or sign in again as a branch admin.'}
+        </p>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="mt-5 rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+        >
+          Reload Settings
+        </button>
       </div>
     );
   }

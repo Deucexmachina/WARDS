@@ -2,6 +2,7 @@ import { useState } from 'react';
 import axios from 'axios';
 import WardsPageHero from '../../components/WardsPageHero';
 import ProcessingModal from '../../components/ProcessingModal';
+import SystemMessageModal from '../../components/SystemMessageModal';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 
@@ -10,6 +11,7 @@ const ReceiptManagement = () => {
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
+  const [messageModal, setMessageModal] = useState(null);
 
   const handleFileSelect = (e) => {
     const file = e.target.files[0];
@@ -26,7 +28,11 @@ const ReceiptManagement = () => {
     }
 
     if (!selectedFile) {
-      alert('Please select a file first');
+      setMessageModal({
+        tone: 'warning',
+        title: 'File Required',
+        message: 'Please select a receipt image before running OCR.',
+      });
       return;
     }
 
@@ -41,10 +47,13 @@ const ReceiptManagement = () => {
         },
       });
       setUploadResult(response.data);
-      alert('Receipt uploaded and processed successfully!');
+      setMessageModal({
+        tone: 'success',
+        title: 'Receipt Processed',
+        message: 'The receipt was uploaded and processed successfully.',
+      });
     } catch (error) {
       console.error('Upload failed:', error);
-      alert('Failed to upload receipt. Please try again.');
     } finally {
       setUploading(false);
     }
@@ -196,6 +205,13 @@ const ReceiptManagement = () => {
         show={uploading}
         title="Processing OCR"
         message="Processing OCR... Please wait."
+      />
+      <SystemMessageModal
+        open={Boolean(messageModal)}
+        tone={messageModal?.tone}
+        title={messageModal?.title}
+        message={messageModal?.message}
+        onClose={() => setMessageModal(null)}
       />
     </div>
   );

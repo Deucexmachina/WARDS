@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 import { getEmailValidationMessage } from '../../utils/validation';
+import SystemMessageModal from '../../components/SystemMessageModal';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 const DEFAULT_DISABLED_MESSAGE = 'This service is currently unavailable because it has been disabled by system administration.';
@@ -46,6 +47,7 @@ const QueueRegistration = () => {
   const [statusMessage, setStatusMessage] = useState('');
   const [immediateAvailability, setImmediateAvailability] = useState(null);
   const [emailError, setEmailError] = useState('');
+  const [messageModal, setMessageModal] = useState(null);
   
   const [formData, setFormData] = useState({
     service_type: '',
@@ -158,34 +160,60 @@ const QueueRegistration = () => {
 
   const handleRegister = async () => {
     if (!systemStatus?.queueEnabled) {
-      alert(systemStatus?.disabledMessage || DEFAULT_DISABLED_MESSAGE);
+      setMessageModal({
+        tone: 'warning',
+        title: language === 'en' ? 'Queue Unavailable' : 'Hindi Available ang Pila',
+        message: systemStatus?.disabledMessage || DEFAULT_DISABLED_MESSAGE,
+      });
       return;
     }
 
     if (selectedService?.requires_appointment && formData.queue_type !== 'appointment') {
-      alert('Queue registration failed: Immediate queueing is unavailable because this service requires an appointment schedule. Please choose Appointment queueing.');
+      setMessageModal({
+        tone: 'warning',
+        title: language === 'en' ? 'Appointment Required' : 'Kailangan ng Appointment',
+        message: language === 'en'
+          ? 'Immediate queueing is unavailable because this service requires an appointment schedule. Please choose Appointment queueing.'
+          : 'Hindi available ang immediate queueing dahil kailangan ng appointment schedule para sa serbisyong ito.',
+      });
       return;
     }
 
     if (formData.queue_type === 'immediate' && immediateAvailability && !immediateAvailability.is_available) {
-      alert(immediateAvailability.message || DEFAULT_DISABLED_MESSAGE);
+      setMessageModal({
+        tone: 'warning',
+        title: language === 'en' ? 'Immediate Queue Unavailable' : 'Hindi Available ang Immediate Queue',
+        message: immediateAvailability.message || DEFAULT_DISABLED_MESSAGE,
+      });
       return;
     }
 
     if (!formData.service_type) {
-      alert(language === 'en' ? 'Please select a service type' : 'Mangyaring pumili ng uri ng serbisyo');
+      setMessageModal({
+        tone: 'warning',
+        title: language === 'en' ? 'Service Required' : 'Kailangan ng Serbisyo',
+        message: language === 'en' ? 'Please select a service type.' : 'Mangyaring pumili ng uri ng serbisyo.',
+      });
       return;
     }
 
     if (formData.queue_type === 'appointment' && !formData.appointment_time) {
-      alert(language === 'en' ? 'Please select appointment time' : 'Mangyaring pumili ng oras ng tipanan');
+      setMessageModal({
+        tone: 'warning',
+        title: language === 'en' ? 'Appointment Time Required' : 'Kailangan ng Oras ng Appointment',
+        message: language === 'en' ? 'Please select an appointment time.' : 'Mangyaring pumili ng oras ng tipanan.',
+      });
       return;
     }
 
     const nextEmailError = getEmailValidationMessage(formData.email, { required: false });
     if (nextEmailError) {
       setEmailError(nextEmailError);
-      alert(language === 'en' ? 'Please correct the highlighted email field.' : 'Pakisuri ang email field.');
+      setMessageModal({
+        tone: 'warning',
+        title: language === 'en' ? 'Invalid Email' : 'Maling Email',
+        message: language === 'en' ? 'Please correct the highlighted email field.' : 'Pakisuri ang email field.',
+      });
       return;
     }
 
@@ -198,7 +226,6 @@ const QueueRegistration = () => {
       setQueueResult(response.data);
     } catch (error) {
       console.error('Failed to register queue:', error);
-      alert(error.response?.data?.detail || (language === 'en' ? 'Failed to register. Please try again.' : 'Nabigo ang pagpaparehistro. Subukan muli.'));
     } finally {
       setRegistering(false);
     }
@@ -546,6 +573,13 @@ const QueueRegistration = () => {
           </div>
         </div>
       </div>
+      <SystemMessageModal
+        open={Boolean(messageModal)}
+        tone={messageModal?.tone}
+        title={messageModal?.title}
+        message={messageModal?.message}
+        onClose={() => setMessageModal(null)}
+      />
     </div>
   );
 };

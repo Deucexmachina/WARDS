@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { sanitizeApiResponseData } from '../utils/responseSanitizer';
+import { getFriendlyErrorMessage, getModalToneForError } from '../utils/errorMessages';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 
@@ -59,6 +60,17 @@ api.interceptors.response.use(
   },
   (error) => {
     const url = error?.config?.url || '';
+    const status = error?.response?.status;
+    if (status) {
+      window.dispatchEvent(new CustomEvent('wards:system-message', {
+        detail: {
+          tone: getModalToneForError(error),
+          title: status === 429 ? 'Too Many Requests' : 'Request Failed',
+          message: getFriendlyErrorMessage(error),
+        },
+      }));
+    }
+
     const hasAdminToken = Boolean(localStorage.getItem('adminToken'));
     const isAdminRequest =
       url.includes('/admin/') ||

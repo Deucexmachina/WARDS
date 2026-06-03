@@ -24,7 +24,6 @@ const LoginModal = ({ onClose }) => {
     } catch (error) {
       console.error('Login error:', error);
       console.error('Error response:', error.response);
-      alert(`Login failed: ${error.response?.data?.detail || error.message}`);
     } finally {
       setLoading(false);
     }

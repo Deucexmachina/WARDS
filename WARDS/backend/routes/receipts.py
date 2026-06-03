@@ -27,7 +27,7 @@ from services.ocr_service import OCRProcessingError, ocr_service
 from services.email_service import send_receipt_release_email
 from utils.branch_appointment_settings import validate_branch_appointment_datetime
 from utils.branch_system_settings import get_branch_setting_value
-from utils.field_crypto import apply_receipt_record_security, apply_receipt_request_history_security, apply_receipt_request_security, find_citizen_by_email, find_payment_by_ref_number, hash_aware_any, hash_aware_match, hash_optional_value, queue_value, receipt_record_value, receipt_request_history_value, receipt_request_value
+from utils.field_crypto import apply_payment_security, apply_receipt_record_security, apply_receipt_request_history_security, apply_receipt_request_security, find_citizen_by_email, find_payment_by_ref_number, get_decrypted_or_raw, hash_aware_any, hash_aware_match, hash_optional_value, queue_value, receipt_record_value, receipt_request_history_value, receipt_request_value, set_encrypted_hash_companions
 from utils.security_validation import normalize_email
 from utils.system_settings import SYSTEM_DISABLED_MESSAGE, get_setting_value
 
@@ -77,6 +77,18 @@ def unique_receipt_request_id() -> str:
 def unique_receipt_payment_refs() -> tuple[str, str]:
     timestamp = datetime.utcnow().strftime('%Y%m%d%H%M%S%f')
     return (f"RCP-{timestamp}", f"TXN-{timestamp[-12:]}")
+
+
+def clear_receipt_payment_checkout_fields(payment: Payment):
+    for field_name in (
+        "paymongo_checkout_session_id",
+        "paymongo_payment_intent_id",
+        "paymongo_source_id",
+        "paymongo_checkout_url",
+        "paymongo_status",
+    ):
+        setattr(payment, field_name, None)
+        set_encrypted_hash_companions(payment, field_name, None)
 
 
 class PublicReceiptRequestCreate(BaseModel):
@@ -1865,15 +1877,23 @@ async def pay_request_fee(
         raise HTTPException(status_code=404, detail="Request not found")
     ensure_receipt_requests_enabled(db, receipt_request.branch_id)
     resolved_request_id = receipt_request_value(receipt_request, "request_id")
+    normalized_payment_method = normalize_receipt_payment_method(payment_data.paymentMethod)
 
     existing_payment = db.query(Payment).filter(Payment.related_request_id == resolved_request_id).order_by(Payment.created_at.desc()).first()
     if existing_payment and (existing_payment.status or "").lower() in {"pending", "pending over-the-counter payment", "verified", "payment verified"}:
+        previous_method = get_decrypted_or_raw(existing_payment, "payment_method") or existing_payment.payment_method
+        if previous_method != normalized_payment_method:
+            clear_receipt_payment_checkout_fields(existing_payment)
+        existing_payment.payment_method = normalized_payment_method
+        apply_payment_security(existing_payment)
+        db.commit()
         return {
             "requestId": resolved_request_id,
-            "paymentRefNumber": existing_payment.ref_number,
-            "txnId": existing_payment.txn_id,
+            "paymentRefNumber": get_decrypted_or_raw(existing_payment, "ref_number") or existing_payment.ref_number,
+            "txnId": get_decrypted_or_raw(existing_payment, "txn_id") or existing_payment.txn_id,
             "amount": float(existing_payment.amount or 0),
             "status": existing_payment.status,
+            "paymentMethod": normalized_payment_method,
         }
 
     branch_name = "Unassigned"
@@ -1883,7 +1903,6 @@ async def pay_request_fee(
             branch_name = branch.name
 
     payment_ref, txn_id = unique_receipt_payment_refs()
-    normalized_payment_method = normalize_receipt_payment_method(payment_data.paymentMethod)
     payment = Payment(
         ref_number=payment_ref,
         txn_id=txn_id,
@@ -1901,6 +1920,7 @@ async def pay_request_fee(
     )
     receipt_request.payment_ref_number = payment_ref
     apply_receipt_request_security(receipt_request)
+    apply_payment_security(payment)
     db.add(payment)
     db.add(ActivityLog(
         action="Receipt Request Fee Initiated",

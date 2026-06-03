@@ -17,6 +17,12 @@ const RECEIPT_REQUEST_REASONS = [
   'Government compliance',
   'Other',
 ];
+const PAYMENT_METHOD_OPTIONS = [
+  { value: 'gcash', label: 'GCash' },
+  { value: 'maya', label: 'Maya' },
+  { value: 'card', label: 'Card' },
+  { value: 'banking', label: 'Online Banking' },
+];
 
 const getTodayDateValue = () =>
   new Intl.DateTimeFormat('en-CA', {
@@ -41,6 +47,7 @@ const RequestReceipt = () => {
   const [requestStatus, setRequestStatus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [paying, setPaying] = useState(false);
+  const [requestConfirmed, setRequestConfirmed] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState('gcash');
   const [error, setError] = useState('');
   const [nameError, setNameError] = useState('');
@@ -120,6 +127,7 @@ const RequestReceipt = () => {
     if (searchParams.get('new') === '1') {
       localStorage.removeItem(activeReceiptRequestStorageKey);
       setRequestStatus(null);
+      setRequestConfirmed(false);
       navigate('/request-receipt', { replace: true });
       return;
     }
@@ -133,6 +141,7 @@ const RequestReceipt = () => {
     receiptAPI.getRequestStatus(activeRequestId)
       .then((response) => {
         setRequestStatus(response.data);
+        setRequestConfirmed(Boolean(response.data?.feePaid));
         if (['Released', 'Completed'].includes(response.data?.overallStatus || response.data?.status)) {
           localStorage.removeItem(activeReceiptRequestStorageKey);
         }
@@ -140,6 +149,7 @@ const RequestReceipt = () => {
       .catch(() => {
         localStorage.removeItem(activeReceiptRequestStorageKey);
         setRequestStatus(null);
+        setRequestConfirmed(false);
       });
   }, [activeReceiptRequestStorageKey, navigate, searchParams]);
 
@@ -203,6 +213,7 @@ const RequestReceipt = () => {
     try {
       const response = await receiptAPI.requestCopy(formData);
       setRequestStatus(response.data);
+      setRequestConfirmed(false);
       localStorage.setItem(activeReceiptRequestStorageKey, response.data.requestId);
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to submit receipt request.');
@@ -336,7 +347,8 @@ const RequestReceipt = () => {
               </div>
             ) : null}
 
-            <div className="grid gap-8 xl:grid-cols-[1.25fr,0.75fr]">
+            <div className={requestStatus ? 'mx-auto max-w-2xl' : 'grid gap-8 xl:grid-cols-[1.25fr,0.75fr]'}>
+              {!requestStatus ? (
               <div className="space-y-6">
                 <div className="rounded-3xl border border-slate-200 bg-slate-50 p-6">
                   <h3 className="text-lg font-bold text-slate-900">Request Details</h3>
@@ -462,19 +474,6 @@ const RequestReceipt = () => {
                       />
                     </div>
 
-                    <div className="md:col-span-2">
-                      <label className="mb-2 block text-sm font-semibold text-slate-700">Online Payment Channel</label>
-                      <select
-                        value={paymentMethod}
-                        onChange={(event) => setPaymentMethod(event.target.value)}
-                        className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-blue-100"
-                      >
-                        <option value="gcash">GCash</option>
-                        <option value="maya">Maya</option>
-                        <option value="card">Card</option>
-                        <option value="banking">Online Banking</option>
-                      </select>
-                    </div>
                   </div>
                 </div>
 
@@ -486,8 +485,10 @@ const RequestReceipt = () => {
                   {loading ? 'Submitting...' : 'Submit Request'}
                 </button>
               </div>
+              ) : null}
 
               <div className="space-y-6">
+                {!requestStatus ? (
                 <div className="rounded-3xl border border-blue-100 bg-blue-50 p-6">
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-700">How It Works</p>
                   <div className="mt-4 space-y-4 text-sm leading-6 text-slate-700">
@@ -497,10 +498,13 @@ const RequestReceipt = () => {
                     <p>4. Once released, the finished copy is sent through the branch release workflow.</p>
                   </div>
                 </div>
+                ) : null}
 
                 {requestStatus ? (
                   <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <h3 className="text-xl font-bold text-slate-900">Request Status</h3>
+                    <h3 className="text-xl font-bold text-slate-900">{requestConfirmed ? 'Request Fee' : 'Request Status'}</h3>
+                    {!requestConfirmed ? (
+                    <>
                     <div className="mt-5 space-y-3">
                       {[
                         ['Request ID', requestStatus.requestId],
@@ -518,15 +522,45 @@ const RequestReceipt = () => {
                         </div>
                       ))}
                     </div>
-
                     {!requestStatus.feePaid ? (
-                      <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                      <button
+                        type="button"
+                        onClick={() => setRequestConfirmed(true)}
+                        className="mt-6 w-full rounded-2xl bg-[#0f2f5f] px-5 py-3 font-semibold text-white transition hover:bg-[#19498d]"
+                      >
+                        Confirm
+                      </button>
+                    ) : null}
+                    </>
+                    ) : null}
+
+                    {!requestStatus.feePaid && requestConfirmed ? (
+                      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
                         <div className="flex items-center justify-between gap-4">
                           <div>
                             <p className="text-sm font-semibold text-emerald-900">Request Fee</p>
                             <p className="mt-1 text-sm text-emerald-800">Complete the online payment to continue the branch release workflow.</p>
                           </div>
                           <p className="text-2xl font-bold text-emerald-700">P200.00</p>
+                        </div>
+                        <div className="mt-5 rounded-2xl border border-white/80 bg-white p-4">
+                          <label className="mb-3 block text-sm font-bold text-slate-900">Choose Payment Method</label>
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            {PAYMENT_METHOD_OPTIONS.map((option) => (
+                              <button
+                                key={option.value}
+                                type="button"
+                                onClick={() => setPaymentMethod(option.value)}
+                                className={`rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition ${
+                                  paymentMethod === option.value
+                                    ? 'border-emerald-500 bg-emerald-50 text-emerald-900 shadow-sm'
+                                    : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-emerald-300'
+                                }`}
+                              >
+                                {option.label}
+                              </button>
+                            ))}
+                          </div>
                         </div>
                         <button
                           onClick={handlePayFee}
@@ -536,11 +570,11 @@ const RequestReceipt = () => {
                           {paying ? 'Processing Payment...' : 'Pay Request Fee'}
                         </button>
                       </div>
-                    ) : (
+                    ) : requestStatus.feePaid ? (
                       <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm font-semibold text-emerald-800">
                         Payment recorded. Your request is now moving through the branch release workflow.
                       </div>
-                    )}
+                    ) : null}
 
                     {requestStatus.nextAction === 'Wait for Branch Release' ? (
                       <button

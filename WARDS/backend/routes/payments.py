@@ -2524,19 +2524,25 @@ async def process_payment(request: PaymentProcessRequest, http_request: Request,
         if existing_metadata:
             metadata.update(existing_metadata)
         
-        description = f"{payment_value(payment, 'tax_type')} - {payment_value(payment, 'taxpayer_name')} ({payment_value(payment, 'ref_number')})"
+        ref_number = payment_value(payment, "ref_number")
+        taxpayer_name = payment_value(payment, "taxpayer_name")
+        taxpayer_email = payment_value(payment, "email")
+        contact_number = payment_value(payment, "contact_number")
+        tax_type = payment_value(payment, "tax_type")
+        description = f"{tax_type} - {taxpayer_name} ({ref_number})"
 
         checkout_response = paymongo_service.create_checkout_session(
             amount=payment.amount,
-            item_name=payment_value(payment, "tax_type"),
-            reference_number=payment_value(payment, "ref_number"),
+            item_name=tax_type,
+            reference_number=ref_number,
             payment_method_types=checkout_payment_methods,
-            success_url=f"{frontend_url}/payment/status?ref={payment.ref_number}&merchant_return=1",
-            cancel_url=f"{frontend_url}/payment/failed?ref={payment.ref_number}",
+            success_url=f"{frontend_url}/payment/status?ref={ref_number}&merchant_return=1",
+            cancel_url=f"{frontend_url}/payment/failed?ref={ref_number}",
             description=description,
             billing={
-                "name": payment.taxpayer_name,
-                "email": payment.email or "taxpayer@example.com",
+                "name": taxpayer_name,
+                "email": taxpayer_email or "taxpayer@example.com",
+                "phone": contact_number or "",
             },
             metadata=metadata,
             send_email_receipt=False,
@@ -2560,7 +2566,7 @@ async def process_payment(request: PaymentProcessRequest, http_request: Request,
         
         db.add(ActivityLog(
             action="PayMongo Checkout Session Created",
-            user=payment.email or payment.taxpayer_name,
+            user=taxpayer_email or taxpayer_name,
             details=f"PayMongo checkout session created for {request.refNumber}",
             type="transaction",
         ))

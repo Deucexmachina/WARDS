@@ -4,6 +4,22 @@ import axios from 'axios'
 import App from './App.jsx'
 import './index.css'
 import { sanitizeApiResponseData } from './utils/responseSanitizer'
+import { getFriendlyErrorMessage, getModalToneForError } from './utils/errorMessages'
+
+const dispatchSystemErrorModal = (error) => {
+  const status = error?.response?.status
+  if (!status) {
+    return
+  }
+
+  window.dispatchEvent(new CustomEvent('wards:system-message', {
+    detail: {
+      tone: getModalToneForError(error),
+      title: status === 429 ? 'Too Many Requests' : 'Request Failed',
+      message: getFriendlyErrorMessage(error),
+    },
+  }))
+}
 
 axios.interceptors.response.use(
   (response) => {
@@ -15,7 +31,10 @@ axios.interceptors.response.use(
     response.data = sanitizeApiResponseData(response.data)
     return response
   },
-  (error) => Promise.reject(error)
+  (error) => {
+    dispatchSystemErrorModal(error)
+    return Promise.reject(error)
+  }
 )
 
 ReactDOM.createRoot(document.getElementById('root')).render(

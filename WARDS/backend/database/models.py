@@ -1267,6 +1267,13 @@ class BranchAppointmentScheduleAudit(Base):
     id = Column(Integer, primary_key=True, index=True)
     branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
     action = Column(String, nullable=False)
+    change_summary = Column(Text, nullable=True)
+    previous_config = Column(Text, nullable=True)
+    new_config = Column(Text, nullable=True)
+    effective_date = Column(String, nullable=True)
+    changed_by = Column(String, nullable=True)
+    reason = Column(Text, nullable=True)
+    changed_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 
 class PermanentIpBlock(Base):
