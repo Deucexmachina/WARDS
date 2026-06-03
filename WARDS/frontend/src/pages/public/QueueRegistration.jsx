@@ -6,6 +6,31 @@ import { getEmailValidationMessage } from '../../utils/validation';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 const DEFAULT_DISABLED_MESSAGE = 'This service is currently unavailable because it has been disabled by system administration.';
+const QUEUE_ANALYSIS_REFRESH_INTERVAL_MS = 15000;
+const STATUS_LABELS = {
+  en: {
+    title: 'Queue Status',
+    service: 'Service',
+    window: 'Window',
+    nowServing: 'Now Serving',
+    waiting: 'Waiting',
+    active: 'Active',
+    estWait: 'Est. Wait',
+    noActiveQueue: 'No active queue',
+    waitingForNextCall: 'Waiting for next call',
+  },
+  tl: {
+    title: 'Katayuan ng Pila',
+    service: 'Serbisyo',
+    window: 'Window',
+    nowServing: 'Kasalukuyan',
+    waiting: 'Naghihintay',
+    active: 'Aktibo',
+    estWait: 'Tantyang Hintay',
+    noActiveQueue: 'Walang aktibong pila',
+    waitingForNextCall: 'Naghihintay ng susunod',
+  },
+};
 
 const QueueRegistration = () => {
   const { branchId } = useParams();
@@ -60,6 +85,18 @@ const QueueRegistration = () => {
     }
   }, [formData.service_type]);
 
+  useEffect(() => {
+    if (!branchId || !formData.service_type) {
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(() => {
+      analyzeQueue({ silent: true });
+    }, QUEUE_ANALYSIS_REFRESH_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [branchId, formData.service_type]);
+
   const selectedService = services.find((service) => service.name === formData.service_type) || null;
 
   useEffect(() => {
@@ -94,7 +131,7 @@ const QueueRegistration = () => {
     }
   };
 
-  const analyzeQueue = async () => {
+  const analyzeQueue = async ({ silent = false } = {}) => {
     try {
       const response = await axios.post(`${API_BASE_URL}/public/queue/analyze`, null, {
         params: {
@@ -105,7 +142,7 @@ const QueueRegistration = () => {
       setQueueAnalysis(response.data);
     } catch (error) {
       console.error('Failed to analyze queue:', error);
-      if (error.response?.data?.detail) {
+      if (!silent && error.response?.data?.detail) {
         setStatusMessage(error.response.data.detail);
       }
     }
@@ -173,8 +210,11 @@ const QueueRegistration = () => {
     return 'bg-red-100 text-red-800 border-red-300';
   };
 
+  const statusLabels = STATUS_LABELS[language] || STATUS_LABELS.en;
   const queueUnavailable = systemStatus && (!systemStatus.queueEnabled || systemStatus.maintenanceMode);
   const disabledMessage = systemStatus?.disabledMessage || statusMessage || DEFAULT_DISABLED_MESSAGE;
+  const currentServingQueueLabel = queueAnalysis?.current_serving_queue || statusLabels.noActiveQueue;
+  const currentServingStatusLabel = queueAnalysis?.current_serving_status || statusLabels.waitingForNextCall;
 
   if (loading) {
     return (
@@ -306,22 +346,39 @@ const QueueRegistration = () => {
         {/* Queue Analysis */}
         {queueAnalysis && (
           <div className={`border-2 rounded-xl p-6 mb-6 ${getQueueLevelColor(queueAnalysis.queue_level)}`}>
-            <h3 className="text-xl font-bold mb-4">
-              {language === 'en' ? 'Current Queue Status' : 'Kasalukuyang Katayuan ng Pila'}
-            </h3>
-            <div className="grid md:grid-cols-3 gap-4">
+            <div className="mb-4 flex items-start justify-between gap-4">
               <div>
-                <p className="text-sm opacity-75">{language === 'en' ? 'Waiting' : 'Naghihintay'}</p>
-                <p className="text-2xl font-bold">{queueAnalysis.current_waiting}</p>
+                <h3 className="text-xl font-bold">{statusLabels.title}</h3>
+                <p className="mt-1 text-sm opacity-75">
+                  {queueAnalysis.service_type} • {queueAnalysis.window_label}
+                </p>
               </div>
-              <div>
-                <p className="text-sm opacity-75">{language === 'en' ? 'Being Served' : 'Pinagsisilbihan'}</p>
-                <p className="text-2xl font-bold">{queueAnalysis.current_serving}</p>
+              <div className="rounded-full bg-white/50 px-3 py-1 text-xs font-semibold uppercase tracking-wide">
+                {queueAnalysis.queue_level}
               </div>
-              <div>
-                <p className="text-sm opacity-75">{language === 'en' ? 'Est. Wait' : 'Tinatayang Hintay'}</p>
-                <p className="text-2xl font-bold">{queueAnalysis.estimated_wait_time} min</p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-lg bg-white/40 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide opacity-75">{statusLabels.nowServing}</p>
+                <p className="mt-2 text-2xl font-bold">{currentServingQueueLabel}</p>
+                <p className="mt-1 text-xs capitalize opacity-75">{currentServingStatusLabel}</p>
               </div>
+              <div className="rounded-lg bg-white/40 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide opacity-75">{statusLabels.waiting}</p>
+                <p className="mt-2 text-2xl font-bold">{queueAnalysis.current_waiting}</p>
+              </div>
+              <div className="rounded-lg bg-white/40 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide opacity-75">{statusLabels.active}</p>
+                <p className="mt-2 text-2xl font-bold">{queueAnalysis.current_serving}</p>
+              </div>
+              <div className="rounded-lg bg-white/40 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide opacity-75">{statusLabels.estWait}</p>
+                <p className="mt-2 text-2xl font-bold">{queueAnalysis.estimated_wait_time} min</p>
+              </div>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2 text-xs font-medium opacity-80">
+              <span className="rounded-full bg-white/40 px-3 py-1">{statusLabels.service}: {queueAnalysis.service_type}</span>
+              <span className="rounded-full bg-white/40 px-3 py-1">{statusLabels.window}: {queueAnalysis.assigned_window_number}</span>
             </div>
             <div className="mt-4 pt-4 border-t border-current border-opacity-20">
               <p className="text-sm font-semibold">

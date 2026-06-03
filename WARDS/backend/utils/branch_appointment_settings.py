@@ -10,6 +10,7 @@ from database.models import (
     Branch,
     BranchAppointmentSchedule,
     BranchAppointmentScheduleAudit,
+    BranchStaff,
     BranchOperatingHours,
     Policy,
     Queue,
@@ -33,6 +34,8 @@ SERVICE_WINDOW_LABELS = {
     "RPT": "RPT Window",
     "BUSINESS": "BT Window",
     "MISC": "MISC Window",
+    "QW4": "Queue Window 4",
+    "QW5": "Queue Window 5",
 }
 WINDOW_MAX_ACTIVE_CLIENTS = 5
 TRANSACTION_DURATION_MINUTES = 30
@@ -88,6 +91,34 @@ def normalize_service_window(service_type: Optional[str]) -> str:
     return "MISC"
 
 
+def normalize_service_window_for_branch(db: Session, branch_id: int, service_type: Optional[str]) -> str:
+    service_window = normalize_service_window(service_type)
+    if service_window != "MISC":
+        return service_window
+
+    normalized_service = " ".join((service_type or "").strip().casefold().split())
+    if not normalized_service:
+        return service_window
+
+    custom_window_accounts = (
+        db.query(BranchStaff)
+        .filter(
+            BranchStaff.branch_id == branch_id,
+            BranchStaff.role == "branch_staff",
+            BranchStaff.account_scope == "queue_window",
+            BranchStaff.service_window.in_(("QW4", "QW5")),
+            BranchStaff.status == "Active",
+        )
+        .all()
+    )
+    for account in custom_window_accounts:
+        normalized_label = " ".join((account.service_window_label or "").strip().casefold().split())
+        if normalized_label and normalized_label == normalized_service:
+            return account.service_window
+
+    return service_window
+
+
 def get_service_window_label(service_window: str) -> str:
     return SERVICE_WINDOW_LABELS.get(service_window, f"{service_window} Window")
 
@@ -121,7 +152,11 @@ def get_window_active_queue_count(db: Session, *, branch_id: int, service_window
         )
         .all()
     )
-    return sum(1 for queue in candidate_queues if normalize_service_window(queue_value(queue, "service_type")) == service_window)
+    return sum(
+        1
+        for queue in candidate_queues
+        if normalize_service_window_for_branch(db, branch_id, queue_value(queue, "service_type")) == service_window
+    )
 
 
 def get_window_capacity_snapshot(
@@ -133,7 +168,7 @@ def get_window_capacity_snapshot(
     if not service_type:
         return None
 
-    service_window = normalize_service_window(service_type)
+    service_window = normalize_service_window_for_branch(db, branch_id, service_type)
     current_count = get_window_active_queue_count(db, branch_id=branch_id, service_window=service_window)
     max_capacity = get_window_capacity_limit(db, branch_id)
     remaining_capacity = max(0, max_capacity - current_count)

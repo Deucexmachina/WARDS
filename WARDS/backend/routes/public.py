@@ -15,7 +15,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from database.models import (
-    Branch, CitizenUser, Queue, QueueHistory, Service, BranchService, FAQ, TaxpayerGuide,
+    Branch, BranchStaff, CitizenUser, Queue, QueueHistory, Service, BranchService, FAQ, TaxpayerGuide,
     BranchOperatingHours, Announcement, QueueActivity, ReceiptRequest,
     Payment, get_db
 )
@@ -110,6 +110,113 @@ def calculate_immediate_wait_metrics(
     return {
         "estimated_wait_time": estimated_wait,
         "recommended_arrival": get_current_utc_naive() + timedelta(minutes=max(0, estimated_wait - 5)),
+    }
+
+
+PUBLIC_SERVICE_WINDOW_DEFAULT_LABELS = {
+    "RPT": "RPT Window",
+    "BUSINESS": "BT Window",
+    "MISC": "MISC Window",
+    "QW4": "Queue Window 4",
+    "QW5": "Queue Window 5",
+}
+
+
+def normalize_public_service_window_for_branch(db: Session, branch_id: int, service_type: Optional[str]) -> str:
+    service_window = normalize_service_window(service_type)
+    if service_window != "MISC":
+        return service_window
+
+    normalized_service = " ".join((service_type or "").strip().casefold().split())
+    if not normalized_service:
+        return service_window
+
+    custom_window_accounts = (
+        db.query(BranchStaff)
+        .filter(
+            BranchStaff.branch_id == branch_id,
+            BranchStaff.role == "branch_staff",
+            BranchStaff.account_scope == "queue_window",
+            BranchStaff.service_window.in_(("QW4", "QW5")),
+            BranchStaff.status == "Active",
+        )
+        .all()
+    )
+    for account in custom_window_accounts:
+        normalized_label = " ".join((account.service_window_label or "").strip().casefold().split())
+        if normalized_label and normalized_label == normalized_service:
+            return account.service_window
+
+    return service_window
+
+
+def get_public_window_metadata(db: Session, branch_id: int, service_type: Optional[str]) -> dict:
+    service_window = normalize_public_service_window_for_branch(db, branch_id, service_type)
+    window_account = (
+        db.query(BranchStaff)
+        .filter(
+            BranchStaff.branch_id == branch_id,
+            BranchStaff.role == "branch_staff",
+            BranchStaff.account_scope == "queue_window",
+            BranchStaff.service_window == service_window,
+            BranchStaff.status == "Active",
+        )
+        .order_by(BranchStaff.assigned_window_number.asc(), BranchStaff.id.asc())
+        .first()
+    )
+
+    default_window_number = {
+        "RPT": 1,
+        "BUSINESS": 2,
+        "MISC": 3,
+        "QW4": 4,
+        "QW5": 5,
+    }.get(service_window, 3)
+
+    return {
+        "service_window": service_window,
+        "assigned_window_number": (
+            window_account.assigned_window_number
+            if window_account and window_account.assigned_window_number
+            else default_window_number
+        ),
+        "window_label": (
+            window_account.service_window_label
+            if window_account and window_account.service_window_label
+            else PUBLIC_SERVICE_WINDOW_DEFAULT_LABELS.get(service_window, service_window)
+        ),
+    }
+
+
+def get_window_scoped_queue_snapshot(db: Session, branch_id: int, service_type: Optional[str]) -> dict:
+    metadata = get_public_window_metadata(db, branch_id, service_type)
+    branch_queues = (
+        db.query(Queue)
+        .filter(
+            Queue.branch_id == branch_id,
+            hash_aware_any(Queue, "status", ACTIVE_PUBLIC_QUEUE_STATUSES),
+        )
+        .order_by(Queue.created_at.asc())
+        .all()
+    )
+
+    scoped_queues = [
+        queue
+        for queue in branch_queues
+        if normalize_public_service_window_for_branch(db, branch_id, queue_value(queue, "service_type")) == metadata["service_window"]
+    ]
+
+    waiting_queues = [queue for queue in scoped_queues if queue_value(queue, "status") == "Waiting"]
+    active_queues = [queue for queue in scoped_queues if queue_value(queue, "status") in {"Called", "Serving"}]
+    current_queue = active_queues[0] if active_queues else None
+
+    return {
+        **metadata,
+        "waiting_count": len(waiting_queues),
+        "serving_count": len(active_queues),
+        "waiting_queue_numbers": [queue_value(queue, "queue_number") for queue in waiting_queues],
+        "current_serving_queue_number": queue_value(current_queue, "queue_number") if current_queue else None,
+        "current_serving_status": queue_value(current_queue, "status") if current_queue else None,
     }
 
 
@@ -605,16 +712,11 @@ async def analyze_queue(branch_id: int, service_type: str, db: Session = Depends
     # Get service processing time
     service = db.query(Service).filter(hash_aware_match(Service, "name", service_type)).first()
     avg_processing_time = get_service_processing_time_minutes(service)
-    
-    # Get current queue
-    waiting = db.query(Queue).filter(
-        and_(Queue.branch_id == branch_id, hash_aware_match(Queue, "status", "Waiting"))
-    ).count()
-    
-    serving = db.query(Queue).filter(
-        and_(Queue.branch_id == branch_id, hash_aware_any(Queue, "status", ["Called", "Serving"]))
-    ).count()
-    
+
+    queue_snapshot = get_window_scoped_queue_snapshot(db, branch_id, service_type)
+    waiting = queue_snapshot["waiting_count"]
+    serving = queue_snapshot["serving_count"]
+
     wait_metrics = calculate_immediate_wait_metrics(
         branch=branch,
         average_processing_time=avg_processing_time,
@@ -624,8 +726,14 @@ async def analyze_queue(branch_id: int, service_type: str, db: Session = Depends
     
     return {
         "branch_name": get_decrypted_or_raw(branch, "name") or branch.name,
+        "service_type": service_type,
+        "service_window": queue_snapshot["service_window"],
+        "assigned_window_number": queue_snapshot["assigned_window_number"],
+        "window_label": queue_snapshot["window_label"],
         "current_waiting": waiting,
         "current_serving": serving,
+        "current_serving_queue": queue_snapshot["current_serving_queue_number"],
+        "current_serving_status": queue_snapshot["current_serving_status"],
         "average_processing_time": avg_processing_time,
         "estimated_wait_time": wait_metrics["estimated_wait_time"],
         "recommended_arrival": serialize_manila_datetime(wait_metrics["recommended_arrival"]),
@@ -790,14 +898,10 @@ async def register_queue(
     # Get service processing time
     avg_processing_time = get_service_processing_time_minutes(service)
     
-    waiting = db.query(Queue).filter(
-        and_(Queue.branch_id == registration.branch_id, hash_aware_match(Queue, "status", "Waiting"))
-    ).count()
-    
-    serving = db.query(Queue).filter(
-        and_(Queue.branch_id == registration.branch_id, hash_aware_any(Queue, "status", ["Called", "Serving"]))
-    ).count()
-    
+    queue_snapshot = get_window_scoped_queue_snapshot(db, registration.branch_id, registration.service_type)
+    waiting = queue_snapshot["waiting_count"]
+    serving = queue_snapshot["serving_count"]
+
     wait_metrics = calculate_immediate_wait_metrics(
         branch=branch,
         average_processing_time=avg_processing_time,
