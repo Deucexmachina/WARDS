@@ -439,6 +439,10 @@ def get_account_identifier(portal: str, account: object) -> str:
     return serialize_citizen_user(account)["email"] if portal == "public" else account.email
 
 
+def get_mfa_username(portal: str, account: object) -> str:
+    return serialize_citizen_user(account)["email"] if portal == "public" else account.username
+
+
 def get_account_display_name(portal: str, account: object) -> str:
     if portal == "public":
         profile = serialize_citizen_user(account)
@@ -588,8 +592,9 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
                 headers={"X-Auth-Portal": portal},
             )
 
-    if portal in {"admin", "branch"}:
-        mfa_secret = get_mfa_secret(db, portal, account.username)
+    if portal in {"public", "admin", "branch"}:
+        mfa_username = get_mfa_username(portal, account)
+        mfa_secret = get_mfa_secret(db, portal, mfa_username)
         if not mfa_secret:
             headers = {
                 "X-Requires-MFA-Setup": "true",
@@ -609,7 +614,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
                 "token_type": "bearer",
                 "portal": portal,
                 "user": {
-                    "email": account.email,
+                    "email": get_account_email(portal, account),
                 },
                 "requires_mfa": True,
                 "requires_captcha": requires_captcha(portal, credentials.identifier),
@@ -654,8 +659,8 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
     )
 
     user_response = build_user_response(portal, account)
-    if portal in {"admin", "branch"}:
-        user_response["mfa_setup_required"] = get_mfa_secret(db, portal, account.username) is None
+    if portal in {"public", "admin", "branch"}:
+        user_response["mfa_setup_required"] = get_mfa_secret(db, portal, get_mfa_username(portal, account)) is None
 
     return {
         "access_token": access_token,
@@ -672,10 +677,10 @@ async def unified_setup_mfa(request: Request, credentials: UnifiedSetupMFAReques
     client_ip = request.client.host
     portal, account = find_account_for_portal(db, credentials.identifier, credentials.portal)
 
-    if portal not in {"admin", "branch"} or not account:
+    if portal not in {"public", "admin", "branch"} or not account:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="MFA setup is only available for staff and admin accounts.",
+            detail="MFA setup is only available for citizen, staff, and admin accounts.",
         )
 
     if not pwd_context.verify(credentials.password, account.hashed_password):
@@ -692,8 +697,23 @@ async def unified_setup_mfa(request: Request, credentials: UnifiedSetupMFAReques
             headers={"X-Auth-Portal": portal},
         )
 
+    if portal == "public" and not getattr(account, "is_verified", True):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Please verify your email before setting up MFA.",
+            headers={"X-Auth-Portal": portal},
+        )
+
+    if getattr(account, "status", "Active") != "Active":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is not active",
+            headers={"X-Auth-Portal": portal},
+        )
+
     secret = pyotp.random_base32()
-    save_mfa_secret(db, portal, account.username, secret)
+    mfa_username = get_mfa_username(portal, account)
+    save_mfa_secret(db, portal, mfa_username, secret)
     log_activity(
         db,
         "Unified MFA Setup Initiated",
@@ -701,7 +721,7 @@ async def unified_setup_mfa(request: Request, credentials: UnifiedSetupMFAReques
         f"Portal: {portal}, IP: {client_ip}",
         "security",
     )
-    return generate_mfa_payload(portal, account.username, secret)
+    return generate_mfa_payload(portal, mfa_username, secret)
 
 
 @router.post("/request-password-reset")

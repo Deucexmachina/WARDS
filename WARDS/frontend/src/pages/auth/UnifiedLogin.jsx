@@ -14,7 +14,7 @@ const LOCKOUT_DURATION_MS = 2 * 60 * 1000;
 const portalCopy = {
   public: {
     title: 'Citizen Access',
-    subtitle: 'Email and password with reCAPTCHA protection',
+    subtitle: 'Email, password, and Microsoft Authenticator MFA',
     accent: 'from-green-600 via-green-700 to-emerald-800',
     button: 'bg-green-600 hover:bg-green-700',
   },
