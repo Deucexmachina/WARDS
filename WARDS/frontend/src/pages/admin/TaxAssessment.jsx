@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { branchAPI, taxAssessmentAPI } from '../../services/api';
 import WardsPageHero from '../../components/WardsPageHero';
 import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
+import FileViewerModal from '../../components/FileViewerModal';
 
 const EMPTY_ASSESSMENT_FORM = {
   assessment_id: null,
@@ -45,6 +46,56 @@ const statusTone = {
 
 const formatCurrency = (value) =>
   `PHP ${Number(value || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const SUPPORTED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif', 'image/svg+xml']);
+const SUPPORTED_TEXT_TYPES = new Set(['text/plain', 'text/csv', 'application/json']);
+
+const getHeaderValue = (headers, headerName) => {
+  if (!headers) {
+    return '';
+  }
+
+  const exactValue = headers[headerName];
+  if (exactValue) {
+    return exactValue;
+  }
+
+  const matchingKey = Object.keys(headers).find((key) => key.toLowerCase() === headerName.toLowerCase());
+  return matchingKey ? headers[matchingKey] : '';
+};
+
+const parseContentDispositionFilename = (contentDisposition) => {
+  if (!contentDisposition) {
+    return '';
+  }
+
+  const utfMatch = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utfMatch?.[1]) {
+    return decodeURIComponent(utfMatch[1].replace(/["']/g, ''));
+  }
+
+  const plainMatch = contentDisposition.match(/filename="?([^"]+)"?/i);
+  return plainMatch?.[1] || '';
+};
+
+const resolvePreviewType = (mimeType, fileName) => {
+  const normalizedMime = String(mimeType || '').split(';')[0].trim().toLowerCase();
+  const normalizedName = String(fileName || '').toLowerCase();
+
+  if (normalizedMime === 'application/pdf' || normalizedName.endsWith('.pdf')) {
+    return 'pdf';
+  }
+
+  if (SUPPORTED_IMAGE_TYPES.has(normalizedMime) || /\.(png|jpe?g|webp|gif|svg)$/i.test(normalizedName)) {
+    return 'image';
+  }
+
+  if (SUPPORTED_TEXT_TYPES.has(normalizedMime) || /\.(txt|csv|json)$/i.test(normalizedName)) {
+    return 'text';
+  }
+
+  return 'unsupported';
+};
 
 const getAssessmentValidationErrors = (form) => {
   const errors = {};
@@ -105,6 +156,15 @@ const TaxAssessment = () => {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [viewingSubmissionId, setViewingSubmissionId] = useState(null);
+  const [fileViewer, setFileViewer] = useState({
+    open: false,
+    title: '',
+    fileUrl: '',
+    previewType: 'unsupported',
+    isLoading: false,
+    errorMessage: '',
+  });
 
   const loadPageData = async () => {
     try {
@@ -128,6 +188,12 @@ const TaxAssessment = () => {
   useEffect(() => {
     loadPageData();
   }, []);
+
+  useEffect(() => () => {
+    if (fileViewer.fileUrl) {
+      window.URL.revokeObjectURL(fileViewer.fileUrl);
+    }
+  }, [fileViewer.fileUrl]);
 
   const filteredSubmissions = useMemo(() => {
     const term = submissionSearch.trim().toLowerCase();
@@ -198,19 +264,90 @@ const TaxAssessment = () => {
     }
   };
 
+  const closeFileViewer = () => {
+    setViewingSubmissionId(null);
+    setFileViewer((current) => {
+      if (current.fileUrl) {
+        window.URL.revokeObjectURL(current.fileUrl);
+      }
+
+      return {
+        open: false,
+        title: '',
+        fileUrl: '',
+        previewType: 'unsupported',
+        isLoading: false,
+        errorMessage: '',
+      };
+    });
+  };
+
+  const downloadViewedFile = () => {
+    if (!fileViewer.fileUrl) {
+      return;
+    }
+
+    const link = document.createElement('a');
+    link.href = fileViewer.fileUrl;
+    link.download = fileViewer.title || 'tax-assessment-file';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
+
   const handleDownloadSubmissionFile = async (submission) => {
+    if (fileViewer.isLoading) {
+      return;
+    }
+
+    setViewingSubmissionId(submission.id);
+    setFileViewer((current) => {
+      if (current.fileUrl) {
+        window.URL.revokeObjectURL(current.fileUrl);
+      }
+
+      return {
+        open: true,
+        title: submission.supporting_file_name || `submission-${submission.id}`,
+        fileUrl: '',
+        previewType: 'unsupported',
+        isLoading: true,
+        errorMessage: '',
+      };
+    });
+
     try {
       const response = await taxAssessmentAPI.downloadSubmissionFile(submission.id);
-      const blobUrl = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = submission.supporting_file_name || `submission-${submission.id}`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(blobUrl);
-    } catch {
-      setError('Failed to download the uploaded taxpayer file.');
+      const fileName = parseContentDispositionFilename(getHeaderValue(response.headers, 'content-disposition'))
+        || submission.supporting_file_name
+        || `submission-${submission.id}`;
+      const mimeType = getHeaderValue(response.headers, 'content-type') || response.data?.type || '';
+      const previewBlob = response.data instanceof Blob
+        ? response.data
+        : new Blob([response.data], { type: mimeType || 'application/octet-stream' });
+      const blobUrl = window.URL.createObjectURL(previewBlob);
+
+      setFileViewer({
+        open: true,
+        title: fileName,
+        fileUrl: blobUrl,
+        previewType: resolvePreviewType(mimeType, fileName),
+        isLoading: false,
+        errorMessage: '',
+      });
+      setViewingSubmissionId(null);
+      setError('');
+    } catch (downloadError) {
+      setFileViewer({
+        open: true,
+        title: submission.supporting_file_name || `submission-${submission.id}`,
+        fileUrl: '',
+        previewType: 'unsupported',
+        isLoading: false,
+        errorMessage: downloadError.response?.data?.detail || 'Failed to load the uploaded taxpayer file preview.',
+      });
+      setViewingSubmissionId(null);
+      setError('Failed to load the uploaded taxpayer file.');
     }
   };
 
@@ -610,8 +747,13 @@ const TaxAssessment = () => {
                         Delete
                       </button>
                       {submission.supporting_file_name ? (
-                        <button type="button" onClick={() => handleDownloadSubmissionFile(submission)} className="rounded-full bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700">
-                          View File
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadSubmissionFile(submission)}
+                          disabled={fileViewer.isLoading}
+                          className="rounded-full bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-300 disabled:cursor-not-allowed disabled:opacity-70"
+                        >
+                          {viewingSubmissionId === submission.id && fileViewer.isLoading ? 'Loading File...' : 'View File'}
                         </button>
                       ) : null}
                     </div>
@@ -717,8 +859,13 @@ const TaxAssessment = () => {
                   Delete
                 </button>
                 {submission.supporting_file_name ? (
-                  <button type="button" onClick={() => handleDownloadSubmissionFile(submission)} className="rounded-full bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700">
-                    View File
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadSubmissionFile(submission)}
+                    disabled={fileViewer.isLoading}
+                    className="rounded-full bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-300 disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    {viewingSubmissionId === submission.id && fileViewer.isLoading ? 'Loading File...' : 'View File'}
                   </button>
                 ) : null}
               </div>
@@ -770,8 +917,13 @@ const TaxAssessment = () => {
                   Delete
                 </button>
                 {submission.supporting_file_name ? (
-                  <button type="button" onClick={() => handleDownloadSubmissionFile(submission)} className="rounded-full bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700">
-                    View File
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadSubmissionFile(submission)}
+                    disabled={fileViewer.isLoading}
+                    className="rounded-full bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-300 disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    {viewingSubmissionId === submission.id && fileViewer.isLoading ? 'Loading File...' : 'View File'}
                   </button>
                 ) : null}
               </div>
@@ -780,6 +932,16 @@ const TaxAssessment = () => {
           {!filteredRejectedSubmissions.length ? <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center text-sm text-slate-500">No rejected taxpayer submissions found.</div> : null}
         </div>
       </section>
+      <FileViewerModal
+        open={fileViewer.open}
+        title={fileViewer.title}
+        fileUrl={fileViewer.fileUrl}
+        previewType={fileViewer.previewType}
+        isLoading={fileViewer.isLoading}
+        errorMessage={fileViewer.errorMessage}
+        onClose={closeFileViewer}
+        onDownload={downloadViewedFile}
+      />
       <DeleteConfirmationModal
         open={Boolean(deleteTarget)}
         title={deleteTarget?.title}

@@ -1,4 +1,6 @@
 import { Link, Outlet, useNavigate } from 'react-router-dom';
+import { useState } from 'react';
+import ActionConfirmationModal from '../components/ActionConfirmationModal';
 import DynamicSidebar from '../components/DynamicSidebar';
 import PublicBrandLogo from '../components/PublicBrandLogo';
 import api from '../services/api';
@@ -6,9 +8,16 @@ import api from '../services/api';
 const AdminLayout = () => {
   const navigate = useNavigate();
   const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}');
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const handleLogout = async () => {
+    if (isLoggingOut) {
+      return;
+    }
+
     try {
+      setIsLoggingOut(true);
       const token = localStorage.getItem('adminToken');
       
       // Call backend logout endpoint
@@ -26,7 +35,7 @@ const AdminLayout = () => {
       localStorage.removeItem('securityAuthenticatedAt');
       sessionStorage.removeItem('securityAuthenticated');
       sessionStorage.removeItem('securityAuthenticatedAt');
-      
+      setShowLogoutConfirm(false);
       navigate('/login');
     } catch (error) {
       console.error('Logout failed:', error);
@@ -37,7 +46,10 @@ const AdminLayout = () => {
       localStorage.removeItem('securityAuthenticatedAt');
       sessionStorage.removeItem('securityAuthenticated');
       sessionStorage.removeItem('securityAuthenticatedAt');
+      setShowLogoutConfirm(false);
       navigate('/login');
+    } finally {
+      setIsLoggingOut(false);
     }
   };
 
@@ -66,8 +78,9 @@ const AdminLayout = () => {
               </svg>
             </button>
             <button 
-              onClick={handleLogout}
-              className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition duration-300 font-semibold"
+              onClick={() => setShowLogoutConfirm(true)}
+              disabled={isLoggingOut}
+              className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition duration-300 font-semibold disabled:cursor-not-allowed disabled:opacity-70"
             >
               Logout
             </button>
@@ -86,6 +99,20 @@ const AdminLayout = () => {
         )}
         <Outlet />
       </main>
+      <ActionConfirmationModal
+        open={showLogoutConfirm}
+        title="Are you sure you want to logout?"
+        message="Your admin session will remain secure and will only be terminated after you confirm."
+        confirmLabel="Confirm Logout"
+        loadingLabel="Logging out..."
+        isLoading={isLoggingOut}
+        onCancel={() => {
+          if (!isLoggingOut) {
+            setShowLogoutConfirm(false);
+          }
+        }}
+        onConfirm={handleLogout}
+      />
     </div>
   );
 };

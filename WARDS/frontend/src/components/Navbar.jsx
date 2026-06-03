@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import PublicBrandLogo from './PublicBrandLogo';
+import ActionConfirmationModal from './ActionConfirmationModal';
+import api from '../services/api';
 import { clearSession } from '../utils/auth';
 import { clearStoredPublicUser, getStoredPublicUser, PUBLIC_USER_STORAGE_EVENT } from '../utils/publicSession';
 
@@ -16,6 +18,8 @@ const Navbar = () => {
   const [language, setLanguage] = useState('English');
   const [publicUser, setPublicUser] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const displayPublicUser = publicUser || getStoredPublicUser();
@@ -46,7 +50,7 @@ const Navbar = () => {
 
   const isTaxpayerLoggedIn = Boolean(displayPublicUser || hasPublicSession());
 
-  const handleLogout = () => {
+  const finalizeLogout = () => {
     localStorage.removeItem('loginPortal');
     sessionStorage.removeItem('loginPortal');
     clearSession('public');
@@ -56,7 +60,24 @@ const Navbar = () => {
     sessionStorage.removeItem('loginMessage');
     setPublicUser(null);
     setMenuOpen(false);
+    setShowLogoutConfirm(false);
     navigate('/', { replace: true });
+  };
+
+  const handleLogout = async () => {
+    if (isLoggingOut) {
+      return;
+    }
+
+    try {
+      setIsLoggingOut(true);
+      await api.post('/public/auth/logout');
+    } catch (error) {
+      console.error('Public logout failed:', error);
+    } finally {
+      setIsLoggingOut(false);
+      finalizeLogout();
+    }
   };
 
   const handleUnifiedSignIn = () => {
@@ -101,8 +122,9 @@ const Navbar = () => {
                 </div>
                 <button
                   type="button"
-                  onClick={handleLogout}
-                  className="bg-red-500 hover:bg-red-600 text-white px-5 py-2 rounded-lg transition duration-300 font-semibold"
+                  onClick={() => setShowLogoutConfirm(true)}
+                  disabled={isLoggingOut}
+                  className="bg-red-500 hover:bg-red-600 text-white px-5 py-2 rounded-lg transition duration-300 font-semibold disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   Logout
                 </button>
@@ -157,6 +179,21 @@ const Navbar = () => {
           </div>
         </div>
       )}
+
+      <ActionConfirmationModal
+        open={showLogoutConfirm}
+        title="Are you sure you want to logout?"
+        message="Your current citizen session will be ended and you will return to the public portal home page."
+        confirmLabel="Confirm Logout"
+        loadingLabel="Logging out..."
+        isLoading={isLoggingOut}
+        onCancel={() => {
+          if (!isLoggingOut) {
+            setShowLogoutConfirm(false);
+          }
+        }}
+        onConfirm={handleLogout}
+      />
     </nav>
   );
 };

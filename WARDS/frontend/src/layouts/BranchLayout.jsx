@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import wardsLogo from '../assets/branding/wards_logo.png';
 import qcLogo from '../assets/branding/qclogo_main.png';
 import galasLogo from '../assets/branding/galas_logo.png';
+import ActionConfirmationModal from '../components/ActionConfirmationModal';
 import api from '../services/api';
 import { branchAnnouncementAPI, discrepancyAPI } from '../services/api';
 import { getBranchPortalPath } from '../utils/auth';
@@ -41,6 +42,8 @@ const BranchLayout = () => {
   const [receiptCount, setReceiptCount] = useState(0);
   const [paymentCount, setPaymentCount] = useState(0);
   const [reportCount, setReportCount] = useState(0);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const fetchAllBranchReports = async () => {
     const firstResponse = await api.get('/branch/reports', { params: { page: 1, page_size: 5 } });
     const firstPageData = firstResponse.data || {};
@@ -274,10 +277,18 @@ const BranchLayout = () => {
   }, [isQueueWindowAccount]);
 
   const handleLogout = async () => {
+    if (isLoggingOut) {
+      return;
+    }
+
+    setIsLoggingOut(true);
+
     if (isSuperadminManagedBranch) {
       localStorage.removeItem('branchToken');
       localStorage.removeItem('branchUser');
       localStorage.removeItem('branchAuthenticatedAt');
+      setShowLogoutConfirm(false);
+      setIsLoggingOut(false);
       navigate('/admin', { replace: true });
       return;
     }
@@ -290,6 +301,8 @@ const BranchLayout = () => {
       localStorage.removeItem('branchToken');
       localStorage.removeItem('branchUser');
       localStorage.removeItem('branchAuthenticatedAt');
+      setShowLogoutConfirm(false);
+      setIsLoggingOut(false);
       navigate('/login', { replace: true });
     }
   };
@@ -375,8 +388,9 @@ const BranchLayout = () => {
             <p className="font-semibold text-gray-800">{staff?.branch_id || 'Unassigned'}</p>
           </div>
           <button
-            onClick={handleLogout}
-            className={`${isSuperadminManagedBranch ? 'bg-purple-600 hover:bg-purple-700' : 'bg-red-500 hover:bg-red-600'} text-white px-4 py-2 rounded-lg font-semibold transition`}
+            onClick={() => setShowLogoutConfirm(true)}
+            disabled={isLoggingOut}
+            className={`${isSuperadminManagedBranch ? 'bg-purple-600 hover:bg-purple-700' : 'bg-red-500 hover:bg-red-600'} text-white px-4 py-2 rounded-lg font-semibold transition disabled:cursor-not-allowed disabled:opacity-70`}
           >
             {isSuperadminManagedBranch ? 'Return to superadmin dashboard' : 'Logout'}
           </button>
@@ -393,6 +407,23 @@ const BranchLayout = () => {
           <Outlet />
         </main>
       </div>
+      <ActionConfirmationModal
+        open={showLogoutConfirm}
+        title={isSuperadminManagedBranch ? 'Return to the super admin dashboard?' : 'Are you sure you want to logout?'}
+        message={isSuperadminManagedBranch
+          ? 'Your branch portal session will close and you will be returned to the super admin dashboard.'
+          : 'Your branch session will only be terminated after you confirm this action.'}
+        confirmLabel={isSuperadminManagedBranch ? 'Return to Dashboard' : 'Confirm Logout'}
+        loadingLabel={isSuperadminManagedBranch ? 'Returning...' : 'Logging out...'}
+        tone={isSuperadminManagedBranch ? 'primary' : 'danger'}
+        isLoading={isLoggingOut}
+        onCancel={() => {
+          if (!isLoggingOut) {
+            setShowLogoutConfirm(false);
+          }
+        }}
+        onConfirm={handleLogout}
+      />
     </div>
   );
 };
