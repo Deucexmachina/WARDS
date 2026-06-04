@@ -214,6 +214,13 @@ def apply_mfa_secret_security(mfa_record):
     return mfa_record
 
 
+def apply_privacy_consent_security(consent_record):
+    ip_value = get_preferred_write_value(consent_record, "ip_address")
+    set_encrypted_hash_companions(consent_record, "ip_address", ip_value)
+    consent_record.ip_address = build_redacted_text("CONSENT_IP", ip_value, 45)
+    return consent_record
+
+
 def apply_payment_security(payment):
     for field_name, prefix, length in (
         ("ref_number", "PAY_REF", 255),

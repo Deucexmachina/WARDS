@@ -36,6 +36,7 @@ import RequestReceipt from './pages/public/RequestReceipt'
 import TaxpayerGuide from './pages/public/TaxpayerGuide'
 import Contact from './pages/public/Contact'
 import GetQueue from './pages/public/GetQueue'
+import DataPrivacyAgreement from './pages/public/DataPrivacyAgreement'
 import PaymentStatus from './pages/public/PaymentStatus'
 import PaymentSuccess from './pages/public/PaymentSuccess'
 import PaymentFailed from './pages/public/PaymentFailed'
@@ -76,6 +77,7 @@ function App() {
           <Route path="taxpayer-guide" element={<TaxpayerGuide />} />
           <Route path="contact" element={<Contact />} />
           <Route path="get-queue" element={<UserProtectedRoute><GetQueue /></UserProtectedRoute>} />
+          <Route path="data-privacy-agreement" element={<DataPrivacyAgreement />} />
         </Route>
         
         {/* Payment Result Pages */}

@@ -1057,6 +1057,23 @@ class PolicyView(Base):
     policy = relationship("Policy", backref="views")
 
 
+class PrivacyConsent(Base):
+    __tablename__ = "privacy_consents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    citizen_user_id = Column(Integer, ForeignKey("citizen_users.id", ondelete="CASCADE"), nullable=False, index=True)
+    agreement_title = Column(String, nullable=False)
+    agreement_version = Column(String, nullable=False, index=True)
+    agreement_effective_date = Column(String, nullable=False)
+    source_module = Column(String, nullable=False, default="citizen_registration")
+    consented_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    ip_address = Column(String(45), nullable=True)
+    ip_address_hash = Column(String, nullable=True, index=True)
+    ip_address_enc = Column(Text, nullable=True)
+
+    citizen_user = relationship("CitizenUser", backref="privacy_consents")
+
+
 class SystemSetting(Base):
     __tablename__ = "system_settings"
 
