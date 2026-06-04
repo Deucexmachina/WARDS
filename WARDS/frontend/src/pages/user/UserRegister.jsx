@@ -426,6 +426,36 @@ const UserRegister = () => {
                         className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
                       />
                     </div>
+
+                    <div className={`rounded-[26px] border px-4 py-5 sm:px-5 ${hasAcceptedAgreement ? 'border-sky-100 bg-sky-50/70' : 'border-slate-200 bg-slate-50/70'}`}>
+                      <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${hasAcceptedAgreement ? 'text-sky-700' : 'text-slate-400'}`}>
+                        reCAPTCHA Verification
+                      </p>
+                      <p className="mt-3 text-sm text-slate-500">
+                        {hasAcceptedAgreement
+                          ? 'Complete the reCAPTCHA challenge to confirm this registration is being submitted by a real person.'
+                          : 'Finish the Data Privacy Agreement step first to unlock reCAPTCHA verification.'}
+                      </p>
+                      <div className="mt-4 flex justify-center rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-5">
+                        {hasAcceptedAgreement ? (
+                          <ReCAPTCHA
+                            ref={recaptchaRef}
+                            sitekey={RECAPTCHA_SITE_KEY}
+                            onChange={(token) => {
+                              setRecaptchaToken(token || '');
+                              setError('');
+                            }}
+                            onExpired={() => setRecaptchaToken('')}
+                            onErrored={() => {
+                              setRecaptchaToken('');
+                              setError('reCAPTCHA verification failed. Please try again.');
+                            }}
+                          />
+                        ) : (
+                          <p className="text-sm font-semibold text-slate-400">reCAPTCHA will appear here after the DPA review is completed.</p>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -534,36 +564,6 @@ const UserRegister = () => {
                 </div>
               </div>
 
-              <div className={`rounded-[26px] border px-4 py-5 sm:px-5 ${hasAcceptedAgreement ? 'border-sky-100 bg-sky-50/70' : 'border-slate-200 bg-slate-50/70'}`}>
-                <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${hasAcceptedAgreement ? 'text-sky-700' : 'text-slate-400'}`}>
-                  reCAPTCHA Verification
-                </p>
-                <p className="mt-3 text-sm text-slate-500">
-                  {hasAcceptedAgreement
-                    ? 'Complete the reCAPTCHA challenge to confirm this registration is being submitted by a real person.'
-                    : 'Finish the Data Privacy Agreement step first to unlock reCAPTCHA verification.'}
-                </p>
-                <div className="mt-4 flex justify-center rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-5">
-                  {hasAcceptedAgreement ? (
-                    <ReCAPTCHA
-                      ref={recaptchaRef}
-                      sitekey={RECAPTCHA_SITE_KEY}
-                      onChange={(token) => {
-                        setRecaptchaToken(token || '');
-                        setError('');
-                      }}
-                      onExpired={() => setRecaptchaToken('')}
-                      onErrored={() => {
-                        setRecaptchaToken('');
-                        setError('reCAPTCHA verification failed. Please try again.');
-                      }}
-                    />
-                  ) : (
-                    <p className="text-sm font-semibold text-slate-400">reCAPTCHA will appear here after the DPA review is completed.</p>
-                  )}
-                </div>
-              </div>
-
               <div className="flex flex-col gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-end">
                 <div className="order-1 flex flex-col gap-3 sm:flex-row">
                   <Link
@@ -625,7 +625,7 @@ const UserRegister = () => {
               <p className="text-sm text-slate-500">
                 {hasReachedAgreementEnd
                   ? 'Review complete. Closing this modal will mark the agreement as accepted.'
-                  : 'The close button will remain disabled until the agreement has been fully reviewed.'}
+                  : ''}
               </p>
               <button
                 type="button"
