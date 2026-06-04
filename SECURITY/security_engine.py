@@ -506,10 +506,14 @@ def ensure_database_audit_infrastructure(db: Session) -> None:
             auth_token VARCHAR(80) NULL,
             auth_actor VARCHAR(255) NULL,
             auth_context VARCHAR(255) NULL,
+            source_ip VARCHAR(80) NULL,
+            db_user VARCHAR(255) NULL,
+            connection_id BIGINT NULL,
             changed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             INDEX idx_wards_security_audit_id (id),
             INDEX idx_wards_security_audit_changed_at (changed_at),
-            INDEX idx_wards_security_audit_token (auth_token)
+            INDEX idx_wards_security_audit_token (auth_token),
+            INDEX idx_wards_security_audit_source_ip (source_ip)
         ) ENGINE=InnoDB
         """
     ))
@@ -527,6 +531,9 @@ def ensure_database_audit_infrastructure(db: Session) -> None:
         "auth_token": "ADD COLUMN auth_token VARCHAR(80) NULL",
         "auth_actor": "ADD COLUMN auth_actor VARCHAR(255) NULL",
         "auth_context": "ADD COLUMN auth_context VARCHAR(255) NULL",
+        "source_ip": "ADD COLUMN source_ip VARCHAR(80) NULL",
+        "db_user": "ADD COLUMN db_user VARCHAR(255) NULL",
+        "connection_id": "ADD COLUMN connection_id BIGINT NULL",
     }.items():
         if column_name not in existing_columns:
             db.execute(text(f"ALTER TABLE {quote_identifier(DATABASE_AUDIT_TABLE)} {ddl}"))
@@ -543,13 +550,16 @@ def ensure_database_audit_infrastructure(db: Session) -> None:
                 AFTER {action} ON {quote_identifier(table_name)}
                 FOR EACH ROW
                 INSERT INTO {quote_identifier(DATABASE_AUDIT_TABLE)}
-                    (table_name, action, auth_token, auth_actor, auth_context)
+                    (table_name, action, auth_token, auth_actor, auth_context, source_ip, db_user, connection_id)
                 VALUES (
                     {sql_string_literal(table_name)},
                     {sql_string_literal(action)},
                     @wards_db_auth_token,
                     @wards_db_auth_actor,
-                    @wards_db_auth_context
+                    @wards_db_auth_context,
+                    SUBSTRING_INDEX(USER(), '@', -1),
+                    USER(),
+                    CONNECTION_ID()
                 )
                 """
             ))
@@ -591,7 +601,8 @@ def database_audit_changes_since(db: Session, last_id: int) -> list[dict]:
         return []
     rows = db.execute(text(
         f"""
-        SELECT table_name, action, COUNT(*) AS change_count, MAX(id) AS max_id, MAX(changed_at) AS latest_change
+        SELECT table_name, action, COUNT(*) AS change_count, MAX(id) AS max_id, MAX(changed_at) AS latest_change,
+               MAX(source_ip) AS source_ip, MAX(db_user) AS db_user, MAX(connection_id) AS connection_id
         FROM {quote_identifier(DATABASE_AUDIT_TABLE)}
         WHERE id > :last_id
         GROUP BY table_name, action
@@ -605,6 +616,9 @@ def database_audit_changes_since(db: Session, last_id: int) -> list[dict]:
             "change_count": int(row["change_count"] or 0),
             "max_id": int(row["max_id"] or 0),
             "latest_change": row["latest_change"].isoformat() if hasattr(row["latest_change"], "isoformat") else str(row["latest_change"]),
+            "source_ip": row.get("source_ip"),
+            "db_user": row.get("db_user"),
+            "connection_id": int(row["connection_id"]) if row.get("connection_id") else None,
         }
         for row in rows
     ]
@@ -623,6 +637,9 @@ def unauthorized_database_audit_changes_since(db: Session, last_id: int) -> list
             audit.auth_token,
             audit.auth_actor,
             audit.auth_context,
+            audit.source_ip,
+            audit.db_user,
+            audit.connection_id,
             COUNT(*) AS change_count,
             MAX(audit.id) AS max_id,
             MAX(audit.changed_at) AS latest_change
@@ -633,7 +650,7 @@ def unauthorized_database_audit_changes_since(db: Session, last_id: int) -> list
             AND audit.changed_at <= auth.expires_at
         WHERE audit.id > :last_id
           AND auth.token IS NULL
-        GROUP BY audit.table_name, audit.action, audit.auth_token, audit.auth_actor, audit.auth_context
+        GROUP BY audit.table_name, audit.action, audit.auth_token, audit.auth_actor, audit.auth_context, audit.source_ip, audit.db_user, audit.connection_id
         ORDER BY max_id ASC
         """
     ), {"last_id": int(last_id or 0)}).mappings().all()
@@ -644,6 +661,9 @@ def unauthorized_database_audit_changes_since(db: Session, last_id: int) -> list
             "auth_token": row["auth_token"],
             "auth_actor": row["auth_actor"],
             "auth_context": row["auth_context"],
+            "source_ip": row["source_ip"],
+            "db_user": row["db_user"],
+            "connection_id": int(row["connection_id"]) if row["connection_id"] else None,
             "change_count": int(row["change_count"] or 0),
             "max_id": int(row["max_id"] or 0),
             "latest_change": row["latest_change"].isoformat() if hasattr(row["latest_change"], "isoformat") else str(row["latest_change"]),
@@ -1787,6 +1807,11 @@ def reconcile_trusted_file_removals(db: Session, actor: str = "trusted_baseline"
 
 
 def create_incident(db: Session, detection: SecurityDetectionEvent, classification: dict, flags: list[str], changed: dict, quarantine_path: str | None) -> SecurityIncident:
+    context = json.loads(detection.context_json or "{}")
+    source_ip = context.get("source_ip") or context.get("client_ip") or context.get("ip_address") or "unknown"
+    source_details = f" Source IP: {source_ip}."
+    if context.get("db_user"):
+        source_details += f" DB user: {context.get('db_user')}."
     incident = SecurityIncident(
         detection_event_id=detection.id,
         incident_type=classification["incident_type"],
@@ -1795,7 +1820,7 @@ def create_incident(db: Session, detection: SecurityDetectionEvent, classificati
         cvss_vector=classification["cvss_vector"],
         nist_category=classification["nist_category"],
         enisa_threat_type=classification["enisa_threat_type"],
-        description=f"{detection.change_type} detected in {detection.target_name}.",
+        description=f"{detection.change_type} detected in {detection.target_name}.{source_details}",
         behaviors_json=json_dumps([BEHAVIOR_LABELS.get(flag, flag) for flag in flags]),
         affected_files_json=json_dumps([detection.target_name]),
         changed_lines_json=json_dumps(changed),
@@ -1822,6 +1847,10 @@ def scan_database_entry(db: Session, file_entry: SecurityMonitoredFile, context:
         context["database_unauthorized_audit_changes"] = unauthorized_audit_changes
         context["database_unauthorized_change_count"] = sum(item["change_count"] for item in unauthorized_audit_changes)
         context["database_unauthorized_tables"] = sorted({item["table_name"] for item in unauthorized_audit_changes})
+        first_source = next((item for item in unauthorized_audit_changes if item.get("source_ip") or item.get("db_user")), {})
+        context.setdefault("source_ip", first_source.get("source_ip") or "unknown")
+        context.setdefault("db_user", first_source.get("db_user"))
+        context.setdefault("db_connection_id", first_source.get("connection_id"))
 
     path = create_database_checksum_manifest(db, Path(file_entry.file_path))
     old_hash = file_entry.current_hash
@@ -1919,6 +1948,8 @@ def scan_single_file(db: Session, file_entry: SecurityMonitoredFile, context: di
 
 def record_detection(db: Session, file_entry: SecurityMonitoredFile, change_type: str, old_hash: str | None, new_hash: str | None, old_content: str, new_content: str, context: dict | None = None) -> SecurityDetectionEvent:
     context = context or {}
+    source_ip = context.get("source_ip") or context.get("client_ip") or context.get("ip_address") or "unknown"
+    context.setdefault("source_ip", source_ip)
     admin_change = recent_admin_change(db, file_entry.file_path)
     is_legitimate = bool(admin_change)
     if is_legitimate:
@@ -1943,12 +1974,12 @@ def record_detection(db: Session, file_entry: SecurityMonitoredFile, change_type
         }
 
     changed = diff_lines(old_content, new_content)
-    trigger_summary = build_trigger_summary(change_type, flags, changed, is_legitimate)
+    trigger_summary = build_trigger_summary(change_type, flags, changed, is_legitimate, source_ip)
     detection = SecurityDetectionEvent(
         file_id=file_entry.id,
         target_type=context.get("target_type") or "file",
         target_name=file_entry.relative_path,
-        actor=str(admin_change.admin_id) if admin_change else context.get("actor") or "unknown",
+        actor=str(admin_change.admin_id) if admin_change else context.get("actor") or source_ip or "unknown",
         change_type=change_type,
         old_hash=old_hash,
         new_hash=new_hash,
@@ -1982,10 +2013,11 @@ def record_detection(db: Session, file_entry: SecurityMonitoredFile, change_type
     return detection
 
 
-def build_trigger_summary(change_type: str, flags: list[str], changed: dict, is_legitimate: bool) -> str:
+def build_trigger_summary(change_type: str, flags: list[str], changed: dict, is_legitimate: bool, source_ip: str = "unknown") -> str:
     if is_legitimate:
-        return "Authorized admin change through MFA-protected WARDS session."
+        return f"Authorized admin change through MFA-protected WARDS session. Source IP: {source_ip}."
     pieces = [change_type.replace("_", " ")]
+    pieces.append(f"Source IP: {source_ip}")
     if flags:
         pieces.append(", ".join(BEHAVIOR_LABELS.get(flag, flag) for flag in flags[:4]))
     added = len(changed.get("added", []))

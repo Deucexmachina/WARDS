@@ -21,7 +21,11 @@ def _build_fernet() -> Fernet:
 
 
 _FERNET = _build_fernet()
-REDACTED_VALUE_PATTERN = re.compile(r"^[A-Z0-9_]+_[0-9a-f]{16}$")
+REDACTED_VALUE_PATTERN = re.compile(r"^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*_[0-9a-fA-F]{6,64}$")
+REDACTED_EMAIL_PATTERN = re.compile(r"^[a-z0-9_.+-]+_[0-9a-fA-F]{6,64}@redacted\.local$")
+REDACTED_PREFIX_ONLY_PATTERN = re.compile(
+    r"^(?:ANNOUNCEMENT|BRANCH|BT|BUSINESS|CITIZEN|DISC|FAQ|GUIDE|INVITE|MAYOR|MEMO|MFA|OTP|PAY|QUEUE|RECEIPT|REGISTRATION|RPT|SERVICE|SUBMISSION|TAX|VERIFY|WINDOW)(?:_[A-Z0-9]+)+$"
+)
 
 
 def encrypt_optional_value(value: Optional[str]) -> Optional[str]:
@@ -71,7 +75,12 @@ def build_redacted_text(prefix: str, value: Optional[str], max_length: int = 255
 def is_redacted_placeholder(value: Optional[str]) -> bool:
     if value is None:
         return False
-    return bool(REDACTED_VALUE_PATTERN.fullmatch(str(value).strip()))
+    text = str(value).strip()
+    return bool(
+        REDACTED_VALUE_PATTERN.fullmatch(text)
+        or REDACTED_EMAIL_PATTERN.fullmatch(text)
+        or REDACTED_PREFIX_ONLY_PATTERN.fullmatch(text)
+    )
 
 
 def get_decrypted_or_raw(entity, field_name: str) -> Optional[str]:

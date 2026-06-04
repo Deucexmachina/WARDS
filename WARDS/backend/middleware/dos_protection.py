@@ -14,9 +14,11 @@ from starlette.types import ASGIApp
 import time
 import asyncio
 from collections import defaultdict
+from datetime import datetime
 from typing import Dict, Optional
 import os
 import ipaddress
+import json
 
 MAX_REQUEST_SIZE = int(os.getenv("MAX_REQUEST_SIZE_BYTES", 10 * 1024 * 1024))  # 10MB
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT_SECONDS", 30))
@@ -54,6 +56,7 @@ block_strikes: Dict[str, list] = defaultdict(list)
 reputation_strikes: Dict[str, list] = defaultdict(list)
 # Track blocked IPs (temporary, in-memory)
 blocked_ips: Dict[str, float] = {}  # IP -> unblock time
+manual_review_incidents: Dict[str, float] = {}
 
 # Cache for permanent blocks (in-memory cache to reduce DB calls)
 _permanent_blocks_cache: Dict[str, bool] = {}
@@ -153,6 +156,78 @@ def temporary_block_duration(strikes: int) -> int:
     return 7 * 24 * 60 * 60
 
 
+def record_ip_manual_review_incident(ip: str, scope: str, strikes: int, reason: str, duration: int) -> None:
+    current_time = time.time()
+    incident_key = f"{ip}:{scope}"
+    if current_time - manual_review_incidents.get(incident_key, 0) < 60 * 60:
+        return
+    manual_review_incidents[incident_key] = current_time
+    try:
+        from database.models import SessionLocal, authorize_database_session
+        from SECURITY.security_models import SecurityDetectionEvent, SecurityIncident
+
+        db = SessionLocal()
+        try:
+            authorize_database_session(db, context="ip_abuse_manual_review", actor="dos_protection")
+            context = {
+                "source_ip": ip,
+                "scope": scope,
+                "strike_count": strikes,
+                "temporary_block_seconds": duration,
+                "manual_review_recommended": True,
+                "reason": reason,
+            }
+            detection = SecurityDetectionEvent(
+                file_id=None,
+                target_type="ip",
+                target_name=ip,
+                actor=ip,
+                change_type="auto_ip_block_escalation",
+                old_hash=None,
+                new_hash=None,
+                is_legitimate=False,
+                admin_id=None,
+                ai_score=None,
+                ai_prediction="suspicious",
+                confidence=1.0,
+                severity_level="high",
+                cvss_score=7.0,
+                nist_category="CAT 1 - Unauthorized Access",
+                enisa_threat_type="Abuse of Information Leakage",
+                trigger_summary=f"Source IP: {ip} | {reason} | strike {strikes}; temporary block {duration}s.",
+                accuracy_basis="Rate-limit strike escalation reached manual-review threshold.",
+                behavior_flags_json=json.dumps(["Rate-limit abuse", "Manual review required"]),
+                changed_lines_json=json.dumps({}),
+                context_json=json.dumps(context),
+            )
+            db.add(detection)
+            db.commit()
+            db.refresh(detection)
+            incident = SecurityIncident(
+                detection_event_id=detection.id,
+                incident_type="ip_abuse",
+                severity_level="high",
+                cvss_score=7.0,
+                cvss_vector="AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:L",
+                nist_category="CAT 1 - Unauthorized Access",
+                enisa_threat_type="Abuse of Information Leakage",
+                description=f"Automated IP block escalated to manual review. Source IP: {ip}. Strike count: {strikes}. Reason: {reason}.",
+                behaviors_json=json.dumps(["Rate-limit abuse", "Manual review required"]),
+                affected_files_json=json.dumps([ip]),
+                changed_lines_json=json.dumps({}),
+                quarantine_paths_json=json.dumps([]),
+                response_action="temporary_block_manual_review",
+                status="open",
+                created_at=datetime.utcnow(),
+            )
+            db.add(incident)
+            db.commit()
+        finally:
+            db.close()
+    except Exception:
+        pass
+
+
 def register_reputation_strike(ip: str, current_time: float) -> int:
     reputation_strikes[ip] = prune_timestamps(reputation_strikes[ip], current_time, STRIKE_WINDOW)
     reputation_strikes[ip].append(current_time)
@@ -162,6 +237,8 @@ def register_reputation_strike(ip: str, current_time: float) -> int:
 def block_response(ip: str, duration: int, scope: str, strikes: int, reason: str) -> JSONResponse:
     blocked_ips[ip] = time.time() + duration
     manual_review = strikes >= 4
+    if manual_review:
+        record_ip_manual_review_incident(ip, scope, strikes, reason, duration)
     content = {
         "detail": f"{reason}. IP temporarily blocked for {duration} seconds.",
         "scope": scope,

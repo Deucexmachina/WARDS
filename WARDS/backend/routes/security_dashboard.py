@@ -461,10 +461,12 @@ def list_blocked_ips(db: Session = Depends(get_db), admin=Depends(current_admin)
     current_time = time.time()
     result = []
     for ip, unblock_at in blocked.items():
+        is_permanent = unblock_at == float("inf")
         result.append({
             "ip": ip,
-            "blocked_until": unblock_at,
-            "remaining_seconds": max(0, int(unblock_at - current_time)),
+            "blocked_until": None if is_permanent else unblock_at,
+            "remaining_seconds": None if is_permanent else max(0, int(unblock_at - current_time)),
+            "is_permanent": is_permanent,
         })
     return {"blocked_ips": result, "total": len(result)}
 

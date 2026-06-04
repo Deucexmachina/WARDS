@@ -176,18 +176,9 @@ def get_permanent_blocks(db: Session, active_only: bool = True) -> List[Permanen
 
 def auto_block_if_malicious(ip: str, db: Session, threshold: int = MALICIOUS_THRESHOLD) -> bool:
     """
-    Check IP reputation and auto-block if malicious.
-    Returns True if IP was blocked.
+    Check IP reputation and report whether the IP meets the malicious threshold.
+    Permanent blocks are reserved for explicit admin actions in the Security Dashboard.
+    Returns True if temporary blocking should be applied by the caller.
     """
     reputation = check_ip_reputation(ip, db)
-    
-    if reputation["is_malicious"]:
-        add_permanent_block(
-            ip=ip,
-            reason=f"Auto-blocked: Malicious IP with {reputation['confidence_score']}% confidence score",
-            blocked_by="system",
-            db=db
-        )
-        return True
-    
-    return False
+    return bool(reputation["is_malicious"] and reputation["confidence_score"] >= threshold)

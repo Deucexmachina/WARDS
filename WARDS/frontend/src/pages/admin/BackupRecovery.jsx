@@ -678,7 +678,13 @@ const BackupRecovery = () => {
     closeFolderPicker();
     if (folderPicker.mode === 'backup') {
       setControls((current) => ({ ...current, backupPath: path }));
-      await runAction(() => api.post('/security/backup/location', { path, delete_previous: controls.deletePrevious }), 'Backup location updated.');
+      askConfirm(
+        'Change backup location?',
+        `WARDS will use ${path} for new trusted backups. The selected folder must be empty so existing files are not mixed with security backups.`,
+        () => api.post('/security/backup/location', { path, delete_previous: controls.deletePrevious }),
+        'Backup location updated.',
+        'Save location',
+      );
       return;
     }
     if (folderPicker.mode === 'add-monitor') {
@@ -1101,7 +1107,13 @@ const BackupRecovery = () => {
                         setNotice('Choose a future date and time for the scheduled backup.');
                         return;
                       }
-                      runAction(() => api.post('/security/backup/schedule', { frequency: 'weekly', next_run: controls.backupDate }), 'Automatic backup schedule saved.', 'Saving automatic backup schedule...');
+                      askConfirm(
+                        'Save automatic backup schedule?',
+                        `WARDS will run weekly backups starting ${formatLocalDateTime(controls.backupDate)}.`,
+                        () => api.post('/security/backup/schedule', { frequency: 'weekly', next_run: controls.backupDate }),
+                        'Automatic backup schedule saved.',
+                        'Save schedule',
+                      );
                     }}>Schedule Automatic Backups</button>
                   </div>
                   <div className="grid gap-3">
@@ -1162,7 +1174,7 @@ const BackupRecovery = () => {
                           onChange={(e) => setControls({ ...controls, scanInterval: e.target.value })}
                         />
                       </label>
-                      <button disabled={busy} className={`rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white${disabledButtonClass}`} onClick={() => runAction(saveScanInterval, 'Automatic scan interval saved.', 'Saving automatic scan interval...')}>Save Scan Interval</button>
+                      <button disabled={busy} className={`rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white${disabledButtonClass}`} onClick={() => askConfirm('Save scan interval?', `Automatic scans will run every ${Number(controls.scanInterval || 0)} seconds while monitoring is enabled.`, saveScanInterval, 'Automatic scan interval saved.', 'Save interval')}>Save Scan Interval</button>
                     </div>
                     <p className="mt-2 text-xs leading-5 text-slate-500">Default is 30 seconds. Lower values detect faster but use more backend resources.</p>
                   </div>
@@ -1176,7 +1188,7 @@ const BackupRecovery = () => {
                       {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((item) => <option key={item} value={item}>{item}</option>)}
                     </select>
                     <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" type="time" value={controls.aiTime} onChange={(e) => setControls({ ...controls, aiTime: e.target.value })} />
-                    <button disabled={busy} className={`rounded-xl bg-slate-900 px-4 py-2 font-semibold text-white${disabledButtonClass}`} onClick={() => runAction(() => api.post('/security/ai/schedule', { day: controls.aiDay, time: controls.aiTime }), 'AI retraining schedule saved.', 'Saving AI retraining schedule...')}>Scheduled AI Retrain</button>
+                    <button disabled={busy} className={`rounded-xl bg-slate-900 px-4 py-2 font-semibold text-white${disabledButtonClass}`} onClick={() => askConfirm('Save AI retraining schedule?', `WARDS will retrain the anomaly model every ${controls.aiDay} at ${controls.aiTime}.`, () => api.post('/security/ai/schedule', { day: controls.aiDay, time: controls.aiTime }), 'AI retraining schedule saved.', 'Save AI schedule')}>Scheduled AI Retrain</button>
                   </div>
                   <button disabled={busy} className="w-full rounded-xl bg-primary px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Retrain AI model?', 'WARDS will retrain using historical validated behavior and the newest verified activity.', () => api.post('/security/ai/retrain'), 'AI model retrained with historical and recent validated data.', 'Retrain AI')}>Manual AI Retrain</button>
                   <button disabled={busy} className={`w-full rounded-xl bg-slate-100 px-4 py-3 font-semibold text-slate-800${disabledButtonClass}`} onClick={loadWeeklyAiData}>Show this week's data</button>
@@ -1256,7 +1268,7 @@ const BackupRecovery = () => {
                               <option key={item.key} value={item.key}>{item.label}</option>
                             ))}
                           </select>
-                          <button disabled={busy} className={`rounded-xl bg-primary px-4 py-2 text-sm font-bold text-white${disabledButtonClass}`} onClick={() => runAction(addSelectedAiRule, 'AI rule added with initial samples.', 'Adding approved AI rule...')}>Add AI Rule</button>
+                          <button disabled={busy} className={`rounded-xl bg-primary px-4 py-2 text-sm font-bold text-white${disabledButtonClass}`} onClick={() => askConfirm('Add AI rule?', 'WARDS will add this approved rule to anomaly scoring with its initial sample configuration.', addSelectedAiRule, 'AI rule added with initial samples.', 'Add rule')}>Add AI Rule</button>
                         </div>
                       </div>
                       <div className="grid gap-3">
@@ -1288,7 +1300,7 @@ const BackupRecovery = () => {
                           </div>
                         ))}
                       </div>
-                      <button disabled={busy} className="w-full rounded-xl bg-primary px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => runAction(saveAiRules, 'AI behavioral rules saved.')}>Save AI Rules</button>
+                      <button disabled={busy} className="w-full rounded-xl bg-primary px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Save AI rules?', 'WARDS will update the enabled rules, weights, and advanced rule configuration used by anomaly scoring.', saveAiRules, 'AI behavioral rules saved.', 'Save rules')}>Save AI Rules</button>
                     </>
                   ) : (
                     <button disabled={busy} className={`rounded-xl bg-blue-50 px-4 py-3 text-sm font-bold text-primary${disabledButtonClass}`} onClick={() => setShowAiRules(true)}>
@@ -1327,7 +1339,7 @@ const BackupRecovery = () => {
                           onChange={(e) => setBlockDuration(Number(e.target.value))}
                         />
                       </div>
-                      <button disabled={busy} className={`rounded-xl bg-red-600 px-4 py-2 font-semibold text-white${disabledButtonClass}`} onClick={blockIp}>
+                      <button disabled={busy} className={`rounded-xl bg-red-600 px-4 py-2 font-semibold text-white${disabledButtonClass}`} onClick={() => askConfirm('Temporarily block this IP?', `WARDS will block ${blockIpInput || 'the entered IP'} for ${blockDuration} seconds.`, blockIp, 'Temporary IP block added.', 'Block IP')}>
                         Block IP
                       </button>
                     </div>
@@ -1349,13 +1361,13 @@ const BackupRecovery = () => {
                             <tr key={item.ip} className="border-t border-slate-100">
                               <td className="px-4 py-3 font-mono text-slate-900">{item.ip}</td>
                               <td className="px-4 py-3 text-slate-700">
-                                {item.remaining_seconds === Infinity ? 'Permanent' : (item.remaining_seconds > 0 ? `${Math.floor(item.remaining_seconds / 60)}m ${item.remaining_seconds % 60}s` : 'Expired')}
+                                {item.is_permanent ? 'Permanent' : (item.remaining_seconds > 0 ? `${Math.floor(item.remaining_seconds / 60)}m ${item.remaining_seconds % 60}s` : 'Expired')}
                               </td>
                               <td className="px-4 py-3 text-right">
                                 <button
                                   disabled={busy}
                                   className={`rounded-lg bg-green-600 px-3 py-1 text-xs font-semibold text-white disabled:opacity-60${disabledButtonClass}`}
-                                  onClick={() => unblockIp(item.ip)}
+                                  onClick={() => askConfirm('Unblock this IP?', `WARDS will remove ${item.ip} from the temporary and active block lists.`, () => unblockIp(item.ip), `IP ${item.ip} unblocked.`, 'Unblock IP')}
                                 >
                                   Unblock
                                 </button>
@@ -1399,7 +1411,7 @@ const BackupRecovery = () => {
                           />
                         </div>
                         <div className="flex items-end">
-                          <button disabled={busy} className={`rounded-xl bg-red-700 px-4 py-2 font-semibold text-white${disabledButtonClass}`} onClick={addPermanentBlock}>
+                          <button disabled={busy} className={`rounded-xl bg-red-700 px-4 py-2 font-semibold text-white${disabledButtonClass}`} onClick={() => askConfirm('Permanently block this IP?', `Only manual controls can create permanent blocks. WARDS will permanently block ${permanentBlockInput || 'the entered IP'} until an admin removes it.`, addPermanentBlock, 'Permanent IP block added.', 'Permanent block')}>
                             Add Permanent Block
                           </button>
                         </div>
@@ -1436,7 +1448,7 @@ const BackupRecovery = () => {
                                     <button
                                       disabled={busy}
                                       className={`rounded-lg bg-orange-600 px-3 py-1 text-xs font-semibold text-white disabled:opacity-60${disabledButtonClass}`}
-                                      onClick={() => removePermanentBlock(item.ip)}
+                                      onClick={() => askConfirm('Remove permanent IP block?', `WARDS will remove ${item.ip} from the manual permanent blocklist.`, () => removePermanentBlock(item.ip), `IP ${item.ip} removed from permanent blocklist.`, 'Remove block')}
                                     >
                                       Remove
                                     </button>
