@@ -26,6 +26,7 @@
 
 # Security runtime artifacts
 SECURITY/local_backups/
+SECURITY/wazuh/ossec.conf
 SECURITY/[Bb][Aa][Cc][Kk][Uu][Pp]*/
 SECURITY/**/[Bb][Aa][Cc][Kk][Uu][Pp]*/
 WARDS/[Bb][Aa][Cc][Kk][Uu][Pp]*/
