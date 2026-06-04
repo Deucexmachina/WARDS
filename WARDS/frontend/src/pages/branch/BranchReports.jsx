@@ -31,6 +31,17 @@ const initialFilters = {
 
 const formatNumber = (value) => Number(value || 0).toLocaleString('en-PH');
 
+const showSystemSuccessMessage = ({ title, message }) => {
+  window.dispatchEvent(new CustomEvent('wards:system-message', {
+    detail: {
+      tone: 'success',
+      title,
+      message,
+      buttonLabel: 'OK',
+    },
+  }));
+};
+
 const SummaryCard = ({ label, value, helper }) => (
   <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{label}</p>
@@ -158,6 +169,10 @@ const BranchReports = () => {
       window.dispatchEvent(new CustomEvent(BRANCH_REPORT_VIEWED_EVENT, { detail: { reportId: response.data?.report?.id } }));
       window.dispatchEvent(new CustomEvent(BRANCH_REPORTS_UPDATED_EVENT));
       await fetchReports(1);
+      showSystemSuccessMessage({
+        title: 'Report Submitted Successfully',
+        message: 'The report has been successfully generated and submitted to the Main Admin.',
+      });
     } catch (generateError) {
       console.error('Failed to generate branch report:', generateError);
       setError(generateError.response?.data?.detail || 'Failed to generate and submit the report.');

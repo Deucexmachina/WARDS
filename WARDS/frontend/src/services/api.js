@@ -22,6 +22,8 @@ api.interceptors.request.use((config) => {
     url.includes('/tax-assessment/user/')
   ) {
     token = localStorage.getItem('userToken');
+  } else if (url.includes('/accounts')) {
+    token = localStorage.getItem('adminToken') || localStorage.getItem('branchToken');
   } else if (url.includes('/branch/auth') || url.includes('/branch/')) {
     token = localStorage.getItem('branchToken');
   } else if (url.includes('/admin/auth') || url.includes('/admin/') ||
@@ -32,7 +34,7 @@ api.interceptors.request.use((config) => {
              url.includes('/announcements') || url.includes('/memos') ||
              url.includes('/alerts') || url.includes('/activity-logs') ||
              url.includes('/backup') || url.includes('/policies') ||
-             url.includes('/settings') || url.includes('/accounts') ||
+             url.includes('/settings') ||
              url.includes('/rbac')) {
     token = localStorage.getItem('adminToken');
   } else {

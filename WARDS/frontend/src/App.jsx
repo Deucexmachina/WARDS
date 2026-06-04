@@ -102,6 +102,7 @@ function App() {
           <Route path="queue/live-monitor" element={<LiveQueueMonitor />} />
           <Route path="receipts" element={<BranchReceiptManagement />} />
           <Route path="payments" element={<BranchPaymentManagement />} />
+          <Route path="accounts" element={<Accounts />} />
           <Route path="memos" element={<BranchMemos />} />
           <Route path="reports" element={<BranchReports />} />
           <Route path="announcements" element={<BranchAnnouncements />} />

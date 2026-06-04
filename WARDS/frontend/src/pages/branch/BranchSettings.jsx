@@ -254,6 +254,17 @@ const getViewedPublishedHistoryStorageKey = (branchUser) => {
   return `branchViewedPublishedHistory:${branchId}:${username}`;
 };
 
+const showSystemSuccessMessage = ({ title, message }) => {
+  window.dispatchEvent(new CustomEvent('wards:system-message', {
+    detail: {
+      tone: 'success',
+      title,
+      message,
+      buttonLabel: 'OK',
+    },
+  }));
+};
+
 const BranchSettings = () => {
   const branchUser = JSON.parse(localStorage.getItem('branchUser') || '{}');
   const isBranchAdmin = branchUser?.role === 'branch_admin' || branchUser?.internal_role === 'branch_admin';
@@ -471,11 +482,11 @@ const BranchSettings = () => {
           ? normalizeScheduleConfig(appointmentSettings.published, todayDate)
           : null
       );
-      setSuccessMessage(
-        response.data.notice
-          ? `Published successfully and posted to Policies & SOPs as "${response.data.notice.title}".`
-          : 'Appointment schedule published successfully.'
-      );
+      showSystemSuccessMessage({
+        title: 'Configuration Published',
+        message: 'System configuration has been successfully saved and published.',
+      });
+      setSuccessMessage('');
       if (response.data.notice) {
         window.dispatchEvent(new Event('branch-policy-updated'));
       }
