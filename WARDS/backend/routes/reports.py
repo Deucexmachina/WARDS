@@ -170,7 +170,7 @@ def format_export_value(value: Any) -> str:
 
 
 def payment_value(payment: Payment, field_name: str) -> Optional[str]:
-    return get_decrypted_or_raw(payment, field_name) or getattr(payment, field_name, None)
+    return get_decrypted_or_raw(payment, field_name)
 
 
 def queue_record_value(record: Queue | QueueHistory, field_name: str) -> Optional[str]:

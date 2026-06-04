@@ -1368,10 +1368,10 @@ async def check_payment_status(ref_number: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Payment not found")
     
     return {
-        "ref_number": get_decrypted_or_raw(payment, "ref_number") or payment.ref_number,
-        "txn_id": get_decrypted_or_raw(payment, "txn_id") or payment.txn_id,
-        "taxpayer_name": get_decrypted_or_raw(payment, "taxpayer_name") or payment.taxpayer_name,
-        "tax_type": get_decrypted_or_raw(payment, "tax_type") or payment.tax_type,
+        "ref_number": get_decrypted_or_raw(payment, "ref_number"),
+        "txn_id": get_decrypted_or_raw(payment, "txn_id"),
+        "taxpayer_name": get_decrypted_or_raw(payment, "taxpayer_name"),
+        "tax_type": get_decrypted_or_raw(payment, "tax_type"),
         "amount": payment.amount,
         "status": payment.status,
         "created_at": payment.created_at.isoformat(),
@@ -1394,7 +1394,7 @@ async def verify_payment(request: Request, ref_number: str, db: Session = Depend
     db.commit()
     
     return {
-        "ref_number": get_decrypted_or_raw(payment, "ref_number") or payment.ref_number,
+        "ref_number": get_decrypted_or_raw(payment, "ref_number"),
         "status": "Verified",
         "message": "Payment verified successfully"
     }

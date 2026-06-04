@@ -26,6 +26,7 @@ from routes import auth, branches, reports, announcements, memos, alerts, logs, 
 from services import ocr_routes
 from database.models import Base, engine, SessionLocal, Admin, Announcement, AnnouncementAttachment, Branch, BusinessRegistry, BusinessTaxApplication, DiscrepancyReport, EmailOTP, EmailVerificationToken, FAQ, Invite, Memo, MemoView, MFASecret, Payment, Queue, QueueActivity, ReceiptRecord, ReceiptRequest, ReceiptRequestHistory, RPTPropertyRecord, Service, ServiceWindowConfig, TaxpayerGuide
 from utils.field_crypto import apply_citizen_user_security, apply_discrepancy_report_security, apply_email_otp_security, apply_email_verification_token_security, apply_faq_security, apply_invite_security, apply_memo_security, apply_memo_view_security, apply_mfa_secret_security, apply_payment_security, apply_queue_activity_security, apply_queue_security, apply_receipt_record_security, apply_receipt_request_history_security, apply_receipt_request_security, apply_rpt_property_record_security, apply_service_security, apply_service_window_config_security, apply_system_setting_security, apply_tax_assessment_record_security, apply_taxpayer_guide_security, apply_taxpayer_identifier_submission_security, build_redacted_text, get_decrypted_or_raw, hash_optional_value, set_encrypted_hash_companions
+from utils import log_integrity  # noqa: F401 - registers tamper-evident log signing hooks
 from utils.system_settings import seed_system_settings
 from middleware.dos_protection import RequestSizeMiddleware, RequestTimeoutMiddleware, ConnectionLimitMiddleware, AbuseDetectionMiddleware
 
@@ -117,6 +118,26 @@ def ensure_auth_extensions():
     inspector = inspect(engine)
 
     with engine.begin() as conn:
+        table_names = set(inspector.get_table_names())
+
+        def ensure_integrity_columns(table_name: str):
+            if table_name not in table_names:
+                return
+            columns = {column["name"] for column in inspector.get_columns(table_name)}
+            if "previous_integrity_hash" not in columns:
+                conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN previous_integrity_hash VARCHAR(128)"))
+            if "integrity_hash" not in columns:
+                conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN integrity_hash VARCHAR(128)"))
+
+        for protected_table in (
+            "activity_logs",
+            "security_detection_events",
+            "security_recovery_events",
+            "security_incidents",
+            "security_admin_file_changes",
+        ):
+            ensure_integrity_columns(protected_table)
+
         report_columns = {column["name"] for column in inspector.get_columns("reports")}
         if "branch_id" not in report_columns:
             conn.execute(text("ALTER TABLE reports ADD COLUMN branch_id INTEGER"))
@@ -1441,6 +1462,18 @@ def backfill_branch_and_business_registry_security():
         db.close()
 
 ensure_auth_extensions()
+
+def backfill_existing_log_integrity():
+    db = SessionLocal()
+    try:
+        log_integrity.backfill_log_integrity_hashes(db)
+    except Exception as exc:
+        print(f"[LOG INTEGRITY] backfill skipped: {exc}")
+    finally:
+        db.close()
+
+
+backfill_existing_log_integrity()
 bootstrap_admin()
 bootstrap_superadmin()
 seed_business_registry()
@@ -1456,7 +1489,7 @@ def start_security_monitor_if_enabled():
     default_interval = max(5, int(os.getenv("SECURITY_SCAN_INTERVAL_SECONDS", "30")))
 
     def monitor_loop():
-        from SECURITY.security_engine import create_manual_backup, get_setting, seed_settings, set_setting, scan_all_files
+        from SECURITY.security_engine import activate_database_runtime_monitoring, create_manual_backup, get_setting, scan_all_files, seed_settings, set_setting
 
         while True:
             retry_delay = False
@@ -1464,13 +1497,15 @@ def start_security_monitor_if_enabled():
             try:
                 seed_settings(startup_db)
                 set_setting(startup_db, "startup_baseline_status", "in_progress", "system")
-                print("[SECURITY MONITOR] refreshing startup baseline backup before scanning")
+                print("[SECURITY MONITOR] activating database runtime monitoring")
+                activate_database_runtime_monitoring(startup_db, reset_baseline=True)
+                print("[SECURITY MONITOR] refreshing startup baseline backup after runtime activation")
                 event = create_manual_backup(startup_db, initiated_by=None, label="startup_baseline")
                 if event.status != "success":
                     raise RuntimeError(event.error_message or "Startup baseline backup failed")
                 set_setting(startup_db, "monitoring_enabled", "true" if enabled else "false", "system_startup")
                 set_setting(startup_db, "startup_baseline_status", "complete", "system")
-                print("[SECURITY MONITOR] startup baseline backup refreshed before scanning")
+                print("[SECURITY MONITOR] startup baseline backup refreshed")
                 break
             except Exception as exc:
                 try:
@@ -1510,6 +1545,26 @@ def start_security_monitor_if_enabled():
 
 
 start_security_monitor_if_enabled()
+
+
+@app.on_event("shutdown")
+def stop_database_runtime_monitoring():
+    deployed = (os.getenv("SECURITY_DEPLOYMENT_MODE") or "development").strip().lower() == "deployed"
+    if not deployed:
+        return
+    try:
+        from SECURITY.security_engine import drop_database_audit_triggers, set_setting
+
+        db = SessionLocal()
+        try:
+            drop_database_audit_triggers(db)
+            set_setting(db, "database_runtime_monitoring", "stopped", "system_shutdown")
+            print("[SECURITY MONITOR] database audit triggers stopped")
+        finally:
+            db.close()
+    except Exception as exc:
+        print(f"[SECURITY MONITOR] database audit trigger shutdown skipped: {exc}")
+
 
 app.include_router(user_auth_v2.router, prefix="/api/user/auth", tags=["User Authentication V2"])
 app.include_router(branch_auth_v2.router, prefix="/api/branch/auth", tags=["Branch Authentication V2"])

@@ -47,6 +47,8 @@ class SecurityDetectionEvent(Base):
     behavior_flags_json = Column(Text, nullable=True)
     changed_lines_json = Column(Text, nullable=True)
     context_json = Column(Text, nullable=True)
+    previous_integrity_hash = Column(String(128), nullable=True)
+    integrity_hash = Column(String(128), nullable=True, index=True)
 
 
 class SecurityRecoveryEvent(Base):
@@ -65,6 +67,8 @@ class SecurityRecoveryEvent(Base):
     recovery_duration_ms = Column(Integer, nullable=True)
     error_message = Column(Text, nullable=True)
     summary = Column(Text, nullable=True)
+    previous_integrity_hash = Column(String(128), nullable=True)
+    integrity_hash = Column(String(128), nullable=True, index=True)
 
 
 class SecurityIncident(Base):
@@ -88,6 +92,8 @@ class SecurityIncident(Base):
     resolved_at = Column(DateTime, nullable=True)
     resolved_by = Column(Integer, ForeignKey("admins.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    previous_integrity_hash = Column(String(128), nullable=True)
+    integrity_hash = Column(String(128), nullable=True, index=True)
 
 
 class SecurityAdminFileChange(Base):
@@ -101,6 +107,8 @@ class SecurityAdminFileChange(Base):
     ip_address = Column(String(60), nullable=True)
     user_agent = Column(Text, nullable=True)
     timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+    previous_integrity_hash = Column(String(128), nullable=True)
+    integrity_hash = Column(String(128), nullable=True, index=True)
 
 
 class SecuritySetting(Base):
@@ -110,4 +118,3 @@ class SecuritySetting(Base):
     value = Column(Text, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     updated_by = Column(String(255), nullable=True)
-

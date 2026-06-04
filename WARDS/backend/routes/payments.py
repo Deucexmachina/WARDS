@@ -267,7 +267,7 @@ def citizen_tin(user: CitizenUser) -> str | None:
 
 
 def payment_value(payment: Payment, field_name: str):
-    return get_decrypted_or_raw(payment, field_name) or getattr(payment, field_name, None)
+    return get_decrypted_or_raw(payment, field_name)
 
 
 def resolve_payment_branch_name(payment: Payment) -> str | None:

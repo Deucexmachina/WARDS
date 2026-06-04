@@ -6,6 +6,7 @@ from typing import Optional
 
 from database.models import ActivityLog, User, get_db
 from middleware.admin_auth import get_current_admin_user
+from utils.log_integrity import verify_record_integrity
 from utils.rbac import require_permission
 
 router = APIRouter()
@@ -40,6 +41,7 @@ async def get_activity_logs(
             "details": log.details,
             "type": log.type,
             "created_at": log.created_at.isoformat() if log.created_at else None,
+            "integrity_valid": verify_record_integrity(log),
         }
         for log in logs
     ]

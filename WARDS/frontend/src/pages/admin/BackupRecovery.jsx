@@ -26,11 +26,16 @@ const ruleHelp = {
   special_chars_count: 'Counts code-like or injection-friendly characters.',
   admin_session_valid: 'Checks whether a valid WARDS admin JWT/MFA session was present.',
   ip_consistent: 'Checks whether the source IP matches normal admin use.',
+  source_ip_reputation: 'Checks source IP reputation, blocklist, and abuse-score signals when available.',
+  keystroke_dynamics: 'Checks aggregate typing-pattern anomaly signals when available.',
   method_legitimate: 'Checks whether the change came through an approved admin workflow.',
   business_hours: 'Raises risk for changes outside normal working hours.',
   file_type_risk: 'Adds risk for web/code files that can affect the deployed system.',
   suspicious_pattern_score: 'Detects defacement, injection, and tampering patterns.',
   vpn_activity: 'Raises risk for VPN use without automatically marking it malicious.',
+  unauthorized_admin_path: 'Raises risk for admin, auth, MFA, backup, recovery, or security-dashboard changes outside approved workflows.',
+  sensitive_config_change: 'Raises risk for environment, Wazuh, dependency, and database configuration changes.',
+  external_resource_injection: 'Raises risk for newly added remote script, link, form, or network-fetch references.',
 };
 
 const badgeClass = (value) => {
@@ -521,6 +526,15 @@ const BackupRecovery = () => {
     });
   };
 
+  const formatMissingFileConfirmation = (detail) => {
+    const incidentsList = (detail?.incidents || []).map((item) => {
+      const missingFiles = (item.missing_files || []).join(', ');
+      const missingQuarantine = (item.missing_quarantine_paths || []).join(', ');
+      return `Incident #${item.incident_id}: ${[missingFiles && `deleted file: ${missingFiles}`, missingQuarantine && `missing quarantine: ${missingQuarantine}`].filter(Boolean).join('; ')}`;
+    });
+    return [detail?.message, ...incidentsList].filter(Boolean).join(' ');
+  };
+
   const runAction = async (action, success, label = 'Working on the requested security operation...') => {
     setBusy(true);
     setBusyLabel(label);
@@ -533,12 +547,29 @@ const BackupRecovery = () => {
         await refreshActiveTab();
       }
     } catch (error) {
-      setNotice(error.response?.data?.detail || error.message || 'Action failed.');
+      const detail = error.response?.data?.detail;
+      if (error.response?.status === 409 && detail?.requires_confirmation) {
+        setConfirm({
+          title: 'Deleted file confirmation required',
+          message: formatMissingFileConfirmation(detail),
+          action: () => action({ confirmMissingFiles: true }),
+          success,
+          confirmText: 'Continue anyway',
+        });
+      } else {
+        setNotice(typeof detail === 'string' ? detail : detail?.message || error.message || 'Action failed.');
+      }
     } finally {
       setBusy(false);
       setBusyLabel('');
     }
   };
+
+  const missingFileParams = (options) => (options?.confirmMissingFiles ? { params: { confirm_missing_files: true } } : undefined);
+
+  const bulkIncidentAction = (action) => (options = {}) => api.patch('/security/incidents/bulk-action', { action, confirm_missing_files: Boolean(options.confirmMissingFiles) });
+
+  const incidentStatusAction = (incidentId, actionPath) => (options = {}) => api.patch(`/security/incidents/${incidentId}/${actionPath}`, null, missingFileParams(options));
 
   const askConfirm = (title, message, action, success, confirmText = 'Confirm') => {
     setConfirm({ title, message, action, success, confirmText });
@@ -988,9 +1019,9 @@ const BackupRecovery = () => {
               }
             >
               <div className="mb-4 flex flex-wrap gap-2">
-                <button disabled={busy} className={`rounded-xl bg-green-600 px-4 py-2 text-sm font-bold text-white${disabledButtonClass}`} onClick={() => askConfirm('Mark all unresolved incidents as resolved?', 'This will close every open or investigating incident and delete their quarantine folders. Logs will remain. The backup will not be changed because resolved incidents keep the current clean files.', () => api.patch('/security/incidents/bulk-action', { action: 'resolve' }), 'All unresolved incidents marked as resolved.', 'Resolve all')}>Mark all as resolved</button>
-                <button disabled={busy} className={`rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-white${disabledButtonClass}`} onClick={() => askConfirm('Mark all unresolved incidents as false positives?', 'This will accept every open or investigating quarantined file as authorized, update the backup, and delete quarantine folders. Logs will remain.', () => api.patch('/security/incidents/bulk-action', { action: 'false_positive' }), 'All unresolved incidents marked as false positive.', 'Mark all False+')}>Mark all as False+</button>
-                <button disabled={busy} className={`rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white${disabledButtonClass}`} onClick={() => askConfirm('Mark all open incidents as investigating?', 'This will move every open incident into investigating status so your team can review them. No files will be restored or deleted.', () => api.patch('/security/incidents/bulk-action', { action: 'investigating' }), 'All open incidents marked as investigating.', 'Mark investigating')}>Mark all as investigating</button>
+                <button disabled={busy} className={`rounded-xl bg-green-600 px-4 py-2 text-sm font-bold text-white${disabledButtonClass}`} onClick={() => askConfirm('Mark all unresolved incidents as resolved?', 'This will close every open or investigating incident and delete their quarantine folders. Logs will remain. The backup will not be changed because resolved incidents keep the current clean files.', bulkIncidentAction('resolve'), 'All unresolved incidents marked as resolved.', 'Resolve all')}>Mark all as resolved</button>
+                <button disabled={busy} className={`rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-white${disabledButtonClass}`} onClick={() => askConfirm('Mark all unresolved incidents as false positives?', 'This will accept every open or investigating quarantined file as authorized, update the backup, and delete quarantine folders. Logs will remain.', bulkIncidentAction('false_positive'), 'All unresolved incidents marked as false positive.', 'Mark all False+')}>Mark all as False+</button>
+                <button disabled={busy} className={`rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white${disabledButtonClass}`} onClick={() => askConfirm('Mark all open incidents as investigating?', 'This will move every open incident into investigating status so your team can review them. No files will be restored or deleted.', bulkIncidentAction('investigating'), 'All open incidents marked as investigating.', 'Mark investigating')}>Mark all as investigating</button>
               </div>
               <div className="space-y-3">
                 {incidents.map((item) => {
@@ -1023,8 +1054,8 @@ const BackupRecovery = () => {
                           <pre className="max-h-64 overflow-auto rounded-xl bg-slate-50 p-4 text-xs text-slate-700">{JSON.stringify(item.changed_lines, null, 2)}</pre>
                           {unresolved && (
                             <div className="flex flex-wrap gap-2">
-                              <button disabled={busy} className={`rounded-lg bg-green-600 px-3 py-2 text-sm font-semibold text-white hover:bg-green-700${disabledButtonClass}`} onClick={(event) => { event.stopPropagation(); askConfirm('Resolve this incident?', 'WARDS will keep the restored clean file and delete this incident quarantine folder. The log remains. The backup will not be changed.', () => api.patch(`/security/incidents/${item.id}/resolve`), 'Incident resolved and quarantine cleared.', 'Resolve'); }}>Resolve</button>
-                              <button disabled={busy} className={`rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-600${disabledButtonClass}`} onClick={(event) => { event.stopPropagation(); askConfirm('Mark this incident as false positive?', 'WARDS will restore the quarantined file as an authorized change, update the backup, and delete the quarantine folder. The log remains.', () => api.patch(`/security/incidents/${item.id}/false-positive`), 'Incident marked as false positive and authorized file restored. Staying on Security Incidents for review.', 'False+'); }}>False+</button>
+                              <button disabled={busy} className={`rounded-lg bg-green-600 px-3 py-2 text-sm font-semibold text-white hover:bg-green-700${disabledButtonClass}`} onClick={(event) => { event.stopPropagation(); askConfirm('Resolve this incident?', 'WARDS will keep the restored clean file and delete this incident quarantine folder. The log remains. The backup will not be changed.', incidentStatusAction(item.id, 'resolve'), 'Incident resolved and quarantine cleared.', 'Resolve'); }}>Resolve</button>
+                              <button disabled={busy} className={`rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-600${disabledButtonClass}`} onClick={(event) => { event.stopPropagation(); askConfirm('Mark this incident as false positive?', 'WARDS will restore the quarantined file as an authorized change, update the backup, and delete the quarantine folder. The log remains.', incidentStatusAction(item.id, 'false-positive'), 'Incident marked as false positive and authorized file restored. Staying on Security Incidents for review.', 'False+'); }}>False+</button>
                             </div>
                           )}
                         </div>

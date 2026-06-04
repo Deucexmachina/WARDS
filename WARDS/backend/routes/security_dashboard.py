@@ -29,6 +29,7 @@ from SECURITY.security_engine import (
     manual_recover_file,
     mark_admin_change,
     mark_false_positive,
+    MissingFileConfirmationRequired,
     query_detections,
     query_recoveries,
     register_initial_files,
@@ -51,6 +52,33 @@ from SECURITY.security_engine import (
 from SECURITY.security_models import SecurityIncident, SecurityMonitoredFile
 
 router = APIRouter()
+BACKEND_ENV_PATH = MASTER_ROOT / "WARDS" / "backend" / ".env"
+
+
+def update_backend_env(updates: dict[str, str], env_path: Path = BACKEND_ENV_PATH) -> dict[str, str]:
+    lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+    pending = {key: str(value) for key, value in updates.items()}
+    written = set()
+    next_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in line:
+            next_lines.append(line)
+            continue
+        key = line.split("=", 1)[0].strip()
+        if key in pending:
+            next_lines.append(f"{key}={pending[key]}")
+            os.environ[key] = pending[key]
+            written.add(key)
+        else:
+            next_lines.append(line)
+    for key, value in pending.items():
+        if key not in written:
+            next_lines.append(f"{key}={value}")
+            os.environ[key] = value
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    env_path.write_text("\n".join(next_lines) + "\n", encoding="utf-8")
+    return pending
 
 
 def datetime_from_iso(value: str, end_of_day: bool = False):
@@ -102,6 +130,7 @@ class MonitoringToggleRequest(BaseModel):
 
 class BulkIncidentRequest(BaseModel):
     action: str
+    confirm_missing_files: bool = False
 
 
 def current_admin(request: Request, db: Session = Depends(get_db)):
@@ -205,21 +234,28 @@ def incidents(
 def bulk_incidents(payload: BulkIncidentRequest, db: Session = Depends(get_db), admin=Depends(current_admin)):
     if payload.action not in {"resolve", "false_positive", "investigating"}:
         raise HTTPException(status_code=400, detail="Action must be resolve, false_positive, or investigating.")
-    return bulk_update_incidents(db, payload.action, admin.id)
+    try:
+        return bulk_update_incidents(db, payload.action, admin.id, confirm_missing_files=payload.confirm_missing_files)
+    except MissingFileConfirmationRequired as exc:
+        raise HTTPException(status_code=409, detail=exc.details)
 
 
 @router.patch("/incidents/{incident_id}/resolve")
-def resolve(incident_id: int, db: Session = Depends(get_db), admin=Depends(current_admin)):
+def resolve(incident_id: int, confirm_missing_files: bool = False, db: Session = Depends(get_db), admin=Depends(current_admin)):
     try:
-        return serialize_incident(resolve_incident(db, incident_id, admin.id))
+        return serialize_incident(resolve_incident(db, incident_id, admin.id, confirm_missing_files=confirm_missing_files))
+    except MissingFileConfirmationRequired as exc:
+        raise HTTPException(status_code=409, detail=exc.details)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
 
 @router.patch("/incidents/{incident_id}/false-positive")
-def false_positive(incident_id: int, db: Session = Depends(get_db), admin=Depends(current_admin)):
+def false_positive(incident_id: int, confirm_missing_files: bool = False, db: Session = Depends(get_db), admin=Depends(current_admin)):
     try:
-        return serialize_incident(mark_false_positive(db, incident_id, admin.id))
+        return serialize_incident(mark_false_positive(db, incident_id, admin.id, confirm_missing_files=confirm_missing_files))
+    except MissingFileConfirmationRequired as exc:
+        raise HTTPException(status_code=409, detail=exc.details)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except RuntimeError as exc:
@@ -272,17 +308,17 @@ def backup_location(payload: BackupLocationRequest, db: Session = Depends(get_db
 
 
 @router.post("/folders")
-def add_folder(payload: AddFolderRequest, db: Session = Depends(get_db), _=Depends(current_admin)):
+def add_folder(payload: AddFolderRequest, db: Session = Depends(get_db), admin=Depends(current_admin)):
     try:
-        return add_monitored_folder(db, payload.path)
+        return add_monitored_folder(db, payload.path, initiated_by=admin.id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.post("/folders/remove")
-def remove_folder(payload: AddFolderRequest, db: Session = Depends(get_db), _=Depends(current_admin)):
+def remove_folder(payload: AddFolderRequest, db: Session = Depends(get_db), admin=Depends(current_admin)):
     try:
-        return remove_monitored_folder(db, payload.path)
+        return remove_monitored_folder(db, payload.path, initiated_by=admin.id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -363,7 +399,8 @@ def save_scan_interval(payload: ScanIntervalRequest, db: Session = Depends(get_d
     if payload.seconds > 3600:
         raise HTTPException(status_code=400, detail="Scan interval must be 3600 seconds or less.")
     set_setting(db, "scan_interval_seconds", str(payload.seconds), admin.username)
-    return {"scan_interval_seconds": payload.seconds}
+    update_backend_env({"SECURITY_SCAN_INTERVAL_SECONDS": str(payload.seconds)})
+    return {"scan_interval_seconds": payload.seconds, "env_updated": True}
 
 
 @router.put("/monitoring")
@@ -374,7 +411,8 @@ def set_monitoring(payload: MonitoringToggleRequest, db: Session = Depends(get_d
         if event.status != "success":
             raise HTTPException(status_code=500, detail=event.error_message or "Unable to refresh backup before enabling automatic scans.")
     set_setting(db, "monitoring_enabled", "true" if payload.enabled else "false", admin.username)
-    return {"monitoring_enabled": payload.enabled, "backup_refreshed": payload.enabled and not previous}
+    update_backend_env({"SECURITY_MONITORING_ENABLED": "true" if payload.enabled else "false"})
+    return {"monitoring_enabled": payload.enabled, "backup_refreshed": payload.enabled and not previous, "env_updated": True}
 
 
 @router.post("/ai/schedule")

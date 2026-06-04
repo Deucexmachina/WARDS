@@ -68,12 +68,21 @@ def build_redacted_text(prefix: str, value: Optional[str], max_length: int = 255
     return redacted[:max_length]
 
 
+def is_redacted_placeholder(value: Optional[str]) -> bool:
+    if value is None:
+        return False
+    return bool(REDACTED_VALUE_PATTERN.fullmatch(str(value).strip()))
+
+
 def get_decrypted_or_raw(entity, field_name: str) -> Optional[str]:
     encrypted_value = getattr(entity, f"{field_name}_enc", None)
     decrypted = decrypt_optional_value(encrypted_value)
     if decrypted:
         return decrypted
-    return getattr(entity, field_name, None)
+    raw_value = getattr(entity, field_name, None)
+    if is_redacted_placeholder(raw_value):
+        return None
+    return raw_value
 
 
 def get_preferred_write_value(entity, field_name: str) -> Optional[str]:
@@ -82,12 +91,12 @@ def get_preferred_write_value(entity, field_name: str) -> Optional[str]:
 
     if raw_value is not None:
         raw_text = str(raw_value).strip()
-        if raw_text and (decrypted is None or raw_text != decrypted) and not REDACTED_VALUE_PATTERN.fullmatch(raw_text):
+        if raw_text and (decrypted is None or raw_text != decrypted) and not is_redacted_placeholder(raw_text):
             return raw_value
 
     if decrypted:
         return decrypted
-    return raw_value
+    return None if is_redacted_placeholder(raw_value) else raw_value
 
 
 def set_encrypted_hash_companions(entity, field_name: str, value: Optional[str] = None):
@@ -292,7 +301,7 @@ def apply_receipt_record_security(record):
 
 
 def receipt_record_value(record, field_name: str) -> Optional[str]:
-    return get_decrypted_or_raw(record, field_name) or getattr(record, field_name, None)
+    return get_decrypted_or_raw(record, field_name)
 
 
 def apply_service_security(service):
@@ -308,7 +317,7 @@ def apply_service_security(service):
 
 
 def service_value(service, field_name: str) -> Optional[str]:
-    return get_decrypted_or_raw(service, field_name) or getattr(service, field_name, None)
+    return get_decrypted_or_raw(service, field_name)
 
 
 def apply_system_setting_security(setting):
@@ -331,7 +340,7 @@ def apply_system_setting_security(setting):
 
 
 def system_setting_value(setting, field_name: str) -> Optional[str]:
-    return get_decrypted_or_raw(setting, field_name) or getattr(setting, field_name, None)
+    return get_decrypted_or_raw(setting, field_name)
 
 
 def apply_tax_assessment_record_security(record):
@@ -370,7 +379,7 @@ def apply_tax_assessment_record_security(record):
 
 
 def tax_assessment_value(record, field_name: str) -> Optional[str]:
-    return get_decrypted_or_raw(record, field_name) or getattr(record, field_name, None)
+    return get_decrypted_or_raw(record, field_name)
 
 
 def apply_taxpayer_guide_security(guide):
@@ -387,7 +396,7 @@ def apply_taxpayer_guide_security(guide):
 
 
 def taxpayer_guide_value(guide, field_name: str) -> Optional[str]:
-    return get_decrypted_or_raw(guide, field_name) or getattr(guide, field_name, None)
+    return get_decrypted_or_raw(guide, field_name)
 
 
 def apply_taxpayer_identifier_submission_security(submission):
@@ -415,7 +424,7 @@ def apply_taxpayer_identifier_submission_security(submission):
 
 
 def taxpayer_submission_value(submission, field_name: str) -> Optional[str]:
-    return get_decrypted_or_raw(submission, field_name) or getattr(submission, field_name, None)
+    return get_decrypted_or_raw(submission, field_name)
 
 
 def apply_receipt_request_security(request):
@@ -464,11 +473,11 @@ def apply_receipt_request_history_security(history):
 
 
 def receipt_request_value(request, field_name: str) -> Optional[str]:
-    return get_decrypted_or_raw(request, field_name) or getattr(request, field_name, None)
+    return get_decrypted_or_raw(request, field_name)
 
 
 def receipt_request_history_value(history, field_name: str) -> Optional[str]:
-    return get_decrypted_or_raw(history, field_name) or getattr(history, field_name, None)
+    return get_decrypted_or_raw(history, field_name)
 
 
 def apply_service_window_config_security(config):
@@ -498,7 +507,7 @@ def hash_aware_any(Model, field_name: str, values: list[str] | tuple[str, ...]):
 
 
 def queue_value(queue, field_name: str) -> Optional[str]:
-    return get_decrypted_or_raw(queue, field_name) or getattr(queue, field_name, None)
+    return get_decrypted_or_raw(queue, field_name)
 
 
 def find_queue_by_queue_number(db, Queue, queue_number: Optional[str]):
@@ -734,11 +743,11 @@ def apply_memo_security(memo):
 def serialize_citizen_user(user) -> dict:
     return {
         "id": user.id,
-        "email": get_decrypted_or_raw(user, "email") or user.email,
-        "full_name": get_decrypted_or_raw(user, "full_name") or user.full_name,
-        "tin": get_decrypted_or_raw(user, "tin") or user.tin,
-        "contact_number": get_decrypted_or_raw(user, "contact_number") or user.contact_number,
-        "address": get_decrypted_or_raw(user, "address") or user.address,
+        "email": get_decrypted_or_raw(user, "email"),
+        "full_name": get_decrypted_or_raw(user, "full_name"),
+        "tin": get_decrypted_or_raw(user, "tin"),
+        "contact_number": get_decrypted_or_raw(user, "contact_number"),
+        "address": get_decrypted_or_raw(user, "address"),
     }
 
 

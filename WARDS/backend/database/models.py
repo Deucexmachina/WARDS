@@ -1,11 +1,12 @@
 import os
+import uuid
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, Column, Integer, String as SQLString, Float, DateTime, Boolean, Text, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String as SQLString, Float, DateTime, Boolean, Text, ForeignKey, event, text
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.orm import Session as SASession, sessionmaker, relationship
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 load_dotenv(BASE_DIR / ".env")
@@ -43,8 +44,71 @@ engine = create_engine(SQLALCHEMY_DATABASE_URL, **engine_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+
+@event.listens_for(SASession, "after_begin")
+def apply_database_authorization_token(session, transaction, connection):
+    if not SQLALCHEMY_DATABASE_URL.startswith("mysql"):
+        return
+    token = session.info.get("wards_db_auth_token")
+    if not token:
+        connection.execute(text("SET @wards_db_auth_token = NULL"))
+        connection.execute(text("SET @wards_db_auth_actor = NULL"))
+        connection.execute(text("SET @wards_db_auth_context = NULL"))
+        return
+    connection.execute(text("SET @wards_db_auth_token = :token"), {"token": token})
+    connection.execute(text("SET @wards_db_auth_actor = :actor"), {"actor": session.info.get("wards_db_auth_actor", "backend")})
+    connection.execute(text("SET @wards_db_auth_context = :context"), {"context": session.info.get("wards_db_auth_context", "wards_backend_request")})
+
+
+def authorize_database_session(db, context: str = "wards_backend_request", actor: str = "backend") -> str | None:
+    if not SQLALCHEMY_DATABASE_URL.startswith("mysql"):
+        return None
+    token = f"AUTH-{uuid.uuid4().hex}"
+    issued_at = datetime.now() - timedelta(seconds=60)
+    expires_at = issued_at + timedelta(minutes=int(os.getenv("DB_AUTH_TOKEN_TTL_MINUTES", "30")))
+    try:
+        db.execute(text(
+            """
+            CREATE TABLE IF NOT EXISTS wards_security_authorized_operations (
+                token VARCHAR(80) PRIMARY KEY,
+                actor VARCHAR(255) NULL,
+                context VARCHAR(255) NULL,
+                issued_at DATETIME NOT NULL,
+                expires_at DATETIME NOT NULL,
+                INDEX idx_wards_security_auth_expires (expires_at)
+            ) ENGINE=InnoDB
+            """
+        ))
+        db.execute(text(
+            """
+            INSERT INTO wards_security_authorized_operations (token, actor, context, issued_at, expires_at)
+            VALUES (:token, :actor, :context, :issued_at, :expires_at)
+            ON DUPLICATE KEY UPDATE
+                actor = VALUES(actor),
+                context = VALUES(context),
+                issued_at = VALUES(issued_at),
+                expires_at = VALUES(expires_at)
+            """
+        ), {
+            "token": token,
+            "actor": actor,
+            "context": context,
+            "issued_at": issued_at,
+            "expires_at": expires_at,
+        })
+        db.commit()
+        db.info["wards_db_auth_token"] = token
+        db.info["wards_db_auth_actor"] = actor
+        db.info["wards_db_auth_context"] = context
+        return token
+    except Exception:
+        db.rollback()
+        return None
+
+
 def get_db():
     db = SessionLocal()
+    authorize_database_session(db)
     try:
         yield db
     finally:
@@ -956,6 +1020,8 @@ class ActivityLog(Base):
     details = Column(Text)
     type = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
+    previous_integrity_hash = Column(String(128), nullable=True)
+    integrity_hash = Column(String(128), nullable=True, index=True)
 
 class Backup(Base):
     __tablename__ = "backups"
