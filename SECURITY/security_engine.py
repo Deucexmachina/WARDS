@@ -719,15 +719,45 @@ def create_database_checksum_manifest(db: Session, output_path: Path = DATABASE_
     return output_path
 
 
-def activate_database_runtime_monitoring(db: Session, reset_baseline: bool = True) -> SecurityMonitoredFile | None:
-    ensure_database_audit_infrastructure(db)
-    clear_database_audit_log(db)
+def database_monitor_entries(db: Session) -> list[SecurityMonitoredFile]:
+    checksum_name = DATABASE_CHECKSUM_PATH.name
+    snapshot_name = DATABASE_SNAPSHOT_PATH.name
+    return (
+        db.query(SecurityMonitoredFile)
+        .filter(
+            or_(
+                SecurityMonitoredFile.folder_root == "DATABASE",
+                SecurityMonitoredFile.relative_path.in_([DATABASE_CHECKSUM_RELATIVE_PATH, DATABASE_BACKUP_RELATIVE_PATH]),
+                SecurityMonitoredFile.file_path.like(f"%{checksum_name}"),
+                SecurityMonitoredFile.file_path.like(f"%{snapshot_name}"),
+            )
+        )
+        .order_by(SecurityMonitoredFile.id.asc())
+        .all()
+    )
+
+
+def normalize_database_monitor_entry(
+    db: Session,
+    reset_baseline: bool = False,
+    ensure_snapshot: bool = True,
+) -> SecurityMonitoredFile:
+    checksum_existed = DATABASE_CHECKSUM_PATH.exists()
     checksum_path = create_database_checksum_manifest(db)
+    if ensure_snapshot or not DATABASE_SNAPSHOT_PATH.exists():
+        create_database_snapshot(db, DATABASE_SNAPSHOT_PATH)
     checksum_hash = sha256_file(checksum_path)
-    entry = db.query(SecurityMonitoredFile).filter(SecurityMonitoredFile.folder_root == "DATABASE").first()
+    entries = database_monitor_entries(db)
+    local_checksum_path = str(checksum_path)
+    entry = next((item for item in entries if item.file_path == local_checksum_path), None)
+    if entry is None:
+        entry = next((item for item in entries if (item.folder_root or "").upper() == "DATABASE"), None)
+    if entry is None:
+        entry = entries[0] if entries else None
+
     if not entry:
         entry = SecurityMonitoredFile(
-            file_path=str(checksum_path),
+            file_path=local_checksum_path,
             relative_path=DATABASE_CHECKSUM_RELATIVE_PATH,
             folder_root="DATABASE",
             baseline_hash=checksum_hash,
@@ -737,16 +767,25 @@ def activate_database_runtime_monitoring(db: Session, reset_baseline: bool = Tru
             size_bytes=checksum_path.stat().st_size,
         )
     else:
-        entry.file_path = str(checksum_path)
+        entry.file_path = local_checksum_path
         entry.relative_path = DATABASE_CHECKSUM_RELATIVE_PATH
+        entry.folder_root = "DATABASE"
         entry.file_type = "json"
         entry.current_hash = checksum_hash
-        if reset_baseline:
+        if reset_baseline or not checksum_existed or not entry.baseline_hash:
             entry.baseline_hash = checksum_hash
             entry.status = "clean"
         entry.size_bytes = checksum_path.stat().st_size
         entry.last_checked = now_utc()
     db.add(entry)
+    db.flush()
+    return entry
+
+
+def activate_database_runtime_monitoring(db: Session, reset_baseline: bool = True) -> SecurityMonitoredFile | None:
+    ensure_database_audit_infrastructure(db)
+    clear_database_audit_log(db)
+    entry = normalize_database_monitor_entry(db, reset_baseline=reset_baseline, ensure_snapshot=True)
     set_setting(db, "database_audit_last_id", str(latest_database_audit_id(db)), "database_monitor")
     set_setting(db, "database_monitor_started_at", now_utc().isoformat(), "database_monitor")
     set_setting(db, "database_runtime_monitoring", "active", "database_monitor")
@@ -830,7 +869,13 @@ def restore_database_snapshot(db: Session, snapshot_path: Path) -> None:
 
 
 def is_database_entry(file_entry: SecurityMonitoredFile) -> bool:
-    return (file_entry.folder_root or "").upper() == "DATABASE"
+    relative = (file_entry.relative_path or "").replace("\\", "/")
+    file_name = Path(file_entry.file_path or "").name.lower()
+    return (
+        (file_entry.folder_root or "").upper() == "DATABASE"
+        or relative in {DATABASE_CHECKSUM_RELATIVE_PATH, DATABASE_BACKUP_RELATIVE_PATH}
+        or file_name in {DATABASE_CHECKSUM_PATH.name.lower(), DATABASE_SNAPSHOT_PATH.name.lower()}
+    )
 
 
 def is_monitorable(path: Path) -> bool:
@@ -1129,34 +1174,9 @@ def register_initial_files(db: Session, ensure_backup: bool = True, refresh_exis
         )
         created += 1
     try:
-        checksum_path = create_database_checksum_manifest(db)
-        current_hash = sha256_file(checksum_path)
-        existing = db.query(SecurityMonitoredFile).filter(SecurityMonitoredFile.folder_root == "DATABASE").first()
-        if existing:
-            existing.file_path = str(checksum_path)
-            existing.relative_path = DATABASE_CHECKSUM_RELATIVE_PATH
-            existing.folder_root = "DATABASE"
-            existing.file_type = "json"
-            if refresh_existing:
-                existing.current_hash = current_hash
-                existing.baseline_hash = existing.baseline_hash or current_hash
-                existing.status = "clean" if existing.baseline_hash == current_hash else existing.status
-                existing.size_bytes = checksum_path.stat().st_size
-                existing.last_checked = now_utc()
-            db.add(existing)
-        else:
-            db.add(
-                SecurityMonitoredFile(
-                    file_path=str(checksum_path),
-                    relative_path=DATABASE_CHECKSUM_RELATIVE_PATH,
-                    folder_root="DATABASE",
-                    baseline_hash=current_hash,
-                    current_hash=current_hash,
-                    status="clean",
-                    file_type="json",
-                    size_bytes=checksum_path.stat().st_size,
-                )
-            )
+        had_database_entry = bool(database_monitor_entries(db))
+        normalize_database_monitor_entry(db, reset_baseline=refresh_existing, ensure_snapshot=True)
+        if not had_database_entry:
             created += 1
     except Exception:
         pass
@@ -1852,7 +1872,9 @@ def scan_database_entry(db: Session, file_entry: SecurityMonitoredFile, context:
         context.setdefault("db_user", first_source.get("db_user"))
         context.setdefault("db_connection_id", first_source.get("connection_id"))
 
-    path = create_database_checksum_manifest(db, Path(file_entry.file_path))
+    existing_path = Path(file_entry.file_path)
+    checksum_existed = existing_path.exists()
+    path = create_database_checksum_manifest(db, existing_path)
     old_hash = file_entry.current_hash
     current_hash = sha256_file(path)
     backup_root = latest_backup_root(db)
@@ -1872,7 +1894,7 @@ def scan_database_entry(db: Session, file_entry: SecurityMonitoredFile, context:
         set_setting(db, "database_audit_last_id", str(latest_database_audit_id(db)), "database_monitor")
         return detection
 
-    if audit_changes or current_hash != file_entry.baseline_hash:
+    if (not checksum_existed and not unauthorized_audit_changes) or audit_changes or current_hash != file_entry.baseline_hash:
         if audit_changes:
             refresh_latest_database_backup_snapshot(db, path)
         file_entry.baseline_hash = current_hash
@@ -2029,14 +2051,20 @@ def build_trigger_summary(change_type: str, flags: list[str], changed: dict, is_
 
 def scan_all_files(db: Session, context: dict | None = None) -> list[SecurityDetectionEvent]:
     register_initial_files(db, refresh_existing=False)
+    database_entry = normalize_database_monitor_entry(db, reset_baseline=False, ensure_snapshot=True)
     set_setting(db, "last_scan_at", now_utc().isoformat(), "security_scanner")
     detections = []
     hash_index = current_hash_index(db)
     for file_entry in db.query(SecurityMonitoredFile).order_by(SecurityMonitoredFile.relative_path.asc()).all():
+        if is_database_entry(file_entry) and database_entry and file_entry.id != database_entry.id:
+            file_entry.status = "clean"
+            file_entry.last_checked = now_utc()
+            db.add(file_entry)
+            continue
         if not Path(file_entry.file_path).exists():
             replacement_path = replacement_path_for(file_entry, hash_index)
             if replacement_path:
-                detections.append(mark_verified_removal(db, file_entry, "verified_renamed", replacement_path=replacement_path, actor="active_scan"))
+                mark_verified_removal(db, file_entry, "verified_renamed", replacement_path=replacement_path, actor="active_scan")
                 continue
         detection = scan_single_file(db, file_entry, context=context, commit_clean=False)
         if detection:
@@ -2060,7 +2088,13 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
     db.refresh(event)
     try:
         backup_root.mkdir(parents=True, exist_ok=True)
+        database_entry = normalize_database_monitor_entry(db, reset_baseline=False, ensure_snapshot=True)
         for entry in db.query(SecurityMonitoredFile).order_by(SecurityMonitoredFile.relative_path.asc()).all():
+            if is_database_entry(entry) and database_entry and entry.id != database_entry.id:
+                entry.status = "clean"
+                entry.last_checked = now_utc()
+                db.add(entry)
+                continue
             path = Path(entry.file_path)
             relative = entry.relative_path or safe_rel(path)
             if is_database_entry(entry):
