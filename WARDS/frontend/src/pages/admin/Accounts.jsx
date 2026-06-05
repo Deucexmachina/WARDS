@@ -1,17 +1,27 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { accountAPI, branchAPI } from '../../services/api';
-import { getEmailValidationMessage, validateStrongPassword, validateCitizenFullName, normalizeCitizenFullName } from '../../utils/validation';
+import {
+  getEmailValidationMessage,
+  normalizeCitizenFullName,
+  normalizePhilippineContactDigits,
+  validateCitizenFullName,
+  validatePhilippineContactDigits,
+  validateStrongPassword,
+} from '../../utils/validation';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 import PasswordField from '../../components/PasswordField';
 
 const DEFAULT_PAGE_SIZE = 100;
+const INTERNAL_BRANCH_EMAIL_PATTERN = /^[A-Za-z0-9._-]+@branch\.local$/i;
 
 const EMPTY_FORM = {
   username: '',
   email: '',
   password: '',
   full_name: '',
+  contact_number: '',
   role: 'branch_staff',
   branch_id: null,
   service_window: '',
@@ -33,19 +43,25 @@ const SERVICE_WINDOW_OPTIONS = [
 ];
 
 const PHYSICAL_WINDOW_OPTIONS = [1, 2, 3, 4, 5];
-
-const INTERNAL_BRANCH_EMAIL_PATTERN = /^[A-Za-z0-9._-]+@branch\.local$/i;
+const READ_ONLY_INPUT_CLASS = 'w-full rounded-2xl border border-slate-200 bg-slate-100 px-4 py-3 text-sm font-medium text-slate-500 shadow-sm';
+const EDITABLE_INPUT_CLASS = 'w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm font-medium text-slate-900 placeholder-slate-400 shadow-sm transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:outline-none';
 
 const Accounts = () => {
-  const adminUser = (() => {
+  const location = useLocation();
+  const isBranchPortal = location.pathname.includes('/branch-dashboard/');
+  const currentManager = useMemo(() => {
     try {
-      return JSON.parse(localStorage.getItem('adminUser') || '{}');
+      return JSON.parse(localStorage.getItem(isBranchPortal ? 'branchUser' : 'adminUser') || '{}');
     } catch {
       return {};
     }
-  })();
-  const verifierLabel = adminUser?.internal_role === 'superadmin' ? 'Super Admin' : 'Main Admin';
+  }, [isBranchPortal]);
+
+  const isBranchAdminManager = isBranchPortal && (currentManager?.internal_role === 'branch_admin' || currentManager?.role === 'branch_admin');
+  const canCreateAccounts = !isBranchPortal;
+  const verifierLabel = currentManager?.internal_role === 'superadmin' ? 'Super Admin' : isBranchPortal ? 'Branch Admin' : 'Main Admin';
   const verifierLabelLower = verifierLabel.toLowerCase();
+
   const [accounts, setAccounts] = useState([]);
   const [branches, setBranches] = useState([]);
   const [showModal, setShowModal] = useState(false);
@@ -53,12 +69,12 @@ const Accounts = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [pendingAccountSave, setPendingAccountSave] = useState(null);
   const [authModal, setAuthModal] = useState({
     mode: null,
     account: null,
     password: '',
   });
-  const [pendingAccountSave, setPendingAccountSave] = useState(null);
   const [pagination, setPagination] = useState({
     page: 1,
     page_size: DEFAULT_PAGE_SIZE,
@@ -67,12 +83,40 @@ const Accounts = () => {
   });
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [emailError, setEmailError] = useState('');
+  const [contactError, setContactError] = useState('');
   const [fullNameError, setFullNameError] = useState('');
   const [authPasswordError, setAuthPasswordError] = useState('');
+
+  const managerEyebrow = isBranchPortal ? 'Branch Admin Dashboard' : 'Main Admin Dashboard';
+  const managerSubtitle = isBranchPortal
+    ? 'Review and manage branch staff, branch admins, and citizen accounts connected to your assigned branch.'
+    : 'Create, review, and maintain main admin, branch, and citizen accounts.';
+
+  const isCitizenAccount = formData.role === 'public';
 
   const getServiceWindowLabel = (value) => {
     if (value === 'BUSINESS') return 'BT';
     return value || 'Not Assigned';
+  };
+
+  const getRoleDisplay = (role) => {
+    const roleMap = {
+      main_admin: 'Main Admin',
+      superadmin: 'Super Admin',
+      branch_admin: 'Branch Admin',
+      branch_staff: 'Branch Staff',
+      admin: 'Admin',
+      public: 'Citizen',
+    };
+    return roleMap[role] || role;
+  };
+
+  const getRoleColor = (role) => {
+    if (role === 'main_admin' || role === 'admin' || role === 'superadmin') return 'bg-purple-100 text-purple-800';
+    if (role === 'branch_admin') return 'bg-blue-100 text-blue-800';
+    if (role === 'branch_staff') return 'bg-sky-100 text-sky-800';
+    if (role === 'public') return 'bg-emerald-100 text-emerald-800';
+    return 'bg-gray-100 text-gray-800';
   };
 
   const getAccountEmailValidationMessage = (email, role) => {
@@ -83,21 +127,33 @@ const Accounts = () => {
     return getEmailValidationMessage(trimmedEmail);
   };
 
+  const renderReadOnlyField = (label, value) => (
+    <div>
+      <label className="mb-2 block text-sm font-semibold text-slate-700">{label}</label>
+      <input type="text" readOnly value={value || 'N/A'} className={READ_ONLY_INPUT_CLASS} />
+    </div>
+  );
+
   useEffect(() => {
     fetchAccounts(1);
-    fetchBranches();
+    if (canCreateAccounts) {
+      fetchBranches();
+    }
 
     const handleAccountsRefresh = () => {
       fetchAccounts(pagination.page);
-      fetchBranches();
+      if (canCreateAccounts) {
+        fetchBranches();
+      }
     };
 
     window.addEventListener('wards-accounts-refresh', handleAccountsRefresh);
     return () => window.removeEventListener('wards-accounts-refresh', handleAccountsRefresh);
-  }, [pagination.page]);
+  }, [canCreateAccounts, pagination.page]);
 
   const fetchAccounts = async (page = pagination.page) => {
     try {
+      setLoading(true);
       const response = await accountAPI.getAll({
         page,
         page_size: pagination.page_size,
@@ -111,10 +167,10 @@ const Accounts = () => {
         total_pages: response.data.total_pages || 1,
       }));
       setError('');
-      setLoading(false);
     } catch (fetchError) {
       console.error('Failed to fetch accounts:', fetchError);
       setError(fetchError.response?.data?.detail || 'Failed to load accounts.');
+    } finally {
       setLoading(false);
     }
   };
@@ -122,7 +178,7 @@ const Accounts = () => {
   const fetchBranches = async () => {
     try {
       const response = await branchAPI.getAll();
-      setBranches(response.data);
+      setBranches(response.data || []);
     } catch (fetchError) {
       console.error('Failed to fetch branches:', fetchError);
       setError(fetchError.response?.data?.detail || 'Failed to load branches.');
@@ -145,12 +201,27 @@ const Accounts = () => {
     if (nextPage < 1 || nextPage > pagination.total_pages || nextPage === pagination.page) {
       return;
     }
-    setLoading(true);
     fetchAccounts(nextPage);
   };
 
   const handleInputChange = (event) => {
     const { name, value } = event.target;
+
+    if (editingAccount) {
+      if (name === 'email') {
+        setFormData((current) => ({ ...current, email: value }));
+        setEmailError(getAccountEmailValidationMessage(value, formData.role));
+      } else if (name === 'contact_number') {
+        const normalizedContact = normalizePhilippineContactDigits(value);
+        setFormData((current) => ({ ...current, contact_number: normalizedContact }));
+        setContactError(validatePhilippineContactDigits(normalizedContact));
+      } else if (name === 'password') {
+        setFormData((current) => ({ ...current, password: value }));
+      }
+      setError('');
+      return;
+    }
+
     if (name === 'role') {
       const nextState = { ...formData, role: value };
       if (value !== 'branch_staff') {
@@ -159,11 +230,18 @@ const Accounts = () => {
       }
       setFormData(nextState);
       setEmailError(getAccountEmailValidationMessage(nextState.email, value));
-      if (error) {
-        setError('');
-      }
+      setError('');
       return;
     }
+
+    if (name === 'contact_number') {
+      const normalizedContact = normalizePhilippineContactDigits(value);
+      setFormData((current) => ({ ...current, contact_number: normalizedContact }));
+      setContactError(validatePhilippineContactDigits(normalizedContact));
+      setError('');
+      return;
+    }
+
     const nextState = { ...formData, [name]: value };
     setFormData(nextState);
     if (name === 'email') {
@@ -173,15 +251,14 @@ const Accounts = () => {
       const normalized = normalizeCitizenFullName(value);
       setFullNameError(validateCitizenFullName(normalized));
     }
-    if (error) {
-      setError('');
-    }
+    setError('');
   };
 
   const handleAddAccount = () => {
     setEditingAccount(null);
     setFormData(EMPTY_FORM);
     setEmailError('');
+    setContactError('');
     setFullNameError('');
     setAuthPasswordError('');
     setError('');
@@ -193,28 +270,35 @@ const Accounts = () => {
     setEditingAccount(account);
     setFormData({
       username: account.username || '',
-      email: account.email,
+      email: account.email || '',
       password: '',
       full_name: account.full_name || '',
+      contact_number: account.contact_number ? normalizePhilippineContactDigits(account.contact_number) : '',
       role: account.role,
       branch_id: account.branch_id,
       service_window: account.service_window || '',
       assigned_window_number: account.assigned_window_number || 1,
-      status: account.status,
+      status: account.status || 'Active',
     });
-    setError('');
     setEmailError('');
+    setContactError('');
     setFullNameError('');
     setAuthPasswordError('');
+    setError('');
     setSuccessMessage('');
     setShowModal(true);
   };
 
   const handleSaveAccount = async () => {
+    if (isBranchPortal && !isBranchAdminManager) {
+      setError('Only Branch Admin accounts can manage branch accounts.');
+      return;
+    }
+
     const needsUsername = ['main_admin', 'admin', 'branch_admin', 'branch_staff'].includes(formData.role);
     const needsFullName = formData.role === 'public';
 
-    if (!formData.email || !formData.role || (needsUsername && !formData.username) || (needsFullName && !formData.full_name)) {
+    if (!formData.email || !formData.role || (!editingAccount && needsUsername && !formData.username) || (!editingAccount && needsFullName && !formData.full_name)) {
       setError('Please fill in all required fields.');
       return;
     }
@@ -226,7 +310,16 @@ const Accounts = () => {
       return;
     }
 
-    if (formData.full_name) {
+    if (editingAccount && formData.role === 'public') {
+      const nextContactError = validatePhilippineContactDigits(formData.contact_number || '');
+      if (formData.contact_number && nextContactError) {
+        setContactError(nextContactError);
+        setError('Please correct the highlighted contact number field.');
+        return;
+      }
+    }
+
+    if (!editingAccount && formData.full_name) {
       const normalizedFullName = normalizeCitizenFullName(formData.full_name);
       const nextFullNameError = validateCitizenFullName(normalizedFullName);
       if (nextFullNameError) {
@@ -249,17 +342,17 @@ const Accounts = () => {
       }
     }
 
-    if ((formData.role === 'branch_admin' || formData.role === 'branch_staff') && !formData.branch_id) {
+    if (!editingAccount && (formData.role === 'branch_admin' || formData.role === 'branch_staff') && !formData.branch_id) {
       setError('Please assign a branch for branch accounts.');
       return;
     }
 
-    if (formData.role === 'branch_staff' && !formData.service_window) {
+    if (!editingAccount && formData.role === 'branch_staff' && !formData.service_window) {
       setError('Please select the assigned queue/service role for this branch staff account.');
       return;
     }
 
-    if (formData.role === 'branch_staff') {
+    if (!editingAccount && formData.role === 'branch_staff') {
       const assignedWindowNumber = Number.parseInt(formData.assigned_window_number, 10);
       if (Number.isNaN(assignedWindowNumber) || assignedWindowNumber < 1 || assignedWindowNumber > 5) {
         setError('Please assign a physical window from 1 to 5 for this branch staff account.');
@@ -267,17 +360,28 @@ const Accounts = () => {
       }
     }
 
-    setLoading(true);
-    setError('');
-    setSuccessMessage('');
-
     try {
+      setLoading(true);
+      setError('');
+      setSuccessMessage('');
+
       if (editingAccount) {
+        const updatePayload = {
+          role: formData.role,
+          email: formData.email,
+        };
+
+        if (formData.password) {
+          updatePayload.password = formData.password;
+        }
+
+        if (formData.role === 'public') {
+          updatePayload.contact_number = formData.contact_number || '';
+        }
+
         setPendingAccountSave({
           id: editingAccount.id,
-          payload: {
-            ...formData,
-          },
+          payload: updatePayload,
         });
         setAuthModal({
           mode: 'edit',
@@ -302,7 +406,7 @@ const Accounts = () => {
     }
   };
 
-  const handleDeactivateAccount = async (account) => {
+  const handleDeactivateAccount = (account) => {
     setError('');
     setSuccessMessage('');
     setAuthModal({
@@ -312,7 +416,7 @@ const Accounts = () => {
     });
   };
 
-  const handleDeleteAccount = async (account) => {
+  const handleDeleteAccount = (account) => {
     setError('');
     setSuccessMessage('');
     setAuthModal({
@@ -341,7 +445,6 @@ const Accounts = () => {
 
     try {
       setLoading(true);
-      setError('');
       setSuccessMessage('');
 
       if (authModal.mode === 'edit' && pendingAccountSave) {
@@ -380,12 +483,7 @@ const Accounts = () => {
     } catch (actionError) {
       console.error('Failed to complete protected account action:', actionError);
       const errorDetail = actionError.response?.data?.detail || 'Failed to complete account action.';
-      
-      // Check if this is a password confirmation error
-      if (errorDetail.toLowerCase().includes('incorrect') && 
-          (errorDetail.toLowerCase().includes('password') || 
-           errorDetail.toLowerCase().includes('super admin') || 
-           errorDetail.toLowerCase().includes('main admin'))) {
+      if (errorDetail.toLowerCase().includes('incorrect') && errorDetail.toLowerCase().includes('password')) {
         setAuthPasswordError('Incorrect password. Please try again.');
         setError('');
       } else {
@@ -395,26 +493,6 @@ const Accounts = () => {
     } finally {
       setLoading(false);
     }
-  };
-
-  const getRoleDisplay = (role) => {
-    const roleMap = {
-      main_admin: 'Main Admin',
-      superadmin: 'Super Admin',
-      branch_admin: 'Branch Admin',
-      branch_staff: 'Branch Staff',
-      admin: 'Admin',
-      public: 'Citizen',
-    };
-    return roleMap[role] || role;
-  };
-
-  const getRoleColor = (role) => {
-    if (role === 'main_admin' || role === 'admin' || role === 'superadmin') return 'bg-purple-100 text-purple-800';
-    if (role === 'branch_admin') return 'bg-blue-100 text-blue-800';
-    if (role === 'branch_staff') return 'bg-sky-100 text-sky-800';
-    if (role === 'public') return 'bg-emerald-100 text-emerald-800';
-    return 'bg-gray-100 text-gray-800';
   };
 
   const adminAccounts = accounts.filter((account) => account.role === 'main_admin' || account.role === 'admin' || account.role === 'superadmin');
@@ -449,84 +527,80 @@ const Accounts = () => {
       <table className="w-full">
         <thead className="bg-gray-50">
           <tr>
-            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">{primaryLabel}</th>
-            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Email</th>
-            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Branch</th>
-            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Role</th>
-            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Queue Role</th>
-            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
-            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Last Login</th>
-            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
+            <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{primaryLabel}</th>
+            <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">Email</th>
+            <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">Branch</th>
+            <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">Role</th>
+            <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">Queue Role</th>
+            <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">Status</th>
+            <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">Last Login</th>
+            <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">Actions</th>
           </tr>
         </thead>
-        <tbody className="bg-white divide-y divide-gray-200">
+        <tbody className="divide-y divide-gray-200 bg-white">
           {rows.length === 0 ? (
             <tr>
-              <td colSpan="8" className="px-6 py-6 text-sm text-center text-gray-500">No accounts found.</td>
+              <td colSpan="8" className="px-6 py-6 text-center text-sm text-gray-500">No accounts found.</td>
             </tr>
-          ) : (
-            rows.map((account) => (
-              <tr key={`${account.role}-${account.id}`} className="hover:bg-gray-50 transition duration-200">
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                  {account.username || account.full_name || 'N/A'}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{account.email}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{account.branch_name || 'All Branches'}</td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getRoleColor(account.role)}`}>
-                    {getRoleDisplay(account.role)}
-                  </span>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                  {account.role === 'branch_staff'
-                    ? `${getServiceWindowLabel(account.service_window_label || account.service_window)} - Window ${account.assigned_window_number || 1}`
-                    : account.role === 'branch_admin'
+          ) : rows.map((account) => (
+            <tr key={`${account.role}-${account.id}`} className="transition duration-200 hover:bg-gray-50">
+              <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-gray-900">
+                {account.username || account.full_name || 'N/A'}
+              </td>
+              <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-600">{account.email}</td>
+              <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-600">{account.branch_name || 'All Branches'}</td>
+              <td className="whitespace-nowrap px-6 py-4">
+                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${getRoleColor(account.role)}`}>
+                  {getRoleDisplay(account.role)}
+                </span>
+              </td>
+              <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-600">
+                {account.role === 'branch_staff'
+                  ? `${getServiceWindowLabel(account.service_window_label || account.service_window)} - Window ${account.assigned_window_number || 1}`
+                  : account.role === 'branch_admin'
                     ? 'Full Branch'
                     : 'N/A'}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                    account.status === 'Active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                  }`}>
-                    {account.status}
-                  </span>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                  {account.last_login ? formatUtc8DateTime(account.last_login) : 'Never'}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm space-x-2">
+              </td>
+              <td className="whitespace-nowrap px-6 py-4">
+                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${account.status === 'Active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                  {account.status}
+                </span>
+              </td>
+              <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-600">
+                {account.last_login ? formatUtc8DateTime(account.last_login) : 'Never'}
+              </td>
+              <td className="whitespace-nowrap px-6 py-4 text-sm space-x-2">
+                <button
+                  onClick={() => handleEditAccount(account)}
+                  className="rounded-lg bg-accent px-3 py-1 font-semibold text-white transition duration-300 hover:bg-blue-600"
+                >
+                  Edit
+                </button>
+                {account.status === 'Active' && (
                   <button
-                    onClick={() => handleEditAccount(account)}
-                    className="bg-accent hover:bg-blue-600 text-white px-3 py-1 rounded-lg font-semibold transition duration-300"
+                    onClick={() => handleDeactivateAccount(account)}
+                    className="rounded-lg bg-yellow-500 px-3 py-1 font-semibold text-white transition duration-300 hover:bg-yellow-600"
                   >
-                    Edit
+                    Deactivate
                   </button>
-                  {account.status === 'Active' && (
-                    <button
-                      onClick={() => handleDeactivateAccount(account)}
-                      className="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded-lg font-semibold transition duration-300"
-                    >
-                      Deactivate
-                    </button>
-                  )}
-                  <button
-                    onClick={() => handleDeleteAccount(account)}
-                    className="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded-lg font-semibold transition duration-300"
-                  >
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))
-          )}
+                )}
+                <button
+                  onClick={() => handleDeleteAccount(account)}
+                  className="rounded-lg bg-red-500 px-3 py-1 font-semibold text-white transition duration-300 hover:bg-red-600"
+                >
+                  Delete
+                </button>
+              </td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>
   );
 
   const renderAccountTable = (title, rows, primaryLabel = 'Username') => (
-    <div className="bg-white rounded-xl shadow-lg overflow-hidden mb-6">
-      <div className="px-6 py-4 bg-primary">
+    <div className="mb-6 overflow-hidden rounded-xl bg-white shadow-lg">
+      <div className="bg-primary px-6 py-4">
         <h3 className="text-xl font-bold text-white">{title}</h3>
       </div>
       {renderAccountRows(rows, primaryLabel)}
@@ -534,8 +608,8 @@ const Accounts = () => {
   );
 
   const renderBranchAccountTable = () => (
-    <div className="bg-white rounded-xl shadow-lg overflow-hidden mb-6">
-      <div className="px-6 py-4 bg-primary">
+    <div className="mb-6 overflow-hidden rounded-xl bg-white shadow-lg">
+      <div className="bg-primary px-6 py-4">
         <h3 className="text-xl font-bold text-white">Branch Accounts</h3>
         <p className="mt-1 text-sm text-blue-100">
           Accounts are grouped by branch so branch admins and branch staff stay together as branches grow.
@@ -543,7 +617,7 @@ const Accounts = () => {
       </div>
 
       {sortedBranchGroups.length === 0 ? (
-        <div className="px-6 py-6 text-sm text-center text-gray-500">No branch accounts found.</div>
+        <div className="px-6 py-6 text-center text-sm text-gray-500">No branch accounts found.</div>
       ) : (
         <div className="space-y-5 p-5">
           {sortedBranchGroups.map(([branchName, rows]) => {
@@ -577,11 +651,11 @@ const Accounts = () => {
     </div>
   );
 
-  if (loading) {
+  if (loading && accounts.length === 0) {
     return (
-      <div className="flex items-center justify-center h-96">
+      <div className="flex h-96 items-center justify-center">
         <div className="text-center">
-          <div className="border-4 border-primary border-t-transparent rounded-full w-12 h-12 mx-auto mb-4 animate-spin"></div>
+          <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-4 border-primary border-t-transparent" />
           <p className="text-gray-600">Loading accounts...</p>
         </div>
       </div>
@@ -591,32 +665,32 @@ const Accounts = () => {
   return (
     <div>
       <WardsPageHero
-        eyebrow="Main Admin Dashboard"
+        eyebrow={managerEyebrow}
         title="Account Management"
-        subtitle="Create, review, and maintain main admin, branch, and citizen accounts."
-        actions={(
+        subtitle={managerSubtitle}
+        actions={canCreateAccounts ? (
           <button
             onClick={handleAddAccount}
-            className="bg-green-500 hover:bg-green-600 text-white px-6 py-3 rounded-lg font-semibold transition duration-300 shadow-lg"
+            className="rounded-lg bg-green-500 px-6 py-3 font-semibold text-white shadow-lg transition duration-300 hover:bg-green-600"
           >
             + Create Account
           </button>
-        )}
+        ) : null}
       />
 
-      {error && (
-        <div className="mb-6 bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded">
+      {error && !authModal.mode && (
+        <div className="mb-6 rounded border-l-4 border-red-500 bg-red-100 p-4 text-red-700">
           <p className="font-semibold">{error}</p>
         </div>
       )}
 
       {successMessage && (
-        <div className="mb-6 bg-green-100 border-l-4 border-green-500 text-green-700 p-4 rounded">
+        <div className="mb-6 rounded border-l-4 border-green-500 bg-green-100 p-4 text-green-700">
           <p className="font-semibold">{successMessage}</p>
         </div>
       )}
 
-      {renderAccountTable('Main Admin Accounts', adminAccounts)}
+      {!isBranchPortal && renderAccountTable('Main Admin Accounts', adminAccounts)}
       {renderBranchAccountTable()}
       {renderAccountTable('Citizen Accounts', citizenAccounts, 'Full Name')}
 
@@ -643,302 +717,291 @@ const Accounts = () => {
       </div>
 
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-2xl bg-white shadow-2xl">
-            {/* Sticky Header */}
-            <div className="flex-shrink-0 border-b border-slate-200 bg-white px-6 py-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-2xl font-bold text-slate-900">
-                    {editingAccount ? 'Edit Account' : 'Create Account'}
-                  </h3>
-                  <p className="mt-1 text-sm text-slate-500">
-                    {editingAccount 
-                      ? 'Update account information and permissions'
-                      : 'Create a new user account with appropriate access level'
-                    }
-                  </p>
-                </div>
-                <button
-                  onClick={() => setShowModal(false)}
-                  className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors"
-                  aria-label="Close modal"
-                >
-                  <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
-                  </svg>
-                </button>
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/60 px-4 py-6">
+          <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-[28px] bg-white shadow-[0_30px_80px_rgba(15,23,42,0.28)]">
+            <div className="flex shrink-0 items-start justify-between border-b border-slate-200 px-6 py-5 md:px-8">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+                  {editingAccount ? 'Account Review' : 'Create Account'}
+                </p>
+                <h3 className="mt-2 text-2xl font-bold text-slate-900">
+                  {editingAccount ? 'Edit Account' : 'Create Account'}
+                </h3>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  {editingAccount
+                    ? 'Only email, password, and contact number can be changed here. All other account details remain visible but read-only.'
+                    : 'Create a new account with the required branch, role, and access settings.'}
+                </p>
               </div>
+              <button
+                onClick={() => setShowModal(false)}
+                className="rounded-2xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                aria-label="Close modal"
+              >
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
             </div>
 
-            {/* Scrollable Content */}
-            <div className="flex-1 overflow-y-auto px-6 py-6 min-h-0">
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6 md:px-8">
               {error && (
-                <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
-                  <div className="flex items-start gap-3">
-                    <svg className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                    </svg>
-                    <div>
-                      <p className="font-semibold text-red-800">{error}</p>
-                    </div>
-                  </div>
+                <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+                  {error}
                 </div>
               )}
 
-              <div className="space-y-6">
-                {/* Account Information Section */}
-                <div>
-                  <h4 className="text-lg font-semibold text-slate-900 mb-4">Account Information</h4>
-                  <div className="space-y-4">
-                    {formData.role === 'public' ? (
-                      <div>
-                        <label className="block text-sm font-semibold text-slate-700 mb-2">Full Name</label>
-                        <input
-                          type="text"
-                          name="full_name"
-                          value={formData.full_name}
-                          onChange={handleInputChange}
-                          className={`w-full rounded-xl border px-4 py-3 text-sm font-medium placeholder-slate-400 shadow-sm transition-colors focus:ring-2 focus:outline-none ${
-                            fullNameError 
-                              ? 'border-red-300 bg-red-50 text-red-900 placeholder-red-300 focus:border-red-500 focus:ring-red-500/20' 
-                              : 'border-slate-300 text-slate-900 focus:border-blue-500 focus:ring-blue-500/20'
-                          }`}
-                          placeholder="Enter full name"
-                        />
-                        {fullNameError && (
-                          <p className="mt-2 flex items-center gap-1 text-sm font-medium text-red-600">
-                            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                            </svg>
-                            {fullNameError}
-                          </p>
-                        )}
-                      </div>
-                    ) : (
-                      <div>
-                        <label className="block text-sm font-semibold text-slate-700 mb-2">Username</label>
-                        <input
-                          type="text"
-                          name="username"
-                          value={formData.username}
-                          onChange={handleInputChange}
-                          maxLength={32}
-                          className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm font-medium text-slate-900 placeholder-slate-400 shadow-sm transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:outline-none"
-                          placeholder="Enter username"
-                        />
-                      </div>
-                    )}
-
-                    <div>
-                      <label className="block text-sm font-semibold text-slate-700 mb-2">Email Address</label>
-                      <input
-                        type="text"
-                        inputMode="email"
-                        name="email"
-                        value={formData.email}
-                        onChange={handleInputChange}
-                        className={`w-full rounded-xl border px-4 py-3 text-sm font-medium placeholder-slate-400 shadow-sm transition-colors focus:ring-2 focus:outline-none ${
-                          emailError 
-                            ? 'border-red-300 bg-red-50 text-red-900 placeholder-red-300 focus:border-red-500 focus:ring-red-500/20' 
-                            : 'border-slate-300 text-slate-900 focus:border-blue-500 focus:ring-blue-500/20'
-                        }`}
-                        placeholder="Enter email address"
-                      />
-                      {emailError && (
-                        <p className="mt-2 flex items-center gap-1 text-sm font-medium text-red-600">
-                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                          </svg>
-                          {emailError}
-                        </p>
-                      )}
-                    </div>
-
-                    {formData.role !== 'public' && (
-                      <div>
-                        <label className="block text-sm font-semibold text-slate-700 mb-2">Full Name</label>
-                        <input
-                          type="text"
-                          name="full_name"
-                          value={formData.full_name}
-                          onChange={handleInputChange}
-                          className={`w-full rounded-xl border px-4 py-3 text-sm font-medium placeholder-slate-400 shadow-sm transition-colors focus:ring-2 focus:outline-none ${
-                            fullNameError 
-                              ? 'border-red-300 bg-red-50 text-red-900 placeholder-red-300 focus:border-red-500 focus:ring-red-500/20' 
-                              : 'border-slate-300 text-slate-900 focus:border-blue-500 focus:ring-blue-500/20'
-                          }`}
-                          placeholder="Enter full name (optional)"
-                        />
-                        {fullNameError && (
-                          <p className="mt-2 flex items-center gap-1 text-sm font-medium text-red-600">
-                            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                            </svg>
-                            {fullNameError}
-                          </p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Security Section */}
-                <div>
-                  <h4 className="text-lg font-semibold text-slate-900 mb-4">Security</h4>
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-semibold text-slate-700 mb-2">
-                        {editingAccount ? 'New Password (leave blank to keep current)' : 'Password'}
-                      </label>
-                      <PasswordField
-                        name="password"
-                        value={formData.password}
-                        onChange={handleInputChange}
-                        className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm font-medium text-slate-900 placeholder-slate-400 shadow-sm transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:outline-none"
-                        placeholder={editingAccount ? "Enter new password" : "Enter password"}
-                      />
-                      <div className="mt-3 space-y-2">
-                        <p className="text-xs text-slate-500">
-                          Password must be more than 12 characters with uppercase, lowercase, and a number or special character.
-                        </p>
-                        {editingAccount && (
-                          <div className="flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2">
-                            <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                            </svg>
-                            <p className="text-xs font-medium text-amber-800">
-                              Saving changes will require your {verifierLabelLower} password for verification.
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Access Control Section */}
-                <div>
-                  <h4 className="text-lg font-semibold text-slate-900 mb-4">Access Control</h4>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div>
-                      <label className="block text-sm font-semibold text-slate-700 mb-2">Role</label>
-                      <select
-                        name="role"
-                        value={formData.role}
-                        onChange={handleInputChange}
-                        className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm font-medium text-slate-900 shadow-sm transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:outline-none"
-                        required
-                      >
-                        <option value="main_admin">Main Office Admin</option>
-                        <option value="branch_admin">Branch Admin</option>
-                        <option value="branch_staff">Branch Staff</option>
-                        <option value="public">Citizen</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-semibold text-slate-700 mb-2">Status</label>
-                      <select
-                        name="status"
-                        value={formData.status}
-                        onChange={handleInputChange}
-                        className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm font-medium text-slate-900 shadow-sm transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:outline-none"
-                      >
-                        <option value="Active">Active</option>
-                        <option value="Inactive">Inactive</option>
-                      </select>
+              {editingAccount ? (
+                <div className="space-y-6">
+                  <div>
+                    <h4 className="mb-4 text-lg font-semibold text-slate-900">View-Only Account Details</h4>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {renderReadOnlyField(formData.role === 'public' ? 'Full Name' : 'Username', formData.role === 'public' ? formData.full_name : formData.username)}
+                      {renderReadOnlyField('Role', getRoleDisplay(formData.role))}
+                      {renderReadOnlyField('Branch Assignment', formData.branch_id ? (editingAccount?.branch_name || `Branch ${formData.branch_id}`) : 'All Branches')}
+                      {renderReadOnlyField('Account Type', formData.role === 'public' ? 'Citizen Account' : 'Employee Account')}
+                      {renderReadOnlyField('Status', formData.status)}
+                      {renderReadOnlyField('Created Date', editingAccount?.created_at ? formatUtc8DateTime(editingAccount.created_at) : 'N/A')}
+                      {formData.role !== 'public' && renderReadOnlyField('Full Name', formData.full_name || 'N/A')}
+                      {formData.role === 'branch_staff' && renderReadOnlyField('Queue Assignment', `${getServiceWindowLabel(formData.service_window)} - Window ${formData.assigned_window_number || 1}`)}
                     </div>
                   </div>
 
-                  {(formData.role === 'branch_admin' || formData.role === 'branch_staff') && (
-                    <div className="mt-4 space-y-4">
-                      <label className="block text-sm font-semibold text-slate-700 mb-2">Branch Assignment</label>
-                      <select
-                        name="branch_id"
-                        value={formData.branch_id || ''}
-                        onChange={(event) => setFormData({ ...formData, branch_id: event.target.value ? parseInt(event.target.value, 10) : null })}
-                        className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm font-medium text-slate-900 shadow-sm transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:outline-none"
-                        required
-                      >
-                        <option value="">Select Branch</option>
-                        {branches.map((branch) => (
-                          <option key={branch.id} value={branch.id}>{branch.name}</option>
-                        ))}
-                      </select>
+                  <div>
+                    <h4 className="mb-4 text-lg font-semibold text-slate-900">Editable Information</h4>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className={isCitizenAccount ? '' : 'sm:col-span-2'}>
+                        <label className="mb-2 block text-sm font-semibold text-slate-700">Email Address</label>
+                        <input
+                          type="email"
+                          name="email"
+                          value={formData.email}
+                          onChange={handleInputChange}
+                          className={`${EDITABLE_INPUT_CLASS} ${emailError ? 'border-red-300 bg-red-50 text-red-900 focus:border-red-500 focus:ring-red-500/20' : ''}`}
+                          placeholder="Enter email address"
+                        />
+                        {emailError && <p className="mt-2 text-sm font-medium text-red-600">{emailError}</p>}
+                      </div>
 
-                      {formData.role === 'branch_staff' && (
-                        <div className="grid gap-4 sm:grid-cols-2">
-                          <div>
-                            <label className="block text-sm font-semibold text-slate-700 mb-2">Assigned Queue / Service Role</label>
-                            <select
-                              name="service_window"
-                              value={formData.service_window}
+                      {isCitizenAccount && (
+                        <div>
+                          <label className="mb-2 block text-sm font-semibold text-slate-700">Contact Number</label>
+                          <div className={`flex overflow-hidden rounded-2xl border ${contactError ? 'border-red-300 bg-red-50' : 'border-slate-300 bg-white'}`}>
+                            <span className="flex items-center bg-slate-100 px-4 font-semibold text-slate-700">+63</span>
+                            <input
+                              type="text"
+                              name="contact_number"
+                              value={formData.contact_number}
                               onChange={handleInputChange}
-                              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm font-medium text-slate-900 shadow-sm transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:outline-none"
-                              required
-                            >
-                              <option value="">Select Queue / Service Role</option>
-                              {SERVICE_WINDOW_OPTIONS.map((option) => (
-                                <option key={option.value} value={option.value}>{option.label}</option>
-                              ))}
-                            </select>
-                            <p className="mt-2 text-xs text-slate-500">
-                              Branch staff accounts must be assigned to exactly one queue/service role.
-                            </p>
+                              inputMode="numeric"
+                              maxLength={10}
+                              className="w-full px-4 py-3 text-sm font-medium text-slate-900 outline-none"
+                              placeholder="9123456789"
+                            />
                           </div>
-
-                          <div>
-                            <label className="block text-sm font-semibold text-slate-700 mb-2">Voice Announcement Window</label>
-                            <select
-                              name="assigned_window_number"
-                              value={formData.assigned_window_number || 1}
-                              onChange={(event) => setFormData({ ...formData, assigned_window_number: Number.parseInt(event.target.value, 10) })}
-                              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm font-medium text-slate-900 shadow-sm transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:outline-none"
-                              required
-                            >
-                              {PHYSICAL_WINDOW_OPTIONS.map((windowNumber) => (
-                                <option key={windowNumber} value={windowNumber}>
-                                  Window {windowNumber}
-                                </option>
-                              ))}
-                            </select>
-                            <p className="mt-2 text-xs text-slate-500">
-                              Voice announcements use this physical window number.
-                            </p>
-                          </div>
+                          {contactError && <p className="mt-2 text-sm font-medium text-red-600">{contactError}</p>}
                         </div>
                       )}
+
+                      <div className="sm:col-span-2">
+                        <label className="mb-2 block text-sm font-semibold text-slate-700">
+                          New Password (leave blank to keep current)
+                        </label>
+                        <PasswordField
+                          name="password"
+                          value={formData.password}
+                          onChange={handleInputChange}
+                          className={EDITABLE_INPUT_CLASS}
+                          placeholder="Enter new password"
+                        />
+                        <p className="mt-2 text-xs text-slate-500">
+                          Password must be more than 12 characters with uppercase, lowercase, and a number or special character.
+                        </p>
+                      </div>
                     </div>
-                  )}
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="space-y-6">
+                  <div>
+                    <h4 className="mb-4 text-lg font-semibold text-slate-900">Account Information</h4>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {formData.role === 'public' ? (
+                        <div className="sm:col-span-2">
+                          <label className="mb-2 block text-sm font-semibold text-slate-700">Full Name</label>
+                          <input
+                            type="text"
+                            name="full_name"
+                            value={formData.full_name}
+                            onChange={handleInputChange}
+                            className={`${EDITABLE_INPUT_CLASS} ${fullNameError ? 'border-red-300 bg-red-50 text-red-900 focus:border-red-500 focus:ring-red-500/20' : ''}`}
+                            placeholder="Enter full name"
+                          />
+                          {fullNameError && <p className="mt-2 text-sm font-medium text-red-600">{fullNameError}</p>}
+                        </div>
+                      ) : (
+                        <>
+                          <div>
+                            <label className="mb-2 block text-sm font-semibold text-slate-700">Username</label>
+                            <input
+                              type="text"
+                              name="username"
+                              value={formData.username}
+                              onChange={handleInputChange}
+                              maxLength={32}
+                              className={EDITABLE_INPUT_CLASS}
+                              placeholder="Enter username"
+                            />
+                          </div>
+                          <div>
+                            <label className="mb-2 block text-sm font-semibold text-slate-700">Full Name</label>
+                            <input
+                              type="text"
+                              name="full_name"
+                              value={formData.full_name}
+                              onChange={handleInputChange}
+                              className={`${EDITABLE_INPUT_CLASS} ${fullNameError ? 'border-red-300 bg-red-50 text-red-900 focus:border-red-500 focus:ring-red-500/20' : ''}`}
+                              placeholder="Enter full name (optional)"
+                            />
+                            {fullNameError && <p className="mt-2 text-sm font-medium text-red-600">{fullNameError}</p>}
+                          </div>
+                        </>
+                      )}
+
+                      <div className="sm:col-span-2">
+                        <label className="mb-2 block text-sm font-semibold text-slate-700">Email Address</label>
+                        <input
+                          type="email"
+                          name="email"
+                          value={formData.email}
+                          onChange={handleInputChange}
+                          className={`${EDITABLE_INPUT_CLASS} ${emailError ? 'border-red-300 bg-red-50 text-red-900 focus:border-red-500 focus:ring-red-500/20' : ''}`}
+                          placeholder="Enter email address"
+                        />
+                        {emailError && <p className="mt-2 text-sm font-medium text-red-600">{emailError}</p>}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4 className="mb-4 text-lg font-semibold text-slate-900">Security</h4>
+                    <PasswordField
+                      name="password"
+                      value={formData.password}
+                      onChange={handleInputChange}
+                      className={EDITABLE_INPUT_CLASS}
+                      placeholder="Enter password"
+                    />
+                    <p className="mt-2 text-xs text-slate-500">
+                      Password must be more than 12 characters with uppercase, lowercase, and a number or special character.
+                    </p>
+                  </div>
+
+                  <div>
+                    <h4 className="mb-4 text-lg font-semibold text-slate-900">Access Control</h4>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div>
+                        <label className="mb-2 block text-sm font-semibold text-slate-700">Role</label>
+                        <select
+                          name="role"
+                          value={formData.role}
+                          onChange={handleInputChange}
+                          className={EDITABLE_INPUT_CLASS}
+                          required
+                        >
+                          <option value="main_admin">Main Office Admin</option>
+                          <option value="branch_admin">Branch Admin</option>
+                          <option value="branch_staff">Branch Staff</option>
+                          <option value="public">Citizen</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="mb-2 block text-sm font-semibold text-slate-700">Status</label>
+                        <select
+                          name="status"
+                          value={formData.status}
+                          onChange={handleInputChange}
+                          className={EDITABLE_INPUT_CLASS}
+                        >
+                          <option value="Active">Active</option>
+                          <option value="Inactive">Inactive</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {(formData.role === 'branch_admin' || formData.role === 'branch_staff') && (
+                      <div className="mt-4 space-y-4">
+                        <div>
+                          <label className="mb-2 block text-sm font-semibold text-slate-700">Branch Assignment</label>
+                          <select
+                            name="branch_id"
+                            value={formData.branch_id || ''}
+                            onChange={(event) => setFormData((current) => ({ ...current, branch_id: event.target.value ? parseInt(event.target.value, 10) : null }))}
+                            className={EDITABLE_INPUT_CLASS}
+                            required
+                          >
+                            <option value="">Select Branch</option>
+                            {branches.map((branch) => (
+                              <option key={branch.id} value={branch.id}>{branch.name}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {formData.role === 'branch_staff' && (
+                          <div className="grid gap-4 sm:grid-cols-2">
+                            <div>
+                              <label className="mb-2 block text-sm font-semibold text-slate-700">Assigned Queue / Service Role</label>
+                              <select
+                                name="service_window"
+                                value={formData.service_window}
+                                onChange={handleInputChange}
+                                className={EDITABLE_INPUT_CLASS}
+                                required
+                              >
+                                <option value="">Select Queue / Service Role</option>
+                                {SERVICE_WINDOW_OPTIONS.map((option) => (
+                                  <option key={option.value} value={option.value}>{option.label}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="mb-2 block text-sm font-semibold text-slate-700">Voice Announcement Window</label>
+                              <select
+                                name="assigned_window_number"
+                                value={formData.assigned_window_number || 1}
+                                onChange={(event) => setFormData((current) => ({ ...current, assigned_window_number: Number.parseInt(event.target.value, 10) }))}
+                                className={EDITABLE_INPUT_CLASS}
+                                required
+                              >
+                                {PHYSICAL_WINDOW_OPTIONS.map((windowNumber) => (
+                                  <option key={windowNumber} value={windowNumber}>Window {windowNumber}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* Sticky Footer */}
-            <div className="flex-shrink-0 border-t border-slate-200 bg-slate-50 px-6 py-4">
+            <div className="shrink-0 rounded-b-[28px] border-t border-slate-200 bg-slate-50 px-6 py-4 md:px-8">
               <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                 <button
                   onClick={() => setShowModal(false)}
-                  className="w-full rounded-xl border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-500/20 sm:w-auto"
+                  className="w-full rounded-2xl bg-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-300 sm:w-auto"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleSaveAccount}
                   disabled={loading}
-                  className="w-full rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-blue-600 sm:w-auto"
+                  className="w-full rounded-2xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                 >
-                  {loading ? (
-                    <span className="flex items-center justify-center gap-2">
-                      <svg className="h-4 w-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                      </svg>
-                      Saving...
-                    </span>
-                  ) : (
-                    editingAccount ? 'Update Account' : 'Create Account'
-                  )}
+                  {loading ? 'Saving...' : editingAccount ? 'Save Changes' : 'Create Account'}
                 </button>
               </div>
             </div>
@@ -947,139 +1010,89 @@ const Accounts = () => {
       )}
 
       {authModal.mode && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md flex flex-col rounded-2xl bg-white shadow-2xl max-h-[90vh]">
-            {/* Header */}
-            <div className="flex-shrink-0 border-b border-slate-200 bg-white px-6 py-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-xl font-bold text-slate-900">
-                    {authModal.mode === 'edit' ? 'Verify Account Update' : 
-                     authModal.mode === 'deactivate' ? 'Verify Account Deactivation' : 
-                     'Verify Account Deletion'}
-                  </h3>
-                  <p className="mt-1 text-sm text-slate-500">
-                    Review the change, then confirm your identity to proceed
-                  </p>
-                </div>
-                <button
-                  onClick={closeAuthModal}
-                  className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors"
-                  aria-label="Close modal"
-                >
-                  <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
-                  </svg>
-                </button>
-              </div>
-            </div>
-
-            {/* Content */}
-            <div className="flex-1 overflow-y-auto px-6 py-6 min-h-0">
-              <div className="mb-6">
-                <p className="text-sm text-slate-600">
-                  Enter your {verifierLabelLower} password to {authModal.mode} the account
-                  {authModal.account?.username
-                    ? ` "${authModal.account.username}"`
-                    : authModal.account?.full_name
-                    ? ` "${authModal.account.full_name}"`
-                    : ''}
-                  .
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/60 px-4 py-6">
+          <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-[28px] bg-white shadow-[0_30px_80px_rgba(15,23,42,0.28)]">
+            <div className="flex shrink-0 items-start justify-between border-b border-slate-200 px-6 py-5 md:px-8">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Protected Action</p>
+                <h3 className="mt-2 text-2xl font-bold text-slate-900">
+                  {authModal.mode === 'edit' ? 'Verify Account Update' : authModal.mode === 'deactivate' ? 'Verify Account Deactivation' : 'Verify Account Deletion'}
+                </h3>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  Review the change, then confirm your identity to proceed.
                 </p>
               </div>
+              <button
+                onClick={closeAuthModal}
+                className="rounded-2xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                aria-label="Close modal"
+              >
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6 md:px-8">
+              <p className="mb-6 text-sm text-slate-600">
+                Enter your {verifierLabelLower} password to {authModal.mode} the account
+                {authModal.account?.username
+                  ? ` "${authModal.account.username}"`
+                  : authModal.account?.full_name
+                    ? ` "${authModal.account.full_name}"`
+                    : ''}
+                .
+              </p>
 
               {authModal.mode === 'edit' && pendingAccountSave && (
-                <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
+                <div className="mb-6 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3">
                   <p className="text-sm font-semibold text-blue-900">Update Summary</p>
                   <div className="mt-2 space-y-1 text-sm text-blue-900">
                     <p><span className="font-semibold">Role:</span> {getRoleDisplay(pendingAccountSave.payload.role)}</p>
-                    {pendingAccountSave.payload.role === 'branch_staff' ? (
-                      <p><span className="font-semibold">Assigned queue role:</span> {getServiceWindowLabel(pendingAccountSave.payload.service_window)} - Window {pendingAccountSave.payload.assigned_window_number || 1}</p>
-                    ) : null}
-                    <p><span className="font-semibold">Email login:</span> {pendingAccountSave.payload.email}</p>
-                    {pendingAccountSave.payload.username ? (
-                      <p><span className="font-semibold">Username:</span> {pendingAccountSave.payload.username}</p>
-                    ) : null}
-                    {pendingAccountSave.payload.full_name ? (
-                      <p><span className="font-semibold">Full name:</span> {pendingAccountSave.payload.full_name}</p>
-                    ) : null}
-                    <p><span className="font-semibold">Status:</span> {pendingAccountSave.payload.status}</p>
-                    {pendingAccountSave.payload.password ? (
-                      <p><span className="font-semibold">Password:</span> Will be replaced with the new value you entered.</p>
-                    ) : (
-                      <p><span className="font-semibold">Password:</span> No password change.</p>
+                    <p><span className="font-semibold">Email:</span> {pendingAccountSave.payload.email}</p>
+                    {pendingAccountSave.payload.contact_number !== undefined && (
+                      <p><span className="font-semibold">Contact Number:</span> {pendingAccountSave.payload.contact_number ? `+63 ${pendingAccountSave.payload.contact_number}` : 'Cleared'}</p>
                     )}
+                    <p><span className="font-semibold">Password:</span> {pendingAccountSave.payload.password ? 'Will be replaced with the new value you entered.' : 'No password change.'}</p>
                   </div>
                 </div>
               )}
 
               <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">{verifierLabel} Password</label>
+                <label className="mb-2 block text-sm font-semibold text-slate-700">{verifierLabel} Password</label>
                 <PasswordField
                   value={authModal.password}
                   onChange={(event) => {
                     setAuthModal((previous) => ({ ...previous, password: event.target.value }));
-                    if (authPasswordError) {
-                      setAuthPasswordError('');
-                    }
+                    setAuthPasswordError('');
                   }}
-                  className={`w-full rounded-xl border px-4 py-3 text-sm font-medium placeholder-slate-400 shadow-sm transition-colors focus:ring-2 focus:outline-none ${
-                    authPasswordError 
-                      ? 'border-red-300 bg-red-50 text-red-900 placeholder-red-300 focus:border-red-500 focus:ring-red-500/20' 
-                      : 'border-slate-300 text-slate-900 focus:border-blue-500 focus:ring-blue-500/20'
-                  }`}
+                  className={`${EDITABLE_INPUT_CLASS} ${authPasswordError ? 'border-red-300 bg-red-50 text-red-900 focus:border-red-500 focus:ring-red-500/20' : ''}`}
                   placeholder="Enter your password"
                 />
-                {authPasswordError && (
-                  <p className="mt-2 flex items-center gap-1 text-sm font-medium text-red-600">
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                    </svg>
-                    {authPasswordError}
-                  </p>
-                )}
+                {authPasswordError && <p className="mt-2 text-sm font-medium text-red-600">{authPasswordError}</p>}
               </div>
 
               {error && (
-                <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
-                  <div className="flex items-start gap-3">
-                    <svg className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                    </svg>
-                    <div>
-                      <p className="font-semibold text-red-800">{error}</p>
-                    </div>
-                  </div>
+                <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+                  {error}
                 </div>
               )}
             </div>
 
-            {/* Footer */}
-            <div className="flex-shrink-0 border-t border-slate-200 bg-slate-50 px-6 py-4">
+            <div className="shrink-0 rounded-b-[28px] border-t border-slate-200 bg-slate-50 px-6 py-4 md:px-8">
               <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                 <button
                   onClick={closeAuthModal}
-                  className="w-full rounded-xl border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-500/20 sm:w-auto"
+                  className="w-full rounded-2xl bg-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-300 sm:w-auto"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleConfirmProtectedAction}
                   disabled={loading}
-                  className="w-full rounded-xl bg-red-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500/20 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-red-600 sm:w-auto"
+                  className="w-full rounded-2xl bg-red-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                 >
-                  {loading ? (
-                    <span className="flex items-center justify-center gap-2">
-                      <svg className="h-4 w-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                      </svg>
-                      Verifying...
-                    </span>
-                  ) : (
-                    'Confirm ' + (authModal.mode === 'edit' ? 'Update' : 
-                                  authModal.mode === 'deactivate' ? 'Deactivation' : 
-                                  'Deletion')
-                  )}
+                  {loading ? 'Verifying...' : `Confirm ${authModal.mode === 'edit' ? 'Update' : authModal.mode === 'deactivate' ? 'Deactivation' : 'Deletion'}`}
                 </button>
               </div>
             </div>

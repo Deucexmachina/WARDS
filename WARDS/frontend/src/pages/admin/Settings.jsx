@@ -32,6 +32,17 @@ const formatManilaTime = (value) => formatUtc8Time(value);
 
 const countConfiguredServices = (settings) => settings.enabledServices?.length || 0;
 
+const showSystemSuccessMessage = ({ title, message }) => {
+  window.dispatchEvent(new CustomEvent('wards:system-message', {
+    detail: {
+      tone: 'success',
+      title,
+      message,
+      buttonLabel: 'OK',
+    },
+  }));
+};
+
 const Settings = () => {
   const [settings, setSettings] = useState(defaultSettings);
   const [serviceOptions, setServiceOptions] = useState([]);
@@ -159,11 +170,16 @@ const Settings = () => {
       });
 
       setSettings((previous) => ({ ...previous, ...(response.data.settings || previous) }));
-      setSavedMessage(
-        response.data.notice
-          ? `Settings applied system-wide and published to Policies & SOPs as "${response.data.notice.title}".`
-          : 'No configuration changes were detected.'
-      );
+      const successMessage = response.data.notice
+        ? 'System configuration has been successfully saved and published.'
+        : 'System configuration has been saved successfully.';
+
+      showSystemSuccessMessage({
+        title: response.data.notice ? 'Configuration Published' : 'Configuration Saved',
+        message: successMessage,
+      });
+
+      setSavedMessage('');
       if (response.data.notice) {
         window.dispatchEvent(new Event('admin-policy-updated'));
       }

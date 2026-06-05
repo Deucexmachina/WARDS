@@ -29,13 +29,14 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
-from database.models import Admin, Branch, BranchStaff, CitizenUser, ActivityLog, EmailOTP, EmailVerificationToken, Invite, MFASecret, get_db
+from database.models import Admin, Branch, BranchStaff, CitizenUser, ActivityLog, EmailOTP, EmailVerificationToken, Invite, MFASecret, PrivacyConsent, get_db
 from services.email_service import (
     send_citizen_verification_email,
     send_registration_confirmation_email,
     smtp_is_configured,
 )
-from utils.field_crypto import apply_citizen_user_security, apply_email_otp_security, apply_email_verification_token_security, apply_mfa_secret_security, find_invite_by_token, find_mfa_secret_record, get_decrypted_or_raw, hash_optional_value, serialize_citizen_user, find_citizen_by_email
+from utils.field_crypto import apply_citizen_user_security, apply_email_otp_security, apply_email_verification_token_security, apply_mfa_secret_security, apply_privacy_consent_security, find_invite_by_token, find_mfa_secret_record, get_decrypted_or_raw, hash_optional_value, serialize_citizen_user, find_citizen_by_email
+from utils.privacy_agreement import get_public_privacy_agreement
 from utils.system_settings import get_setting_value
 from utils.security_validation import (
     DUPLICATE_EMAIL_MESSAGE,
@@ -88,6 +89,8 @@ class UserRegisterRequest(BaseModel):
     password: str
     address: Optional[str] = None
     recaptcha_token: Optional[str] = None
+    dpa_consent: bool
+    dpa_version: str
 
 class InviteRegisterRequest(BaseModel):
     email: EmailStr
@@ -135,6 +138,16 @@ class EmailVerificationOtpConfirm(BaseModel):
 
 def validate_public_password(password: str):
     validate_strong_password(password)
+
+
+def get_client_ip(request: Request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for", "").strip()
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    real_ip = request.headers.get("x-real-ip", "").strip()
+    if real_ip:
+        return real_ip
+    return request.client.host if request.client else "unknown"
 
 
 def hash_email_verification_code(code: str) -> str:
@@ -447,20 +460,33 @@ def check_verification_confirm_rate_limit(email: str) -> bool:
 @limiter.limit("5/minute;25/day")
 async def register_user(request: Request, user_data: UserRegisterRequest, db: Session = Depends(get_db)):
     """Register new citizen user"""
-    client_ip = request.client.host
-    
-    # Verify reCAPTCHA for registration
-    if user_data.recaptcha_token:
-        if not verify_recaptcha(user_data.recaptcha_token, client_ip):
-            log_activity(db, "Failed Registration reCAPTCHA", user_data.email, f"IP: {client_ip}", "security")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="reCAPTCHA verification failed"
-            )
-    
+    client_ip = get_client_ip(request)
+    agreement = get_public_privacy_agreement()
+
     normalized_email = normalize_email(user_data.email, check_deliverability=True)
     normalized_full_name = normalize_citizen_full_name(user_data.full_name)
     normalized_contact_number = normalize_ph_contact_number(user_data.contact_number)
+    if not user_data.dpa_consent:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You must agree to the Data Privacy Agreement before registering.",
+        )
+    if user_data.dpa_version.strip() != agreement["version"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The Data Privacy Agreement version is outdated. Please review the latest agreement and try again.",
+        )
+    if not user_data.recaptcha_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please complete the reCAPTCHA verification before registering.",
+        )
+    if not verify_recaptcha(user_data.recaptcha_token, client_ip):
+        log_activity(db, "Failed Registration reCAPTCHA", normalized_email, f"IP: {client_ip}", "security")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="reCAPTCHA verification failed. Please try again.",
+        )
     ensure_email_is_unique(db, normalized_email)
     normalized_tin = None
     if user_data.tin and user_data.tin.strip():
@@ -486,6 +512,19 @@ async def register_user(request: Request, user_data: UserRegisterRequest, db: Se
     db.add(new_user)
     db.flush()
     apply_citizen_user_security(new_user)
+
+    consent_record = PrivacyConsent(
+        citizen_user_id=new_user.id,
+        agreement_title=agreement["title"],
+        agreement_version=agreement["version"],
+        agreement_effective_date=agreement["effective_date"],
+        source_module="citizen_registration",
+        consented_at=datetime.utcnow(),
+        ip_address=client_ip,
+    )
+    apply_privacy_consent_security(consent_record)
+    db.add(consent_record)
+    db.flush()
 
     if verification_required:
         issue_email_verification_otp(db, new_user, allow_recent_existing=False)
