@@ -75,8 +75,13 @@ const PaymentStatus = () => {
   const isReceiptRequestPayment = payment?.source_module === 'receipt_request';
   const paymongoStatus = normalizeStatus(payment?.paymongo_status);
   const status = normalizeStatus(payment?.status);
-  const isVerified = SUCCESS_STATUSES.has(status) || SUCCESS_STATUSES.has(paymongoStatus) || Boolean(payment?.verified_at);
-  const isFailed = FAILED_STATUSES.has(status) || FAILED_STATUSES.has(paymongoStatus);
+  const isReceiptRequestPendingVerification = isReceiptRequestPayment
+    && !payment?.verified_at
+    && (status === 'pending transaction' || SUCCESS_STATUSES.has(paymongoStatus));
+  const isVerified = isReceiptRequestPayment
+    ? (status === 'verified' || status === 'payment verified' || Boolean(payment?.verified_at))
+    : (SUCCESS_STATUSES.has(status) || SUCCESS_STATUSES.has(paymongoStatus) || Boolean(payment?.verified_at));
+  const isFailed = FAILED_STATUSES.has(status) || FAILED_STATUSES.has(paymongoStatus) || status === 'rejected';
   const isExpired = EXPIRED_STATUSES.has(status) || EXPIRED_STATUSES.has(paymongoStatus);
   const shouldShowProofUpload = (isRptPayment && RPT_POST_PAYMENT_STAGES.has(rawStatus) || isBusinessTaxPayment && BT_POST_PAYMENT_STAGES.has(rawStatus)) && !payment?.has_payment_proof;
   const shouldResetRptWorkflowOnReturn = isRptPayment && RPT_SUCCESS_RETURN_RESET_STAGES.has(rawStatus);
@@ -303,7 +308,9 @@ const PaymentStatus = () => {
     );
   }
 
-  const stageLabel = rawStatus
+  const stageLabel = isReceiptRequestPendingVerification
+    ? 'Pending Transaction'
+    : rawStatus
     ? rawStatus.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
     : (isVerified ? 'Payment Verified' : 'Payment Processing');
 
@@ -324,16 +331,20 @@ const PaymentStatus = () => {
               </svg>
             </div>
             <h2 className="text-4xl font-bold text-primary mb-3">
-              {(isRptPayment && RPT_POST_PAYMENT_STAGES.has(rawStatus)) || (isBusinessTaxPayment && BT_POST_PAYMENT_STAGES.has(rawStatus))
-                ? 'Payment Submitted to Treasury Workflow'
-                : isVerified
-                  ? 'Payment Verified!'
-                  : 'Payment Processing'}
+              {isReceiptRequestPendingVerification
+                ? 'Pending Branch Verification'
+                : ((isRptPayment && RPT_POST_PAYMENT_STAGES.has(rawStatus)) || (isBusinessTaxPayment && BT_POST_PAYMENT_STAGES.has(rawStatus))
+                  ? 'Payment Submitted to Treasury Workflow'
+                  : isVerified
+                    ? 'Payment Verified!'
+                    : 'Payment Processing')}
             </h2>
             <p className="text-gray-600 text-lg">
-              {(isRptPayment && RPT_POST_PAYMENT_STAGES.has(rawStatus)) || (isBusinessTaxPayment && BT_POST_PAYMENT_STAGES.has(rawStatus))
-                ? 'Your PayMongo sandbox payment has been captured. WARDS is now waiting for branch treasury validation and supporting proof.'
-                : 'Your transaction is being monitored. This page updates automatically as PayMongo responds.'}
+              {isReceiptRequestPendingVerification
+                ? 'Your receipt request payment was captured successfully and is now waiting for Branch Admin verification before release can continue.'
+                : ((isRptPayment && RPT_POST_PAYMENT_STAGES.has(rawStatus)) || (isBusinessTaxPayment && BT_POST_PAYMENT_STAGES.has(rawStatus))
+                  ? 'Your PayMongo sandbox payment has been captured. WARDS is now waiting for branch treasury validation and supporting proof.'
+                  : 'Your transaction is being monitored. This page updates automatically as PayMongo responds.')}
             </p>
           </div>
 
@@ -451,11 +462,11 @@ const PaymentStatus = () => {
                 <div className="rounded-xl border border-slate-200 bg-white px-6 py-5">
                   <h3 className="text-lg font-bold text-slate-900 mb-3">Upload Payment Proof</h3>
                   <p className="text-sm text-slate-600 mb-4">
-                    Upload a screenshot or payment receipt reference in JPG, PNG, or PDF format. Maximum file size is 5MB.
+                    Upload a payment proof document in PDF, DOC, or DOCX format. Maximum file size is 5MB.
                   </p>
                   <input
                     type="file"
-                    accept=".jpg,.jpeg,.png,.pdf"
+                    accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                     onChange={(event) => setSelectedProofFile(event.target.files?.[0] || null)}
                     className="block w-full text-sm text-slate-700"
                   />

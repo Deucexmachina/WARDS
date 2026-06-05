@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 
 import { paymentAPI, receiptAPI } from '../../services/api';
+import PaymentGatewayExperience from '../../components/PaymentGatewayExperience';
 import { getStoredPublicUser, PUBLIC_USER_STORAGE_EVENT } from '../../utils/publicSession';
 import { getEmailValidationMessage } from '../../utils/validation';
 
@@ -17,13 +18,6 @@ const RECEIPT_REQUEST_REASONS = [
   'Government compliance',
   'Other',
 ];
-const PAYMENT_METHOD_OPTIONS = [
-  { value: 'gcash', label: 'GCash' },
-  { value: 'maya', label: 'Maya' },
-  { value: 'card', label: 'Card' },
-  { value: 'banking', label: 'Online Banking' },
-];
-
 const getTodayDateValue = () =>
   new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Manila',
@@ -43,18 +37,24 @@ const RequestReceipt = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [storedUser, setStoredUser] = useState(() => getStoredPublicUser());
+  const authenticatedProfileName = (storedUser?.full_name || '').trim();
   const [branches, setBranches] = useState([]);
   const [requestStatus, setRequestStatus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [paying, setPaying] = useState(false);
   const [requestConfirmed, setRequestConfirmed] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState('gcash');
+  const [selectedBank, setSelectedBank] = useState('');
+  const [paymentCustomer, setPaymentCustomer] = useState({
+    name: authenticatedProfileName,
+    email: storedUser?.email || '',
+    mobile: storedUser?.contact_number || '',
+  });
   const [error, setError] = useState('');
   const [nameError, setNameError] = useState('');
   const [emailError, setEmailError] = useState('');
   const [systemStatus, setSystemStatus] = useState(null);
 
-  const authenticatedProfileName = (storedUser?.full_name || '').trim();
   const todayDate = useMemo(() => getTodayDateValue(), []);
   const activeReceiptRequestStorageKey = useMemo(
     () => buildReceiptRequestStorageKey(storedUser?.email),
@@ -83,6 +83,12 @@ const RequestReceipt = () => {
       ...current,
       taxpayerName: authenticatedProfileName || current.taxpayerName || '',
       email: storedUser?.email || current.email || '',
+    }));
+    setPaymentCustomer((current) => ({
+      ...current,
+      name: authenticatedProfileName || current.name || '',
+      email: storedUser?.email || current.email || '',
+      mobile: storedUser?.contact_number || current.mobile || '',
     }));
   }, [authenticatedProfileName, storedUser]);
 
@@ -222,7 +228,7 @@ const RequestReceipt = () => {
     }
   };
 
-  const handlePayFee = async (requestIdOverride = null) => {
+  const handlePayFee = async (requestIdOverride = null, checkoutDetails = {}) => {
     if (!systemStatus?.paymentGatewayEnabled) {
       setError(systemStatus?.disabledMessage || DEFAULT_DISABLED_MESSAGE);
       return;
@@ -256,10 +262,11 @@ const RequestReceipt = () => {
       }
 
       const paymentContext = requestStatus || {};
+      const checkoutCustomer = checkoutDetails.customer || paymentCustomer;
       const initiateResponse = await receiptAPI.payRequestFee(resolvedRequestId, {
-        paymentMethod,
-        email: paymentContext.email || formData.email,
-        taxpayerName: paymentContext.taxpayerName || formData.taxpayerName,
+        paymentMethod: checkoutDetails.method || paymentMethod,
+        email: paymentContext.email || checkoutCustomer.email || formData.email,
+        taxpayerName: paymentContext.taxpayerName || checkoutCustomer.name || formData.taxpayerName,
         transactionDate: paymentContext.transactionDate || formData.txnDate,
         branchId: paymentContext.branchId || Number(formData.branchId) || null,
         taxType: paymentContext.taxType || formData.taxType,
@@ -277,7 +284,7 @@ const RequestReceipt = () => {
                 refNumber: initiateResponse.data.paymentRefNumber || current.payment?.refNumber,
                 status: initiateResponse.data.status || current.payment?.status,
                 amount: initiateResponse.data.amount ?? current.payment?.amount,
-                paymentMethod,
+                paymentMethod: checkoutDetails.method || paymentMethod,
               },
             }
           : current
@@ -289,7 +296,8 @@ const RequestReceipt = () => {
 
       const paymentResponse = await paymentAPI.processPayment({
         refNumber: initiateResponse.data.paymentRefNumber,
-        paymentMethod,
+        paymentMethod: checkoutDetails.method || paymentMethod,
+        bankCode: checkoutDetails.bankCode || undefined,
       });
 
       if (paymentResponse.data.checkoutUrl) {
@@ -323,7 +331,7 @@ const RequestReceipt = () => {
 
   return (
     <section className="min-h-screen bg-slate-50 py-16">
-      <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-xl shadow-slate-200/60">
           <div className="bg-gradient-to-r from-[#0f2f5f] via-[#17457f] to-[#2b6cb0] px-8 py-10 text-white">
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-100">Online Services</p>
@@ -347,7 +355,7 @@ const RequestReceipt = () => {
               </div>
             ) : null}
 
-            <div className={requestStatus ? 'mx-auto max-w-2xl' : 'grid gap-8 xl:grid-cols-[1.25fr,0.75fr]'}>
+            <div className={requestStatus ? `mx-auto ${requestConfirmed ? 'max-w-6xl' : 'max-w-2xl'}` : 'grid gap-8 xl:grid-cols-[1.25fr,0.75fr]'}>
               {!requestStatus ? (
               <div className="space-y-6">
                 <div className="rounded-3xl border border-slate-200 bg-slate-50 p-6">
@@ -502,7 +510,7 @@ const RequestReceipt = () => {
 
                 {requestStatus ? (
                   <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <h3 className="text-xl font-bold text-slate-900">{requestConfirmed ? 'Request Fee' : 'Request Status'}</h3>
+                    <h3 className="text-xl font-bold text-slate-900">{requestConfirmed ? 'Payment Details' : 'Request Status'}</h3>
                     {!requestConfirmed ? (
                     <>
                     <div className="mt-5 space-y-3">
@@ -535,7 +543,7 @@ const RequestReceipt = () => {
                     ) : null}
 
                     {!requestStatus.feePaid && requestConfirmed ? (
-                      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                      <div className="rounded-[28px] border border-emerald-200 bg-emerald-50 p-5">
                         <div className="flex items-center justify-between gap-4">
                           <div>
                             <p className="text-sm font-semibold text-emerald-900">Request Fee</p>
@@ -543,36 +551,35 @@ const RequestReceipt = () => {
                           </div>
                           <p className="text-2xl font-bold text-emerald-700">P200.00</p>
                         </div>
-                        <div className="mt-5 rounded-2xl border border-white/80 bg-white p-4">
-                          <label className="mb-3 block text-sm font-bold text-slate-900">Choose Payment Method</label>
-                          <div className="grid gap-3 sm:grid-cols-2">
-                            {PAYMENT_METHOD_OPTIONS.map((option) => (
-                              <button
-                                key={option.value}
-                                type="button"
-                                onClick={() => setPaymentMethod(option.value)}
-                                className={`rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition ${
-                                  paymentMethod === option.value
-                                    ? 'border-emerald-500 bg-emerald-50 text-emerald-900 shadow-sm'
-                                    : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-emerald-300'
-                                }`}
-                              >
-                                {option.label}
-                              </button>
-                            ))}
-                          </div>
+                        <div className="mt-5">
+                          <PaymentGatewayExperience
+                            amount={200}
+                            bankCode={selectedBank}
+                            customer={{
+                              name: paymentCustomer.name || requestStatus.taxpayerName || formData.taxpayerName,
+                              email: paymentCustomer.email || requestStatus.email || formData.email,
+                              mobile: paymentCustomer.mobile,
+                            }}
+                            disabled={Boolean(systemStatus && (!systemStatus.paymentGatewayEnabled || systemStatus.maintenanceMode))}
+                            method={paymentMethod}
+                            onBankChange={setSelectedBank}
+                            onCustomerChange={setPaymentCustomer}
+                            onMethodChange={(nextMethod) => {
+                              setPaymentMethod(nextMethod);
+                              setSelectedBank('');
+                            }}
+                            onContinue={(details) => handlePayFee(null, details)}
+                            processing={paying}
+                            referenceNumber={requestStatus.requestId}
+                            title="Request Fee Checkout"
+                          />
                         </div>
-                        <button
-                          onClick={handlePayFee}
-                          disabled={paying || (systemStatus && (!systemStatus.paymentGatewayEnabled || systemStatus.maintenanceMode))}
-                          className="mt-4 w-full rounded-2xl bg-emerald-600 px-5 py-3 font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
-                        >
-                          {paying ? 'Processing Payment...' : 'Pay Request Fee'}
-                        </button>
                       </div>
                     ) : requestStatus.feePaid ? (
                       <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm font-semibold text-emerald-800">
-                        Payment recorded. Your request is now moving through the branch release workflow.
+                        {requestStatus.paymentStatus === 'Pending Transaction'
+                          ? 'Payment recorded. Your request is now waiting for Branch Admin verification before release can continue.'
+                          : 'Payment recorded. Your request is now moving through the branch release workflow.'}
                       </div>
                     ) : null}
 

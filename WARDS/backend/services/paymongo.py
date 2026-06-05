@@ -1,5 +1,6 @@
 import os
 import base64
+import json
 import requests
 from typing import Dict, Optional
 from datetime import datetime
@@ -30,13 +31,40 @@ class PayMongoService:
             "Content-Type": "application/json",
             "Accept": "application/json"
         }
+
+    def _get_public_headers(self) -> Dict[str, str]:
+        if not self.public_key:
+            return self._get_headers()
+        credentials = f"{self.public_key}:"
+        encoded = base64.b64encode(credentials.encode()).decode()
+        return {
+            "Authorization": f"Basic {encoded}",
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
+
+    def _sanitize_metadata(self, metadata: Optional[Dict]) -> Dict:
+        """
+        PayMongo metadata values must be flat/scalar. Convert nested values to
+        compact strings so WARDS can keep context without PayMongo rejecting it.
+        """
+        sanitized = {}
+        for key, value in (metadata or {}).items():
+            if value is None:
+                sanitized[str(key)] = ""
+            elif isinstance(value, (str, int, float, bool)):
+                sanitized[str(key)] = str(value)
+            else:
+                sanitized[str(key)] = json.dumps(value, separators=(",", ":"), default=str)
+        return sanitized
     
     def create_payment_intent(
         self,
         amount: float,
         description: str,
         statement_descriptor: str = "WARDS Tax Payment",
-        metadata: Optional[Dict] = None
+        metadata: Optional[Dict] = None,
+        payment_method_allowed: Optional[list[str]] = None
     ) -> Dict:
         """
         Create a PayMongo Payment Intent
@@ -54,11 +82,12 @@ class PayMongoService:
         
         amount_centavos = int(amount * 100)
         
+        safe_metadata = self._sanitize_metadata(metadata)
         payload = {
             "data": {
                 "attributes": {
                     "amount": amount_centavos,
-                    "payment_method_allowed": [
+                    "payment_method_allowed": payment_method_allowed or [
                         "gcash",
                         "paymaya",
                         "card",
@@ -72,19 +101,23 @@ class PayMongoService:
                     "currency": "PHP",
                     "description": description,
                     "statement_descriptor": statement_descriptor[:22],
-                    "metadata": metadata or {}
+                    "metadata": safe_metadata
                 }
             }
         }
         
         response = requests.post(url, json=payload, headers=self._get_headers())
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            raise requests.HTTPError(f"{exc}; response={response.text}", response=response) from exc
         return response.json()
     
     def create_payment_method(
         self,
         payment_type: str,
-        details: Optional[Dict] = None
+        details: Optional[Dict] = None,
+        billing: Optional[Dict] = None
     ) -> Dict:
         """
         Create a PayMongo Payment Method
@@ -106,9 +139,14 @@ class PayMongoService:
                 }
             }
         }
+        if billing:
+            payload["data"]["attributes"]["billing"] = billing
         
-        response = requests.post(url, json=payload, headers=self._get_headers())
-        response.raise_for_status()
+        response = requests.post(url, json=payload, headers=self._get_public_headers())
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            raise requests.HTTPError(f"{exc}; response={response.text}", response=response) from exc
         return response.json()
     
     def attach_payment_intent(
@@ -144,8 +182,11 @@ class PayMongoService:
         if return_url:
             payload["data"]["attributes"]["return_url"] = return_url
         
-        response = requests.post(url, json=payload, headers=self._get_headers())
-        response.raise_for_status()
+        response = requests.post(url, json=payload, headers=self._get_public_headers())
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            raise requests.HTTPError(f"{exc}; response={response.text}", response=response) from exc
         return response.json()
     
     def retrieve_payment_intent(self, payment_intent_id: str) -> Dict:
@@ -192,6 +233,7 @@ class PayMongoService:
         url = f"{self.base_url}/sources"
         
         amount_centavos = int(amount * 100)
+        safe_metadata = self._sanitize_metadata(metadata)
         
         payload = {
             "data": {
@@ -204,18 +246,21 @@ class PayMongoService:
                         "failed": redirect_failed
                     },
                     "billing": {
-                        "name": metadata.get("taxpayer_name", "Taxpayer") if metadata else "Taxpayer",
-                        "email": metadata.get("email", "taxpayer@example.com") if metadata else "taxpayer@example.com"
+                        "name": safe_metadata.get("taxpayer_name") or "Taxpayer",
+                        "email": safe_metadata.get("email") or "taxpayer@example.com"
                     },
                     "description": description,
                     "statement_descriptor": statement_descriptor[:22],
-                    "metadata": metadata or {}
+                    "metadata": safe_metadata
                 }
             }
         }
         
         response = requests.post(url, json=payload, headers=self._get_headers())
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            raise requests.HTTPError(f"{exc}; response={response.text}", response=response) from exc
         return response.json()
 
     def create_checkout_session(

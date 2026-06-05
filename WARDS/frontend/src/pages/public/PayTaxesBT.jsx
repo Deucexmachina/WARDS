@@ -1,22 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import PaymentGatewayExperience from '../../components/PaymentGatewayExperience';
 import { paymentAPI, taxpayerAccountAPI } from '../../services/api';
 import { getStoredPublicUser } from '../../utils/publicSession';
 import { formatTin } from '../../utils/validation';
 
 const API_ORIGIN = 'http://localhost:8000';
-const PAYMENT_METHODS = [
-  { id: 'gcash', label: 'GCash' },
-  { id: 'maya', label: 'Maya' },
-  { id: 'card', label: 'Debit / Credit Card' },
-  { id: 'banking', label: 'Online Banking' },
-];
 const SEARCH_OPTIONS = [
   { value: 'tracking_mp_no', label: 'Tracking/MP No.' },
   { value: 'mayors_permit_number', label: "Mayor's Permit Number" },
   { value: 'business_name', label: 'Business Name' },
   { value: 'owner_name', label: 'Owner Name' },
 ];
+const CITIZEN_BT_REFRESH_INTERVAL_MS = 30000;
 const STATUS_OPTIONS = [
   { value: 'ALL', label: 'All' },
   { value: 'VALIDATED', label: 'Validated' },
@@ -66,11 +62,25 @@ const PayTaxesBT = () => {
   });
   const [paymentMethod, setPaymentMethod] = useState('gcash');
   const [selectedBank, setSelectedBank] = useState('');
+  const [paymentCustomer, setPaymentCustomer] = useState({
+    name: publicUser?.full_name || '',
+    email: publicUser?.email || '',
+    mobile: publicUser?.contact_number || '',
+  });
   const [linkedAssessments, setLinkedAssessments] = useState([]);
 
   const trackingFromQuery = searchParams.get('tracking') || '';
   const currentView = searchParams.get('view') || 'list';
   const isDashboardView = currentView === 'dashboard';
+
+  const refreshLinkedAssessments = async () => {
+    try {
+      const response = await taxpayerAccountAPI.getAssessments({ tax_type: 'BT' });
+      setLinkedAssessments(response.data?.items || []);
+    } catch {
+      // Leave the current linked assessment state unchanged on refresh failure.
+    }
+  };
 
   const fetchApplications = async (nextFilters = {}) => {
     const params = {
@@ -85,17 +95,29 @@ const PayTaxesBT = () => {
       setApplications(items);
 
       const selectedTracking = nextFilters.selectedTracking ?? trackingFromQuery;
-      if (selectedTracking) {
+      if (selectedTracking && (nextFilters.keepSelectedDashboard ?? isDashboardView)) {
         const matched = items.find((item) => item.tracking_number === selectedTracking);
         if (matched) {
           setSelectedApplication(matched);
           return;
         }
+
+        try {
+          const selectedResponse = await paymentAPI.getBusinessTaxApplication(selectedTracking);
+          setSelectedApplication(selectedResponse.data);
+          return;
+        } catch {
+          setSelectedApplication(null);
+        }
       }
 
       if (selectedApplication) {
         const refreshed = items.find((item) => item.tracking_number === selectedApplication.tracking_number);
-        if (refreshed) setSelectedApplication(refreshed);
+        if (refreshed) {
+          setSelectedApplication(refreshed);
+        } else if (!(nextFilters.keepSelectedDashboard ?? isDashboardView)) {
+          setSelectedApplication(null);
+        }
       }
     } catch (fetchError) {
       setError(fetchError.response?.data?.detail || 'Failed to load Business Tax applications.');
@@ -105,11 +127,30 @@ const PayTaxesBT = () => {
   };
 
   useEffect(() => {
-    fetchApplications();
-    taxpayerAccountAPI.getAssessments({ tax_type: 'BT' })
-      .then((response) => setLinkedAssessments(response.data?.items || []))
-      .catch(() => {});
+    fetchApplications({ keepSelectedDashboard: true });
+    refreshLinkedAssessments();
   }, []);
+
+  useEffect(() => {
+    const refreshAll = () => {
+      fetchApplications({ selectedTracking: trackingFromQuery || selectedApplication?.tracking_number || '', keepSelectedDashboard: true });
+      refreshLinkedAssessments();
+    };
+
+    const refreshOnFocus = () => {
+      refreshAll();
+    };
+
+    const intervalId = window.setInterval(refreshAll, CITIZEN_BT_REFRESH_INTERVAL_MS);
+    window.addEventListener('focus', refreshOnFocus);
+    document.addEventListener('visibilitychange', refreshOnFocus);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', refreshOnFocus);
+      document.removeEventListener('visibilitychange', refreshOnFocus);
+    };
+  }, [trackingFromQuery, selectedApplication?.tracking_number, searchField, searchTerm, statusFilter, isDashboardView]);
 
   useEffect(() => {
     if (!trackingFromQuery || !applications.length) return;
@@ -228,14 +269,13 @@ const PayTaxesBT = () => {
     try {
       const response = await paymentAPI.generateBusinessTaxReference(selectedApplication.tracking_number, {
         trackingNumber: selectedApplication.tracking_number,
-        taxpayerName: publicUser?.full_name || '',
-        tin: publicUser?.tin || '',
-        email: publicUser?.email || '',
-        contactNumber: publicUser?.contact_number || '',
+        taxpayerName: paymentCustomer.name || publicUser?.full_name || '',
+        email: paymentCustomer.email || publicUser?.email || '',
+        contactNumber: paymentCustomer.mobile || publicUser?.contact_number || '',
         paymentMethod,
         bankCode: paymentMethod === 'banking' ? selectedBank : undefined,
       });
-      setMessage(`Payment reference ${response.data?.refNumber} generated. Continue to PayMongo simulation when ready.`);
+      setMessage(`Payment reference ${response.data?.refNumber} generated. Continue to PayMongo gateway when ready.`);
       await fetchApplications({ selectedTracking: selectedApplication.tracking_number });
     } catch (referenceError) {
       const detail = referenceError.response?.data?.detail;
@@ -482,7 +522,7 @@ const PayTaxesBT = () => {
             ) : null}
 
             {isDashboardView && selectedApplication ? (
-              <div className={`mt-8 grid gap-7 ${shouldShowPaymentPanels ? 'xl:grid-cols-[1.18fr,0.82fr]' : 'max-w-[860px] mx-auto'}`}>
+              <div className={`mt-8 grid gap-7 ${shouldShowPaymentPanels ? '' : 'max-w-[860px] mx-auto'}`}>
                 <div className="space-y-6">
                   <div className="rounded-[30px] border border-[#d9e7f9] bg-[linear-gradient(180deg,#f8fbff_0%,#eef5ff_100%)] p-7 shadow-[0_12px_28px_rgba(15,52,108,0.05)]">
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -590,58 +630,25 @@ const PayTaxesBT = () => {
 
                       <div className="rounded-[30px] border border-slate-200 bg-white p-7 shadow-[0_12px_28px_rgba(15,23,42,0.05)]">
                         <h3 className="text-[1.15rem] font-bold text-slate-900">Payment And Treasury Verification</h3>
-                        <p className="mt-2 text-sm leading-7 text-slate-500">Business Tax uses the same PayMongo simulation architecture already running in the RPT public module.</p>
+                        <p className="mt-2 text-sm leading-7 text-slate-500">WARDS validates the selected payment details first. PayMongo is used as the final hosted gateway for transaction processing and success or failed status validation.</p>
 
                         <div className="mt-6 space-y-4">
-                          <div>
-                            <label className="mb-2 block text-sm font-semibold text-slate-700">Payment Method</label>
-                            <select
-                              value={paymentMethod}
-                              onChange={(event) => setPaymentMethod(event.target.value)}
-                              className="w-full rounded-[18px] border border-slate-300 px-4 py-3 text-sm shadow-sm focus:border-[#123f8f] focus:outline-none"
-                            >
-                              {PAYMENT_METHODS.map((method) => (
-                                <option key={method.id} value={method.id}>{method.label}</option>
-                              ))}
-                            </select>
-                          </div>
-
-                          {paymentMethod === 'banking' ? (
-                            <div>
-                              <label className="mb-2 block text-sm font-semibold text-slate-700">Bank Code</label>
-                              <input
-                                type="text"
-                                value={selectedBank}
-                                onChange={(event) => setSelectedBank(event.target.value)}
-                                placeholder="Enter bank code"
-                                className="w-full rounded-[18px] border border-slate-300 px-4 py-3 text-sm shadow-sm focus:border-[#123f8f] focus:outline-none"
-                              />
-                            </div>
-                          ) : null}
-
-                          <div className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4">
-                            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Payment Reference</p>
-                            <p className="mt-2 text-sm font-semibold text-slate-900">{selectedApplication.payment_ref_number || 'No payment reference generated yet'}</p>
-                            <p className="mt-2 text-xs text-slate-500">Citizen: {publicUser?.full_name || selectedApplication.taxpayer_name}</p>
-                            <p className="mt-1 text-xs text-slate-500">TIN: {formatTin(publicUser?.tin || '') || 'Not yet set'}</p>
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={handleGenerateReference}
-                            disabled={generatingReference}
-                            className="w-full rounded-full bg-[linear-gradient(135deg,#123f8f_0%,#0f2f5f_100%)] px-6 py-3 text-[11px] font-bold uppercase tracking-[0.18em] text-white shadow-[0_10px_24px_rgba(15,52,108,0.18)] transition hover:-translate-y-0.5 disabled:opacity-60"
-                          >
-                            {generatingReference ? 'Generating Reference...' : 'Generate Business Tax Payment Reference'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleProceedToPayment}
-                            disabled={processingPayment || !selectedApplication.payment_ref_number}
-                            className="w-full rounded-full bg-[linear-gradient(135deg,#2ea67d_0%,#58c6a0_100%)] px-6 py-3 text-[11px] font-bold uppercase tracking-[0.18em] text-white shadow-[0_10px_24px_rgba(46,166,125,0.22)] transition hover:-translate-y-0.5 disabled:opacity-60"
-                          >
-                            {processingPayment ? 'Opening PayMongo...' : 'Proceed To Payment'}
-                          </button>
+                          <PaymentGatewayExperience
+                            amount={selectedApplication.amount_due}
+                            bankCode={selectedBank}
+                            customer={paymentCustomer}
+                            method={paymentMethod}
+                            onBankChange={setSelectedBank}
+                            onCustomerChange={setPaymentCustomer}
+                            onMethodChange={(value) => {
+                              setPaymentMethod(value);
+                              setSelectedBank('');
+                            }}
+                            onContinue={selectedApplication.payment_ref_number ? handleProceedToPayment : handleGenerateReference}
+                            processing={generatingReference || processingPayment}
+                            referenceNumber={selectedApplication.payment_ref_number}
+                            title="Business Tax Checkout"
+                          />
                         </div>
                       </div>
 
@@ -649,7 +656,7 @@ const PayTaxesBT = () => {
                         <div className="rounded-[30px] border border-slate-200 bg-white p-7 shadow-[0_12px_28px_rgba(15,23,42,0.05)]">
                         <h3 className="text-[1.15rem] font-bold text-slate-900">Receipt And Branch Outcome</h3>
                         <div className="mt-5 space-y-3 text-sm leading-7 text-slate-600">
-                          <p>Proof of payment upload is completed through the payment status page after PayMongo simulation.</p>
+                          <p>Proof of payment upload is completed through the payment status page after PayMongo gateway processing.</p>
                           <p>Branch treasury personnel can verify, approve, reject, or return your submission for correction inside the Branch Admin portal.</p>
                           <p>Once verified, your Business Tax Official Receipt will appear here.</p>
                         </div>

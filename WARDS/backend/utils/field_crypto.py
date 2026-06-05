@@ -205,6 +205,17 @@ def apply_mfa_secret_security(mfa_record):
     portal_value = get_preferred_write_value(mfa_record, "portal")
     username_value = get_preferred_write_value(mfa_record, "username")
     secret_value = get_preferred_write_value(mfa_record, "secret")
+    # If an existing MFA record can no longer be decrypted, leave it untouched here.
+    # This avoids wiping the stored MFA material during startup re-application.
+    raw_portal = getattr(mfa_record, "portal", None)
+    raw_username = getattr(mfa_record, "username", None)
+    raw_secret = getattr(mfa_record, "secret", None)
+    if (
+        (portal_value is None and is_redacted_placeholder(raw_portal))
+        or (username_value is None and is_redacted_placeholder(raw_username))
+        or (secret_value is None and is_redacted_placeholder(raw_secret))
+    ):
+        return mfa_record
     set_encrypted_hash_companions(mfa_record, "portal", portal_value)
     set_encrypted_hash_companions(mfa_record, "username", username_value)
     set_encrypted_hash_companions(mfa_record, "secret", secret_value)

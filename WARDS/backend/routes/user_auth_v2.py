@@ -15,6 +15,7 @@ from passlib.context import CryptContext
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
 from typing import Optional
+import binascii
 import base64
 import io
 import os
@@ -337,7 +338,23 @@ def log_activity(db: Session, action: str, user: str, details: str, log_type: st
 
 def get_mfa_secret(db: Session, email: str) -> Optional[str]:
     mfa = find_mfa_secret_record(db, MFASecret, "public", email, enabled_only=True)
-    return (get_decrypted_or_raw(mfa, "secret") or mfa.secret) if mfa else None
+    if not mfa:
+        return None
+
+    secret = get_decrypted_or_raw(mfa, "secret")
+    if not secret:
+        return None
+
+    normalized_secret = str(secret).strip().replace(" ", "")
+    if not normalized_secret:
+        return None
+
+    try:
+        base64.b32decode(normalized_secret, casefold=True)
+    except (binascii.Error, ValueError):
+        return None
+
+    return normalized_secret
 
 def save_mfa_secret(db: Session, email: str, secret: str):
     mfa = find_mfa_secret_record(db, MFASecret, "public", email)

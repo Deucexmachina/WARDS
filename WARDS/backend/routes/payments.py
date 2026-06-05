@@ -74,6 +74,7 @@ BT_BLOCKING_PAYMENT_STATUSES = {
     "VALIDATED",
     "DOCUMENTS_UPLOADED",
 }
+BT_FINAL_APPLICATION_STATUSES = {"PAYMENT_VERIFIED", "OR_GENERATED", "COMPLETED", "VERIFIED"}
 BT_ALLOWED_UPLOAD_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".docx"}
 
 SIMULATED_RPT_PROPERTIES = {
@@ -183,7 +184,7 @@ class RptCartItem(BaseModel):
 
 class RptPaymentReferenceRequest(BaseModel):
     taxpayerName: str
-    tin: str
+    tin: str | None = None
     email: str | None = None
     contactNumber: str
     branchId: int
@@ -206,7 +207,7 @@ class BusinessTaxApplicationSearchQuery(BaseModel):
 class BusinessTaxPaymentReferenceRequest(BaseModel):
     trackingNumber: str
     taxpayerName: str
-    tin: str
+    tin: str | None = None
     email: str | None = None
     contactNumber: str
     paymentMethod: str
@@ -236,11 +237,11 @@ PUBLIC_PAYMENT_METHOD_CONFIG = {
     },
     "banking": {
         "stored_value": "banking",
-        "checkout_methods": ["card"],
+        "checkout_methods": ["dob", "brankas"],
     },
     "online_banking": {
         "stored_value": "banking",
-        "checkout_methods": ["card"],
+        "checkout_methods": ["dob", "brankas"],
     },
     "grabpay": {
         "stored_value": "grabpay",
@@ -250,6 +251,14 @@ PUBLIC_PAYMENT_METHOD_CONFIG = {
         "stored_value": "grabpay",
         "checkout_methods": ["grab_pay"],
     },
+}
+ONLINE_BANKING_METHODS_BY_BANK = {
+    "bpi": ["dob"],
+    "ubp": ["dob"],
+    "unionbank": ["dob"],
+    "bdo": ["brankas"],
+    "landbank": ["brankas"],
+    "metrobank": ["brankas"],
 }
 PH_MOBILE_PATTERN = re.compile(r"^(?:\+63|63|0)9\d{9}$")
 
@@ -1075,31 +1084,42 @@ def map_workflow_status_to_serialized(status_value: str | None) -> str:
 
 def mark_payment_submitted(payment: Payment):
     payment.paymongo_status = "paid"
-    payment.verified_at = payment.verified_at or datetime.utcnow()
     if payment.source_module in {"rpt_online_payment", "business_tax_online_payment"}:
+        payment.verified_at = payment.verified_at or datetime.utcnow()
         payment.status = "PAYMENT_SUBMITTED"
         metadata = parse_payment_metadata(payment)
         metadata["payment_timestamp"] = payment.verified_at.isoformat()
         metadata["awaiting_treasury_validation"] = True
         set_payment_metadata(payment, metadata)
+    elif payment.source_module == "receipt_request":
+        payment.status = "Pending Transaction"
     else:
+        payment.verified_at = payment.verified_at or datetime.utcnow()
         payment.status = "Verified"
     apply_payment_security(payment)
 
 
 def normalize_public_payment_method(payment_method: str | None) -> str:
     normalized = (payment_method or "").strip().lower().replace(" ", "_")
+    if normalized in {"banking", "online_banking"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Online banking is temporarily unavailable because PayMongo's DOB test bank portal is not completing payments.",
+        )
     payment_method_config = PUBLIC_PAYMENT_METHOD_CONFIG.get(normalized)
     if not payment_method_config:
         raise HTTPException(status_code=400, detail="Unsupported payment method selected")
     return payment_method_config["stored_value"]
 
 
-def resolve_checkout_payment_methods(payment_method: str | None) -> list[str]:
+def resolve_checkout_payment_methods(payment_method: str | None, bank_code: str | None = None) -> list[str]:
     normalized = (payment_method or "").strip().lower().replace(" ", "_")
     payment_method_config = PUBLIC_PAYMENT_METHOD_CONFIG.get(normalized)
     if not payment_method_config:
         raise HTTPException(status_code=400, detail="Unsupported payment method selected")
+    if payment_method_config["stored_value"] == "banking":
+        normalized_bank = (bank_code or "").strip().lower()
+        return ONLINE_BANKING_METHODS_BY_BANK.get(normalized_bank, payment_method_config["checkout_methods"])
     return payment_method_config["checkout_methods"]
 
 
@@ -1584,6 +1604,8 @@ def send_verified_payment_receipt_if_needed(db: Session, payment: Payment, trigg
     recipient_email = payment_value(payment, "email")
     if payment.receipt_sent_at or not recipient_email:
         return
+    if payment.source_module == "receipt_request" and (payment.status or "").strip().lower() not in {"verified", "payment verified"}:
+        return
 
     is_rpt_submitted = payment.source_module == "rpt_online_payment" and payment.status == "PAYMENT_SUBMITTED"
     email_status = "Payment Submitted" if is_rpt_submitted else "Verified"
@@ -1628,6 +1650,8 @@ def normalize_payment_status(status_value: str | None) -> str:
     if workflow_status:
         return workflow_status
     normalized = (status_value or "pending").strip().lower()
+    if normalized in {"pending transaction", "pending_transaction", "pending branch verification"}:
+        return "pending"
     if normalized in {"verified", "payment verified", "confirmed", "paid", "succeeded", "successful", "success"}:
         return "confirmed"
     if normalized == "expired":
@@ -1658,10 +1682,17 @@ def update_linked_request_status(db: Session, payment: Payment):
 
     receipt_request.fee_paid = True
     receipt_request.payment_ref_number = payment_value(payment, "ref_number")
-    if receipt_request_value(receipt_request, "release_copy_path"):
+    normalized_payment_status = (payment.status or "").strip().lower()
+    is_branch_verified_receipt_payment = (
+        normalized_payment_status in {"verified", "payment verified"}
+        or payment.verified_at is not None
+    )
+    if is_branch_verified_receipt_payment and receipt_request_value(receipt_request, "release_copy_path"):
         receipt_request.status = "Ready for Release"
-    else:
+    elif is_branch_verified_receipt_payment:
         receipt_request.status = "Pending Branch Review"
+    else:
+        receipt_request.status = "Pending Transaction"
     receipt_request.processed_at = datetime.utcnow()
     apply_receipt_request_security(receipt_request)
 
@@ -1681,7 +1712,7 @@ def revert_linked_request_status_for_declined_payment(db: Session, payment: Paym
 
     receipt_request.fee_paid = False
     receipt_request.payment_ref_number = None
-    receipt_request.status = "Payment Required"
+    receipt_request.status = "Rejected"
     receipt_request.processed_at = datetime.utcnow()
     apply_receipt_request_security(receipt_request)
 
@@ -1689,6 +1720,8 @@ def revert_linked_request_status_for_declined_payment(db: Session, payment: Paym
 def is_confirmed_payment(payment: Payment) -> bool:
     payment_status = (payment.status or "").strip().lower()
     paymongo_status = (payment_value(payment, "paymongo_status") or "").strip().lower()
+    if payment.source_module == "receipt_request":
+        return payment_status in {"verified", "payment verified"} or payment.verified_at is not None
     return (
         payment_status in {"verified", "payment verified", "confirmed", "paid", "succeeded", "successful", "success"}
         or paymongo_status in {"paid", "succeeded"}
@@ -1990,7 +2023,13 @@ async def generate_rpt_payment_reference(
 
     payment_method = normalize_public_payment_method(request.paymentMethod)
     contact_number = normalize_contact_number(request.contactNumber)
-    normalized_tin = verify_payment_identity(db, current_user, request.taxpayerName, request.tin)
+    normalized_request_name = normalize_identity_name(request.taxpayerName)
+    normalized_account_name = normalize_identity_name(citizen_name(current_user))
+    if not normalized_request_name or normalized_request_name != normalized_account_name:
+        raise HTTPException(
+            status_code=400,
+            detail="The taxpayer name must match the logged-in citizen account.",
+        )
 
     validated_items = []
     total_amount = 0.0
@@ -2046,7 +2085,7 @@ async def generate_rpt_payment_reference(
         ref_number=ref_number,
         txn_id=txn_id,
         taxpayer_name=citizen_name(current_user),
-        tin=normalized_tin,
+        tin=citizen_tin(current_user),
         property_ref_number=", ".join(item["tdn"] for item in validated_items),
         tax_type="Real Property Tax",
         amount=round(total_amount, 2),
@@ -2164,7 +2203,7 @@ async def validate_business_tax_record(
 
     ensure_bt_registry_record_is_active(permit_record)
 
-    normalized_owner_name = normalize_identity_name(permit_record.owner_name)
+    normalized_owner_name = normalize_identity_name(get_decrypted_or_raw(permit_record, "owner_name") or permit_record.owner_name)
     normalized_user_name = normalize_identity_name(citizen_name(current_user))
     if normalized_owner_name and normalized_user_name and normalized_owner_name != normalized_user_name:
         db.commit()
@@ -2209,6 +2248,8 @@ async def list_business_tax_applications(
     normalized_status = (applicationStatus or "ALL").strip().upper()
     if normalized_status != "ALL":
         base_query = base_query.filter(BusinessTaxApplication.application_status == normalized_status)
+    else:
+        base_query = base_query.filter(~BusinessTaxApplication.application_status.in_(tuple(BT_FINAL_APPLICATION_STATUSES)))
 
     query = base_query
     normalized_search_term = (searchTerm or "").strip()
@@ -2346,7 +2387,14 @@ async def generate_business_tax_reference(
 
     payment_method = normalize_public_payment_method(request.paymentMethod)
     contact_number = normalize_contact_number(request.contactNumber)
-    normalized_tin = verify_payment_identity(db, current_user, request.taxpayerName, request.tin)
+    normalized_request_name = normalize_identity_name(request.taxpayerName)
+    normalized_account_name = normalize_identity_name(citizen_name(current_user))
+    if not normalized_request_name or normalized_request_name != normalized_account_name:
+        raise HTTPException(
+            status_code=400,
+            detail="The taxpayer name must match the logged-in citizen account.",
+        )
+    application_tin = get_decrypted_or_raw(application, "tin") or application.tin
 
     ref_number = build_bt_payment_reference(db, branch)
     txn_id = f"TX-BT-{datetime.utcnow().strftime('%Y')}-{random.randint(10000, 99999)}"
@@ -2375,7 +2423,7 @@ async def generate_business_tax_reference(
         ref_number=ref_number,
         txn_id=txn_id,
         taxpayer_name=citizen_name(current_user),
-        tin=normalized_tin,
+        tin=application_tin,
         property_ref_number=get_decrypted_or_raw(application, "mayor_permit_number") or application.mayor_permit_number,
         tax_type="Business Tax",
         amount=round(float(application.amount_due or 0), 2),
@@ -2487,13 +2535,21 @@ async def process_payment(request: PaymentProcessRequest, http_request: Request,
         raise HTTPException(status_code=404, detail="Payment reference not found")
     ensure_public_payment_gateway_enabled(db, payment.branch_id)
 
-    if request.paymentMethod:
-        payment.payment_method = normalize_public_payment_method(request.paymentMethod)
-        apply_payment_security(payment)
-
+    existing_metadata = parse_payment_metadata(payment)
+    existing_payment_method = payment_value(payment, "payment_method")
+    requested_payment_method = (
+        normalize_public_payment_method(request.paymentMethod)
+        if request.paymentMethod
+        else existing_payment_method
+    )
+    requested_bank_code = (request.bankCode or "").strip().lower()
+    existing_bank_code = (existing_metadata.get("selected_bank") or "").strip().lower()
+    method_changed = bool(request.paymentMethod) and bool(existing_payment_method) and existing_payment_method != requested_payment_method
+    bank_changed = requested_payment_method == "banking" and bool(requested_bank_code) and requested_bank_code != existing_bank_code
+    use_direct_redirect = requested_payment_method in {"gcash", "maya", "banking"}
     frontend_url = resolve_frontend_base_url(http_request)
 
-    if has_active_checkout_session(payment):
+    if has_active_checkout_session(payment) and not method_changed and not bank_changed and not use_direct_redirect:
         return {
             "message": "Existing checkout session reused",
             "status": normalize_payment_status(payment.status).capitalize(),
@@ -2503,12 +2559,13 @@ async def process_payment(request: PaymentProcessRequest, http_request: Request,
         }
     
     try:
-        selected_method = request.paymentMethod or payment.payment_method or "gcash"
+        selected_method = request.paymentMethod or existing_payment_method or "gcash"
         normalized_payment_method = normalize_public_payment_method(selected_method)
-        checkout_payment_methods = resolve_checkout_payment_methods(selected_method)
+        checkout_payment_methods = resolve_checkout_payment_methods(selected_method, request.bankCode)
         payment.payment_method = normalized_payment_method
         
         metadata = {
+            **existing_metadata,
             "ref_number": payment_value(payment, "ref_number"),
             "txn_id": payment_value(payment, "txn_id"),
             "taxpayer_name": payment_value(payment, "taxpayer_name"),
@@ -2520,9 +2577,6 @@ async def process_payment(request: PaymentProcessRequest, http_request: Request,
             "selected_bank": (request.bankCode or "").strip().lower(),
             "payment_method": normalized_payment_method,
         }
-        existing_metadata = parse_payment_metadata(payment)
-        if existing_metadata:
-            metadata.update(existing_metadata)
         
         ref_number = payment_value(payment, "ref_number")
         taxpayer_name = payment_value(payment, "taxpayer_name")
@@ -2530,6 +2584,178 @@ async def process_payment(request: PaymentProcessRequest, http_request: Request,
         contact_number = payment_value(payment, "contact_number")
         tax_type = payment_value(payment, "tax_type")
         description = f"{tax_type} - {taxpayer_name} ({ref_number})"
+
+        if normalized_payment_method == "gcash":
+            source_response = paymongo_service.create_source(
+                source_type="gcash",
+                amount=payment.amount,
+                redirect_success=f"{frontend_url}/payment/status?ref={ref_number}&merchant_return=1",
+                redirect_failed=f"{frontend_url}/payment/failed?ref={ref_number}",
+                description=description,
+                statement_descriptor="WARDS",
+                metadata=metadata,
+            )
+
+            source_data = source_response.get("data", {})
+            source_attrs = source_data.get("attributes", {}) or {}
+            redirect_attrs = source_attrs.get("redirect", {}) or {}
+            checkout_url = redirect_attrs.get("checkout_url")
+            source_id = source_data.get("id")
+
+            payment.paymongo_source_id = source_id
+            payment.paymongo_checkout_url = checkout_url
+            payment.paymongo_checkout_session_id = None
+            payment.paymongo_payment_intent_id = None
+            payment.paymongo_status = source_attrs.get("status") or "pending"
+            payment.status = "PAYMENT_INITIATED" if (existing_metadata.get("is_rpt_workflow") or existing_metadata.get("is_business_tax_workflow")) else "Pending"
+            set_payment_metadata(payment, metadata)
+
+            db.add(ActivityLog(
+                action="PayMongo Source Created",
+                user=taxpayer_email or taxpayer_name,
+                details=f"Direct PayMongo gcash source created for {request.refNumber}",
+                type="transaction",
+            ))
+            db.commit()
+            db.refresh(payment)
+
+            return {
+                "message": "Direct PayMongo source created successfully",
+                "status": "Pending",
+                "checkoutUrl": checkout_url,
+                "sourceId": source_id,
+                "refNumber": payment_value(payment, "ref_number"),
+            }
+
+        if normalized_payment_method == "maya":
+            intent_response = paymongo_service.create_payment_intent(
+                amount=payment.amount,
+                description=description,
+                statement_descriptor="WARDS",
+                metadata=metadata,
+            )
+            intent_data = intent_response.get("data", {})
+            intent_attrs = intent_data.get("attributes", {}) or {}
+            intent_id = intent_data.get("id")
+            client_key = intent_attrs.get("client_key")
+            method_response = paymongo_service.create_payment_method(
+                "paymaya",
+                details={
+                    "email": taxpayer_email or "taxpayer@example.com",
+                    "phone": contact_number or "",
+                },
+                billing={
+                    "name": taxpayer_name,
+                    "email": taxpayer_email or "taxpayer@example.com",
+                    "phone": contact_number or "",
+                },
+            )
+            method_id = method_response.get("data", {}).get("id")
+            attach_response = paymongo_service.attach_payment_intent(
+                payment_intent_id=intent_id,
+                payment_method_id=method_id,
+                client_key=client_key,
+                return_url=f"{frontend_url}/payment/status?ref={ref_number}&merchant_return=1",
+            )
+            attach_attrs = attach_response.get("data", {}).get("attributes", {}) or {}
+            next_action = attach_attrs.get("next_action", {}) or {}
+            redirect = next_action.get("redirect", {}) or {}
+            checkout_url = redirect.get("url")
+            if not checkout_url:
+                raise HTTPException(status_code=502, detail="PayMongo Maya redirect URL was not returned")
+
+            payment.paymongo_source_id = None
+            payment.paymongo_checkout_url = checkout_url
+            payment.paymongo_checkout_session_id = None
+            payment.paymongo_payment_intent_id = intent_id
+            payment.paymongo_status = attach_attrs.get("status") or intent_attrs.get("status") or "pending"
+            payment.status = "PAYMENT_INITIATED" if (existing_metadata.get("is_rpt_workflow") or existing_metadata.get("is_business_tax_workflow")) else "Pending"
+            set_payment_metadata(payment, metadata)
+
+            db.add(ActivityLog(
+                action="PayMongo Payment Intent Created",
+                user=taxpayer_email or taxpayer_name,
+                details=f"Direct PayMongo Maya payment intent created for {request.refNumber}",
+                type="transaction",
+            ))
+            db.commit()
+            db.refresh(payment)
+
+            return {
+                "message": "Direct PayMongo Maya redirect created successfully",
+                "status": "Pending",
+                "checkoutUrl": checkout_url,
+                "paymentIntentId": intent_id,
+                "refNumber": payment_value(payment, "ref_number"),
+            }
+
+        if normalized_payment_method == "banking":
+            selected_bank_code = (request.bankCode or "").strip().lower()
+            if selected_bank_code not in {"bpi", "ubp"}:
+                raise HTTPException(
+                    status_code=400,
+                    detail="This PayMongo account currently supports only BPI and UnionBank for online banking.",
+                )
+            bank_method_type = "dob"
+
+            intent_response = paymongo_service.create_payment_intent(
+                amount=payment.amount,
+                description=description,
+                statement_descriptor="WARDS",
+                metadata=metadata,
+                payment_method_allowed=[bank_method_type],
+            )
+            intent_data = intent_response.get("data", {})
+            intent_attrs = intent_data.get("attributes", {}) or {}
+            intent_id = intent_data.get("id")
+            client_key = intent_attrs.get("client_key")
+            method_response = paymongo_service.create_payment_method(
+                bank_method_type,
+                details={"bank_code": selected_bank_code},
+                billing={
+                    "name": taxpayer_name,
+                    "email": taxpayer_email or "taxpayer@example.com",
+                    "phone": contact_number or "",
+                },
+            )
+            method_id = method_response.get("data", {}).get("id")
+            attach_response = paymongo_service.attach_payment_intent(
+                payment_intent_id=intent_id,
+                payment_method_id=method_id,
+                client_key=client_key,
+                return_url=f"{frontend_url}/payment/status?ref={ref_number}&merchant_return=1",
+            )
+            attach_attrs = attach_response.get("data", {}).get("attributes", {}) or {}
+            next_action = attach_attrs.get("next_action", {}) or {}
+            redirect = next_action.get("redirect", {}) or {}
+            checkout_url = redirect.get("url")
+            if not checkout_url:
+                raise HTTPException(status_code=502, detail="PayMongo online banking redirect URL was not returned")
+
+            payment.paymongo_source_id = None
+            payment.paymongo_checkout_url = checkout_url
+            payment.paymongo_checkout_session_id = None
+            payment.paymongo_payment_intent_id = intent_id
+            payment.paymongo_status = attach_attrs.get("status") or intent_attrs.get("status") or "pending"
+            payment.status = "PAYMENT_INITIATED" if (existing_metadata.get("is_rpt_workflow") or existing_metadata.get("is_business_tax_workflow")) else "Pending"
+            set_payment_metadata(payment, metadata)
+
+            db.add(ActivityLog(
+                action="PayMongo Online Banking Intent Created",
+                user=taxpayer_email or taxpayer_name,
+                details=f"Direct PayMongo {bank_method_type} banking intent created for {request.refNumber} using {selected_bank_code}",
+                type="transaction",
+            ))
+            db.commit()
+            db.refresh(payment)
+
+            return {
+                "message": "Direct PayMongo online banking redirect created successfully",
+                "status": "Pending",
+                "checkoutUrl": checkout_url,
+                "paymentIntentId": intent_id,
+                "refNumber": payment_value(payment, "ref_number"),
+            }
 
         checkout_response = paymongo_service.create_checkout_session(
             amount=payment.amount,
@@ -2782,7 +3008,7 @@ async def decline_payment(payment_id: int, db: Session = Depends(get_db)):
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
     
-    payment.status = "PAYMENT_REJECTED" if payment.source_module == "rpt_online_payment" else "Failed"
+    payment.status = "PAYMENT_REJECTED" if payment.source_module == "rpt_online_payment" else ("Rejected" if payment.source_module == "receipt_request" else "Failed")
     payment.treasury_updated_at = datetime.utcnow()
     revert_linked_request_status_for_declined_payment(db, payment)
     if payment.source_module == "business_tax_online_payment" and payment.related_request_id:
@@ -2854,12 +3080,14 @@ async def upload_public_payment_proof(
         raise HTTPException(status_code=404, detail="Payment not found")
     if payment.source_module not in {"rpt_online_payment", "business_tax_online_payment"}:
         raise HTTPException(status_code=400, detail="Payment proof upload is only available for public tax payment workflows.")
-    if payment.email and citizen_email(current_user) and payment.email.lower() != citizen_email(current_user).lower():
+    payment_email = payment_value(payment, "email")
+    current_user_email = citizen_email(current_user)
+    if payment_email and current_user_email and payment_email.lower() != current_user_email.lower():
         raise HTTPException(status_code=403, detail="You are not authorized to upload proof for this transaction.")
 
     extension = Path(file.filename or "").suffix.lower()
-    if extension not in {".jpg", ".jpeg", ".png", ".pdf"}:
-        raise HTTPException(status_code=400, detail="Allowed file types are JPG, PNG, and PDF only.")
+    if extension not in {".pdf", ".doc", ".docx"}:
+        raise HTTPException(status_code=400, detail="Allowed file types are PDF, DOC, and DOCX only.")
 
     file_bytes = await file.read()
     if len(file_bytes) > MAX_PROOF_FILE_SIZE_BYTES:
@@ -3034,7 +3262,7 @@ async def paymongo_webhook(payload: PayMongoWebhookPayload, db: Session = Depend
             if not payment and metadata.get("ref_number"):
                 payment = find_payment_by_ref_number(db, Payment, metadata.get("ref_number"))
             
-            if payment and payment.status not in {"Verified", "PAYMENT_SUBMITTED"}:
+            if payment and payment.status not in {"Verified", "PAYMENT_SUBMITTED", "Pending Transaction"}:
                 mark_payment_submitted(payment)
                 payment.paymongo_status = "paid"
                 payment.paymongo_payment_id = payment_id
@@ -3091,7 +3319,7 @@ async def paymongo_webhook(payload: PayMongoWebhookPayload, db: Session = Depend
                 payment = find_payment_by_ref_number(db, Payment, metadata.get("ref_number"))
 
             if payment:
-                if payment.status in {"Verified", "PAYMENT_SUBMITTED"}:
+                if payment.status in {"Verified", "PAYMENT_SUBMITTED", "Pending Transaction"}:
                     payment.paymongo_status = "paid"
                     if payment_id:
                         payment.paymongo_payment_id = payment_id
@@ -3134,7 +3362,7 @@ async def check_paymongo_status(ref_number: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Payment not found")
     
     if is_confirmed_payment(payment):
-        if payment.status not in {"Verified", "PAYMENT_SUBMITTED", "PAYMENT_VERIFIED", "OR_GENERATED", "COMPLETED"}:
+        if payment.status not in {"Verified", "PAYMENT_SUBMITTED", "Pending Transaction", "PAYMENT_VERIFIED", "OR_GENERATED", "COMPLETED"}:
             mark_payment_submitted(payment)
             send_verified_payment_receipt_if_needed(db, payment, "status reconciliation")
             apply_payment_security(payment)
@@ -3156,7 +3384,7 @@ async def check_paymongo_status(ref_number: str, db: Session = Depends(get_db)):
                 payment_intent = paymongo_service.retrieve_payment_intent(payment.paymongo_payment_intent_id)
                 update_payment_from_payment_intent(payment, payment_intent)
 
-            if payment.status in {"Verified", "PAYMENT_SUBMITTED"}:
+            if payment.status in {"Verified", "PAYMENT_SUBMITTED", "Pending Transaction"}:
                 update_linked_request_status(db, payment)
                 send_verified_payment_receipt_if_needed(db, payment, "checkout status reconciliation")
             else:
@@ -3250,7 +3478,7 @@ async def check_paymongo_status(ref_number: str, db: Session = Depends(get_db)):
             
             payment.paymongo_status = payment_status
             
-            if payment_status == "paid" and payment.status not in {"Verified", "PAYMENT_SUBMITTED"}:
+            if payment_status == "paid" and payment.status not in {"Verified", "PAYMENT_SUBMITTED", "Pending Transaction"}:
                 mark_payment_submitted(payment)
                 update_linked_request_status(db, payment)
                 send_verified_payment_receipt_if_needed(db, payment, "payment status reconciliation")
@@ -3274,7 +3502,7 @@ async def check_paymongo_status(ref_number: str, db: Session = Depends(get_db)):
         if failure_status and payment.status != failure_status:
             payment.status = failure_status
 
-        if is_confirmed_payment(payment) and payment.status not in {"Verified", "PAYMENT_SUBMITTED", "PAYMENT_VERIFIED", "OR_GENERATED", "COMPLETED"}:
+        if is_confirmed_payment(payment) and payment.status not in {"Verified", "PAYMENT_SUBMITTED", "Pending Transaction", "PAYMENT_VERIFIED", "OR_GENERATED", "COMPLETED"}:
             mark_payment_submitted(payment)
             send_verified_payment_receipt_if_needed(db, payment, "final payment reconciliation")
         

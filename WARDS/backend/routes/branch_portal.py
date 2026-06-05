@@ -118,6 +118,7 @@ def normalize_payment_status(status_value: Optional[str]) -> str:
         "ADDED_TO_CART",
         "PAYMENT_INITIATED",
         "PAYMENT_SUBMITTED",
+        "PENDING_TRANSACTION",
         "PENDING_TREASURY_VALIDATION",
         "CLARIFICATION_REQUESTED",
         "VALIDATED",
@@ -136,7 +137,7 @@ def normalize_payment_status(status_value: Optional[str]) -> str:
         return "confirmed"
     if status_text == "expired":
         return "expired"
-    if status_text in {"failed", "declined", "cancelled", "canceled", "payment_rejected", "returned_for_correction"}:
+    if status_text in {"failed", "declined", "rejected", "cancelled", "canceled", "payment_rejected", "returned_for_correction"}:
         return "failed"
     return "pending"
 
@@ -144,11 +145,26 @@ def normalize_payment_status(status_value: Optional[str]) -> str:
 def get_effective_payment_status(payment: Payment) -> str:
     raw_status = normalize_payment_status(payment.status)
     paymongo_status = normalize_payment_status(payment.paymongo_status)
+    workflow_status = (payment.status or "").strip().upper()
+
+    if workflow_status in {
+        "PAYMENT_INITIATED",
+        "PAYMENT_SUBMITTED",
+        "PENDING_TRANSACTION",
+        "PENDING_TREASURY_VALIDATION",
+        "CLARIFICATION_REQUESTED",
+        "VALIDATED",
+    }:
+        return "pending"
 
     if raw_status in {"failed", "expired"}:
         return raw_status
     if paymongo_status in {"failed", "expired"}:
         return paymongo_status
+    if payment.source_module == "receipt_request":
+        if payment.verified_at is not None or raw_status == "confirmed":
+            return "confirmed"
+        return "pending"
     if payment.verified_at is not None or raw_status == "confirmed" or paymongo_status == "confirmed":
         return "confirmed"
     return "pending"
@@ -767,6 +783,44 @@ def payment_belongs_to_branch(payment: Payment, branch: Branch, current_staff: B
             return True
 
     return False
+
+
+def resolve_branch_payment_display_name(payment: Payment, db: Session) -> str | None:
+    branch = getattr(payment, "branch_record", None)
+    if branch:
+        branch_name = get_decrypted_or_raw(branch, "name") or branch.name
+        if branch_name:
+            return branch_name
+
+    payment_branch_name = get_decrypted_or_raw(payment, "branch") or payment.branch
+    if payment_branch_name and payment_branch_name.strip().upper() != "BRANCH_NAME":
+        return payment_branch_name
+
+    metadata = parse_payment_metadata(payment)
+    selected_branch_name = (metadata.get("selected_branch_name") or "").strip()
+    if selected_branch_name and selected_branch_name.upper() != "BRANCH_NAME":
+        return selected_branch_name
+
+    if payment.source_module == "receipt_request" and payment.related_request_id:
+        receipt_request = (
+            db.query(ReceiptRequest)
+            .filter(hash_aware_match(ReceiptRequest, "request_id", payment.related_request_id))
+            .first()
+        )
+        receipt_branch = getattr(receipt_request, "branch", None) if receipt_request else None
+        if receipt_branch:
+            return get_decrypted_or_raw(receipt_branch, "name") or receipt_branch.name
+
+        receipt_request_history = (
+            db.query(ReceiptRequestHistory)
+            .filter(hash_aware_match(ReceiptRequestHistory, "request_id", payment.related_request_id))
+            .first()
+        )
+        history_branch = getattr(receipt_request_history, "branch", None) if receipt_request_history else None
+        if history_branch:
+            return get_decrypted_or_raw(history_branch, "name") or history_branch.name
+
+    return None
 
 
 def get_branch_payments(current_staff: BranchStaff, branch: Branch, db: Session) -> list[Payment]:
@@ -1524,7 +1578,7 @@ async def list_branch_payments(
             "tax_type": get_decrypted_or_raw(payment, "tax_type"),
             "amount": float(payment.amount or 0),
             "payment_method": get_decrypted_or_raw(payment, "payment_method"),
-            "branch": get_decrypted_or_raw(payment, "branch"),
+            "branch": resolve_branch_payment_display_name(payment, db) or (get_decrypted_or_raw(branch, "name") or branch.name),
             "status": get_effective_payment_status(payment),
             "remittance_status": remittance_statuses.get(payment.id, "Available" if get_effective_payment_status(payment) == "confirmed" else "Not Eligible"),
             "workflow_status": payment.status,
@@ -1754,7 +1808,7 @@ async def decline_branch_payment(
     if get_effective_payment_status(payment) != "pending":
         raise HTTPException(status_code=409, detail="Only pending payments can be declined.")
 
-    payment.status = "Failed"
+    payment.status = "Rejected" if payment.source_module == "receipt_request" else "Failed"
     payment.treasury_updated_at = datetime.utcnow()
     revert_linked_request_status_for_declined_payment(db, payment)
     if payment.source_module == "business_tax_online_payment" and payment.related_request_id:
@@ -1769,7 +1823,7 @@ async def decline_branch_payment(
     log_branch_action(db, current_staff, "Payment Declined", f"Declined payment {payment.ref_number}")
     db.commit()
 
-    return {"message": "Payment declined successfully", "status": "Failed"}
+    return {"message": "Payment declined successfully", "status": payment.status}
 
 
 @router.delete("/payments/{payment_id}")

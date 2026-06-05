@@ -92,6 +92,19 @@ const getPaymentBucket = (payment) => {
   const normalizedStatus = normalizeStatus(payment?.status);
   const normalizedPaymongoStatus = normalizeStatus(payment?.paymongo_status);
   const normalizedWorkflowStatus = normalizeStatus(payment?.workflow_status);
+  const workflowStatus = (payment?.workflow_status || '').toString().trim().toUpperCase();
+  const isReceiptRequestPayment = payment?.source_module === 'receipt_request';
+
+  if ([
+    'PAYMENT_INITIATED',
+    'PAYMENT_SUBMITTED',
+    'PENDING_TRANSACTION',
+    'PENDING_TREASURY_VALIDATION',
+    'CLARIFICATION_REQUESTED',
+    'VALIDATED',
+  ].includes(workflowStatus)) {
+    return 'pending';
+  }
 
   if (
     payment?.verified_at ||
@@ -111,6 +124,13 @@ const getPaymentBucket = (payment) => {
     normalizedWorkflowStatus === 'expired'
   ) {
     return 'failed';
+  }
+
+  if (isReceiptRequestPayment) {
+    if (payment?.verified_at || normalizedStatus === 'confirmed' || normalizedWorkflowStatus === 'confirmed') {
+      return 'confirmed';
+    }
+    return 'pending';
   }
 
   return 'pending';
@@ -469,6 +489,7 @@ const PaymentManagement = () => {
   const [selectedRemittancePayments, setSelectedRemittancePayments] = useState([]);
   const [remittanceReportFile, setRemittanceReportFile] = useState(null);
   const [remitting, setRemitting] = useState(false);
+  const [showSubmitRemittanceModal, setShowSubmitRemittanceModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [draftFilters, setDraftFilters] = useState(() => createEmptyFilters());
   const [appliedFilters, setAppliedFilters] = useState(() => createEmptyFilters());
@@ -553,6 +574,30 @@ const PaymentManagement = () => {
     } finally {
       setRemitting(false);
     }
+  };
+
+  const handleOpenSubmitRemittanceModal = () => {
+    if (!selectedRemittancePayments.length) {
+      setFeedback({ type: 'error', message: 'Select at least one verified payment to remit to Main.' });
+      return;
+    }
+    if (!remittanceReportFile) {
+      setFeedback({ type: 'error', message: 'Upload the remittance report before submitting to Main.' });
+      return;
+    }
+    setShowSubmitRemittanceModal(true);
+  };
+
+  const handleCloseSubmitRemittanceModal = () => {
+    if (remitting) {
+      return;
+    }
+    setShowSubmitRemittanceModal(false);
+  };
+
+  const handleConfirmSubmitRemittance = async () => {
+    await submitRemittance();
+    setShowSubmitRemittanceModal(false);
   };
 
   const updateDraftFilter = (field, value) => {
@@ -747,16 +792,16 @@ const PaymentManagement = () => {
   }, [baseFilteredPayments, appliedFilters.status]);
 
   const pendingTransactions = useMemo(
-    () => [...filteredPayments.filter((payment) => getPaymentBucket(payment) === 'pending')].sort(comparePaymentsByQueueOrder),
-    [filteredPayments]
+    () => [...baseFilteredPayments.filter((payment) => getPaymentBucket(payment) === 'pending')].sort(comparePaymentsByQueueOrder),
+    [baseFilteredPayments]
   );
   const verifiedTransactions = useMemo(
-    () => [...filteredPayments.filter((payment) => getPaymentBucket(payment) === 'confirmed')].sort(compareProcessedPayments),
-    [filteredPayments]
+    () => [...baseFilteredPayments.filter((payment) => getPaymentBucket(payment) === 'confirmed')].sort(compareProcessedPayments),
+    [baseFilteredPayments]
   );
   const declinedTransactions = useMemo(
-    () => [...filteredPayments.filter((payment) => getPaymentBucket(payment) === 'failed')].sort(compareProcessedPayments),
-    [filteredPayments]
+    () => [...baseFilteredPayments.filter((payment) => getPaymentBucket(payment) === 'failed')].sort(compareProcessedPayments),
+    [baseFilteredPayments]
   );
 
   useEffect(() => {
@@ -1212,7 +1257,7 @@ const PaymentManagement = () => {
             </label>
             <button
               type="button"
-              onClick={submitRemittance}
+              onClick={handleOpenSubmitRemittanceModal}
               disabled={remitting || !selectedRemittancePayments.length || !remittanceReportFile}
               className="mt-4 w-full rounded-2xl bg-[#0f2f5f] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#174d85] disabled:opacity-60"
             >
@@ -1502,6 +1547,26 @@ const PaymentManagement = () => {
           onConfirm={handleDeclineConfirm}
           loading={declining}
           iconType="alert"
+        />
+      ) : null}
+
+      {showSubmitRemittanceModal ? (
+        <ConfirmationModal
+          title="Submit Remittance To Main?"
+          message="Are you sure you want to submit this remittance batch to Main for review?"
+          details={[
+            { label: 'Selected Payments', value: `${selectedRemittancePayments.length}` },
+            { label: 'Batch Amount', value: formatCurrency(selectedRemittanceAmount) },
+            { label: 'Report File', value: remittanceReportFile?.name || 'No file selected' },
+          ]}
+          warning="Submitted remittance batches are locked until Main accepts or rejects them."
+          cancelLabel="No"
+          confirmLabel="Yes"
+          confirmClassName="bg-[#0f2f5f] hover:bg-[#174d85]"
+          onCancel={handleCloseSubmitRemittanceModal}
+          onConfirm={handleConfirmSubmitRemittance}
+          loading={remitting}
+          iconType="wallet"
         />
       ) : null}
 

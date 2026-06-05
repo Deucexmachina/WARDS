@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
 import base64
+import binascii
 import io
 import os
 import time
@@ -286,22 +287,53 @@ def find_account_for_portal(db: Session, identifier: str, requested_portal: Opti
 
     if portal == "public":
         public_user = find_citizen_by_email(db, CitizenUser, normalized)
-        return ("public", public_user) if public_user else (None, None)
+        if public_user:
+            return "public", public_user
+        return find_account(db, identifier)
 
     if portal == "admin":
         admin = db.query(Admin).filter(Admin.email == normalized).first()
-        return ("admin", admin) if admin else (None, None)
+        if admin:
+            return "admin", admin
+        return find_account(db, identifier)
 
     if portal == "branch":
         branch_staff = db.query(BranchStaff).filter(BranchStaff.email == normalized).first()
-        return ("branch", branch_staff) if branch_staff else (None, None)
+        if branch_staff:
+            return "branch", branch_staff
+        return find_account(db, identifier)
 
     return find_account(db, identifier)
 
 
+def get_portal_login_label(portal: Optional[str]) -> str:
+    labels = {
+        "public": "Citizen Access",
+        "admin": "Main Office Admin",
+        "branch": "Branch Office",
+    }
+    return labels.get((portal or "").strip().lower(), "WARDS Login")
+
+
 def get_mfa_secret(db: Session, portal: str, username: str) -> Optional[str]:
     record = find_mfa_secret_record(db, MFASecret, portal, username, enabled_only=True)
-    return (get_decrypted_or_raw(record, "secret") or record.secret) if record else None
+    if not record:
+        return None
+
+    secret = get_decrypted_or_raw(record, "secret")
+    if not secret:
+        return None
+
+    normalized_secret = str(secret).strip().replace(" ", "")
+    if not normalized_secret:
+        return None
+
+    try:
+        base64.b32decode(normalized_secret, casefold=True)
+    except (binascii.Error, ValueError):
+        return None
+
+    return normalized_secret
 
 
 def save_mfa_secret(db: Session, portal: str, username: str, secret: str):

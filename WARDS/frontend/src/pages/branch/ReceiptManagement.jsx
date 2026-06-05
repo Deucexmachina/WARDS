@@ -256,7 +256,7 @@ const ReceiptManagement = () => {
 
   const getPaymentStatusTone = (status) => {
     if (status === 'Verified') return 'bg-emerald-50 text-emerald-700 ring-emerald-200';
-    if (status === 'Declined') return 'bg-rose-50 text-rose-700 ring-rose-200';
+    if (status === 'Rejected') return 'bg-rose-50 text-rose-700 ring-rose-200';
     return 'bg-amber-50 text-amber-700 ring-amber-200';
   };
 
@@ -994,7 +994,7 @@ const ReceiptManagement = () => {
     const buttonClassName = compact
       ? 'rounded-lg px-2.5 py-1.5 text-xs font-semibold transition'
       : 'rounded-lg px-3 py-1.5 font-semibold transition';
-    const paymentStatus = request.paymentStatus || (request.feePaid ? 'Verified' : 'Pending');
+    const paymentStatus = request.paymentStatus || (request.feePaid ? 'Pending Transaction' : 'Pending');
     const canRelease = paymentStatus === 'Verified';
 
     return (
@@ -1109,7 +1109,11 @@ const ReceiptManagement = () => {
         ) : null}
         <div className="basis-full text-xs text-slate-500">
           {!canRelease
-            ? 'Receipt copy release stays locked until Payment Management marks the request fee as verified.'
+            ? paymentStatus === 'Rejected'
+              ? 'Receipt copy release is blocked because branch administration rejected the payment.'
+              : paymentStatus === 'Pending Transaction'
+                ? 'Receipt copy release stays locked until Branch Admin verifies the paid receipt request in Payment Management.'
+                : 'Receipt copy release stays locked until Payment Management marks the request fee as verified.'
             : request.releaseStatus === 'Ready for Release'
               ? 'Payment is verified and the request is ready for branch release.'
               : 'Payment is verified. Upload the finished copy to continue the release flow.'}

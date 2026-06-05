@@ -16,7 +16,6 @@ const DEFAULT_PROFILE = {
   mobile_number: '',
   address: '',
   taxpayer_type: 'Individual',
-  tin: '',
 };
 
 const DEFAULT_IDENTIFIER_FORM = {
@@ -64,7 +63,6 @@ const buildStoredPublicProfile = (profile) => ({
   contact_number: profile?.mobile_number || '',
   address: profile?.address || '',
   taxpayer_type: profile?.taxpayer_type || 'Individual',
-  tin: profile?.tin || '',
 });
 
 const isProfileReady = (profile) =>
@@ -108,13 +106,11 @@ const AccountManagement = () => {
         ...DEFAULT_PROFILE,
         ...nextProfile,
         mobile_number: normalizePhilippineContactDigits(nextProfile.mobile_number || ''),
-        tin: nextProfile.tin || '',
       });
       setOriginalProfile({
         ...DEFAULT_PROFILE,
         ...nextProfile,
         mobile_number: normalizePhilippineContactDigits(nextProfile.mobile_number || ''),
-        tin: nextProfile.tin || '',
       });
       setStoredPublicUser(buildStoredPublicProfile(nextProfile));
       setIsProfileLocked(isProfileReady(nextProfile));
@@ -462,10 +458,6 @@ const AccountManagement = () => {
                   <label className="block md:col-span-2">
                     <span className="mb-2 block text-sm font-semibold text-slate-700">Address</span>
                     <input name="address" value={profile.address} onChange={handleProfileChange} disabled={isProfileLocked} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 focus:border-[#0f5b83] focus:ring-2 focus:ring-[#0f5b83]/10" required />
-                  </label>
-                  <label className="block md:col-span-2">
-                    <span className="mb-2 block text-sm font-semibold text-slate-700">Tax Identification Number (TIN)</span>
-                    <input name="tin" value={profile.tin} onChange={handleProfileChange} disabled={isProfileLocked} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 focus:border-[#0f5b83] focus:ring-2 focus:ring-[#0f5b83]/10" placeholder="Optional" />
                   </label>
                 </div>
 

@@ -1,35 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import PaymentGatewayExperience from '../../components/PaymentGatewayExperience';
 import { paymentAPI, taxpayerAccountAPI } from '../../services/api';
 import { getStoredPublicUser } from '../../utils/publicSession';
-import { formatTin, getEmailValidationMessage, validateTin } from '../../utils/validation';
+import { getEmailValidationMessage } from '../../utils/validation';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 const DEFAULT_DISABLED_MESSAGE = 'This service is currently unavailable because it has been disabled by system administration.';
-const PAYMENT_METHODS = [
-  { id: 'gcash', label: 'GCash', icon: 'GC' },
-  { id: 'maya', label: 'Maya', icon: 'MY' },
-  { id: 'card', label: 'Debit / Credit Card', icon: 'CC' },
-  { id: 'banking', label: 'Online Banking', icon: 'OB' },
-];
 const PH_MOBILE_PATTERN = /^(?:\+63|63|0)9\d{9}$/;
-const BANK_OPTIONS = [
-  { value: 'bdo', label: 'BDO - Banco de Oro' },
-  { value: 'bpi', label: 'BPI - Bank of the Philippine Islands' },
-  { value: 'metrobank', label: 'Metrobank' },
-  { value: 'unionbank', label: 'UnionBank' },
-  { value: 'landbank', label: 'Landbank' },
-];
 const RPT_FINAL_CLEAR_STATUSES = new Set(['PAYMENT_VERIFIED', 'OR_GENERATED', 'COMPLETED']);
+const CITIZEN_RPT_REFRESH_INTERVAL_MS = 30000;
 
 const normalizeIdentityName = (value) =>
   String(value || '')
     .trim()
     .replace(/\s+/g, ' ')
     .toLowerCase();
-
-const normalizeTinDigits = (value) => String(value || '').replace(/\D/g, '');
 
 const formatCurrency = (amount) =>
   `PHP ${Number(amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -175,7 +162,6 @@ const PayTaxesRPT = () => {
   const [cartItems, setCartItems] = useState([]);
   const [formData, setFormData] = useState({
     taxpayerName: '',
-    tin: formatTin(publicUser?.tin || ''),
     email: publicUser?.email || '',
     contactNumber: publicUser?.contact_number || '',
   });
@@ -198,7 +184,46 @@ const PayTaxesRPT = () => {
   const [selectedPaymentOption, setSelectedPaymentOption] = useState('');
   const [stagedPaymentOption, setStagedPaymentOption] = useState('full');
   const [addToCartSuccessOpen, setAddToCartSuccessOpen] = useState(false);
+  const [removeFromCartConfirmationOpen, setRemoveFromCartConfirmationOpen] = useState(false);
+  const [pendingRemovalTdn, setPendingRemovalTdn] = useState('');
   const [activePendingPayment, setActivePendingPayment] = useState(null);
+
+  const refreshCitizenPaymentState = async ({ preserveWorkflow = true } = {}) => {
+    try {
+      const [activePaymentResponse, linkedAssessmentResponse] = await Promise.all([
+        paymentAPI.getActiveRptPayment(),
+        taxpayerAccountAPI.getAssessments({ tax_type: 'RPT' }).catch(() => ({ data: { items: [] } })),
+      ]);
+      const nextActivePayment = activePaymentResponse.data?.payment || null;
+      const previousRefNumber = activePendingPayment?.ref_number || null;
+      const nextRefNumber = nextActivePayment?.ref_number || null;
+
+      setLinkedAssessments(linkedAssessmentResponse.data?.items || []);
+      setActivePendingPayment(nextActivePayment);
+
+      if (!nextActivePayment && previousRefNumber && preserveWorkflow) {
+        clearWorkflowState({ preserveBranch: true });
+      }
+      if (nextActivePayment?.branch_id) {
+        setSelectedBranchId(String(nextActivePayment.branch_id));
+      }
+      if (!nextRefNumber && searchParams.get('reset') !== '1') {
+        resetGeneratedPayment();
+      }
+    } catch {
+      // Keep the current citizen view stable if the refresh fails.
+    }
+  };
+
+  const handlePaymentCustomerChange = (customer) => {
+    setFormData((current) => ({
+      ...current,
+      taxpayerName: customer.name ?? current.taxpayerName,
+      email: customer.email ?? current.email,
+      contactNumber: customer.mobile ?? current.contactNumber,
+    }));
+    resetGeneratedPayment();
+  };
 
   const clearWorkflowState = ({ preserveBranch = false } = {}) => {
     setError('');
@@ -223,25 +248,20 @@ const PayTaxesRPT = () => {
     setShowPaymentOptionStage(false);
     setPaymentOptionModalOpen(false);
     setAddToCartSuccessOpen(false);
+    setRemoveFromCartConfirmationOpen(false);
+    setPendingRemovalTdn('');
   };
 
   useEffect(() => {
     const fetchSetup = async () => {
       try {
-        const [branchesResponse, statusResponse, activePaymentResponse, linkedAssessmentResponse] = await Promise.all([
+        const [branchesResponse, statusResponse] = await Promise.all([
           axios.get(`${API_BASE_URL}/public/branches`),
           axios.get(`${API_BASE_URL}/public/system-status`),
-          paymentAPI.getActiveRptPayment(),
-          taxpayerAccountAPI.getAssessments({ tax_type: 'RPT' }).catch(() => ({ data: { items: [] } })),
         ]);
         setBranches(branchesResponse.data);
         setSystemStatus(statusResponse.data);
-        const nextActivePayment = activePaymentResponse.data?.payment || null;
-        setLinkedAssessments(linkedAssessmentResponse.data?.items || []);
-        setActivePendingPayment(nextActivePayment);
-        if (nextActivePayment) {
-          clearWorkflowState();
-        }
+        await refreshCitizenPaymentState({ preserveWorkflow: false });
       } catch (err) {
         setError(err.response?.data?.detail || 'Failed to load payment setup.');
       } finally {
@@ -251,6 +271,25 @@ const PayTaxesRPT = () => {
 
     fetchSetup();
   }, []);
+
+  useEffect(() => {
+    const refreshOnFocus = () => {
+      refreshCitizenPaymentState();
+    };
+
+    const intervalId = window.setInterval(() => {
+      refreshCitizenPaymentState();
+    }, CITIZEN_RPT_REFRESH_INTERVAL_MS);
+
+    window.addEventListener('focus', refreshOnFocus);
+    document.addEventListener('visibilitychange', refreshOnFocus);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', refreshOnFocus);
+      document.removeEventListener('visibilitychange', refreshOnFocus);
+    };
+  }, [activePendingPayment, searchParams]);
 
   useEffect(() => {
     if (searchParams.get('reset') === '1') {
@@ -291,8 +330,7 @@ const PayTaxesRPT = () => {
 
   const handleFieldChange = (event) => {
     const { name, value } = event.target;
-    const nextValue = name === 'tin' ? formatTin(value) : value;
-    setFormData((current) => ({ ...current, [name]: nextValue }));
+    setFormData((current) => ({ ...current, [name]: value }));
     if (validationErrors[name]) {
       setValidationErrors((current) => ({ ...current, [name]: '' }));
     }
@@ -336,15 +374,16 @@ const PayTaxesRPT = () => {
       });
     } catch (err) {
       const detail = err.response?.data?.detail;
+      const isBranchMismatchSearch = err.response?.status === 404;
       if (typeof detail === 'object' && detail?.message) {
-        setSearchError(detail.message);
+        setSearchError(isBranchMismatchSearch ? 'Please select the correct branch.' : detail.message);
         setSearchStats({
           searchesRemaining: detail.searchesRemaining ?? searchStats.searchesRemaining,
           searchLimit: detail.searchLimit ?? searchStats.searchLimit,
           searchesUsed: detail.searchesUsed ?? searchStats.searchesUsed,
         });
       } else {
-        setSearchError(detail || 'Failed to search property record.');
+        setSearchError(isBranchMismatchSearch ? 'Please select the correct branch.' : detail || 'Failed to search property record.');
       }
     } finally {
       setSearchingProperty(false);
@@ -371,27 +410,37 @@ const PayTaxesRPT = () => {
   };
 
   const handleRemoveFromCart = (tdn) => {
-    setCartItems((current) => current.filter((item) => item.tdn !== tdn));
+    setPendingRemovalTdn(tdn);
+    setRemoveFromCartConfirmationOpen(true);
+  };
+
+  const confirmRemoveFromCart = () => {
+    if (!pendingRemovalTdn) {
+      setRemoveFromCartConfirmationOpen(false);
+      return;
+    }
+    setCartItems((current) => current.filter((item) => item.tdn !== pendingRemovalTdn));
+    setPendingRemovalTdn('');
+    setRemoveFromCartConfirmationOpen(false);
+    setPaymentDetailsOpen(false);
     resetGeneratedPayment();
+  };
+
+  const cancelRemoveFromCart = () => {
+    setPendingRemovalTdn('');
+    setRemoveFromCartConfirmationOpen(false);
   };
 
   const validateCheckout = () => {
     const errors = {};
     const storedCitizenName = normalizeIdentityName(publicUser?.full_name);
     const enteredTaxpayerName = normalizeIdentityName(formData.taxpayerName);
-    const storedTin = normalizeTinDigits(publicUser?.tin);
-    const enteredTin = normalizeTinDigits(formData.tin);
 
     if (!selectedBranchId) errors.branch = 'Branch selection is required';
     if (!cartItems.length) errors.cart = 'Add at least one TDN to the cart';
     if (!formData.taxpayerName.trim()) errors.taxpayerName = 'Taxpayer name is required';
-    const tinValidationError = validateTin(formData.tin);
-    if (tinValidationError) errors.tin = tinValidationError;
     if (storedCitizenName && enteredTaxpayerName && storedCitizenName !== enteredTaxpayerName) {
       errors.taxpayerName = 'The taxpayer name must match the logged-in citizen account.';
-    }
-    if (storedTin && enteredTin && storedTin !== enteredTin) {
-      errors.tin = 'TIN verification failed. Please use the TIN linked to your citizen account.';
     }
     if (!formData.email.trim()) {
       errors.email = 'Email is required';
@@ -406,10 +455,6 @@ const PayTaxesRPT = () => {
     } else if (!PH_MOBILE_PATTERN.test(formData.contactNumber.replace(/[\s()-]/g, ''))) {
       errors.contactNumber = 'Please enter a valid Philippine mobile number';
     }
-    if (selectedPaymentMethod === 'banking' && !selectedBank) {
-      errors.selectedBank = 'Please select a bank';
-    }
-
     setValidationErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -435,7 +480,6 @@ const PayTaxesRPT = () => {
     try {
       const response = await paymentAPI.generateRptReference({
         taxpayerName: formData.taxpayerName,
-        tin: formData.tin,
         email: formData.email,
         contactNumber: formData.contactNumber,
         branchId: Number(selectedBranchId),
@@ -740,7 +784,13 @@ const PayTaxesRPT = () => {
                               <button
                                 key={assessment.id}
                                 type="button"
-                                onClick={() => setTdnInput((assessment.tdn || '').toUpperCase())}
+                                onClick={() => {
+                                  setTdnInput((assessment.tdn || '').toUpperCase());
+                                  if (assessment.branch_id) {
+                                    setSelectedBranchId(String(assessment.branch_id));
+                                  }
+                                  setSearchError('');
+                                }}
                                 className="rounded-2xl border border-slate-200 bg-white px-4 py-4 text-left transition hover:border-[#0f5b83] hover:bg-[#fbfdff]"
                               >
                                 <div className="flex items-start justify-between gap-3">
@@ -1076,133 +1126,38 @@ const PayTaxesRPT = () => {
                       <p className="mt-2 max-w-xl text-sm text-blue-100">The total is system-computed from the selected RPT entries and is read-only.</p>
                     </div>
 
-                    <div className="grid gap-5 md:grid-cols-2">
-                      <div>
-                        <label className="mb-2 block text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Tax Type</label>
-                        <input
-                          type="text"
-                          value="Real Property Tax"
-                          readOnly
-                          className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-700"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="mb-2 block text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Taxpayer Name</label>
-                        <input
-                          type="text"
-                          name="taxpayerName"
-                          value={formData.taxpayerName}
-                          onChange={handleFieldChange}
-                          placeholder="Enter your full name"
-                          className={`w-full rounded-2xl border px-4 py-3 text-sm ${
-                            validationErrors.taxpayerName ? 'border-red-500' : 'border-slate-300'
-                          } text-slate-900`}
-                        />
-                        {validationErrors.taxpayerName ? <p className="mt-2 text-sm text-red-500">{validationErrors.taxpayerName}</p> : null}
-                      </div>
-
-                      <div>
-                        <label className="mb-2 block text-xs font-bold uppercase tracking-[0.18em] text-slate-500">TIN</label>
-                        <input
-                          type="text"
-                          name="tin"
-                          value={formData.tin}
-                          onChange={handleFieldChange}
-                          maxLength={15}
-                          className={`w-full rounded-2xl border px-4 py-3 text-sm ${validationErrors.tin ? 'border-red-500' : 'border-slate-300'}`}
-                        />
-                        {validationErrors.tin ? <p className="mt-2 text-sm text-red-500">{validationErrors.tin}</p> : null}
-                      </div>
-
-                      <div>
-                        <label className="mb-2 block text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Email Address</label>
-                        <input
-                          type="email"
-                          name="email"
-                          value={formData.email}
-                          onChange={handleFieldChange}
-                          className={`w-full rounded-2xl border px-4 py-3 text-sm ${validationErrors.email ? 'border-red-500' : 'border-slate-300'}`}
-                        />
-                        {validationErrors.email ? <p className="mt-2 text-sm text-red-500">{validationErrors.email}</p> : null}
-                      </div>
-
-                      <div className="md:col-span-2">
-                        <label className="mb-2 block text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Mobile Number</label>
-                        <input
-                          type="tel"
-                          name="contactNumber"
-                          value={formData.contactNumber}
-                          onChange={handleFieldChange}
-                          placeholder="09XXXXXXXXX"
-                          className={`w-full rounded-2xl border px-4 py-3 text-sm ${validationErrors.contactNumber ? 'border-red-500' : 'border-slate-300'}`}
-                        />
-                        {validationErrors.contactNumber ? <p className="mt-2 text-sm text-red-500">{validationErrors.contactNumber}</p> : null}
-                      </div>
-                    </div>
-
-                    <div>
-                      <p className="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Payment Method</p>
-                      <div className="grid grid-cols-2 gap-3">
-                        {PAYMENT_METHODS.map((method) => (
-                          <button
-                            key={method.id}
-                            type="button"
-                            onClick={() => {
-                              setSelectedPaymentMethod(method.id);
-                              if (method.id !== 'banking') setSelectedBank('');
-                              resetGeneratedPayment();
-                            }}
-                            disabled={isBlockedByPendingPayment}
-                            className={`rounded-[22px] border px-4 py-4 text-left transition ${
-                              selectedPaymentMethod === method.id
-                                ? 'border-[#0f5b83] bg-[#eef7fb] shadow-[0_12px_28px_rgba(15,91,131,0.12)]'
-                                : 'border-slate-300 hover:border-[#0f5b83]'
-                            } disabled:cursor-not-allowed disabled:opacity-60`}
-                          >
-                            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">{method.icon}</p>
-                            <p className="mt-2 text-sm font-semibold text-slate-900">{method.label}</p>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {selectedPaymentMethod === 'banking' ? (
-                      <div>
-                        <label className="mb-2 block text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Select Bank</label>
-                        <select
-                          value={selectedBank}
-                          onChange={(event) => {
-                            setSelectedBank(event.target.value);
-                            resetGeneratedPayment();
-                          }}
-                          disabled={isBlockedByPendingPayment}
-                          className={`w-full rounded-2xl border px-4 py-3 text-sm ${validationErrors.selectedBank ? 'border-red-500' : 'border-slate-300'}`}
-                        >
-                          <option value="">Choose a bank...</option>
-                          {BANK_OPTIONS.map((bank) => (
-                            <option key={bank.value} value={bank.value}>{bank.label}</option>
-                          ))}
-                        </select>
-                        {validationErrors.selectedBank ? <p className="mt-2 text-sm text-red-500">{validationErrors.selectedBank}</p> : null}
-                      </div>
-                    ) : null}
+                    <PaymentGatewayExperience
+                      amount={cartTotal}
+                      bankCode={selectedBank}
+                      customer={{
+                        name: formData.taxpayerName,
+                        email: formData.email,
+                        mobile: formData.contactNumber,
+                      }}
+                      disabled={isSystemDisabled || isBlockedByPendingPayment}
+                      method={selectedPaymentMethod}
+                      onBankChange={(value) => {
+                        setSelectedBank(value);
+                        resetGeneratedPayment();
+                      }}
+                      onCustomerChange={handlePaymentCustomerChange}
+                      onMethodChange={(value) => {
+                        setSelectedPaymentMethod(value);
+                        setSelectedBank('');
+                        resetGeneratedPayment();
+                      }}
+                      onContinue={handleGenerateReference}
+                      processing={generatingReference}
+                      referenceNumber={paymentReference?.refNumber}
+                      title="RPT Payment Checkout"
+                    />
 
                     <div className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-700">
-                      <p className="font-bold text-slate-900">Treasury-Assisted Validation Reminder</p>
+                      <p className="font-bold text-slate-900">PayMongo Gateway Note</p>
                       <p className="mt-2">
-                        After successful PayMongo sandbox payment, the taxpayer must still upload payment proof. The selected branch treasury staff validates the transaction before Official Receipt release.
+                        Review the system-computed RPT amount, then complete the payer details in the checkout below. PayMongo opens only for final transaction processing and payment status validation.
                       </p>
                     </div>
-
-                    <button
-                      type="button"
-                      onClick={handleGenerateReference}
-                      disabled={generatingReference || isSystemDisabled || isBlockedByPendingPayment}
-                      className="w-full rounded-full bg-[#0f5b83] px-6 py-4 text-sm font-bold uppercase tracking-[0.12em] text-white shadow-[0_12px_25px_rgba(15,91,131,0.18)] transition hover:bg-[#0c4d6f] disabled:opacity-50"
-                    >
-                      {generatingReference ? 'Generating Payment Reference...' : paymentReference ? 'Regenerate Payment Reference' : 'Generate Payment Reference'}
-                    </button>
 
                     {paymentReference ? (
                       <div className="rounded-[24px] bg-emerald-50 px-5 py-5 ring-1 ring-emerald-200">
@@ -1492,6 +1447,38 @@ const PayTaxesRPT = () => {
             >
               OK
             </button>
+          </div>
+        </div>
+      ) : null}
+
+      {removeFromCartConfirmationOpen && pendingRemovalTdn ? (
+        <div className="fixed inset-0 z-[75] flex items-center justify-center bg-slate-900/55 px-4 py-6">
+          <div className="w-full max-w-md rounded-[30px] bg-white px-7 py-7 shadow-[0_28px_80px_rgba(15,23,42,0.32)]">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-rose-50 text-rose-600">
+              <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <h3 className="mt-5 text-center text-xl font-bold text-slate-900">Remove this TDN from your cart?</h3>
+            <p className="mt-4 text-center text-sm leading-7 text-slate-700">
+              This will remove <span className="font-bold text-slate-900">{pendingRemovalTdn}</span> from My Cart and update your transaction summary.
+            </p>
+            <div className="mt-6 grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={cancelRemoveFromCart}
+                className="rounded-full border border-slate-300 px-5 py-3 text-sm font-bold uppercase tracking-[0.08em] text-slate-600 transition hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmRemoveFromCart}
+                className="rounded-full bg-[#df3b39] px-5 py-3 text-sm font-bold uppercase tracking-[0.08em] text-white transition hover:bg-[#c6312f]"
+              >
+                Yes, Remove
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

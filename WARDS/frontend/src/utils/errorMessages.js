@@ -32,6 +32,7 @@ const isTechnicalMessage = (message) => (
 
 export const getFriendlyErrorMessage = (error, fallback = 'Something went wrong. Please try again.') => {
   const status = error?.response?.status;
+  const url = String(error?.config?.url || '').toLowerCase();
 
   if (status === 429) {
     return 'Too many requests were sent in a short time. Please wait a moment, then try again.';
@@ -43,6 +44,9 @@ export const getFriendlyErrorMessage = (error, fallback = 'Something went wrong.
     return 'You do not have permission to perform this action.';
   }
   if (status === 404) {
+    if (url.includes('/payments/rpt/search')) {
+      return 'Please select the correct branch.';
+    }
     return 'The requested record could not be found.';
   }
   if (status >= 500) {

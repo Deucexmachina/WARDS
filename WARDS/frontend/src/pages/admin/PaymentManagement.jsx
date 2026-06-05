@@ -22,6 +22,17 @@ const formatPaymentDate = (value, options) => {
   return parsedDate.toLocaleString('en-PH', { timeZone: PAYMENT_TIME_ZONE, ...options });
 };
 
+const formatBranchRemittanceDate = (value) => {
+  if (!value) return 'N/A';
+  return formatPaymentDate(value, {
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+};
+
 const getCollectionMonthLabel = () => new Date().toLocaleDateString('en-PH', {
   month: 'long',
   timeZone: PAYMENT_TIME_ZONE,
@@ -127,6 +138,10 @@ const buildReportRows = (branchSummaries) => branchSummaries.map((branch) => `
     <td>${formatCurrency(branch.verifiedAmount)}</td>
     <td>${formatCurrency(branch.remittedAmount)}</td>
     <td>${formatCurrency(branch.pendingRemittanceAmount)}</td>
+    <td>${escapeHtml(branch.remittedBy || 'N/A')}</td>
+    <td>${escapeHtml(formatBranchRemittanceDate(branch.remittedAt))}</td>
+    <td>${escapeHtml(branch.verifiedBy || 'Pending Main Review')}</td>
+    <td>${escapeHtml(formatBranchRemittanceDate(branch.verifiedAt))}</td>
     <td>${branch.verifiedCount}</td>
   </tr>
 `).join('');
@@ -384,6 +399,10 @@ const PaymentManagement = () => {
     ))
   ), [remittanceData, selectedMonth]);
 
+  const pendingReviewRemittances = useMemo(() => (
+    monthlyRemittances.filter((remittance) => remittance.status === 'Submitted')
+  ), [monthlyRemittances]);
+
   const filteredPayments = useMemo(() => (
     monthlyPayments.filter((payment) => {
       if (filter === 'all') return true;
@@ -438,6 +457,12 @@ const PaymentManagement = () => {
           verifiedAmount: 0,
           remittedAmount: 0,
           pendingRemittanceAmount: 0,
+          remittedAt: null,
+          remittedBy: '',
+          verifiedAt: null,
+          verifiedBy: '',
+          _latestRemittedAtTs: 0,
+          _latestVerifiedAtTs: 0,
         });
       }
       const summary = byBranch.get(branch);
@@ -465,18 +490,40 @@ const PaymentManagement = () => {
           verifiedAmount: 0,
           remittedAmount: 0,
           pendingRemittanceAmount: 0,
+          remittedAt: null,
+          remittedBy: '',
+          verifiedAt: null,
+          verifiedBy: '',
+          _latestRemittedAtTs: 0,
+          _latestVerifiedAtTs: 0,
         });
       }
       const summary = byBranch.get(branch);
+      const submittedAtTs = parsePaymentDate(remittance.submitted_at)?.getTime() || 0;
+      const reviewedAtTs = parsePaymentDate(remittance.reviewed_at)?.getTime() || 0;
+
+      if (submittedAtTs >= summary._latestRemittedAtTs) {
+        summary._latestRemittedAtTs = submittedAtTs;
+        summary.remittedAt = remittance.submitted_at || null;
+        summary.remittedBy = remittance.submitted_by || '';
+      }
+
       if (remittance.status === 'Accepted') {
         summary.remittedAmount += Number(remittance.total_amount || 0);
+        if (reviewedAtTs >= summary._latestVerifiedAtTs) {
+          summary._latestVerifiedAtTs = reviewedAtTs;
+          summary.verifiedAt = remittance.reviewed_at || null;
+          summary.verifiedBy = remittance.reviewed_by || '';
+        }
       }
       if (remittance.status === 'Submitted') {
         summary.pendingRemittanceAmount += Number(remittance.total_amount || 0);
       }
     });
 
-    return Array.from(byBranch.values()).sort((left, right) => right.verifiedAmount - left.verifiedAmount || left.branch.localeCompare(right.branch));
+    return Array.from(byBranch.values())
+      .map(({ _latestRemittedAtTs, _latestVerifiedAtTs, ...summary }) => summary)
+      .sort((left, right) => right.verifiedAmount - left.verifiedAmount || left.branch.localeCompare(right.branch));
   }, [monthlyPayments, monthlyRemittances, branchLookup]);
 
   const pendingRemittanceAmount = monthlyRemittances
@@ -640,6 +687,10 @@ const PaymentManagement = () => {
                     <th>Verified Collections</th>
                     <th>Remitted To Main</th>
                     <th>Pending Remittance</th>
+                    <th>Remitted By</th>
+                    <th>Remitted Date</th>
+                    <th>Verified By Main</th>
+                    <th>Verified Date</th>
                     <th>Verified Count</th>
                   </tr>
                 </thead>
@@ -671,6 +722,10 @@ const PaymentManagement = () => {
         'Verified Collection',
         'Remitted To Main',
         'Pending Remittance',
+        'Remitted By',
+        'Remitted Date',
+        'Verified By Main',
+        'Verified Date',
         'Verified Count',
         'Pending Count',
         'Failed Count',
@@ -681,6 +736,10 @@ const PaymentManagement = () => {
         Number(branch.verifiedAmount || 0).toFixed(2),
         Number(branch.remittedAmount || 0).toFixed(2),
         Number(branch.pendingRemittanceAmount || 0).toFixed(2),
+        branch.remittedBy || 'N/A',
+        formatBranchRemittanceDate(branch.remittedAt),
+        branch.verifiedBy || 'Pending Main Review',
+        formatBranchRemittanceDate(branch.verifiedAt),
         branch.verifiedCount,
         branch.pendingCount,
         branch.failedCount,
@@ -866,7 +925,7 @@ const PaymentManagement = () => {
           </div>
         </div>
         <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200">
-          <table className="min-w-full divide-y divide-slate-200 text-sm">
+          <table className="min-w-[1650px] divide-y divide-slate-200 text-sm">
             <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
               <tr>
                 <th className="px-5 py-4">Branch</th>
@@ -874,6 +933,10 @@ const PaymentManagement = () => {
                 <th className="px-5 py-4 text-right">Verified Collection</th>
                 <th className="px-5 py-4 text-right">Remitted To Main</th>
                 <th className="px-5 py-4 text-right">Pending Remittance</th>
+                <th className="px-5 py-4">Remitted By</th>
+                <th className="px-5 py-4">Remitted Date</th>
+                <th className="px-5 py-4">Verified By Main</th>
+                <th className="px-5 py-4">Verified Date</th>
                 <th className="px-5 py-4">Status Mix</th>
               </tr>
             </thead>
@@ -885,6 +948,10 @@ const PaymentManagement = () => {
                   <td className="px-5 py-4 text-right font-bold text-slate-950">{formatCurrency(branch.verifiedAmount)}</td>
                   <td className="px-5 py-4 text-right font-semibold text-emerald-700">{formatCurrency(branch.remittedAmount)}</td>
                   <td className="px-5 py-4 text-right font-semibold text-amber-700">{formatCurrency(branch.pendingRemittanceAmount)}</td>
+                  <td className="px-5 py-4 text-slate-700">{branch.remittedBy || 'N/A'}</td>
+                  <td className="px-5 py-4 text-slate-600">{formatBranchRemittanceDate(branch.remittedAt)}</td>
+                  <td className="px-5 py-4 text-slate-700">{branch.verifiedBy || 'Pending Main Review'}</td>
+                  <td className="px-5 py-4 text-slate-600">{formatBranchRemittanceDate(branch.verifiedAt)}</td>
                   <td className="px-5 py-4 text-slate-600">
                     {branch.verifiedCount} verified / {branch.pendingCount} pending / {branch.failedCount} failed
                   </td>
@@ -1040,7 +1107,7 @@ const PaymentManagement = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 bg-white">
-              {monthlyRemittances.map((remittance) => (
+              {pendingReviewRemittances.map((remittance) => (
                 <tr key={remittance.id} className="hover:bg-slate-50">
                   <td className="px-5 py-4 font-mono text-sm font-semibold text-slate-900">{remittance.remittance_number}</td>
                   <td className="px-5 py-4 font-semibold text-slate-700">{branchLookup[remittance.branch_id] || formatBranchLabel(remittance.branch_name, remittance.branch_id)}</td>
@@ -1060,11 +1127,7 @@ const PaymentManagement = () => {
                     )}
                   </td>
                   <td className="px-5 py-4">
-                    <span className={`rounded-full px-3 py-1 text-xs font-bold ${
-                      remittance.status === 'Accepted' ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200' :
-                      remittance.status === 'Rejected' ? 'bg-rose-50 text-rose-700 ring-1 ring-rose-200' :
-                      'bg-amber-50 text-amber-700 ring-1 ring-amber-200'
-                    }`}>
+                    <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700 ring-1 ring-amber-200">
                       {remittance.status}
                     </span>
                   </td>
@@ -1072,32 +1135,28 @@ const PaymentManagement = () => {
                     {formatPaymentDate(remittance.submitted_at, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                   </td>
                   <td className="px-5 py-4">
-                    {remittance.status === 'Submitted' ? (
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => openRemittanceActionModal(remittance, 'accept')}
-                          className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-emerald-700"
-                        >
-                          Accept
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => openRemittanceActionModal(remittance, 'reject')}
-                          className="rounded-xl bg-rose-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-rose-700"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    ) : (
-                      <span className="text-xs font-semibold text-slate-400">Reviewed</span>
-                    )}
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openRemittanceActionModal(remittance, 'accept')}
+                        className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-emerald-700"
+                      >
+                        Accept
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openRemittanceActionModal(remittance, 'reject')}
+                        className="rounded-xl bg-rose-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-rose-700"
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          {!monthlyRemittances.length ? (
+          {!pendingReviewRemittances.length ? (
             <div className="bg-white px-5 py-10 text-center text-sm text-slate-500">No branch remittances submitted for {collectionMonthLabel}.</div>
           ) : null}
         </div>

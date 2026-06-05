@@ -21,6 +21,7 @@ from database.models import (
     Branch,
     BusinessRegistry,
     CitizenUser,
+    Payment,
     Queue,
     QueueHistory,
     TaxAssessmentRecord,
@@ -70,6 +71,7 @@ SUBMISSION_TYPES = {"RPT", "BT"}
 REVIEWABLE_STATUSES = {"Pending Verification", "Verified", "Rejected"}
 ACTIVE_ASSESSMENT_STATUSES = {"Active", "Inactive"}
 IDENTIFIER_PATTERN = re.compile(r"^[A-Z0-9-]{6,40}$")
+ASSESSMENT_CLEAR_PAYMENT_STATUSES = {"PAYMENT_VERIFIED", "OR_GENERATED", "COMPLETED", "VERIFIED"}
 
 
 class PublicProfileUpdateRequest(BaseModel):
@@ -260,6 +262,72 @@ def citizen_contact(user: CitizenUser) -> str | None:
 
 def citizen_address(user: CitizenUser) -> str | None:
     return get_decrypted_or_raw(user, "address") or user.address
+
+
+def payment_is_successfully_verified(payment: Payment) -> bool:
+    workflow_status = (payment.status or "").strip().upper()
+    return (
+        workflow_status in ASSESSMENT_CLEAR_PAYMENT_STATUSES
+        or payment.verified_at is not None
+        or bool(get_decrypted_or_raw(payment, "official_receipt_number"))
+        or bool(get_decrypted_or_raw(payment, "official_receipt_path"))
+    )
+
+
+def amount_matches_assessment(payment: Payment, assessment: TaxAssessmentRecord) -> bool:
+    assessment_amount = float(assessment.final_total_amount_due or assessment.amount_due or 0)
+    if assessment_amount <= 0:
+        return False
+    return round(float(payment.amount or 0), 2) == round(assessment_amount, 2)
+
+
+def payment_matches_assessment(payment: Payment, assessment: TaxAssessmentRecord) -> bool:
+    tax_type = (tax_assessment_value(assessment, "tax_type") or "").strip().upper()
+    if not payment_is_successfully_verified(payment):
+        return False
+
+    if tax_type == "RPT" and payment.source_module == "rpt_online_payment":
+        tdn = (tax_assessment_value(assessment, "tdn") or "").strip().upper()
+        payment_refs = (get_decrypted_or_raw(payment, "property_ref_number") or payment.property_ref_number or "").upper()
+        payment_tokens = {token.strip() for token in payment_refs.split(",") if token.strip()}
+        return bool(tdn and tdn in payment_tokens)
+
+    if tax_type == "BT" and payment.source_module == "business_tax_online_payment":
+        mayor_permit = (tax_assessment_value(assessment, "mayor_permit_number") or "").strip().upper()
+        payment_permit = (get_decrypted_or_raw(payment, "property_ref_number") or payment.property_ref_number or "").strip().upper()
+        if mayor_permit and payment_permit and mayor_permit == payment_permit:
+            return True
+        return amount_matches_assessment(payment, assessment)
+
+    return False
+
+
+def filter_unsettled_public_assessments(
+    db: Session,
+    current_user: CitizenUser,
+    assessments: list[TaxAssessmentRecord],
+) -> list[TaxAssessmentRecord]:
+    if not assessments:
+        return []
+
+    user_email = citizen_email(current_user)
+    candidate_payments = (
+        db.query(Payment)
+        .filter(Payment.source_module.in_(("rpt_online_payment", "business_tax_online_payment")))
+        .order_by(Payment.created_at.desc())
+        .all()
+    )
+    if user_email:
+        normalized_email = user_email.strip().lower()
+        candidate_payments = [
+            payment for payment in candidate_payments
+            if (get_decrypted_or_raw(payment, "email") or payment.email or "").strip().lower() == normalized_email
+        ]
+
+    return [
+        assessment for assessment in assessments
+        if not any(payment_matches_assessment(payment, assessment) for payment in candidate_payments)
+    ]
 
 
 def get_citizen_profile_snapshot(user: CitizenUser) -> dict:
@@ -564,6 +632,7 @@ async def get_public_account_management(
         .order_by(TaxAssessmentRecord.created_at.desc())
         .all()
     )
+    assessments = filter_unsettled_public_assessments(db, current_user, assessments)
     return {
         "profile": {
             "id": current_user.id,
@@ -802,6 +871,7 @@ async def list_public_assessments(
     if tax_type:
         query = query.filter(hash_aware_match(TaxAssessmentRecord, "tax_type", normalize_submission_type(tax_type)))
     assessments = query.order_by(TaxAssessmentRecord.created_at.desc()).all()
+    assessments = filter_unsettled_public_assessments(db, current_user, assessments)
     return {"items": [serialize_assessment(record) for record in assessments]}
 
 

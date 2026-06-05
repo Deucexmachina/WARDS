@@ -212,7 +212,7 @@ def serialize_receipt_request(request: ReceiptRequest, db: Session):
         matched_receipt = db.query(ReceiptRecord).filter(ReceiptRecord.id == request.matched_receipt_id).first()
 
     payment_status = get_receipt_request_payment_status(request, payment)
-    release_status = get_receipt_request_release_status(request)
+    release_status = get_receipt_request_release_status(request, payment)
     overall_status = get_receipt_request_overall_status(request, payment)
     next_action = get_receipt_request_next_action(request, payment)
 
@@ -469,7 +469,7 @@ def is_declined_receipt_payment(payment: Payment | None) -> bool:
         return False
     normalized_status = (payment.status or "").strip().lower()
     normalized_paymongo_status = (payment.paymongo_status or "").strip().lower()
-    return normalized_status in {"failed", "declined", "payment_rejected", "expired", "cancelled", "canceled"} or normalized_paymongo_status in {
+    return normalized_status in {"failed", "declined", "rejected", "payment_rejected", "expired", "cancelled", "canceled"} or normalized_paymongo_status in {
         "failed",
         "declined",
         "expired",
@@ -482,19 +482,19 @@ def is_verified_receipt_payment(payment: Payment | None) -> bool:
     if not payment:
         return False
     normalized_status = (payment.status or "").strip().lower()
-    normalized_paymongo_status = (payment.paymongo_status or "").strip().lower()
     return (
-        normalized_status in {"verified", "payment verified", "payment_submitted", "payment_verified", "or_generated", "completed", "confirmed"}
-        or normalized_paymongo_status in {"paid", "succeeded"}
+        normalized_status in {"verified", "payment verified", "payment_verified", "or_generated", "completed", "confirmed"}
         or payment.verified_at is not None
     )
 
 
 def get_receipt_request_payment_status(request: ReceiptRequest, payment: Payment | None) -> str:
-    if request.fee_paid or is_verified_receipt_payment(payment):
+    if is_verified_receipt_payment(payment):
         return "Verified"
     if is_declined_receipt_payment(payment):
-        return "Declined"
+        return "Rejected"
+    if request.fee_paid or (payment and (payment.paymongo_status or "").strip().lower() in {"paid", "succeeded"}):
+        return "Pending Transaction"
     return "Pending"
 
 
@@ -502,11 +502,11 @@ def has_uploaded_release_copy(request: ReceiptRequest) -> bool:
     return bool(receipt_request_value(request, "release_copy_path"))
 
 
-def get_receipt_request_release_status(request: ReceiptRequest) -> str:
+def get_receipt_request_release_status(request: ReceiptRequest, payment: Payment | None) -> str:
     current_status = receipt_request_value(request, "status")
     if current_status in {"Released", "Completed"}:
         return "Released"
-    if request.fee_paid and has_uploaded_release_copy(request):
+    if is_verified_receipt_payment(payment) and has_uploaded_release_copy(request):
         return "Ready for Release"
     return "Not Ready for Release"
 
@@ -516,9 +516,13 @@ def get_receipt_request_overall_status(request: ReceiptRequest, payment: Payment
     if current_status in {"Released", "Completed"}:
         return current_status
     payment_status = get_receipt_request_payment_status(request, payment)
-    release_status = get_receipt_request_release_status(request)
+    release_status = get_receipt_request_release_status(request, payment)
     if payment_status == "Declined":
         return "Payment Declined"
+    if payment_status == "Rejected":
+        return "Payment Rejected"
+    if payment_status == "Pending Transaction":
+        return "Pending Transaction"
     if payment_status == "Pending":
         return "Payment Pending"
     if release_status == "Ready for Release":
@@ -528,11 +532,17 @@ def get_receipt_request_overall_status(request: ReceiptRequest, payment: Payment
 
 def get_receipt_request_next_action(request: ReceiptRequest, payment: Payment | None) -> str:
     payment_status = get_receipt_request_payment_status(request, payment)
-    release_status = get_receipt_request_release_status(request)
-    if payment_status in {"Pending", "Declined"}:
+    release_status = get_receipt_request_release_status(request, payment)
+    if payment_status == "Rejected":
+        return "Pay Request Fee"
+    if payment_status == "Pending Transaction":
+        return "Wait for Branch Verification"
+    if payment_status == "Pending":
         return "Pay Request Fee"
     if release_status == "Ready for Release":
         return "Wait for Branch Release"
+    if payment_status == "Verified":
+        return "Upload Release Copy"
     return "Request Receipt"
 
 
@@ -1059,12 +1069,10 @@ def validate_receipt_appointment_datetime(
 
 
 def sync_request_status(request: ReceiptRequest):
-    if receipt_request_value(request, "status") in {"Released", "Completed"}:
+    if receipt_request_value(request, "status") in {"Released", "Completed", "Rejected"}:
         return
 
-    if request.fee_paid and has_uploaded_release_copy(request):
-        request.status = "Ready for Release"
-    elif request.fee_paid:
+    if request.fee_paid:
         request.status = "Pending Branch Review"
     else:
         request.status = "Payment Required"
@@ -1589,8 +1597,15 @@ async def release_receipt_request(request_id: str, current_staff=Depends(get_cur
         raise HTTPException(status_code=403, detail="Request belongs to another branch")
 
     payment = get_latest_receipt_request_payment(db, receipt_request_value(receipt_request, "request_id"))
-    if not receipt_request.fee_paid and not is_verified_receipt_payment(payment):
-        raise HTTPException(status_code=400, detail="Receipt request fee has not been paid")
+    payment_status = get_receipt_request_payment_status(receipt_request, payment)
+    if payment_status == "Pending":
+        raise HTTPException(status_code=400, detail="Receipt request fee has not been paid yet.")
+    if payment_status == "Pending Transaction":
+        raise HTTPException(status_code=400, detail="Receipt release is blocked while payment is still pending branch verification.")
+    if payment_status == "Rejected":
+        raise HTTPException(status_code=400, detail="Receipt release is blocked because the payment was rejected by branch administration.")
+    if not is_verified_receipt_payment(payment):
+        raise HTTPException(status_code=400, detail="Receipt release is available only for verified payments.")
 
     current_release_copy_path = receipt_request_value(receipt_request, "release_copy_path")
     current_release_copy_filename = receipt_request_value(receipt_request, "release_copy_filename")
@@ -1901,7 +1916,7 @@ async def pay_request_fee(
     normalized_payment_method = normalize_receipt_payment_method(payment_data.paymentMethod)
 
     existing_payment = db.query(Payment).filter(Payment.related_request_id == resolved_request_id).order_by(Payment.created_at.desc()).first()
-    if existing_payment and (existing_payment.status or "").lower() in {"pending", "pending over-the-counter payment", "verified", "payment verified"}:
+    if existing_payment and (existing_payment.status or "").lower() in {"pending", "pending over-the-counter payment", "pending transaction", "verified", "payment verified"}:
         previous_method = get_decrypted_or_raw(existing_payment, "payment_method") or existing_payment.payment_method
         if previous_method != normalized_payment_method:
             clear_receipt_payment_checkout_fields(existing_payment)

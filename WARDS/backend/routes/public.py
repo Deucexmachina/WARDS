@@ -1100,7 +1100,7 @@ async def get_my_active_ticket(
             "created_at": serialize_manila_datetime(active_queue.created_at),
             "served_at": serialize_manila_datetime(active_queue.served_at),
             "linked_receipt_requests": [
-                {
+                ({
                     "request_id": receipt_request_value(request, "request_id"),
                     "tax_type": receipt_request_value(request, "tax_type"),
                     "request_reason": receipt_request_value(request, "request_reason"),
@@ -1108,9 +1108,36 @@ async def get_my_active_ticket(
                     "status": receipt_request_value(request, "status"),
                     "fee_paid": bool(request.fee_paid),
                     "payment_ref_number": receipt_request_value(request, "payment_ref_number"),
-                    "payment_status": "Verified" if request.fee_paid else "Pending",
+                    "payment_status": (
+                        "Verified"
+                        if (
+                            (latest_payment := db.query(Payment)
+                                .filter(Payment.related_request_id == receipt_request_value(request, "request_id"))
+                                .order_by(Payment.created_at.desc(), Payment.id.desc())
+                                .first()
+                            )
+                            and (((latest_payment.status or "").strip().lower() in {"verified", "payment verified"}) or latest_payment.verified_at)
+                        )
+                        else "Rejected"
+                        if (
+                            latest_payment
+                            and (
+                                (latest_payment.status or "").strip().lower() in {"rejected", "failed", "declined", "payment_rejected", "expired"}
+                                or (latest_payment.paymongo_status or "").strip().lower() in {"failed", "declined", "expired", "cancelled", "canceled"}
+                            )
+                        )
+                        else "Pending Transaction"
+                        if (
+                            request.fee_paid
+                            or (
+                                latest_payment
+                                and (latest_payment.paymongo_status or "").strip().lower() in {"paid", "succeeded"}
+                            )
+                        )
+                        else "Pending"
+                    ),
                     "created_at": serialize_manila_datetime(request.created_at),
-                }
+                })
                 for request in linked_receipt_requests
             ],
         }
@@ -1387,14 +1414,17 @@ async def verify_payment(request: Request, ref_number: str, db: Session = Depend
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
     
-    payment.status = "Verified"
-    payment.verified_at = datetime.utcnow()
+    if payment.source_module == "receipt_request":
+        payment.status = "Pending Transaction"
+    else:
+        payment.status = "Verified"
+        payment.verified_at = datetime.utcnow()
     from utils.field_crypto import apply_payment_security
     apply_payment_security(payment)
     db.commit()
     
     return {
         "ref_number": get_decrypted_or_raw(payment, "ref_number"),
-        "status": "Verified",
-        "message": "Payment verified successfully"
+        "status": payment.status,
+        "message": "Payment submitted successfully" if payment.source_module == "receipt_request" else "Payment verified successfully"
     }
