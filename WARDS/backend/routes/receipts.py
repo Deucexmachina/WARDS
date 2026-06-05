@@ -203,7 +203,7 @@ def serialize_receipt_request(request: ReceiptRequest, db: Session):
     branch_name = None
     if request.branch_id:
         branch = db.query(Branch).filter(Branch.id == request.branch_id).first()
-        branch_name = branch.name if branch else None
+        branch_name = get_decrypted_or_raw(branch, "name") if branch else None
 
     payment = get_latest_receipt_request_payment(db, receipt_request_value(request, "request_id"))
 
@@ -253,7 +253,7 @@ def serialize_receipt_request_history(history: ReceiptRequestHistory, db: Sessio
     branch_name = None
     if history.branch_id:
         branch = db.query(Branch).filter(Branch.id == history.branch_id).first()
-        branch_name = branch.name if branch else None
+        branch_name = get_decrypted_or_raw(branch, "name") if branch else None
 
     payment = None
     history_payment_ref_number = receipt_request_history_value(history, "payment_ref_number")
@@ -296,6 +296,27 @@ def serialize_receipt_request_history(history: ReceiptRequestHistory, db: Sessio
             "paymentMethod": payment.payment_method,
         } if payment else None,
     }
+
+
+def find_receipt_request_by_request_id(db: Session, request_id: str | None) -> ReceiptRequest | None:
+    normalized_request_id = (request_id or "").strip()
+    if not normalized_request_id:
+        return None
+
+    receipt_request = (
+        db.query(ReceiptRequest)
+        .filter(hash_aware_match(ReceiptRequest, "request_id", normalized_request_id))
+        .first()
+    )
+    if receipt_request:
+        return receipt_request
+
+    # Fallback for legacy/encrypted rows whose hash companion may be stale.
+    for candidate in db.query(ReceiptRequest).all():
+        if receipt_request_value(candidate, "request_id") == normalized_request_id:
+            return candidate
+
+    return None
 
 
 def validate_taxpayer_name(value: str) -> str:
@@ -1519,7 +1540,7 @@ async def delete_receipt_request(
     current_staff=Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
-    receipt_request = db.query(ReceiptRequest).filter(hash_aware_match(ReceiptRequest, "request_id", request_id)).first()
+    receipt_request = find_receipt_request_by_request_id(db, request_id)
     if not receipt_request:
         raise HTTPException(status_code=404, detail="Receipt request not found")
 
@@ -1560,7 +1581,7 @@ async def delete_receipt_request(
 
 @router.post("/requests/{request_id}/release")
 async def release_receipt_request(request_id: str, current_staff=Depends(get_current_branch_staff), db: Session = Depends(get_db)):
-    receipt_request = db.query(ReceiptRequest).filter(hash_aware_match(ReceiptRequest, "request_id", request_id)).first()
+    receipt_request = find_receipt_request_by_request_id(db, request_id)
     if not receipt_request:
         raise HTTPException(status_code=404, detail="Receipt request not found")
 
@@ -1636,7 +1657,7 @@ async def release_receipt_request(request_id: str, current_staff=Depends(get_cur
 
 @router.post("/requests/{request_id}/complete-appointment")
 async def complete_appointment_request(request_id: str, current_staff=Depends(get_current_branch_staff), db: Session = Depends(get_db)):
-    receipt_request = db.query(ReceiptRequest).filter(hash_aware_match(ReceiptRequest, "request_id", request_id)).first()
+    receipt_request = find_receipt_request_by_request_id(db, request_id)
     if not receipt_request:
         raise HTTPException(status_code=404, detail="Receipt request not found")
     if receipt_request.branch_id != current_staff.branch_id:
@@ -1674,7 +1695,7 @@ async def upload_release_copy(
     current_staff=Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
-    receipt_request = db.query(ReceiptRequest).filter(hash_aware_match(ReceiptRequest, "request_id", request_id)).first()
+    receipt_request = find_receipt_request_by_request_id(db, request_id)
     if not receipt_request:
         raise HTTPException(status_code=404, detail="Receipt request not found")
     if receipt_request.branch_id != current_staff.branch_id:
@@ -1785,7 +1806,7 @@ async def download_release_copy(
     current_staff=Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
-    receipt_request = db.query(ReceiptRequest).filter(hash_aware_match(ReceiptRequest, "request_id", request_id)).first()
+    receipt_request = find_receipt_request_by_request_id(db, request_id)
     if not receipt_request:
         raise HTTPException(status_code=404, detail="Receipt request not found")
     if receipt_request.branch_id != current_staff.branch_id:

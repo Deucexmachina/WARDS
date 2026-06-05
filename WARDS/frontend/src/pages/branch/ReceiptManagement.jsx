@@ -918,6 +918,9 @@ const ReceiptManagement = () => {
         setError(detail.message || 'The file name must match the taxpayer name before release.');
       } else {
         setError(detail || 'Failed to upload finished receipt copy.');
+        if (err.response?.status === 404) {
+          await refreshData({ emitReceiptEvent: true });
+        }
       }
     } finally {
       setUploadingReleaseId(null);

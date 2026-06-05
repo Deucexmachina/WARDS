@@ -551,7 +551,21 @@ def find_mfa_secret_record(db, MFASecret, portal: Optional[str], username: Optio
     )
     if enabled_only:
         query = query.filter(MFASecret.enabled.is_(True))
-    return query.first()
+    record = query.first()
+    if record:
+        return record
+
+    fallback_query = db.query(MFASecret)
+    if enabled_only:
+        fallback_query = fallback_query.filter(MFASecret.enabled.is_(True))
+
+    for candidate in fallback_query.all():
+        candidate_portal = (get_decrypted_or_raw(candidate, "portal") or "").strip().lower()
+        candidate_username = (get_decrypted_or_raw(candidate, "username") or "").strip()
+        if candidate_portal == normalized_portal and candidate_username == normalized_username:
+            return candidate
+
+    return None
 
 
 def find_payment_by_ref_number(db, Payment, ref_number: Optional[str]):
@@ -772,7 +786,7 @@ def find_citizen_by_email(db, CitizenUser, email: Optional[str]):
     if not normalized:
         return None
     email_hash = hash_optional_value(normalized)
-    return (
+    user = (
         db.query(CitizenUser)
         .filter(
             or_(
@@ -782,6 +796,16 @@ def find_citizen_by_email(db, CitizenUser, email: Optional[str]):
         )
         .first()
     )
+    if user:
+        return user
+
+    # Fallback for encrypted rows whose hash companion may be stale in a long-running worker.
+    for candidate in db.query(CitizenUser).all():
+        candidate_email = (get_decrypted_or_raw(candidate, "email") or "").strip().lower()
+        if candidate_email == normalized:
+            return candidate
+
+    return None
 
 
 def find_citizen_by_tin(db, CitizenUser, tin: Optional[str]):
