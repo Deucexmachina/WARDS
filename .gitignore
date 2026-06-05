@@ -26,6 +26,8 @@
 
 # Security runtime artifacts
 SECURITY/local_backups/
+SECURITY/database_monitor/wards_db_checksum.json
+SECURITY/database_monitor/wards_db_snapshot.json
 SECURITY/wazuh/ossec.conf
 SECURITY/[Bb][Aa][Cc][Kk][Uu][Pp]*/
 SECURITY/**/[Bb][Aa][Cc][Kk][Uu][Pp]*/
