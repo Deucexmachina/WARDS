@@ -100,7 +100,7 @@ const DynamicSidebar = () => {
       fetchUnreadPolicyCount();
       fetchUnreadDiscrepancyCount();
       fetchSidebarModuleCounts();
-    }, 60000);
+    }, 10000);
     const handleAdminMemoRead = (event) => {
       setUnreadMemoCount((current) => resolveUnreadCount(event, current));
       fetchUnreadMemoCount();
@@ -148,6 +148,17 @@ const DynamicSidebar = () => {
         queue: getActiveQueueBadgeCount(eventQueues),
       }));
     };
+    const handleSecurityNotificationsUpdated = (event) => {
+      const counts = event?.detail || {};
+      setModuleCounts((current) => ({
+        ...current,
+        backup: Number(counts.detections || 0)
+          + Number(counts.recoveries || 0)
+          + Number(counts.backups || 0)
+          + Number(counts.incidents || 0),
+      }));
+    };
+    const handleAdminAlertRead = () => fetchSidebarModuleCounts();
     window.addEventListener('admin-memo-read', handleAdminMemoRead);
     window.addEventListener('admin-policy-read', handleAdminPolicyRead);
     window.addEventListener('admin-policy-updated', handleAdminPolicyUpdated);
@@ -161,6 +172,8 @@ const DynamicSidebar = () => {
     window.addEventListener(BRANCH_REPORTS_UPDATED_EVENT, handleBranchReportsUpdated);
     window.addEventListener(BRANCH_RECEIPT_UPDATED_EVENT, handleBranchReceiptUpdated);
     window.addEventListener(BRANCH_QUEUE_UPDATED_EVENT, handleBranchQueueUpdated);
+    window.addEventListener('security-notifications-updated', handleSecurityNotificationsUpdated);
+    window.addEventListener('admin-alert-read', handleAdminAlertRead);
     return () => {
       clearInterval(interval);
       window.removeEventListener('admin-memo-read', handleAdminMemoRead);
@@ -176,6 +189,8 @@ const DynamicSidebar = () => {
       window.removeEventListener(BRANCH_REPORTS_UPDATED_EVENT, handleBranchReportsUpdated);
       window.removeEventListener(BRANCH_RECEIPT_UPDATED_EVENT, handleBranchReceiptUpdated);
       window.removeEventListener(BRANCH_QUEUE_UPDATED_EVENT, handleBranchQueueUpdated);
+      window.removeEventListener('security-notifications-updated', handleSecurityNotificationsUpdated);
+      window.removeEventListener('admin-alert-read', handleAdminAlertRead);
     };
   }, []);
 
@@ -243,28 +258,30 @@ const DynamicSidebar = () => {
           reportsResult,
           accountsResult,
           backupResult,
-          logsResult,
         ] = await Promise.allSettled([
           announcementAPI.getUnreadCount(),
-          api.get('/alerts'),
+          api.get('/alerts/unread-count'),
           fetchAllAdminReports(),
           api.get('/accounts', { params: { page: 1, page_size: 1 } }),
-          api.get('/security/dashboard'),
-          api.get('/activity-logs'),
+          api.get('/security/unread-counts'),
         ]);
 
         const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}');
+        const securityCounts = backupResult.status === 'fulfilled' ? (backupResult.value.data || {}) : {};
 
         setModuleCounts({
           announcements: announcementsResult.status === 'fulfilled' ? Number(announcementsResult.value.data?.unread_count || 0) : 0,
-          alerts: alertsResult.status === 'fulfilled' ? (alertsResult.value.data || []).length : 0,
+          alerts: alertsResult.status === 'fulfilled' ? Number(alertsResult.value.data?.unread_count || 0) : 0,
           receipts: 0,
           payments: 0,
           queue: 0,
           reports: reportsResult.status === 'fulfilled' ? getUnreadAdminReportCount(reportsResult.value || [], adminUser) : 0,
           accounts: accountsResult.status === 'fulfilled' ? Number(accountsResult.value.data?.total || 0) : 0,
-          backup: backupResult.status === 'fulfilled' ? Number(backupResult.value.data?.active_incidents || 0) : 0,
-          logs: logsResult.status === 'fulfilled' ? (logsResult.value.data || []).length : 0,
+          backup: Number(securityCounts.detections || 0)
+            + Number(securityCounts.recoveries || 0)
+            + Number(securityCounts.backups || 0)
+            + Number(securityCounts.incidents || 0),
+          logs: 0,
         });
         return;
       }

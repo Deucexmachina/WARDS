@@ -32,6 +32,13 @@ from middleware.dos_protection import RequestSizeMiddleware, RequestTimeoutMiddl
 
 app = FastAPI(title="WARDS API", version="1.0.0")
 
+
+@app.exception_handler(Exception)
+async def production_exception_handler(request: Request, exc: Exception):
+    if os.getenv("APP_ENV", os.getenv("ENV", "development")).lower() in {"prod", "production"}:
+        return JSONResponse(status_code=500, content={"detail": "An internal server error occurred."})
+    raise exc
+
 # Rate limiting configuration
 limiter = Limiter(key_func=get_remote_address, headers_enabled=True)
 app.state.limiter = limiter
@@ -116,6 +123,9 @@ Base.metadata.create_all(bind=engine)
 
 def ensure_auth_extensions():
     inspector = inspect(engine)
+    is_mysql = engine.dialect.name.startswith("mysql")
+    id_column = "INTEGER PRIMARY KEY AUTO_INCREMENT" if is_mysql else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    attachment_blob_type = "LONGBLOB" if is_mysql else "BLOB"
 
     with engine.begin() as conn:
         table_names = set(inspector.get_table_names())
@@ -168,6 +178,9 @@ def ensure_auth_extensions():
             ("recipient_type_enc", "TEXT"),
             ("author_hash", "VARCHAR(255)"),
             ("author_enc", "TEXT"),
+            ("author_type", "VARCHAR(255) DEFAULT 'admin'"),
+            ("author_type_hash", "VARCHAR(255)"),
+            ("author_type_enc", "TEXT"),
             ("priority_hash", "VARCHAR(255)"),
             ("priority_enc", "TEXT"),
             ("attachment_path_hash", "VARCHAR(255)"),
@@ -181,6 +194,46 @@ def ensure_auth_extensions():
         announcement_columns = {column["name"] for column in inspector.get_columns("announcements")}
         if "branch_id" not in announcement_columns:
             conn.execute(text("ALTER TABLE announcements ADD COLUMN branch_id INTEGER"))
+        if "announcement_attachments" in table_names:
+            attachment_columns = {column["name"]: column for column in inspector.get_columns("announcement_attachments")}
+            if "file_content" not in attachment_columns:
+                conn.execute(text(f"ALTER TABLE announcement_attachments ADD COLUMN file_content {attachment_blob_type}"))
+            elif is_mysql:
+                current_type = str(attachment_columns["file_content"].get("type", "")).lower()
+                if "blob" not in current_type:
+                    conn.execute(text("ALTER TABLE announcement_attachments MODIFY COLUMN file_content LONGBLOB"))
+
+        if "alert_views" not in table_names:
+            conn.execute(text(f"""
+                CREATE TABLE alert_views (
+                    id {id_column},
+                    alert_id INTEGER NOT NULL,
+                    viewer_username VARCHAR(255) NOT NULL,
+                    viewer_type VARCHAR(255) DEFAULT 'admin',
+                    viewed_at DATETIME
+                )
+            """))
+        if "revoked_tokens" not in table_names:
+            conn.execute(text(f"""
+                CREATE TABLE revoked_tokens (
+                    id {id_column},
+                    token_hash VARCHAR(128) NOT NULL UNIQUE,
+                    token_type VARCHAR(40),
+                    subject VARCHAR(255),
+                    expires_at DATETIME,
+                    revoked_at DATETIME
+                )
+            """))
+        if "security_log_views" not in table_names:
+            conn.execute(text(f"""
+                CREATE TABLE security_log_views (
+                    id {id_column},
+                    log_type VARCHAR(40) NOT NULL,
+                    log_id INTEGER NOT NULL,
+                    viewer_username VARCHAR(255) NOT NULL,
+                    viewed_at DATETIME
+                )
+            """))
 
         payment_columns = {column["name"] for column in inspector.get_columns("payments")}
         if "paymongo_checkout_session_id" not in payment_columns:

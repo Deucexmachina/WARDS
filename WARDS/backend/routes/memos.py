@@ -60,6 +60,8 @@ def serialize_memo(memo: Memo, branch_lookup: dict[int, str], current_username: 
         "recipient_branch_ids": recipient_ids,
         "recipient_label": recipient_label,
         "author": get_decrypted_or_raw(memo, "author") or memo.author,
+        "author_type": get_decrypted_or_raw(memo, "author_type") or getattr(memo, "author_type", "admin"),
+        "is_mine": current_username == (get_decrypted_or_raw(memo, "author") or memo.author),
         "priority": get_decrypted_or_raw(memo, "priority") or memo.priority,
         "attachment_path": get_decrypted_or_raw(memo, "attachment_path") or memo.attachment_path,
         "attachment_filename": get_decrypted_or_raw(memo, "attachment_filename") or memo.attachment_filename,
@@ -142,6 +144,7 @@ async def create_memo(
         recipient_type=memo_data.recipient_type,
         priority=memo_data.priority,
         author=current_user.username,
+        author_type="admin",
         attachment_path=attachment_path,
         attachment_filename=attachment_filename
     )
@@ -189,6 +192,8 @@ async def update_memo(
     db_memo = db.query(Memo).filter(Memo.id == memo_id).first()
     if not db_memo:
         raise HTTPException(status_code=404, detail="Memo not found")
+    if (get_decrypted_or_raw(db_memo, "author") or db_memo.author) != current_user.username:
+        raise HTTPException(status_code=403, detail="You can only edit memos you created")
     
     if attachment and attachment.filename:
         existing_attachment_path = get_decrypted_or_raw(db_memo, "attachment_path") or db_memo.attachment_path
@@ -244,6 +249,8 @@ async def delete_memo(
     memo = db.query(Memo).filter(Memo.id == memo_id).first()
     if not memo:
         raise HTTPException(status_code=404, detail="Memo not found")
+    if (get_decrypted_or_raw(memo, "author") or memo.author) != current_user.username:
+        raise HTTPException(status_code=403, detail="You can only delete memos you created")
 
     attachment_path = get_decrypted_or_raw(memo, "attachment_path") or memo.attachment_path
     if attachment_path and os.path.exists(attachment_path):

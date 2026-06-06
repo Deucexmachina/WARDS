@@ -53,7 +53,6 @@ async def create_invite(
     db.commit()
     db.refresh(invite)
 
-    print(f"[INVITE] {get_decrypted_or_raw(invite, 'role') or invite.role} invite for {get_decrypted_or_raw(invite, 'email') or invite.email}: {get_decrypted_or_raw(invite, 'token') or invite.token}")
 
     return {
         "id": invite.id,

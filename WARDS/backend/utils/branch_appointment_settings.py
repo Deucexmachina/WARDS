@@ -15,7 +15,7 @@ from database.models import (
     Policy,
     Queue,
 )
-from utils.field_crypto import hash_aware_any, hash_aware_match, queue_value
+from utils.field_crypto import get_decrypted_or_raw, hash_aware_any, hash_aware_match, queue_value
 from utils.branch_system_settings import get_branch_setting_value
 from utils.system_settings import get_setting_value
 
@@ -591,10 +591,12 @@ def publish_branch_schedule(
     )
     cutoff_label = _format_time_label(time_settings["last_appointment_time"])
 
+    branch_display_name = get_decrypted_or_raw(branch, "name") or branch.name
+
     notice_lines = [
         "Branch Appointment Schedule Update",
         "",
-        f"Branch: {branch.name}",
+        f"Branch: {branch_display_name}",
         f"Effective date: {draft_config['effective_date']}",
         f"Updated by: {changed_by}",
         f"Reason: {(reason or '').strip() or 'No reason provided.'}",
@@ -628,7 +630,7 @@ def publish_branch_schedule(
     ])
 
     policy = Policy(
-        title=f"{branch.name} Appointment Schedule Update - {draft_config['effective_date']}",
+        title=f"{branch_display_name} Appointment Schedule Update - {draft_config['effective_date']}",
         category=APPOINTMENT_POLICY_CATEGORY,
         content="\n".join(notice_lines),
         author=changed_by,
@@ -637,7 +639,7 @@ def publish_branch_schedule(
     db.add(ActivityLog(
         action="Branch Appointment Schedule Published",
         user=changed_by,
-        details=f"Published appointment schedule for {branch.name}",
+        details=f"Published appointment schedule for {branch_display_name}",
         type="branch_portal",
     ))
     db.commit()

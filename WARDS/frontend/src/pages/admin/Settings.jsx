@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import axios from 'axios';
 import { settingsAPI } from '../../services/api';
 import { formatUtc8Date, formatUtc8Time } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 
 const DEFAULT_PAGE_SIZE = 5;
+const API_URL = 'http://localhost:8000';
 
 const defaultSettings = {
   queueEnabled: true,
@@ -70,7 +73,22 @@ const Settings = () => {
   const [mfaSetupData, setMfaSetupData] = useState(null);
   const [mfaError, setMfaError] = useState('');
   const [settingUpMfa, setSettingUpMfa] = useState(false);
+  const [settingsAuthenticated, setSettingsAuthenticated] = useState(false);
+  const [authStep, setAuthStep] = useState('credentials');
+  const [authForm, setAuthForm] = useState({ email: '', password: '', totpCode: '' });
+  const [authError, setAuthError] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
   const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}');
+  const adminRoleLabel = adminUser?.internal_role === 'superadmin'
+    ? 'Superadmin'
+    : adminUser?.internal_role === 'branch_admin'
+      ? 'Branch Admin'
+      : 'Main Admin';
+  const adminDashboardLabel = adminUser?.internal_role === 'superadmin'
+    ? 'superadmin'
+    : adminUser?.internal_role === 'branch_admin'
+      ? 'branch admin'
+      : 'main admin';
 
   const fetchSettings = async () => {
     const settingsResponse = await settingsAPI.get();
@@ -125,8 +143,12 @@ const Settings = () => {
   };
 
   useEffect(() => {
-    fetchPageData();
-  }, []);
+    if (settingsAuthenticated) {
+      fetchPageData();
+    } else {
+      setLoading(false);
+    }
+  }, [settingsAuthenticated]);
 
   useEffect(() => {
     if (!loading) {
@@ -248,6 +270,101 @@ const Settings = () => {
     groups[category].push({ key, ...details });
     return groups;
   }, {}), [metadata]);
+
+  const handleSettingsLogin = async (event) => {
+    event.preventDefault();
+    setAuthLoading(true);
+    setAuthError('');
+    try {
+      const normalizedEmail = authForm.email.trim().toLowerCase();
+      const currentEmail = String(adminUser?.email || '').toLowerCase();
+      if (normalizedEmail && currentEmail && normalizedEmail !== currentEmail) {
+        setAuthError('Use the same admin account that is already signed in to the main dashboard.');
+        return;
+      }
+      const response = await axios.post(`${API_URL}/api/auth/unified/login`, {
+        identifier: authForm.email,
+        password: authForm.password,
+        portal: 'admin',
+        totp_code: authStep === 'totp' ? authForm.totpCode : undefined,
+      });
+      if (response.data.requires_mfa) {
+        setAuthStep('totp');
+        return;
+      }
+      if (response.data.portal !== 'admin') {
+        setAuthError('Only admin accounts can access System Settings.');
+        return;
+      }
+      if (adminUser?.id && response.data.user?.id && Number(adminUser.id) !== Number(response.data.user.id)) {
+        setAuthError('System Settings re-authentication must use the same admin account that opened the dashboard.');
+        return;
+      }
+      localStorage.setItem('adminToken', response.data.access_token);
+      localStorage.setItem('adminUser', JSON.stringify(response.data.user));
+      setSettingsAuthenticated(true);
+    } catch (error) {
+      const detail = error.response?.data?.detail || 'System Settings login failed.';
+      setAuthError(String(detail).toLowerCase().includes('mfa not configured')
+        ? 'MFA is required. Set up Microsoft Authenticator in the main WARDS login first.'
+        : detail);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  if (!settingsAuthenticated) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-blue-900 via-blue-800 to-slate-900 p-4">
+        <div className="w-full max-w-md rounded-3xl bg-white p-8 shadow-2xl">
+          <div className="mb-8 text-center">
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">{adminRoleLabel}</p>
+            <h1 className="mt-2 text-3xl font-bold text-gray-900">System Settings</h1>
+            <p className="mt-2 text-gray-600">
+              {authStep === 'totp' ? 'MFA required for secured settings access' : `${adminRoleLabel} secured access`}
+            </p>
+          </div>
+          {authError && <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{authError}</div>}
+          {authStep === 'credentials' && (
+            <form onSubmit={handleSettingsLogin} className="space-y-5">
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-gray-700">Email Address</label>
+                  <input value={authForm.email} onChange={(event) => setAuthForm((current) => ({ ...current, email: event.target.value }))} className="w-full rounded-xl border-2 border-gray-200 px-4 py-3 outline-none transition focus:border-transparent focus:ring-2 focus:ring-blue-500" placeholder="admin@example.com" autoComplete="email" required />
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-gray-700">Password</label>
+                  <input type="password" value={authForm.password} onChange={(event) => setAuthForm((current) => ({ ...current, password: event.target.value }))} className="w-full rounded-xl border-2 border-gray-200 px-4 py-3 outline-none transition focus:border-transparent focus:ring-2 focus:ring-blue-500" autoComplete="current-password" required />
+                </div>
+                <button type="submit" disabled={authLoading} className="w-full rounded-xl bg-blue-600 py-3 font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50">{authLoading ? 'Checking account...' : 'Continue'}</button>
+            </form>
+          )}
+          {authStep === 'totp' && (
+            <form onSubmit={handleSettingsLogin} className="space-y-5">
+                <div className="text-center">
+                  <p className="text-sm text-gray-600">Enter the 6-digit code from your authenticator app.</p>
+                  <p className="mt-2 text-xs text-gray-500">
+                    Use the current code from Microsoft Authenticator. If the code fails, check that your device time is set automatically and try again.
+                  </p>
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-gray-700">Authenticator Code</label>
+                  <input type="text" value={authForm.totpCode} onChange={(event) => setAuthForm((current) => ({ ...current, totpCode: event.target.value.replace(/\D/g, '').slice(0, 6) }))} className="w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-center font-mono text-2xl tracking-[0.4em] outline-none transition focus:border-transparent focus:ring-2 focus:ring-blue-500" placeholder="000000" maxLength="6" autoComplete="one-time-code" required />
+                </div>
+                <div className="flex gap-3">
+                  <button type="button" onClick={() => { setAuthStep('credentials'); setAuthForm((current) => ({ ...current, totpCode: '' })); setAuthError(''); }} className="flex-1 rounded-xl bg-gray-200 py-3 font-semibold text-gray-800 transition hover:bg-gray-300">Back</button>
+                  <button type="submit" disabled={authLoading || authForm.totpCode.length !== 6} className="flex-1 rounded-xl bg-blue-600 py-3 font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50">{authLoading ? 'Signing in...' : 'Login'}</button>
+                </div>
+            </form>
+          )}
+          <div className="mt-8 text-center">
+            <Link to="/admin" className="text-sm font-semibold text-slate-600 hover:text-primary">
+              Return to {adminDashboardLabel} dashboard
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (

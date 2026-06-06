@@ -277,7 +277,6 @@ async def request_otp(request: Request, credentials: OTPRequest, db: Session = D
     
     log_activity(db, "OTP Generated", normalized_email, f"OTP requested from IP: {client_ip}", "user_auth")
     
-    print(f"[USER AUTH] OTP for {normalized_email}: {otp}")
     
     return {
         "message": "OTP sent successfully",

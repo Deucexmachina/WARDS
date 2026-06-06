@@ -6,6 +6,7 @@ from typing import Optional
 import os
 
 from database.models import Admin, BranchStaff, get_db, ActivityLog
+from utils.token_revocation import is_token_revoked
 
 SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "your-admin-secret-key-change-in-production-immediately")
 UNIFIED_SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "your-unified-auth-secret-change-in-production")
@@ -37,6 +38,8 @@ async def get_current_admin_user(
     db: Session = Depends(get_db)
 ) -> Admin | BranchStaff:
     token = credentials.credentials
+    if is_token_revoked(db, token):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session has been logged out")
     
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,

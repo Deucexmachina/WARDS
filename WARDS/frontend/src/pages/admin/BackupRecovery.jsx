@@ -5,7 +5,7 @@ import wardsLogo from '../../assets/branding/wards_logo.png';
 import qcLogo from '../../assets/branding/qclogo_main.png';
 import galasLogo from '../../assets/branding/galas_logo.png';
 
-const tabs = ['Dashboard', 'File Status', 'Detection History', 'Recovery History', 'Security Incidents', 'Manual Controls'];
+const tabs = ['Dashboard', 'File Status', 'Backup History', 'Detection History', 'Recovery History', 'Security Incidents', 'Manual Controls'];
 const severities = ['info', 'low', 'medium', 'high', 'critical'];
 const sortOptions = [
   { value: 'newest', label: 'Newest to oldest' },
@@ -40,7 +40,7 @@ const ruleHelp = {
 
 const badgeClass = (value) => {
   const normalized = String(value || '').toLowerCase();
-  if (['critical', 'failed', 'compromised', 'missing', 'malicious'].includes(normalized)) return 'bg-red-100 text-red-700 border-red-200';
+  if (['critical', 'failed', 'compromised', 'missing', 'malicious', 'quarantined'].includes(normalized)) return 'bg-red-100 text-red-700 border-red-200';
   if (['high', 'modified', 'at risk', 'automatic'].includes(normalized)) return 'bg-orange-100 text-orange-700 border-orange-200';
   if (['medium', 'suspicious', 'reverted', 'false_positive', 'false positive', 'manual_backup', 'manual backup'].includes(normalized)) return 'bg-amber-100 text-amber-700 border-amber-200';
   if (['success', 'clean', 'protected', 'resolved', 'normal', 'recovered', 'legitimate', 'low'].includes(normalized)) return 'bg-green-100 text-green-700 border-green-200';
@@ -50,7 +50,7 @@ const badgeClass = (value) => {
 
 const humanize = (value) => String(value || 'n/a').replaceAll('_', ' ');
 const titleize = (value) => humanize(value).replace(/\b\w/g, (letter) => letter.toUpperCase());
-const badgeText = (value) => String(value || '').toLowerCase() === 'false_positive' ? 'False+' : titleize(value);
+const badgeText = (value) => String(value || '').toLowerCase() === 'false_positive' ? 'False' : titleize(value);
 
 const Badge = ({ children }) => (
   <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${badgeClass(children)}`}>
@@ -130,8 +130,8 @@ const MiniChart = ({ data, empty = 'No data yet.' }) => {
   );
 };
 
-const Filters = ({ filters, setFilters, showType, showStatus }) => (
-  <div className="grid gap-3 md:grid-cols-6">
+const Filters = ({ filters, setFilters, showType, showStatus, showClassification = false }) => (
+  <div className="grid w-full gap-3 md:ml-auto md:max-w-5xl md:grid-cols-6">
     <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Search keyword" value={filters.keyword} onChange={(e) => setFilters({ ...filters, keyword: e.target.value })} />
     <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" type="date" value={filters.date_from} onChange={(e) => setFilters({ ...filters, date_from: e.target.value })} />
     <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" type="date" value={filters.date_to} onChange={(e) => setFilters({ ...filters, date_to: e.target.value })} />
@@ -140,8 +140,15 @@ const Filters = ({ filters, setFilters, showType, showStatus }) => (
         <option value="">All types</option>
         {showType.map((item) => <option key={item} value={item}>{titleize(item)}</option>)}
       </select>
+    ) : showClassification ? (
+      <select className="rounded-xl border border-slate-200 px-3 py-2 text-sm" value={filters.classification} onChange={(e) => setFilters({ ...filters, classification: e.target.value })}>
+        <option value="">All classifications</option>
+        <option value="malicious">Malicious</option>
+        <option value="suspicious">Suspicious</option>
+        <option value="legitimate">Legitimate</option>
+      </select>
     ) : (
-      <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="User or file" value={filters.target} onChange={(e) => setFilters({ ...filters, target: e.target.value })} />
+      <div />
     )}
     {showStatus ? (
       <select className="rounded-xl border border-slate-200 px-3 py-2 text-sm" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}>
@@ -159,6 +166,54 @@ const Filters = ({ filters, setFilters, showType, showStatus }) => (
     </select>
   </div>
 );
+
+const PaginationFooter = ({ state, onPage }) => {
+  const [jumpPage, setJumpPage] = useState('');
+  const totalPages = Math.max(1, Number(state.total_pages || 1));
+  const currentPage = Math.min(Math.max(1, Number(state.page || 1)), totalPages);
+  const goToPage = (page) => onPage(Math.min(Math.max(1, Number(page || 1)), totalPages));
+  const submitJump = (event) => {
+    event.preventDefault();
+    goToPage(jumpPage || currentPage);
+    setJumpPage('');
+  };
+  return (
+  <div className="mt-5 flex flex-col gap-3 border-t border-slate-100 pt-5 lg:flex-row lg:items-center lg:justify-between">
+    <p className="text-sm text-slate-500">
+      Showing page {currentPage} of {totalPages} ({state.total} logs)
+    </p>
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+      <form onSubmit={submitJump} className="flex items-center gap-2">
+        <label className="text-sm font-semibold text-slate-600">Jump to</label>
+        <input
+          type="number"
+          min="1"
+          max={totalPages}
+          value={jumpPage}
+          onChange={(event) => setJumpPage(event.target.value)}
+          className="w-24 rounded-xl border border-slate-200 px-3 py-2 text-sm"
+          placeholder={String(currentPage)}
+        />
+        <button type="submit" className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700">Go</button>
+      </form>
+      <button
+        onClick={() => goToPage(currentPage - 1)}
+        disabled={currentPage <= 1}
+        className="rounded-xl bg-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-300 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        Previous
+      </button>
+      <button
+        onClick={() => goToPage(currentPage + 1)}
+        disabled={currentPage >= totalPages}
+        className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        Next
+      </button>
+    </div>
+  </div>
+  );
+};
 
 const SortHeader = ({ label, column, sort, setSort }) => {
   const active = sort.column === column;
@@ -254,19 +309,24 @@ const BackupRecovery = () => {
   const [detections, setDetections] = useState([]);
   const [recoveries, setRecoveries] = useState([]);
   const [incidents, setIncidents] = useState([]);
+  const [backups, setBackups] = useState([]);
+  const [historyPages, setHistoryPages] = useState({
+    backups: { page: 1, page_size: 10, total: 0, total_pages: 1 },
+    detections: { page: 1, page_size: 10, total: 0, total_pages: 1 },
+    recoveries: { page: 1, page_size: 10, total: 0, total_pages: 1 },
+    incidents: { page: 1, page_size: 10, total: 0, total_pages: 1 },
+  });
   const [openRows, setOpenRows] = useState({});
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [busyLabel, setBusyLabel] = useState('');
   const [confirm, setConfirm] = useState(null);
   const [weeklyAiData, setWeeklyAiData] = useState(null);
-  const [seenNotifications, setSeenNotifications] = useState(() => ({
-    detections: JSON.parse(sessionStorage.getItem('securitySeenDetections') || '[]'),
-    recoveries: JSON.parse(sessionStorage.getItem('securitySeenRecoveries') || '[]'),
-  }));
-  const [detectionFilters, setDetectionFilters] = useState({ keyword: '', date_from: '', date_to: '', target: '', severity: '', sort: 'newest' });
+  const [securityUnreadCounts, setSecurityUnreadCounts] = useState({ detections: 0, recoveries: 0, backups: 0, incidents: 0 });
+  const [detectionFilters, setDetectionFilters] = useState({ keyword: '', date_from: '', date_to: '', classification: '', severity: '', sort: 'newest' });
   const [recoveryFilters, setRecoveryFilters] = useState({ keyword: '', date_from: '', date_to: '', type: '', status: '', sort: 'newest' });
   const [incidentFilters, setIncidentFilters] = useState({ keyword: '', status: '', severity: '', date_from: '', date_to: '', sort: 'newest' });
+  const [backupFilters, setBackupFilters] = useState({ keyword: '', date_from: '', date_to: '', type: '', status: '', sort: 'newest' });
   const [fileKeyword, setFileKeyword] = useState('');
   const [fileSort, setFileSort] = useState({ column: 'folder', direction: 'asc' });
   const [aiRules, setAiRules] = useState({});
@@ -320,19 +380,61 @@ const BackupRecovery = () => {
 
   const refreshFiles = async () => setFiles((await api.get('/security/files')).data || []);
 
-  const refreshDetections = async () => {
+  const refreshUnreadCounts = async () => {
+    const response = await api.get('/security/unread-counts');
+    const nextCounts = response.data || { detections: 0, recoveries: 0, backups: 0, incidents: 0 };
+    setSecurityUnreadCounts(nextCounts);
+    window.dispatchEvent(new CustomEvent('security-notifications-updated', { detail: nextCounts }));
+  };
+
+  const updateHistoryPage = (key, data) => {
+    setHistoryPages((current) => ({
+      ...current,
+      [key]: {
+        page: data.page || current[key].page,
+        page_size: data.page_size || 10,
+        total: data.total || 0,
+        total_pages: data.total_pages || 1,
+      },
+    }));
+  };
+
+  const refreshBackups = async (page = historyPages.backups.page) => {
+    const safePage = Math.max(1, Number(page || 1));
+    const params = {
+      keyword: backupFilters.keyword || undefined,
+      date_from: backupFilters.date_from || undefined,
+      date_to: backupFilters.date_to || undefined,
+      recovery_type: backupFilters.type || undefined,
+      status: backupFilters.status || undefined,
+      sort: backupFilters.sort || 'newest',
+      page: safePage,
+      page_size: 10,
+    };
+    const response = await api.get('/security/backups', { params });
+    setBackups(response.data?.items || []);
+    updateHistoryPage('backups', response.data || {});
+  };
+
+  const refreshDetections = async (page = historyPages.detections.page) => {
+    const safePage = Math.max(1, Number(page || 1));
     const params = {
       keyword: detectionFilters.keyword || undefined,
       date_from: detectionFilters.date_from || undefined,
       date_to: detectionFilters.date_to || undefined,
-      target: detectionFilters.target || undefined,
+      classification: detectionFilters.classification || undefined,
       severity: detectionFilters.severity || undefined,
       sort: detectionFilters.sort || 'newest',
+      page: safePage,
+      page_size: 10,
     };
-    setDetections((await api.get('/security/detections', { params })).data || []);
+    const response = await api.get('/security/detections', { params });
+    setDetections(response.data?.items || []);
+    updateHistoryPage('detections', response.data || {});
   };
 
-  const refreshRecoveries = async () => {
+  const refreshRecoveries = async (page = historyPages.recoveries.page) => {
+    const safePage = Math.max(1, Number(page || 1));
     const params = {
       keyword: recoveryFilters.keyword || undefined,
       date_from: recoveryFilters.date_from || undefined,
@@ -340,11 +442,16 @@ const BackupRecovery = () => {
       recovery_type: recoveryFilters.type || undefined,
       status: recoveryFilters.status || undefined,
       sort: recoveryFilters.sort || 'newest',
+      page: safePage,
+      page_size: 10,
     };
-    setRecoveries((await api.get('/security/recoveries', { params })).data || []);
+    const response = await api.get('/security/recoveries', { params });
+    setRecoveries(response.data?.items || []);
+    updateHistoryPage('recoveries', response.data || {});
   };
 
-  const refreshIncidents = async () => {
+  const refreshIncidents = async (page = historyPages.incidents.page) => {
+    const safePage = Math.max(1, Number(page || 1));
     const params = {
       keyword: incidentFilters.keyword || undefined,
       status: incidentFilters.status || undefined,
@@ -352,8 +459,12 @@ const BackupRecovery = () => {
       date_from: incidentFilters.date_from || undefined,
       date_to: incidentFilters.date_to || undefined,
       sort: incidentFilters.sort || 'newest',
+      page: safePage,
+      page_size: 10,
     };
-    setIncidents((await api.get('/security/incidents', { params })).data || []);
+    const response = await api.get('/security/incidents', { params });
+    setIncidents(response.data?.items || []);
+    updateHistoryPage('incidents', response.data || {});
   };
 
   const refreshAiRules = async () => {
@@ -455,6 +566,10 @@ const BackupRecovery = () => {
       await refreshIncidents();
       return;
     }
+    if (tab === 'Backup History') {
+      await refreshBackups();
+      return;
+    }
     if (tab === 'Manual Controls') {
       await refreshAiRules();
       await refreshBlockedIps();
@@ -464,7 +579,7 @@ const BackupRecovery = () => {
 
   const refreshAll = async () => {
     try {
-      await refreshDashboard();
+      await Promise.all([refreshDashboard(), refreshUnreadCounts()]);
       await refreshActiveTab();
     } catch (error) {
       setNotice(error.response?.data?.detail || 'Unable to load the Security Dashboard.');
@@ -476,55 +591,128 @@ const BackupRecovery = () => {
   }, []);
 
   useEffect(() => {
-    const seconds = Math.max(5, Number(controls.scanInterval || 30));
     const timer = setInterval(() => {
       refreshDashboard();
+      refreshUnreadCounts();
       if (activeTab === 'File Status') refreshFiles();
       if (activeTab === 'Detection History') refreshDetections();
       if (activeTab === 'Recovery History') refreshRecoveries();
       if (activeTab === 'Security Incidents') refreshIncidents();
-    }, seconds * 1000);
+      if (activeTab === 'Backup History') refreshBackups();
+    }, 5000);
     return () => clearInterval(timer);
-  }, [controls.scanInterval, activeTab, detectionFilters, recoveryFilters, incidentFilters]);
+  }, [activeTab, detectionFilters, recoveryFilters, incidentFilters, backupFilters]);
+
+  useEffect(() => {
+    if (activeTab === 'Backup History') {
+      refreshBackups(1);
+    }
+  }, [backupFilters]);
 
   useEffect(() => {
     if (activeTab === 'Detection History') {
-      refreshDetections();
+      refreshDetections(1);
     }
   }, [detectionFilters]);
 
   useEffect(() => {
     if (activeTab === 'Recovery History') {
-      refreshRecoveries();
+      refreshRecoveries(1);
     }
   }, [recoveryFilters]);
 
   useEffect(() => {
     if (activeTab === 'Security Incidents') {
-      refreshIncidents();
+      refreshIncidents(1);
     }
   }, [incidentFilters]);
 
   const markSeen = (type, ids) => {
-    setSeenNotifications((current) => {
-      const merged = Array.from(new Set([...(current[type] || []), ...ids.map(String)]));
-      sessionStorage.setItem(type === 'detections' ? 'securitySeenDetections' : 'securitySeenRecoveries', JSON.stringify(merged));
-      return { ...current, [type]: merged };
-    });
+    const uniqueIds = Array.from(new Set((ids || []).filter((id) => id !== undefined && id !== null).map(Number)));
+    if (!uniqueIds.length) return;
+    api.post(`/security/${type}/mark-viewed`, uniqueIds)
+      .then((response) => {
+        if (response.data?.unread_counts) {
+          setSecurityUnreadCounts(response.data.unread_counts);
+          window.dispatchEvent(new CustomEvent('security-notifications-updated', { detail: response.data.unread_counts }));
+        } else {
+          refreshUnreadCounts();
+        }
+      })
+      .catch(() => {});
+    if (type === 'detections') {
+      setDetections((current) => current.map((item) => uniqueIds.includes(Number(item.id)) ? { ...item, is_viewed: true } : item));
+    }
+    if (type === 'recoveries') {
+      setRecoveries((current) => current.map((item) => uniqueIds.includes(Number(item.id)) ? { ...item, is_viewed: true } : item));
+    }
+    if (type === 'backups') {
+      setBackups((current) => current.map((item) => uniqueIds.includes(Number(item.id)) ? { ...item, is_viewed: true } : item));
+    }
+  };
+
+  const markAllSeen = (type) => {
+    api.post(`/security/${type}/mark-viewed`)
+      .then((response) => {
+        if (response.data?.unread_counts) {
+          setSecurityUnreadCounts(response.data.unread_counts);
+          window.dispatchEvent(new CustomEvent('security-notifications-updated', { detail: response.data.unread_counts }));
+        } else {
+          refreshUnreadCounts();
+        }
+      })
+      .catch(() => {});
+    if (type === 'detections') {
+      setDetections((current) => current.map((item) => ({ ...item, is_viewed: true })));
+    }
+    if (type === 'recoveries') {
+      setRecoveries((current) => current.map((item) => ({ ...item, is_viewed: true })));
+    }
+    if (type === 'backups') {
+      setBackups((current) => current.map((item) => ({ ...item, is_viewed: true })));
+    }
   };
 
   const changeTab = (tab) => {
     if (activeTab === 'Detection History' && tab !== 'Detection History') {
-      markSeen('detections', detections.map((item) => item.id));
+      markAllSeen('detections');
     }
     if (activeTab === 'Recovery History' && tab !== 'Recovery History') {
-      markSeen('recoveries', recoveries.map((item) => item.id));
+      markAllSeen('recoveries');
+    }
+    if (activeTab === 'Backup History' && tab !== 'Backup History') {
+      markAllSeen('backups');
     }
     setActiveTab(tab);
     refreshActiveTab(tab).catch((error) => {
       setNotice(error.response?.data?.detail || `Unable to load ${tab}.`);
     });
+    if (tab === 'Detection History') markAllSeen('detections');
+    if (tab === 'Recovery History') markAllSeen('recoveries');
+    if (tab === 'Backup History') markAllSeen('backups');
   };
+
+  const visibleDetectionKey = detections.map((item) => item.id).join(',');
+  const visibleRecoveryKey = recoveries.map((item) => item.id).join(',');
+  const visibleBackupKey = backups.map((item) => item.id).join(',');
+
+  useEffect(() => {
+    if (activeTab === 'Detection History') {
+      markAllSeen('detections');
+    }
+  }, [activeTab, visibleDetectionKey]);
+
+  useEffect(() => {
+    if (activeTab === 'Recovery History') {
+      markAllSeen('recoveries');
+    }
+  }, [activeTab, visibleRecoveryKey]);
+
+  useEffect(() => {
+    if (activeTab === 'Backup History') {
+      markAllSeen('backups');
+    }
+  }, [activeTab, visibleBackupKey]);
 
   const formatMissingFileConfirmation = (detail) => {
     const incidentsList = (detail?.incidents || []).map((item) => {
@@ -545,6 +733,7 @@ const BackupRecovery = () => {
       if (!result?.skipRefresh) {
         await refreshDashboard();
         await refreshActiveTab();
+        await refreshUnreadCounts();
       }
     } catch (error) {
       const detail = error.response?.data?.detail;
@@ -587,6 +776,11 @@ const BackupRecovery = () => {
 
   const toggleRow = (key) => setOpenRows((current) => ({ ...current, [key]: !current[key] }));
 
+  const toggleBackupRow = (key, id) => {
+    markSeen('backups', [id]);
+    toggleRow(key);
+  };
+
   const toggleDetectionRow = (key, id) => {
     markSeen('detections', [id]);
     toggleRow(key);
@@ -597,12 +791,23 @@ const BackupRecovery = () => {
     toggleRow(key);
   };
 
-  const returnToAdmin = () => {
+  const confirmReturnToAdmin = async () => {
     localStorage.removeItem('securityAuthenticated');
     localStorage.removeItem('securityAuthenticatedAt');
     sessionStorage.removeItem('securityAuthenticated');
     sessionStorage.removeItem('securityAuthenticatedAt');
     navigate('/admin');
+    return { skipRefresh: true };
+  };
+
+  const returnToAdmin = () => {
+    askConfirm(
+      `Return to ${isSuperadmin ? 'superadmin' : 'admin'} dashboard?`,
+      'This will close your Security Dashboard session and return you to the admin dashboard.',
+      confirmReturnToAdmin,
+      'Returning to dashboard...',
+      'Return'
+    );
   };
 
   const updateRule = (ruleKey, patch) => {
@@ -711,20 +916,16 @@ const BackupRecovery = () => {
   ] : [];
 
   const dashboardNotifications = dashboard?.notification_counts || {};
+  const activeIncidentCount = Number(dashboard?.active_incidents || 0);
   const notificationCounts = {
-    Dashboard: Number(dashboard?.active_incidents || 0),
+    Dashboard: activeIncidentCount,
     'File Status': files.length
       ? files.filter((file) => ['modified', 'missing', 'compromised'].includes(String(file.status).toLowerCase())).length
       : Number(dashboardNotifications.files || 0),
-    'Detection History': detections.length
-      ? detections.filter((item) => !item.is_legitimate && !seenNotifications.detections.includes(String(item.id))).length
-      : Number(dashboardNotifications.detections || 0),
-    'Recovery History': recoveries.length
-      ? recoveries.filter((item) => ['failed', 'reverted'].includes(String(item.status).toLowerCase()) && !seenNotifications.recoveries.includes(String(item.id))).length
-      : Number(dashboardNotifications.recoveries || 0),
-    'Security Incidents': incidents.length
-      ? incidents.filter((item) => ['open', 'investigating'].includes(String(item.status).toLowerCase())).length
-      : Number(dashboardNotifications.incidents || dashboard?.active_incidents || 0),
+    'Detection History': Number(securityUnreadCounts.detections || 0),
+    'Recovery History': Number(securityUnreadCounts.recoveries || 0),
+    'Security Incidents': activeIncidentCount,
+    'Backup History': Number(securityUnreadCounts.backups || 0),
     'Manual Controls': 0,
   };
 
@@ -933,12 +1134,44 @@ const BackupRecovery = () => {
             </Section>
           )}
 
+          {activeTab === 'Backup History' && (
+            <Section title="Backup History" actions={<Filters filters={backupFilters} setFilters={setBackupFilters} showType={['manual_backup', 'automatic_backup']} showStatus={['success', 'failed', 'in_progress']} />}>
+              <div className="space-y-3">
+                {backups.map((item) => {
+                  const key = `b-${item.id}`;
+                  const unseen = !item.is_viewed;
+                  return (
+                    <div key={item.id} className="relative rounded-xl border border-slate-200 bg-white p-4">
+                      {unseen && <span className="absolute right-3 top-3 rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold text-white">New</span>}
+                      <button className="flex w-full flex-col gap-3 pr-12 text-left md:flex-row md:items-center md:justify-between" onClick={() => toggleBackupRow(key, item.id)}>
+                        <div>
+                          <p className="font-bold text-slate-900">{item.summary || 'Backup completed'}</p>
+                          <p className="text-sm text-slate-600">{formatDateTime(item.started_at)}</p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge>{item.recovery_type}</Badge>
+                          <Badge>{item.status}</Badge>
+                          <span className="text-sm font-semibold text-slate-600">{item.backup_path || 'No path recorded'}</span>
+                        </div>
+                      </button>
+                      {openRows[key] && (
+                        <pre className="mt-4 max-h-64 overflow-auto rounded-xl bg-slate-50 p-4 text-xs text-slate-700">{JSON.stringify(item, null, 2)}</pre>
+                      )}
+                    </div>
+                  );
+                })}
+                {!backups.length && <p className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">No backup history matched the current filters.</p>}
+              </div>
+              <PaginationFooter state={historyPages.backups} onPage={refreshBackups} />
+            </Section>
+          )}
+
           {activeTab === 'Detection History' && (
-            <Section title="Detection Logs" actions={<Filters filters={detectionFilters} setFilters={setDetectionFilters} />}>
+            <Section title="Detection Logs" actions={<Filters filters={detectionFilters} setFilters={setDetectionFilters} showClassification />}>
               <div className="space-y-3">
                 {detections.map((item) => {
                   const key = `d-${item.id}`;
-                  const unseen = !item.is_legitimate && !seenNotifications.detections.includes(String(item.id));
+                  const unseen = !item.is_legitimate && !item.is_viewed;
                   return (
                     <div key={item.id} className="relative rounded-xl border border-slate-200 bg-white p-4">
                       {unseen && <span className="absolute right-3 top-3 rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold text-white">New</span>}
@@ -969,15 +1202,16 @@ const BackupRecovery = () => {
                   );
                 })}
               </div>
+              <PaginationFooter state={historyPages.detections} onPage={refreshDetections} />
             </Section>
           )}
 
           {activeTab === 'Recovery History' && (
-            <Section title="Recovery Logs" actions={<Filters filters={recoveryFilters} setFilters={setRecoveryFilters} showType={['automatic', 'manual', 'manual_full', 'manual_backup']} showStatus={['success', 'failed', 'reverted', 'in_progress']} />}>
+            <Section title="Recovery Logs" actions={<Filters filters={recoveryFilters} setFilters={setRecoveryFilters} showType={['automatic', 'manual', 'manual_full', 'reverted']} showStatus={['success', 'failed', 'reverted', 'in_progress']} />}>
               <div className="space-y-3">
                 {recoveries.map((item) => {
                   const key = `r-${item.id}`;
-                  const unseen = ['failed', 'reverted'].includes(String(item.status).toLowerCase()) && !seenNotifications.recoveries.includes(String(item.id));
+                  const unseen = !item.is_viewed;
                   return (
                     <div key={item.id} className="relative rounded-xl border border-slate-200 bg-white p-4">
                       {unseen && <span className="absolute right-3 top-3 rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold text-white">New</span>}
@@ -999,6 +1233,7 @@ const BackupRecovery = () => {
                   );
                 })}
               </div>
+              <PaginationFooter state={historyPages.recoveries} onPage={refreshRecoveries} />
             </Section>
           )}
 
@@ -1012,7 +1247,7 @@ const BackupRecovery = () => {
                   <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" type="date" value={incidentFilters.date_to} onChange={(e) => setIncidentFilters({ ...incidentFilters, date_to: e.target.value })} />
                   <select className="rounded-xl border border-slate-200 px-3 py-2 text-sm" value={incidentFilters.status} onChange={(e) => setIncidentFilters({ ...incidentFilters, status: e.target.value })}>
                     <option value="">All statuses</option>
-                    {['open', 'investigating', 'resolved', 'false_positive', 'verified_deleted', 'verified_renamed'].map((item) => <option key={item} value={item}>{badgeText(item)}</option>)}
+                    {['open', 'investigating', 'resolved', 'false_positive'].map((item) => <option key={item} value={item}>{badgeText(item)}</option>)}
                   </select>
                   <select className="rounded-xl border border-slate-200 px-3 py-2 text-sm" value={incidentFilters.severity} onChange={(e) => setIncidentFilters({ ...incidentFilters, severity: e.target.value })}>
                     <option value="">All severities</option>
@@ -1070,6 +1305,7 @@ const BackupRecovery = () => {
                   );
                 })}
               </div>
+              <PaginationFooter state={historyPages.incidents} onPage={refreshIncidents} />
             </Section>
           )}
 

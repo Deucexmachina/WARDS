@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -15,6 +15,7 @@ from utils.announcement_attachments import (
     remove_attachment_file,
     serialize_attachments,
     store_announcement_attachment,
+    attachment_bytes,
 )
 from utils.field_crypto import (
     apply_announcement_view_security,
@@ -633,6 +634,13 @@ async def download_announcement_attachment(
     )
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
+    content = attachment_bytes(attachment)
+    if content is not None:
+        return Response(
+            content=content,
+            media_type=attachment.mime_type or "application/octet-stream",
+            headers={"Content-Disposition": f'attachment; filename="{attachment.original_filename}"'},
+        )
     import os as _os
     if not _os.path.exists(attachment.file_path):
         raise HTTPException(status_code=404, detail="Attachment file is missing")
@@ -660,6 +668,9 @@ async def preview_announcement_attachment(
     )
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
+    content = attachment_bytes(attachment)
+    if content is not None:
+        return Response(content=content, media_type=attachment.mime_type or "application/octet-stream")
     import os as _os
     if not _os.path.exists(attachment.file_path):
         raise HTTPException(status_code=404, detail="Attachment file is missing")

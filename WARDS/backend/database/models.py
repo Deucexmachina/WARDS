@@ -4,7 +4,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, Column, Integer, String as SQLString, Float, DateTime, Boolean, Text, ForeignKey, event, text
+from sqlalchemy import create_engine, Column, Integer, String as SQLString, Float, DateTime, Boolean, Text, ForeignKey, event, text, LargeBinary
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session as SASession, sessionmaker, relationship
 
@@ -877,6 +877,7 @@ class AnnouncementAttachment(Base):
     stored_filename = Column(String(255), nullable=False)
     mime_type = Column(String(150), nullable=True)
     file_size = Column(Integer, default=0)
+    file_content = Column(LargeBinary, nullable=True)
     uploaded_by = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -916,6 +917,9 @@ class Memo(Base):
     author = Column(String)
     author_hash = Column(String, nullable=True)
     author_enc = Column(Text, nullable=True)
+    author_type = Column(String, default="admin")
+    author_type_hash = Column(String, nullable=True)
+    author_type_enc = Column(Text, nullable=True)
     priority = Column(String, default="normal")  # low, normal, high
     priority_hash = Column(String, nullable=True)
     priority_enc = Column(Text, nullable=True)
@@ -1011,6 +1015,17 @@ class Alert(Base):
     read = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+class AlertView(Base):
+    __tablename__ = "alert_views"
+
+    id = Column(Integer, primary_key=True, index=True)
+    alert_id = Column(Integer, ForeignKey("alerts.id"), nullable=False, index=True)
+    viewer_username = Column(String, nullable=False, index=True)
+    viewer_type = Column(String, default="admin", index=True)
+    viewed_at = Column(DateTime, default=datetime.utcnow)
+
+    alert = relationship("Alert", backref="views")
+
 class ActivityLog(Base):
     __tablename__ = "activity_logs"
     
@@ -1032,6 +1047,25 @@ class Backup(Base):
     type = Column(String)
     status = Column(String, default="Completed")
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class RevokedToken(Base):
+    __tablename__ = "revoked_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    token_hash = Column(String(128), unique=True, nullable=False, index=True)
+    token_type = Column(String(40), nullable=True, index=True)
+    subject = Column(String(255), nullable=True, index=True)
+    expires_at = Column(DateTime, nullable=True, index=True)
+    revoked_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+class SecurityLogView(Base):
+    __tablename__ = "security_log_views"
+
+    id = Column(Integer, primary_key=True, index=True)
+    log_type = Column(String(40), nullable=False, index=True)
+    log_id = Column(Integer, nullable=False, index=True)
+    viewer_username = Column(String(255), nullable=False, index=True)
+    viewed_at = Column(DateTime, default=datetime.utcnow)
 
 class Policy(Base):
     __tablename__ = "policies"

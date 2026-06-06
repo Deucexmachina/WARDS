@@ -20,6 +20,12 @@ const BranchMemos = () => {
   const [viewingMemo, setViewingMemo] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedContent, setExpandedContent] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [editingMemo, setEditingMemo] = useState(null);
+  const [savingMemo, setSavingMemo] = useState(false);
+  const [formState, setFormState] = useState({ title: '', content: '', priority: 'normal', attachment: null });
+  const branchUser = JSON.parse(localStorage.getItem('branchUser') || '{}');
+  const isBranchAdmin = branchUser?.role === 'branch_admin' || branchUser?.internal_role === 'branch_admin';
 
   const fetchMemos = async () => {
     try {
@@ -102,6 +108,57 @@ const BranchMemos = () => {
     }
   };
 
+  const openCreateForm = () => {
+    setEditingMemo(null);
+    setFormState({ title: '', content: '', priority: 'normal', attachment: null });
+    setShowForm(true);
+  };
+
+  const openEditForm = (memo) => {
+    setEditingMemo(memo);
+    setFormState({ title: memo.title || '', content: memo.content || '', priority: memo.priority || 'normal', attachment: null });
+    setShowForm(true);
+  };
+
+  const saveMemo = async (event) => {
+    event.preventDefault();
+    setSavingMemo(true);
+    setError('');
+    try {
+      const formData = new FormData();
+      formData.append('title', formState.title);
+      formData.append('content', formState.content);
+      formData.append('priority', formState.priority);
+      if (formState.attachment) {
+        formData.append('attachment', formState.attachment);
+      }
+      if (editingMemo) {
+        await api.put(`/branch/memos/${editingMemo.id}`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      } else {
+        await api.post('/branch/memos', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      }
+      setShowForm(false);
+      setEditingMemo(null);
+      await fetchMemos();
+    } catch (saveError) {
+      setError(saveError.response?.data?.detail || 'Failed to save internal memo.');
+    } finally {
+      setSavingMemo(false);
+    }
+  };
+
+  const deleteMemo = async (memo) => {
+    if (!window.confirm(`Delete internal memo "${memo.title}"?`)) {
+      return;
+    }
+    try {
+      await api.delete(`/branch/memos/${memo.id}`);
+      await fetchMemos();
+    } catch (deleteError) {
+      setError(deleteError.response?.data?.detail || 'Failed to delete internal memo.');
+    }
+  };
+
   if (loading) {
     return (
       <div className="h-96 flex items-center justify-center">
@@ -138,7 +195,7 @@ const BranchMemos = () => {
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
             </svg>
-            {memo.author}
+            {memo.author}{memo.is_mine ? ' (You)' : ''}
           </span>
           <span className="flex items-center gap-1">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -153,12 +210,20 @@ const BranchMemos = () => {
             {memo.recipient_label || 'All Branches'}
           </span>
         </div>
-        <button
-          onClick={() => openViewModal(memo)}
-          className="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2 rounded-lg text-sm font-semibold transition duration-300"
-        >
-          View Details
-        </button>
+        <div className="flex flex-wrap justify-end gap-2">
+          <button
+            onClick={() => openViewModal(memo)}
+            className="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2 rounded-lg text-sm font-semibold transition duration-300"
+          >
+            View Details
+          </button>
+          {isBranchAdmin && memo.is_mine && (
+            <>
+              <button onClick={() => openEditForm(memo)} className="rounded-lg bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-300">Edit</button>
+              <button onClick={() => deleteMemo(memo)} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700">Delete</button>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -171,6 +236,36 @@ const BranchMemos = () => {
         subtitle="View organization-wide and branch-targeted memos issued by the main admin office."
         className="mb-6"
       />
+
+      {isBranchAdmin && (
+        <div className="mb-6 flex justify-end">
+          <button onClick={openCreateForm} className="rounded-lg bg-purple-600 px-5 py-3 font-semibold text-white transition hover:bg-purple-700">
+            Create Internal Memo
+          </button>
+        </div>
+      )}
+
+      {showForm && (
+        <form onSubmit={saveMemo} className="mb-6 rounded-xl bg-white p-6 shadow-md">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-xl font-bold text-purple-700">{editingMemo ? 'Edit Internal Memo' : 'Create Internal Memo'}</h2>
+            <button type="button" onClick={() => setShowForm(false)} className="rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700">Cancel</button>
+          </div>
+          <div className="grid gap-4 md:grid-cols-[1fr_180px]">
+            <input value={formState.title} onChange={(event) => setFormState((current) => ({ ...current, title: event.target.value }))} className="rounded-lg border border-gray-300 px-4 py-3" placeholder="Memo title" required />
+            <select value={formState.priority} onChange={(event) => setFormState((current) => ({ ...current, priority: event.target.value }))} className="rounded-lg border border-gray-300 px-4 py-3">
+              <option value="low">Low</option>
+              <option value="normal">Normal</option>
+              <option value="high">High</option>
+            </select>
+          </div>
+          <textarea value={formState.content} onChange={(event) => setFormState((current) => ({ ...current, content: event.target.value }))} className="mt-4 min-h-36 w-full rounded-lg border border-gray-300 px-4 py-3" placeholder="Memo content" required />
+          <input type="file" onChange={(event) => setFormState((current) => ({ ...current, attachment: event.target.files?.[0] || null }))} className="mt-4 w-full rounded-lg border border-gray-300 px-4 py-3" />
+          <button disabled={savingMemo} className="mt-4 rounded-lg bg-purple-600 px-5 py-3 font-semibold text-white transition hover:bg-purple-700 disabled:opacity-60">
+            {savingMemo ? 'Saving...' : editingMemo ? 'Save Changes' : 'Publish Memo'}
+          </button>
+        </form>
+      )}
 
       {error && (
         <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-red-700 flex items-center gap-2">
@@ -298,7 +393,7 @@ const BranchMemos = () => {
                 </div>
                 <div className="bg-slate-50 rounded-lg px-5 py-4 border border-slate-200">
                   <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold mb-2">Issued By</p>
-                  <p className="text-gray-900 font-medium">{viewingMemo.author}</p>
+                  <p className="text-gray-900 font-medium">{viewingMemo.author}{viewingMemo.is_mine ? ' (You)' : ''}</p>
                 </div>
                 <div className="bg-slate-50 rounded-lg px-5 py-4 border border-slate-200">
                   <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold mb-2">Created</p>

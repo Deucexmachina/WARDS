@@ -21,6 +21,8 @@ const formatTimestamp = (value) =>
 
 const ActivityLogs = () => {
   const [logs, setLogs] = useState([]);
+  const [pageState, setPageState] = useState({ page: 1, page_size: 10, total: 0, total_pages: 1 });
+  const [jumpPage, setJumpPage] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [filters, setFilters] = useState({
@@ -30,12 +32,20 @@ const ActivityLogs = () => {
     user: '',
   });
 
-  const fetchLogs = async () => {
+  const fetchLogs = async (nextPage = pageState.page || 1) => {
+    const safePage = Math.max(1, Number(nextPage || 1));
     try {
       setLoading(true);
       setError('');
-      const response = await activityLogAPI.getAll(filters);
-      setLogs(response.data || []);
+      const response = await activityLogAPI.getAll({ ...filters, page: safePage, page_size: 10 });
+      const data = response.data || {};
+      setLogs(data.items || []);
+      setPageState({
+        page: data.page || safePage,
+        page_size: data.page_size || 10,
+        total: data.total || 0,
+        total_pages: data.total_pages || 1,
+      });
     } catch (fetchError) {
       console.error('Failed to load activity logs:', fetchError);
       setError(fetchError.response?.data?.detail || 'Failed to load activity logs.');
@@ -54,7 +64,15 @@ const ActivityLogs = () => {
   };
 
   const handleApplyFilters = () => {
-    fetchLogs();
+    fetchLogs(1);
+  };
+
+  const submitJump = (event) => {
+    event.preventDefault();
+    const totalPages = Math.max(1, Number(pageState.total_pages || 1));
+    const page = Math.min(Math.max(1, Number(jumpPage || pageState.page || 1)), totalPages);
+    setJumpPage('');
+    fetchLogs(page);
   };
 
   return (
@@ -131,27 +149,74 @@ const ActivityLogs = () => {
         ) : error ? (
           <div className="m-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
         ) : logs.length ? (
-          <div className="divide-y divide-gray-200">
-            {logs.map((log) => (
-              <div key={log.id} className="p-6 hover:bg-gray-50 transition duration-200">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1">
-                    <div className="mb-2 flex flex-wrap items-center gap-3">
-                      <h3 className="text-lg font-bold text-primary">{log.action}</h3>
-                      <span className={`rounded px-2 py-1 text-xs font-semibold ${typeColors[log.type] || 'bg-gray-100 text-gray-800'}`}>
-                        {log.type || 'general'}
-                      </span>
-                    </div>
-                    <p className="text-gray-600">{log.details}</p>
-                    <div className="mt-3 flex flex-wrap gap-4 text-sm text-gray-500">
-                      <span>{log.user || 'Unknown user'}</span>
-                      <span>{formatTimestamp(log.created_at)}</span>
-                    </div>
-                  </div>
-                </div>
+          <>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="bg-slate-50">
+                  <tr>
+                    {['Log Title', 'Activity Type', 'Branch', 'Email/User', 'Role', 'IP', 'Action', 'Date'].map((heading) => (
+                      <th key={heading} className="whitespace-nowrap px-4 py-3 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-500">{heading}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {logs.map((log) => (
+                    <tr key={log.id} className="hover:bg-slate-50">
+                      <td className="max-w-xs px-4 py-3 font-bold text-primary">
+                        <div>{log.title || log.action}</div>
+                        <div className="mt-1 line-clamp-2 text-xs font-normal text-slate-500">{log.details || 'No additional details'}</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`rounded px-2 py-1 text-xs font-semibold ${typeColors[log.type] || 'bg-gray-100 text-gray-800'}`}>
+                          {log.type || 'general'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-700">{log.branch || 'System-wide'}</td>
+                      <td className="px-4 py-3 text-slate-700">{log.email || log.user || 'Unknown'}</td>
+                      <td className="px-4 py-3 capitalize text-slate-700">{String(log.role || 'not recorded').replaceAll('_', ' ')}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-slate-600">{log.ip || 'not recorded'}</td>
+                      <td className="px-4 py-3 text-slate-700">{log.action}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-slate-500">{formatTimestamp(log.created_at)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex flex-col gap-3 border-t border-slate-100 px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-slate-500">
+                Showing page {pageState.page} of {pageState.total_pages} ({pageState.total} logs)
+              </p>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <form onSubmit={submitJump} className="flex items-center gap-2">
+                  <label className="text-sm font-semibold text-slate-600">Jump to</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max={Math.max(1, Number(pageState.total_pages || 1))}
+                    value={jumpPage}
+                    onChange={(event) => setJumpPage(event.target.value)}
+                    placeholder={String(pageState.page || 1)}
+                    className="w-24 rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                  />
+                  <button type="submit" className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700">Go</button>
+                </form>
+                <button
+                  onClick={() => fetchLogs(pageState.page - 1)}
+                  disabled={pageState.page <= 1}
+                  className="rounded-xl bg-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-300 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Previous
+                </button>
+                <button
+                  onClick={() => fetchLogs(pageState.page + 1)}
+                  disabled={pageState.page >= pageState.total_pages}
+                  className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Next
+                </button>
               </div>
-            ))}
-          </div>
+            </div>
+          </>
         ) : (
           <div className="p-10 text-center text-gray-500">No activity logs matched the current filters.</div>
         )}

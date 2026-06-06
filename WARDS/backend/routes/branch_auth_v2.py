@@ -105,7 +105,6 @@ def verify_recaptcha(token: str, client_ip: str) -> bool:
         result = response.json()
         return result.get('success', False)
     except Exception as e:
-        print(f"[BRANCH AUTH] reCAPTCHA verification error: {e}")
         return False
 
 def check_rate_limit(ip_address: str) -> bool:
@@ -315,8 +314,6 @@ async def branch_login(request: Request, credentials: BranchLoginRequest, db: Se
     
     staff = db.query(BranchStaff).filter(BranchStaff.email == normalized_email).first()
     
-    print(f"[BRANCH AUTH] Login attempt for email: {normalized_email}")
-    print(f"[BRANCH AUTH] Staff found: {staff is not None}")
     
     if not staff:
         record_failed_attempt(normalized_email, db)
@@ -326,9 +323,7 @@ async def branch_login(request: Request, credentials: BranchLoginRequest, db: Se
             detail="Invalid email or password"
         )
     
-    print(f"[BRANCH AUTH] Verifying password...")
     password_valid = pwd_context.verify(credentials.password, staff.hashed_password)
-    print(f"[BRANCH AUTH] Password valid: {password_valid}")
     
     if not password_valid:
         record_failed_attempt(normalized_email, db)
@@ -426,7 +421,6 @@ async def branch_login(request: Request, credentials: BranchLoginRequest, db: Se
     
     log_activity(db, "Successful Branch Login", normalized_email, f"Role: {staff.role}, Branch: {staff.branch_id}, IP: {client_ip}", "security")
     
-    print(f"[BRANCH AUTH] Login successful for {normalized_email}")
     
     return {
         "access_token": access_token,

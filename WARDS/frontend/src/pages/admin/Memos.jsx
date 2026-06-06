@@ -268,7 +268,7 @@ const Memos = () => {
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
             </svg>
-            {memo.author}
+            {memo.author}{memo.is_mine ? ' (You)' : ''}
           </span>
           <span className="flex items-center gap-1">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -290,18 +290,22 @@ const Memos = () => {
           >
             View
           </button>
-          <button
-            onClick={() => openEditModal(memo)}
-            className="bg-accent hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition duration-300"
-          >
-            Edit
-          </button>
-          <button
-            onClick={() => handleDeleteMemo(memo)}
-            className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition duration-300"
-          >
-            Delete
-          </button>
+          {memo.is_mine && (
+            <>
+              <button
+                onClick={() => openEditModal(memo)}
+                className="bg-accent hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition duration-300"
+              >
+                Edit
+              </button>
+              <button
+                onClick={() => handleDeleteMemo(memo)}
+                className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition duration-300"
+              >
+                Delete
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -476,15 +480,17 @@ const Memos = () => {
                 >
                   Close
                 </button>
-                <button
-                  onClick={() => {
-                    closeViewModal();
-                    openEditModal(viewingMemo);
-                  }}
-                  className="flex-1 bg-accent hover:bg-blue-600 text-white py-3 rounded-lg font-semibold transition duration-300"
-                >
-                  Edit Memo
-                </button>
+                {viewingMemo.is_mine && (
+                  <button
+                    onClick={() => {
+                      closeViewModal();
+                      openEditModal(viewingMemo);
+                    }}
+                    className="flex-1 bg-accent hover:bg-blue-600 text-white py-3 rounded-lg font-semibold transition duration-300"
+                  >
+                    Edit Memo
+                  </button>
+                )}
               </div>
             </div>
           </div>

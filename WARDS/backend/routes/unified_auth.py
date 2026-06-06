@@ -26,6 +26,7 @@ from services.email_service import (
     send_password_reset_email,
 )
 from utils.field_crypto import apply_citizen_user_security, apply_mfa_secret_security, find_citizen_by_email, find_mfa_secret_record, get_decrypted_or_raw, serialize_citizen_user
+from utils.token_revocation import revoke_token
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -247,7 +248,6 @@ def verify_recaptcha(token: str, client_ip: str) -> bool:
         )
         return response.json().get("success", False)
     except Exception as exc:
-        print(f"[UNIFIED AUTH] reCAPTCHA verification error: {exc}")
         return False
 
 
@@ -702,6 +702,17 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
         "requires_mfa": False,
         "requires_captcha": False,
     }
+
+
+@router.post("/logout")
+async def unified_logout(request: Request, db: Session = Depends(get_db)):
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1]
+        for config in PORTAL_CONFIG.values():
+            revoke_token(db, token, config["secret_key"], ALGORITHM, config.get("token_type"))
+        db.commit()
+    return {"message": "Logged out successfully"}
 
 
 @router.post("/setup-mfa")

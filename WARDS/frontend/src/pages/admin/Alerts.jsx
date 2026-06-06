@@ -1,33 +1,57 @@
 import { useState, useEffect } from 'react';
 import { alertAPI } from '../../services/api';
 import WardsPageHero from '../../components/WardsPageHero';
+import { formatUtc8DateTime } from '../../utils/dateTime';
 
 const Alerts = () => {
-  const [alerts, setAlerts] = useState([
-    { id: 1, type: 'security', title: 'Unauthorized Login Attempt', message: 'Multiple failed login attempts detected from IP 192.168.1.100', timestamp: '2024-03-17 14:35:22', severity: 'high', read: false },
-    { id: 2, type: 'anomaly', title: 'Unusual Transaction Volume', message: 'Transaction volume 150% higher than average at Galas Branch', timestamp: '2024-03-17 13:20:15', severity: 'medium', read: false },
-    { id: 3, type: 'system', title: 'System Performance Warning', message: 'Database response time exceeding threshold', timestamp: '2024-03-17 12:10:08', severity: 'low', read: true },
-  ]);
+  const [alerts, setAlerts] = useState([]);
+  const [pageState, setPageState] = useState({ page: 1, page_size: 10, total: 0, total_pages: 1 });
+  const [jumpPage, setJumpPage] = useState('');
 
-  useEffect(() => {
-    const fetchAlerts = async () => {
+  const fetchAlerts = async (page = pageState.page) => {
       try {
-        const response = await alertAPI.getAll();
-        setAlerts(response.data);
+      const safePage = Math.max(1, Number(page || 1));
+      const response = await alertAPI.getAll({ page: safePage, page_size: 10 });
+      const data = response.data || {};
+      setAlerts(data.items || []);
+      setPageState({
+        page: data.page || safePage,
+        page_size: data.page_size || 10,
+        total: data.total || 0,
+        total_pages: data.total_pages || 1,
+      });
       } catch (error) {
         console.error('Error fetching alerts:', error);
       }
     };
-    fetchAlerts();
+
+  useEffect(() => {
+    fetchAlerts(1);
   }, []);
 
   const handleMarkAsRead = async (id) => {
     try {
       await alertAPI.markAsRead(id);
-      setAlerts(alerts.map(a => a.id === id ? { ...a, read: true } : a));
+      const nextAlerts = alerts.map(a => a.id === id ? { ...a, read: true } : a);
+      setAlerts(nextAlerts);
+      window.dispatchEvent(new CustomEvent('admin-alert-read', {
+        detail: { unreadCount: nextAlerts.filter((alert) => !alert.read).length },
+      }));
     } catch (error) {
-      setAlerts(alerts.map(a => a.id === id ? { ...a, read: true } : a));
+      const nextAlerts = alerts.map(a => a.id === id ? { ...a, read: true } : a);
+      setAlerts(nextAlerts);
+      window.dispatchEvent(new CustomEvent('admin-alert-read', {
+        detail: { unreadCount: nextAlerts.filter((alert) => !alert.read).length },
+      }));
     }
+  };
+
+  const submitJump = (event) => {
+    event.preventDefault();
+    const totalPages = Math.max(1, Number(pageState.total_pages || 1));
+    const page = Math.min(Math.max(1, Number(jumpPage || pageState.page || 1)), totalPages);
+    setJumpPage('');
+    fetchAlerts(page);
   };
 
   const getSeverityColor = (severity) => {
@@ -81,7 +105,7 @@ const Alerts = () => {
                     </span>
                   </div>
                   <p className="text-gray-600 mb-2">{alert.message}</p>
-                  <p className="text-sm text-gray-500">{alert.timestamp}</p>
+                  <p className="text-sm text-gray-500">{formatUtc8DateTime(alert.created_at)}</p>
                 </div>
               </div>
               {!alert.read && (
@@ -95,7 +119,34 @@ const Alerts = () => {
             </div>
           </div>
         ))}
+        {!alerts.length && (
+          <div className="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">
+            No system alerts have been logged yet.
+          </div>
+        )}
       </div>
+      {pageState.total > 0 && (
+        <div className="flex flex-col gap-3 rounded-xl bg-white px-6 py-5 shadow sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-slate-500">Showing page {pageState.page} of {pageState.total_pages} ({pageState.total} alerts)</p>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <form onSubmit={submitJump} className="flex items-center gap-2">
+              <label className="text-sm font-semibold text-slate-600">Jump to</label>
+              <input
+                type="number"
+                min="1"
+                max={Math.max(1, Number(pageState.total_pages || 1))}
+                value={jumpPage}
+                onChange={(event) => setJumpPage(event.target.value)}
+                placeholder={String(pageState.page || 1)}
+                className="w-24 rounded-xl border border-slate-200 px-3 py-2 text-sm"
+              />
+              <button type="submit" className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700">Go</button>
+            </form>
+            <button onClick={() => fetchAlerts(pageState.page - 1)} disabled={pageState.page <= 1} className="rounded-xl bg-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-300 disabled:cursor-not-allowed disabled:opacity-60">Previous</button>
+            <button onClick={() => fetchAlerts(pageState.page + 1)} disabled={pageState.page >= pageState.total_pages} className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60">Next</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

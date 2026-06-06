@@ -342,6 +342,7 @@ async def get_all_users(
 
     total = len(accounts)
     total_pages = max(1, (total + page_size - 1) // page_size)
+    page = min(max(1, page), total_pages)
     start = (page - 1) * page_size
     end = start + page_size
 

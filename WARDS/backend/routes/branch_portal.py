@@ -9,7 +9,7 @@ from typing import Optional
 from typing import List
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import OperationalError
@@ -21,10 +21,11 @@ from utils.announcement_attachments import (
     remove_attachment_file,
     serialize_attachments,
     store_announcement_attachment,
+    attachment_bytes,
 )
 from services.email_service import send_payment_receipt_email
 from routes.payments import revert_linked_request_status_for_declined_payment, update_linked_request_status
-from utils.field_crypto import apply_announcement_view_security, apply_memo_view_security, apply_queue_security, decrypt_optional_value, find_announcement_view, find_memo_view, get_announcement_viewed_ids, get_decrypted_or_raw, get_memo_viewed_ids, hash_aware_any, hash_aware_match, hash_optional_value, queue_value
+from utils.field_crypto import apply_announcement_view_security, apply_memo_security, apply_memo_view_security, apply_queue_security, decrypt_optional_value, find_announcement_view, find_memo_view, get_announcement_viewed_ids, get_decrypted_or_raw, get_memo_viewed_ids, hash_aware_any, hash_aware_match, hash_optional_value, queue_value
 from utils.security_validation import format_tin
 from utils.branch_system_settings import get_branch_setting_value
 from utils.system_settings import SYSTEM_DISABLED_MESSAGE, get_setting_value
@@ -96,6 +97,13 @@ class BranchAnnouncementPayload(BaseModel):
 class BranchRemittanceCreatePayload(BaseModel):
     payment_ids: List[int]
     remarks: Optional[str] = None
+
+
+class BranchMemoPayload(BaseModel):
+    title: str
+    content: str
+    recipient_type: str = "specific_branches"
+    priority: str = "normal"
 
 
 def normalize_payment_status(status_value: Optional[str]) -> str:
@@ -1863,6 +1871,8 @@ async def list_branch_memos(
     memos = [
         memo for memo in memos
         if (
+            (get_decrypted_or_raw(memo, "author") or memo.author) == current_staff.username
+            or
             (get_decrypted_or_raw(memo, "recipient_type") or memo.recipient_type) == "all"
             or (
                 (get_decrypted_or_raw(memo, "recipient_type") or memo.recipient_type) == "specific_branches"
@@ -1886,6 +1896,8 @@ async def list_branch_memos(
                 if item.strip().isdigit()
             ),
             "author": get_decrypted_or_raw(memo, "author") or memo.author,
+            "author_type": get_decrypted_or_raw(memo, "author_type") or getattr(memo, "author_type", "admin"),
+            "is_mine": (get_decrypted_or_raw(memo, "author") or memo.author) == current_staff.username,
             "priority": get_decrypted_or_raw(memo, "priority") or memo.priority,
             "attachment_path": get_decrypted_or_raw(memo, "attachment_path") or memo.attachment_path,
             "attachment_filename": get_decrypted_or_raw(memo, "attachment_filename") or memo.attachment_filename,
@@ -1895,6 +1907,112 @@ async def list_branch_memos(
         }
         for memo in memos
     ]
+
+
+def _require_branch_admin_memo_access(current_staff: BranchStaff):
+    if current_staff.role != "branch_admin":
+        raise HTTPException(status_code=403, detail="Only branch admins can manage internal memos.")
+
+
+def _store_memo_attachment(attachment: Optional[UploadFile]) -> tuple[str | None, str | None]:
+    if not attachment or not attachment.filename:
+        return None, None
+    upload_dir = Path("uploads/memos")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", attachment.filename)
+    file_path = upload_dir / f"{timestamp}_{safe_name}"
+    with file_path.open("wb") as buffer:
+        shutil.copyfileobj(attachment.file, buffer)
+    return str(file_path), attachment.filename
+
+
+@router.post("/memos")
+async def create_branch_memo(
+    title: str = Form(...),
+    content: str = Form(...),
+    priority: str = Form("normal"),
+    attachment: Optional[UploadFile] = File(None),
+    current_staff: BranchStaff = Depends(get_current_branch_staff),
+    db: Session = Depends(get_db),
+):
+    _require_branch_admin_memo_access(current_staff)
+    if not title.strip() or not content.strip():
+        raise HTTPException(status_code=400, detail="Memo title and content are required.")
+    attachment_path, attachment_filename = _store_memo_attachment(attachment)
+    memo = Memo(
+        title=title.strip(),
+        content=content.strip(),
+        recipients=str(current_staff.branch_id),
+        recipient_type="specific_branches",
+        priority=priority,
+        author=current_staff.username,
+        author_type="branch_staff",
+        attachment_path=attachment_path,
+        attachment_filename=attachment_filename,
+    )
+    db.add(memo)
+    db.flush()
+    apply_memo_security(memo)
+    log_branch_action(db, current_staff, "Memo Created", f"Created internal memo: {title.strip()}")
+    db.commit()
+    db.refresh(memo)
+    return {"id": memo.id, "message": "Memo created successfully"}
+
+
+@router.put("/memos/{memo_id}")
+async def update_branch_memo(
+    memo_id: int,
+    title: str = Form(...),
+    content: str = Form(...),
+    priority: str = Form("normal"),
+    attachment: Optional[UploadFile] = File(None),
+    current_staff: BranchStaff = Depends(get_current_branch_staff),
+    db: Session = Depends(get_db),
+):
+    _require_branch_admin_memo_access(current_staff)
+    memo = db.query(Memo).filter(Memo.id == memo_id).first()
+    if not memo:
+        raise HTTPException(status_code=404, detail="Memo not found")
+    if (get_decrypted_or_raw(memo, "author") or memo.author) != current_staff.username:
+        raise HTTPException(status_code=403, detail="You can only edit memos you created.")
+    if attachment and attachment.filename:
+        old_path = get_decrypted_or_raw(memo, "attachment_path") or memo.attachment_path
+        if old_path and os.path.exists(old_path):
+            os.remove(old_path)
+        memo.attachment_path, memo.attachment_filename = _store_memo_attachment(attachment)
+    memo.title = title.strip()
+    memo.content = content.strip()
+    memo.priority = priority
+    memo.recipients = str(current_staff.branch_id)
+    memo.recipient_type = "specific_branches"
+    memo.updated_at = datetime.utcnow()
+    apply_memo_security(memo)
+    log_branch_action(db, current_staff, "Memo Updated", f"Updated internal memo: {title.strip()}")
+    db.commit()
+    return {"message": "Memo updated successfully"}
+
+
+@router.delete("/memos/{memo_id}")
+async def delete_branch_memo(
+    memo_id: int,
+    current_staff: BranchStaff = Depends(get_current_branch_staff),
+    db: Session = Depends(get_db),
+):
+    _require_branch_admin_memo_access(current_staff)
+    memo = db.query(Memo).filter(Memo.id == memo_id).first()
+    if not memo:
+        raise HTTPException(status_code=404, detail="Memo not found")
+    if (get_decrypted_or_raw(memo, "author") or memo.author) != current_staff.username:
+        raise HTTPException(status_code=403, detail="You can only delete memos you created.")
+    attachment_path = get_decrypted_or_raw(memo, "attachment_path") or memo.attachment_path
+    if attachment_path and os.path.exists(attachment_path):
+        os.remove(attachment_path)
+    db.query(MemoView).filter(MemoView.memo_id == memo_id).delete()
+    db.delete(memo)
+    log_branch_action(db, current_staff, "Memo Deleted", f"Deleted internal memo #{memo_id}")
+    db.commit()
+    return {"message": "Memo deleted successfully"}
 
 
 @router.get("/announcements")
@@ -2172,7 +2290,7 @@ def _get_branch_attachment_for_download(
     )
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
-    if not os.path.exists(attachment.file_path):
+    if attachment_bytes(attachment) is None and not os.path.exists(attachment.file_path):
         raise HTTPException(status_code=404, detail="Attachment file is missing")
     return attachment
 
@@ -2184,6 +2302,13 @@ async def download_branch_announcement_attachment(
     db: Session = Depends(get_db),
 ):
     attachment = _get_branch_attachment_for_download(db, announcement_id, attachment_id)
+    content = attachment_bytes(attachment)
+    if content is not None:
+        return Response(
+            content=content,
+            media_type=attachment.mime_type or "application/octet-stream",
+            headers={"Content-Disposition": f'attachment; filename="{attachment.original_filename}"'},
+        )
     return FileResponse(
         attachment.file_path,
         media_type=attachment.mime_type or "application/octet-stream",
@@ -2198,6 +2323,9 @@ async def preview_branch_announcement_attachment(
     db: Session = Depends(get_db),
 ):
     attachment = _get_branch_attachment_for_download(db, announcement_id, attachment_id)
+    content = attachment_bytes(attachment)
+    if content is not None:
+        return Response(content=content, media_type=attachment.mime_type or "application/octet-stream")
     return FileResponse(
         attachment.file_path,
         media_type=attachment.mime_type or "application/octet-stream",

@@ -123,24 +123,15 @@ async def request_otp(request: Request, credentials: OTPRequest, db: Session = D
     
     staff = db.query(BranchStaff).filter(BranchStaff.username == credentials.username).first()
     
-    # Debug logging
-    print(f"[BRANCH AUTH DEBUG] OTP Request for username: {credentials.username}")
-    print(f"[BRANCH AUTH DEBUG] Staff found: {staff is not None}")
-    
     if not staff:
         record_failed_attempt(credentials.username)
         log_activity(db, "Failed OTP Request", credentials.username, f"Staff not found, IP: {client_ip}", "branch_auth")
-        print(f"[BRANCH AUTH DEBUG] Branch staff not found in database")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password"
         )
     
-    print(f"[BRANCH AUTH DEBUG] Staff ID: {staff.id}, Status: {staff.status}, Branch: {staff.branch_id}")
-    print(f"[BRANCH AUTH DEBUG] Verifying password...")
-    
     password_valid = pwd_context.verify(credentials.password, staff.hashed_password)
-    print(f"[BRANCH AUTH DEBUG] Password valid: {password_valid}")
     
     if not password_valid:
         record_failed_attempt(credentials.username)
@@ -152,7 +143,6 @@ async def request_otp(request: Request, credentials: OTPRequest, db: Session = D
     
     if staff.status != "Active":
         log_activity(db, "OTP Request for Inactive Account", credentials.username, f"Status: {staff.status}, IP: {client_ip}", "branch_auth")
-        print(f"[BRANCH AUTH DEBUG] Staff account not active: {staff.status}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is not active"
@@ -165,11 +155,7 @@ async def request_otp(request: Request, credentials: OTPRequest, db: Session = D
         "user_id": staff.id
     }
     
-    print(f"[BRANCH AUTH DEBUG] OTP generated successfully: {otp}")
-    
     log_activity(db, "OTP Generated", credentials.username, f"OTP requested from IP: {client_ip}", "branch_auth")
-    
-    print(f"[BRANCH AUTH] OTP for {credentials.username}: {otp}")
     
     return {
         "message": "OTP sent successfully",

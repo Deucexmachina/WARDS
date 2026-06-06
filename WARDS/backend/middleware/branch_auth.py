@@ -5,6 +5,7 @@ from jose import JWTError, jwt
 import os
 
 from database.models import BranchStaff, get_db
+from utils.token_revocation import is_token_revoked
 
 SECRET_KEY = os.getenv("BRANCH_SECRET_KEY", "your-branch-secret-key-change-in-production")
 UNIFIED_SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "your-unified-auth-secret-change-in-production")
@@ -17,6 +18,8 @@ async def get_current_branch_staff(
     db: Session = Depends(get_db)
 ) -> BranchStaff:
     token = credentials.credentials
+    if is_token_revoked(db, token):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session has been logged out")
     
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,

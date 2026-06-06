@@ -18,6 +18,8 @@ from typing import Iterable
 import requests
 from sqlalchemy import MetaData, Table, inspect, or_, text
 from sqlalchemy.orm import Session
+from database.models import Admin
+from services.email_service import send_security_incident_alert_email
 from utils.log_integrity import verify_record_integrity
 
 from SECURITY.security_models import (
@@ -1663,6 +1665,52 @@ def restore_from_quarantine(db: Session, file_entry: SecurityMonitoredFile, dete
     return recovery
 
 
+def revert_recovery_to_quarantine(db: Session, file_entry: SecurityMonitoredFile, detection_id: int | None, initiated_by: int, quarantine_path: str) -> SecurityRecoveryEvent:
+    recovery = SecurityRecoveryEvent(
+        detection_event_id=detection_id,
+        file_id=file_entry.id,
+        recovery_type="reverted",
+        initiated_by=initiated_by,
+        status="reverted",
+        quarantine_path=quarantine_path,
+    )
+    db.add(recovery)
+    db.commit()
+    db.refresh(recovery)
+
+    started = time.time()
+    try:
+        source = Path(quarantine_path)
+        target = Path(file_entry.file_path)
+        if not source.exists() or not source.is_file():
+            raise FileNotFoundError(f"Quarantined copy not found for {file_entry.relative_path}")
+        if is_database_entry(file_entry):
+            restore_database_snapshot(db, source)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+        reverted_hash = sha256_file(target)
+        file_entry.current_hash = reverted_hash
+        file_entry.status = "quarantined"
+        file_entry.size_bytes = target.stat().st_size
+        file_entry.last_checked = now_utc()
+        recovery.completed_at = now_utc()
+        recovery.recovery_duration_ms = int((time.time() - started) * 1000)
+        recovery.summary = f"Reverted previous recovery and returned {file_entry.relative_path} to the quarantined incident state."
+        db.add(file_entry)
+        db.add(recovery)
+        db.commit()
+    except Exception as exc:
+        recovery.status = "failed"
+        recovery.error_message = str(exc)
+        recovery.completed_at = now_utc()
+        recovery.recovery_duration_ms = int((time.time() - started) * 1000)
+        recovery.summary = f"Failed to revert recovery for {file_entry.relative_path}."
+        db.add(recovery)
+        db.commit()
+    db.refresh(recovery)
+    return recovery
+
+
 def current_hash_index(db: Session) -> dict[str, list[SecurityMonitoredFile]]:
     index: dict[str, list[SecurityMonitoredFile]] = {}
     for entry in db.query(SecurityMonitoredFile).all():
@@ -1851,6 +1899,22 @@ def create_incident(db: Session, detection: SecurityDetectionEvent, classificati
     db.add(incident)
     db.commit()
     db.refresh(incident)
+    try:
+        recipients = [
+            admin.email
+            for admin in db.query(Admin).filter(Admin.status == "Active", Admin.role.in_(["main_admin", "superadmin"])).all()
+            if admin.email
+        ]
+        recoveries = [
+            serialize_recovery(item)
+            for item in db.query(SecurityRecoveryEvent)
+            .filter(SecurityRecoveryEvent.detection_event_id == detection.id)
+            .order_by(SecurityRecoveryEvent.started_at.desc())
+            .all()
+        ]
+        send_security_incident_alert_email(recipients, serialize_incident(incident), serialize_detection(detection), recoveries)
+    except Exception:
+        pass
     return incident
 
 
@@ -2073,8 +2137,27 @@ def scan_all_files(db: Session, context: dict | None = None) -> list[SecurityDet
     return detections
 
 
+def mark_stale_backup_events_failed(db: Session, max_age_minutes: int = 10) -> int:
+    cutoff = now_utc() - timedelta(minutes=max_age_minutes)
+    stale_events = db.query(SecurityRecoveryEvent).filter(
+        SecurityRecoveryEvent.recovery_type.like("%backup%"),
+        SecurityRecoveryEvent.status == "in_progress",
+        SecurityRecoveryEvent.started_at <= cutoff,
+    ).all()
+    for event in stale_events:
+        event.status = "failed"
+        event.completed_at = now_utc()
+        event.error_message = event.error_message or "Backup did not complete before the timeout window."
+        event.summary = event.summary or "Backup failed because it did not complete."
+        db.add(event)
+    if stale_events:
+        db.commit()
+    return len(stale_events)
+
+
 def create_manual_backup(db: Session, initiated_by: int | None, label: str = "manual") -> SecurityRecoveryEvent:
     seed_settings(db)
+    mark_stale_backup_events_failed(db)
     register_count = register_initial_files(db, ensure_backup=False)
     removal_summary = reconcile_trusted_file_removals(db, actor=f"{label}_backup")
     backup_location = writable_backup_location(db)
@@ -2292,8 +2375,8 @@ def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_ba
         raise ValueError("Incident has no quarantined copy to restore")
     false_positive_recovery = None
     if has_quarantine_copy:
-        false_positive_recovery = restore_from_quarantine(db, file_entry, incident.detection_event_id, admin_id, quarantine_paths[0])
-        if false_positive_recovery.status != "success":
+        false_positive_recovery = revert_recovery_to_quarantine(db, file_entry, incident.detection_event_id, admin_id, quarantine_paths[0])
+        if false_positive_recovery.status != "reverted":
             raise RuntimeError(false_positive_recovery.error_message or "Unable to restore the quarantined file")
     if detection:
         detection.is_legitimate = True
@@ -2301,30 +2384,27 @@ def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_ba
         detection.ai_score = 0.0
         detection.confidence = 1.0
         detection.severity_level = "info"
-        detection.trigger_summary = f"False positive accepted by admin; {'quarantined copy restored' if has_quarantine_copy else 'missing file acknowledged'} for {detection.target_name}."
+        detection.trigger_summary = f"False positive accepted by admin; {'previous recovery reverted to quarantined state' if has_quarantine_copy else 'missing file acknowledged'} for {detection.target_name}."
         db.add(detection)
     for recovery in db.query(SecurityRecoveryEvent).filter(SecurityRecoveryEvent.detection_event_id == incident.detection_event_id).all():
         if false_positive_recovery and recovery.id == false_positive_recovery.id:
             continue
-        recovery.status = "verified_false_positive"
-        recovery.summary = "False positive accepted; quarantined copy restored and trusted backup refreshed." if has_quarantine_copy else "False positive accepted after admin confirmed the affected or quarantined file is missing."
+        if "backup" not in (recovery.recovery_type or ""):
+            recovery.status = "reverted"
+            recovery.summary = "False positive accepted; previous recovery was reversed to the quarantined incident state." if has_quarantine_copy else "False positive accepted after admin confirmed the affected or quarantined file is missing."
         db.add(recovery)
     incident.status = "false_positive"
-    incident.response_action = "authorized_change_restored" if has_quarantine_copy else "authorized_change_missing_file_acknowledged"
+    incident.response_action = "recovery_reverted_to_quarantine" if has_quarantine_copy else "authorized_change_missing_file_acknowledged"
     incident.resolved_at = now_utc()
     incident.resolved_by = admin_id
-    cleanup_quarantine_paths(quarantine_paths)
     db.add(incident)
     db.commit()
-    if refresh_backup and has_quarantine_copy:
-        create_manual_backup(db, initiated_by=admin_id, label="post_false_positive")
     db.refresh(incident)
     return incident
 
 
 def bulk_update_incidents(db: Session, action: str, admin_id: int, confirm_missing_files: bool = False) -> dict:
     updated = 0
-    backup_after_bulk = False
     rows = db.query(SecurityIncident).filter(SecurityIncident.status.in_(["open", "investigating"])).order_by(SecurityIncident.id.asc()).all()
     if action in {"resolve", "false_positive"}:
         ensure_missing_file_confirmation(db, rows, action, confirm_missing_files)
@@ -2333,10 +2413,7 @@ def bulk_update_incidents(db: Session, action: str, admin_id: int, confirm_missi
             resolve_incident(db, incident.id, admin_id, confirm_missing_files=confirm_missing_files)
             updated += 1
         elif action == "false_positive":
-            quarantine_paths = json_loads(incident.quarantine_paths_json, [])
-            had_quarantine_copy = bool(quarantine_paths) and Path(quarantine_paths[0]).exists() and Path(quarantine_paths[0]).is_file()
             mark_false_positive(db, incident.id, admin_id, refresh_backup=False, confirm_missing_files=confirm_missing_files)
-            backup_after_bulk = backup_after_bulk or had_quarantine_copy
             updated += 1
         elif action == "investigating":
             incident.status = "investigating"
@@ -2346,8 +2423,6 @@ def bulk_update_incidents(db: Session, action: str, admin_id: int, confirm_missi
             updated += 1
         else:
             raise ValueError("Unsupported bulk incident action")
-    if backup_after_bulk:
-        create_manual_backup(db, initiated_by=admin_id, label="post_false_positive_bulk")
     return {"updated": updated, "action": action}
 
 
@@ -2431,7 +2506,7 @@ def summarize_chart(kind: str, data: dict) -> str:
     return f"The most common monitored behavior is {label}, seen {top_value} time(s) across {total} behavior flags."
 
 
-def query_detections(db: Session, keyword: str | None = None, date_from: str | None = None, date_to: str | None = None, target: str | None = None, severity: str | None = None, limit: int = 200, sort: str = "newest") -> list[SecurityDetectionEvent]:
+def query_detections(db: Session, keyword: str | None = None, date_from: str | None = None, date_to: str | None = None, target: str | None = None, severity: str | None = None, limit: int = 200, sort: str = "newest", classification: str | None = None) -> list[SecurityDetectionEvent]:
     query = db.query(SecurityDetectionEvent)
     if keyword:
         like = f"%{keyword}%"
@@ -2440,6 +2515,11 @@ def query_detections(db: Session, keyword: str | None = None, date_from: str | N
         query = query.filter(SecurityDetectionEvent.target_name.like(f"%{target}%"))
     if severity:
         query = query.filter(SecurityDetectionEvent.severity_level == severity)
+    if classification:
+        if classification == "legitimate":
+            query = query.filter(SecurityDetectionEvent.is_legitimate == True)
+        else:
+            query = query.filter(SecurityDetectionEvent.ai_prediction == classification)
     if date_from:
         query = query.filter(SecurityDetectionEvent.detected_at >= datetime.fromisoformat(date_from))
     if date_to:
@@ -2455,7 +2535,10 @@ def query_recoveries(db: Session, keyword: str | None = None, date_from: str | N
         like = f"%{keyword}%"
         query = query.filter(or_(SecurityRecoveryEvent.summary.like(like), SecurityRecoveryEvent.backup_path.like(like), SecurityRecoveryEvent.error_message.like(like)))
     if recovery_type:
-        query = query.filter(SecurityRecoveryEvent.recovery_type == recovery_type)
+        if recovery_type == "reverted":
+            query = query.filter(or_(SecurityRecoveryEvent.recovery_type == "reverted", SecurityRecoveryEvent.status == "reverted"))
+        else:
+            query = query.filter(SecurityRecoveryEvent.recovery_type == recovery_type)
     if status:
         query = query.filter(SecurityRecoveryEvent.status == status)
     if date_from:
@@ -2714,6 +2797,12 @@ def serialize_detection(item: SecurityDetectionEvent) -> dict:
 
 def serialize_recovery(item: SecurityRecoveryEvent) -> dict:
     display_status = "success" if item.status == "verified_removal" else item.status
+    display_recovery_type = item.recovery_type
+    if item.recovery_type == "manual_backup" and (
+        item.initiated_by is None
+        or any(label in str(item.backup_path or item.summary or "").lower() for label in ("startup", "initial", "scheduled", "automatic"))
+    ):
+        display_recovery_type = "automatic_backup"
     display_summary = item.summary
     if "Verified rename" in str(display_summary or ""):
         display_summary = "Trusted baseline accepted; previous automatic recovery is no longer treated as a security incident."
@@ -2721,7 +2810,7 @@ def serialize_recovery(item: SecurityRecoveryEvent) -> dict:
         "id": item.id,
         "detection_event_id": item.detection_event_id,
         "file_id": item.file_id,
-        "recovery_type": item.recovery_type,
+        "recovery_type": display_recovery_type,
         "initiated_by": item.initiated_by,
         "started_at": item.started_at.isoformat() if item.started_at else None,
         "completed_at": item.completed_at.isoformat() if item.completed_at else None,

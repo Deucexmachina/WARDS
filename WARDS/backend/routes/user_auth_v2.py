@@ -290,7 +290,6 @@ def verify_recaptcha(token: str, client_ip: str) -> bool:
         result = response.json()
         return result.get('success', False)
     except Exception as e:
-        print(f"[USER AUTH] reCAPTCHA verification error: {e}")
         return False
 
 def check_rate_limit(ip_address: str) -> bool:
@@ -908,8 +907,6 @@ async def user_login(request: Request, credentials: UserLoginRequest, db: Sessio
     normalized_email = normalize_email(credentials.email)
     user = find_citizen_by_email(db, CitizenUser, normalized_email)
     
-    print(f"[USER AUTH] Login attempt for email: {credentials.email}")
-    print(f"[USER AUTH] User found: {user is not None}")
     
     if not user:
         record_failed_attempt(normalized_email, db)
@@ -1016,7 +1013,6 @@ async def user_login(request: Request, credentials: UserLoginRequest, db: Sessio
     
     log_activity(db, "Successful User Login", normalized_email, f"IP: {client_ip}", "user_auth")
     
-    print(f"[USER AUTH] Login successful for {credentials.email}")
     
     return {
         "access_token": access_token,
@@ -1060,11 +1056,9 @@ async def request_password_reset(request: Request, reset_request: PasswordResetR
         log_activity(db, "Password Reset Requested", reset_request.email, f"IP: {client_ip}", "user_auth")
         
         # In production, send email with reset link
-        print(f"[USER AUTH] Password reset token for {reset_request.email}: {reset_token}")
         
         return {
             "message": "If the email exists, a password reset link has been sent.",
-            "reset_token": reset_token  # Remove in production
         }
     
     return {"message": "If the email exists, a password reset link has been sent."}

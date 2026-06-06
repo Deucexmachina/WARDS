@@ -124,24 +124,15 @@ async def request_otp(request: Request, credentials: OTPRequest, db: Session = D
     
     admin = db.query(Admin).filter(Admin.username == credentials.username).first()
     
-    # Debug logging
-    print(f"[ADMIN AUTH DEBUG] OTP Request for username: {credentials.username}")
-    print(f"[ADMIN AUTH DEBUG] Admin found: {admin is not None}")
-    
     if not admin:
         record_failed_attempt(credentials.username)
         log_activity(db, "Failed OTP Request", credentials.username, f"Admin not found, IP: {client_ip}", "security")
-        print(f"[ADMIN AUTH DEBUG] Admin not found in database")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password"
         )
     
-    print(f"[ADMIN AUTH DEBUG] Admin ID: {admin.id}, Status: {admin.status}")
-    print(f"[ADMIN AUTH DEBUG] Verifying password...")
-    
     password_valid = pwd_context.verify(credentials.password, admin.hashed_password)
-    print(f"[ADMIN AUTH DEBUG] Password valid: {password_valid}")
     
     if not password_valid:
         record_failed_attempt(credentials.username)
@@ -153,7 +144,6 @@ async def request_otp(request: Request, credentials: OTPRequest, db: Session = D
     
     if admin.status != "Active":
         log_activity(db, "OTP Request for Inactive Account", credentials.username, f"Status: {admin.status}, IP: {client_ip}", "security")
-        print(f"[ADMIN AUTH DEBUG] Admin account not active: {admin.status}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is not active"
@@ -166,11 +156,7 @@ async def request_otp(request: Request, credentials: OTPRequest, db: Session = D
         "user_id": admin.id
     }
     
-    print(f"[ADMIN AUTH DEBUG] OTP generated successfully: {otp}")
-    
     log_activity(db, "OTP Generated", credentials.username, f"OTP requested from IP: {client_ip}", "security")
-    
-    print(f"[SECURITY] OTP for {credentials.username}: {otp}")
     
     return {
         "message": "OTP sent successfully",

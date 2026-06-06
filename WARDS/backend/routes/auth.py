@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
@@ -8,6 +8,7 @@ from passlib.context import CryptContext
 from pydantic import BaseModel
 
 from database.models import User, get_db
+from utils.token_revocation import is_token_revoked, revoke_token
 
 router = APIRouter()
 
@@ -82,7 +83,11 @@ async def login(credentials: dict, db: Session = Depends(get_db)):
     }
 
 @router.post("/logout")
-async def logout():
+async def logout(request: Request, db: Session = Depends(get_db)):
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        revoke_token(db, auth_header.split(" ", 1)[1], SECRET_KEY, ALGORITHM)
+        db.commit()
     return {"message": "Logged out successfully"}
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
@@ -93,6 +98,8 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
+        if is_token_revoked(db, token):
+            raise credentials_exception
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
         if username is None:

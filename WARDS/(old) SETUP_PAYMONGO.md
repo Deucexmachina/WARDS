@@ -2,7 +2,7 @@
 
 ## 🚀 Quick Start (5 Minutes)
 
-### Step 1: Get PayMongo API Keys (2 minutes)
+### Step 1: Get PayMongo API Keys (2 minute
 
 1. Go to https://dashboard.paymongo.com/
 2. Sign up or log in

@@ -6,7 +6,7 @@ from typing import Optional
 
 from database.models import (
     get_db, Branch, Queue, QueueActivity, Payment, User, 
-    Alert, ActivityLog, Announcement
+    Alert, AlertView, ActivityLog, Announcement
 )
 from middleware.admin_auth import get_current_admin_user
 from utils.rbac import require_permission
@@ -120,8 +120,15 @@ async def get_dashboard_statistics(
     # Get recent payments
     recent_payments = payment_query.order_by(Payment.created_at.desc()).limit(10).all()
     
-    # Get recent alerts
-    alerts = db.query(Alert).filter(Alert.read == False).order_by(Alert.created_at.desc()).limit(5).all()
+    # Get recent stored alerts with per-admin read state.
+    alerts = db.query(Alert).order_by(Alert.created_at.desc()).limit(5).all()
+    viewed_alert_ids = {
+        row.alert_id
+        for row in db.query(AlertView).filter(
+            AlertView.viewer_username == current_user.username,
+            AlertView.viewer_type == "admin",
+        ).all()
+    }
     
     return {
         "summary": {
@@ -163,6 +170,7 @@ async def get_dashboard_statistics(
                 "title": alert.title,
                 "message": alert.message,
                 "severity": alert.severity,
+                "read": alert.id in viewed_alert_ids,
                 "created_at": alert.created_at.isoformat()
             }
             for alert in alerts

@@ -9,7 +9,6 @@ from __future__ import annotations
 import mimetypes
 import os
 import re
-import shutil
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -19,7 +18,8 @@ from fastapi import HTTPException, UploadFile
 
 from database.models import AnnouncementAttachment
 
-# Storage root for announcement files. Each announcement gets its own subfolder.
+# Legacy disk storage root. New attachments are stored in the database, but this
+# remains for old records created before DB-backed storage existed.
 ATTACHMENT_ROOT = Path("uploads/announcements")
 
 # 25 MB per file is plenty for documents/images/short videos.
@@ -79,36 +79,68 @@ def store_announcement_attachment(
     file_bytes: bytes,
     uploaded_by: Optional[str] = None,
 ) -> AnnouncementAttachment:
-    """Persist a single attachment file to disk and return a model instance.
+    """Persist a single attachment in the database and return a model instance.
 
     Caller is responsible for adding the returned instance to the DB session
     and committing the transaction.
     """
     extension = _validate_upload(upload, file_bytes)
 
-    target_dir = ATTACHMENT_ROOT / str(announcement_id)
-    target_dir.mkdir(parents=True, exist_ok=True)
-
     unique_id = uuid.uuid4().hex[:10]
     timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
     safe_stem = _safe_stem(upload.filename or "file")
     stored_name = f"{timestamp}_{unique_id}_{safe_stem}{extension}"
-    file_path = target_dir / stored_name
-
-    with file_path.open("wb") as buffer:
-        buffer.write(file_bytes)
 
     mime = upload.content_type or mimetypes.guess_type(upload.filename or "")[0]
 
     return AnnouncementAttachment(
         announcement_id=announcement_id,
-        file_path=str(file_path),
+        file_path=f"db://announcements/{announcement_id}/{stored_name}",
         original_filename=upload.filename or stored_name,
         stored_filename=stored_name,
         mime_type=mime,
         file_size=len(file_bytes),
+        file_content=file_bytes,
         uploaded_by=(uploaded_by or "")[:255] or None,
     )
+
+
+def attachment_bytes(attachment: AnnouncementAttachment) -> bytes | None:
+    content = getattr(attachment, "file_content", None)
+    if content:
+        if isinstance(content, bytes):
+            if not str(attachment.file_path or "").startswith("db://"):
+                try:
+                    import base64
+                    decoded = base64.b64decode(content, validate=True)
+                    if not attachment.file_size or len(decoded) == attachment.file_size:
+                        return decoded
+                except Exception:
+                    pass
+            return content
+        if isinstance(content, memoryview):
+            content_bytes = content.tobytes()
+            if not str(attachment.file_path or "").startswith("db://"):
+                try:
+                    import base64
+                    decoded = base64.b64decode(content_bytes, validate=True)
+                    if not attachment.file_size or len(decoded) == attachment.file_size:
+                        return decoded
+                except Exception:
+                    pass
+            return content_bytes
+        if isinstance(content, str):
+            try:
+                import base64
+                return base64.b64decode(content.encode("ascii"))
+            except Exception:
+                return content.encode("utf-8")
+    if attachment.file_path and os.path.exists(attachment.file_path):
+        try:
+            return Path(attachment.file_path).read_bytes()
+        except OSError:
+            return None
+    return None
 
 
 def enforce_attachment_limit(existing_count: int, additional: int) -> None:
@@ -124,7 +156,7 @@ def enforce_attachment_limit(existing_count: int, additional: int) -> None:
 
 def remove_attachment_file(attachment: AnnouncementAttachment) -> None:
     path = attachment.file_path
-    if not path:
+    if not path or str(path).startswith("db://"):
         return
     try:
         if os.path.exists(path):
@@ -137,6 +169,7 @@ def remove_attachment_file(attachment: AnnouncementAttachment) -> None:
 def remove_announcement_directory(announcement_id: int) -> None:
     folder = ATTACHMENT_ROOT / str(announcement_id)
     if folder.exists():
+        import shutil
         shutil.rmtree(folder, ignore_errors=True)
 
 

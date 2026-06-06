@@ -86,6 +86,7 @@ const Accounts = () => {
   const [contactError, setContactError] = useState('');
   const [fullNameError, setFullNameError] = useState('');
   const [authPasswordError, setAuthPasswordError] = useState('');
+  const [jumpPage, setJumpPage] = useState('');
 
   const managerEyebrow = isBranchPortal ? 'Branch Admin Dashboard' : 'Main Admin Dashboard';
   const managerSubtitle = isBranchPortal
@@ -198,10 +199,18 @@ const Accounts = () => {
   };
 
   const handlePageChange = (nextPage) => {
-    if (nextPage < 1 || nextPage > pagination.total_pages || nextPage === pagination.page) {
+    const totalPages = Math.max(1, Number(pagination.total_pages || 1));
+    const clampedPage = Math.min(Math.max(1, Number(nextPage || 1)), totalPages);
+    if (clampedPage === pagination.page) {
       return;
     }
-    fetchAccounts(nextPage);
+    fetchAccounts(clampedPage);
+  };
+
+  const submitJump = (event) => {
+    event.preventDefault();
+    handlePageChange(jumpPage || pagination.page);
+    setJumpPage('');
   };
 
   const handleInputChange = (event) => {
@@ -698,7 +707,20 @@ const Accounts = () => {
         <p className="text-sm text-gray-500">
           Showing page {pagination.page} of {pagination.total_pages} · {pagination.total} total account{pagination.total === 1 ? '' : 's'}
         </p>
-        <div className="flex gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <form onSubmit={submitJump} className="flex items-center gap-2">
+            <label className="text-sm font-semibold text-slate-600">Jump to</label>
+            <input
+              type="number"
+              min="1"
+              max={Math.max(1, Number(pagination.total_pages || 1))}
+              value={jumpPage}
+              onChange={(event) => setJumpPage(event.target.value)}
+              placeholder={String(pagination.page || 1)}
+              className="w-24 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            />
+            <button type="submit" disabled={loading} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:opacity-60">Go</button>
+          </form>
           <button
             onClick={() => handlePageChange(pagination.page - 1)}
             disabled={pagination.page <= 1 || loading}

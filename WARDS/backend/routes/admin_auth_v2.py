@@ -30,6 +30,7 @@ from slowapi.errors import RateLimitExceeded
 from database.models import Admin, ActivityLog, MFASecret, get_db
 from utils.system_settings import get_setting_value
 from utils.field_crypto import apply_mfa_secret_security, find_mfa_secret_record, get_decrypted_or_raw
+from utils.token_revocation import is_token_revoked, revoke_token
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -103,7 +104,6 @@ def verify_recaptcha(token: str, client_ip: str) -> bool:
         result = response.json()
         return result.get('success', False)
     except Exception as e:
-        print(f"[ADMIN AUTH] reCAPTCHA verification error: {e}")
         return False
 
 def check_rate_limit(ip_address: str) -> bool:
@@ -200,6 +200,8 @@ def get_current_admin_from_token(request: Request, db: Session) -> Admin:
         )
 
     token = auth_header.split(" ")[1]
+    if is_token_revoked(db, token):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session has been logged out")
 
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
@@ -324,8 +326,6 @@ async def admin_login(request: Request, credentials: AdminLoginRequest, db: Sess
     # Verify admin exists
     admin = db.query(Admin).filter(Admin.email == normalized_email).first()
     
-    print(f"[ADMIN AUTH] Login attempt for email: {normalized_email}")
-    print(f"[ADMIN AUTH] Admin found: {admin is not None}")
     
     if not admin:
         record_failed_attempt(normalized_email, db)
@@ -336,9 +336,7 @@ async def admin_login(request: Request, credentials: AdminLoginRequest, db: Sess
         )
     
     # Verify password
-    print(f"[ADMIN AUTH] Verifying password...")
     password_valid = pwd_context.verify(credentials.password, admin.hashed_password)
-    print(f"[ADMIN AUTH] Password valid: {password_valid}")
     
     if not password_valid:
         record_failed_attempt(normalized_email, db)
@@ -433,7 +431,6 @@ async def admin_login(request: Request, credentials: AdminLoginRequest, db: Sess
     
     log_activity(db, "Successful Admin Login", normalized_email, f"Role: {admin.role}, IP: {client_ip}", "security")
     
-    print(f"[ADMIN AUTH] Login successful for {normalized_email}")
     
     return {
         "access_token": access_token,
@@ -461,7 +458,9 @@ async def admin_logout(request: Request, db: Session = Depends(get_db)):
         try:
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
             username = payload.get("sub")
+            revoke_token(db, token, SECRET_KEY, ALGORITHM, "admin")
             log_activity(db, "Admin Logout", username or "Unknown", f"IP: {client_ip}", "security")
+            db.commit()
         except:
             pass
     

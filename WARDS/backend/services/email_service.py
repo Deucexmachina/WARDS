@@ -1132,6 +1132,83 @@ def send_login_notification_email(
         }
 
 
+def send_security_incident_alert_email(
+    recipient_emails: list[str],
+    incident: dict,
+    detection: dict | None = None,
+    recoveries: list[dict] | None = None,
+) -> dict:
+    recipients = sorted({email.strip() for email in (recipient_emails or []) if email and email.strip()})
+    if not recipients:
+        return {"sent": False, "status": "skipped", "message": "No admin recipients were available."}
+    if not smtp_is_configured():
+        return {"sent": False, "status": "skipped", "message": "SMTP is not configured. Security incident alert was not sent."}
+
+    recovery_lines = [
+        f"- {item.get('recovery_type', 'recovery')}: {item.get('status', 'unknown')} ({item.get('summary') or 'No summary'})"
+        for item in (recoveries or [])
+    ] or ["- No recovery event has been recorded yet."]
+    text = "\n".join([
+        "WARDS Security Incident Alert",
+        "",
+        f"Incident ID: SEC-{incident.get('id')}",
+        f"Severity: {incident.get('severity_level')}",
+        f"Status: {incident.get('status')}",
+        f"Incident Type: {incident.get('incident_type')}",
+        f"Description: {incident.get('description')}",
+        "",
+        "Related Detection",
+        f"- Detection ID: {detection.get('id') if detection else 'N/A'}",
+        f"- Target: {detection.get('target_name') if detection else 'N/A'}",
+        f"- Change Type: {detection.get('change_type') if detection else 'N/A'}",
+        f"- Trigger: {detection.get('trigger_summary') if detection else 'N/A'}",
+        "",
+        "Recovery Summary",
+        *recovery_lines,
+        "",
+        "Review this incident in the Security Dashboard.",
+        "",
+        "City Treasurer's Office",
+        "WARDS Security Monitor",
+    ])
+
+    html_recovery = "".join(f"<li>{line[2:]}</li>" for line in recovery_lines)
+    html = f"""
+<!DOCTYPE html>
+<html lang="en">
+  <body style="margin:0;padding:0;background:#f3f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;">
+    <div style="max-width:680px;margin:0 auto;padding:32px 20px;">
+      {_build_email_shell_header("Security Incident Alert", "A security incident was logged by the WARDS monitoring system.", [])}
+      <div style="background:#ffffff;border-radius:0 0 24px 24px;padding:30px;border:1px solid #dbe3ef;border-top:none;">
+        <h2 style="margin:0 0 14px;color:#991b1b;">SEC-{incident.get('id')} - {incident.get('severity_level')}</h2>
+        <p style="line-height:1.7;margin:0 0 18px;">{incident.get('description') or 'No description provided.'}</p>
+        <table style="width:100%;border-collapse:collapse;">
+          <tr><td style="padding:8px 0;font-weight:700;">Incident Type</td><td>{incident.get('incident_type')}</td></tr>
+          <tr><td style="padding:8px 0;font-weight:700;">Status</td><td>{incident.get('status')}</td></tr>
+          <tr><td style="padding:8px 0;font-weight:700;">Target</td><td>{detection.get('target_name') if detection else 'N/A'}</td></tr>
+          <tr><td style="padding:8px 0;font-weight:700;">Change Type</td><td>{detection.get('change_type') if detection else 'N/A'}</td></tr>
+        </table>
+        <h3 style="margin:22px 0 10px;color:#0f2744;">Recovery Summary</h3>
+        <ul style="line-height:1.7;">{html_recovery}</ul>
+      </div>
+    </div>
+  </body>
+</html>
+"""
+
+    message = EmailMessage()
+    message["Subject"] = f"WARDS Security Incident SEC-{incident.get('id')} | {incident.get('severity_level')}"
+    message["From"] = f"{os.getenv('SMTP_FROM_NAME', 'WARDS Admin')} <{os.getenv('SMTP_FROM_EMAIL')}>"
+    message["To"] = ", ".join(recipients)
+    message.set_content(text)
+    message.add_alternative(html, subtype="html")
+    try:
+        result = _send_email_message(message)
+        return {**result, "message": f"Security incident alert sent to {len(recipients)} admin(s)."}
+    except Exception as exc:
+        return {"sent": False, "status": "failed", "message": f"Security incident alert could not be sent: {exc}"}
+
+
 def _build_registration_notice_text(
     display_name: str,
     account_type: str,

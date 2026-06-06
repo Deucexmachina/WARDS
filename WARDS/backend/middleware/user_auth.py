@@ -6,6 +6,7 @@ import os
 
 from database.models import CitizenUser, get_db
 from utils.field_crypto import find_citizen_by_email
+from utils.token_revocation import is_token_revoked
 
 SECRET_KEY = os.getenv("USER_SECRET_KEY", "your-user-secret-key-change-in-production")
 UNIFIED_SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "your-unified-auth-secret-change-in-production")
@@ -19,6 +20,8 @@ async def get_current_user(
     db: Session = Depends(get_db)
 ) -> CitizenUser:
     token = credentials.credentials
+    if is_token_revoked(db, token):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session has been logged out")
     
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,

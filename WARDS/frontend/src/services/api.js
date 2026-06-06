@@ -327,7 +327,8 @@ export const discrepancyAPI = {
 };
 
 export const alertAPI = {
-  getAll: () => api.get('/alerts'),
+  getAll: (params) => api.get('/alerts', { params }),
+  getUnreadCount: () => api.get('/alerts/unread-count'),
   markAsRead: (id) => api.put(`/alerts/${id}/read`),
 };
 
