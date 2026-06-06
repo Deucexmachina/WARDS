@@ -2,7 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import api from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
+import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
 import { UNREAD_CARD_HIGHLIGHT_CLASS, UNREAD_STATUS_BADGE_CLASS } from '../../utils/notificationUI';
+
+const EMPTY_FORM = {
+  title: '',
+  content: '',
+  priority: 'normal',
+  attachment: null,
+};
 
 const priorityStyles = {
   low: 'bg-slate-100 text-slate-700',
@@ -20,10 +28,11 @@ const BranchMemos = () => {
   const [viewingMemo, setViewingMemo] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedContent, setExpandedContent] = useState(false);
-  const [showForm, setShowForm] = useState(false);
+  const [showFormModal, setShowFormModal] = useState(false);
   const [editingMemo, setEditingMemo] = useState(null);
-  const [savingMemo, setSavingMemo] = useState(false);
-  const [formState, setFormState] = useState({ title: '', content: '', priority: 'normal', attachment: null });
+  const [memoToDelete, setMemoToDelete] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [formState, setFormState] = useState(EMPTY_FORM);
   const branchUser = JSON.parse(localStorage.getItem('branchUser') || '{}');
   const isBranchAdmin = branchUser?.role === 'branch_admin' || branchUser?.internal_role === 'branch_admin';
 
@@ -110,24 +119,49 @@ const BranchMemos = () => {
 
   const openCreateForm = () => {
     setEditingMemo(null);
-    setFormState({ title: '', content: '', priority: 'normal', attachment: null });
-    setShowForm(true);
+    setFormState(EMPTY_FORM);
+    setShowFormModal(true);
   };
 
   const openEditForm = (memo) => {
     setEditingMemo(memo);
-    setFormState({ title: memo.title || '', content: memo.content || '', priority: memo.priority || 'normal', attachment: null });
-    setShowForm(true);
+    setFormState({
+      title: memo.title || '',
+      content: memo.content || '',
+      priority: memo.priority || 'normal',
+      attachment: null,
+    });
+    setShowFormModal(true);
   };
 
-  const saveMemo = async (event) => {
-    event.preventDefault();
-    setSavingMemo(true);
+  const closeFormModal = () => {
+    setShowFormModal(false);
+    setEditingMemo(null);
+    setFormState(EMPTY_FORM);
+  };
+
+  const handleInputChange = (event) => {
+    const { name, value } = event.target;
+    setFormState((current) => ({ ...current, [name]: value }));
+  };
+
+  const handleFileChange = (event) => {
+    const file = event.target.files?.[0] || null;
+    setFormState((current) => ({ ...current, attachment: file }));
+  };
+
+  const handleSaveMemo = async () => {
+    if (!formState.title.trim() || !formState.content.trim()) {
+      setError('Memo title and content are required.');
+      return;
+    }
+
+    setSaving(true);
     setError('');
     try {
       const formData = new FormData();
-      formData.append('title', formState.title);
-      formData.append('content', formState.content);
+      formData.append('title', formState.title.trim());
+      formData.append('content', formState.content.trim());
       formData.append('priority', formState.priority);
       if (formState.attachment) {
         formData.append('attachment', formState.attachment);
@@ -137,25 +171,35 @@ const BranchMemos = () => {
       } else {
         await api.post('/branch/memos', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
       }
-      setShowForm(false);
-      setEditingMemo(null);
+      closeFormModal();
       await fetchMemos();
     } catch (saveError) {
       setError(saveError.response?.data?.detail || 'Failed to save internal memo.');
     } finally {
-      setSavingMemo(false);
+      setSaving(false);
     }
   };
 
-  const deleteMemo = async (memo) => {
-    if (!window.confirm(`Delete internal memo "${memo.title}"?`)) {
+  const handleDeleteMemo = async (memoId) => {
+    if (!memoToDelete && memoId && typeof memoId === 'object') {
+      setMemoToDelete(memoId);
       return;
     }
+
+    const targetMemo = memoToDelete || memos.find((memo) => memo.id === memoId);
+    if (!targetMemo) {
+      return;
+    }
+
     try {
-      await api.delete(`/branch/memos/${memo.id}`);
+      setSaving(true);
+      await api.delete(`/branch/memos/${targetMemo.id}`);
       await fetchMemos();
+      setMemoToDelete(null);
     } catch (deleteError) {
       setError(deleteError.response?.data?.detail || 'Failed to delete internal memo.');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -163,7 +207,7 @@ const BranchMemos = () => {
     return (
       <div className="h-96 flex items-center justify-center">
         <div className="text-center">
-          <div className="border-4 border-purple-600 border-t-transparent rounded-full w-12 h-12 mx-auto mb-4 animate-spin"></div>
+          <div className="border-4 border-primary border-t-transparent rounded-full w-12 h-12 mx-auto mb-4 animate-spin"></div>
           <p className="text-gray-600">Loading internal memos...</p>
         </div>
       </div>
@@ -171,7 +215,7 @@ const BranchMemos = () => {
   }
 
   const MemoCard = ({ memo }) => (
-    <div className={`rounded-xl border-l-4 p-5 shadow-md transition duration-300 hover:shadow-lg ${!memo.is_viewed ? `${UNREAD_CARD_HIGHLIGHT_CLASS} border-l-purple-600` : 'bg-white border-l-purple-500'}`}>
+    <div className={`rounded-xl border-l-4 p-5 shadow-md transition duration-300 hover:shadow-lg ${!memo.is_viewed ? `${UNREAD_CARD_HIGHLIGHT_CLASS} border-l-primary` : 'bg-white border-l-primary'}`}>
       <div className="flex items-start justify-between gap-4 mb-3">
         <div className="flex-1">
           <div className="flex items-center gap-3 mb-2">
@@ -213,14 +257,24 @@ const BranchMemos = () => {
         <div className="flex flex-wrap justify-end gap-2">
           <button
             onClick={() => openViewModal(memo)}
-            className="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2 rounded-lg text-sm font-semibold transition duration-300"
+            className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition duration-300"
           >
-            View Details
+            View
           </button>
           {isBranchAdmin && memo.is_mine && (
             <>
-              <button onClick={() => openEditForm(memo)} className="rounded-lg bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-300">Edit</button>
-              <button onClick={() => deleteMemo(memo)} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700">Delete</button>
+              <button
+                onClick={() => openEditForm(memo)}
+                className="bg-accent hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition duration-300"
+              >
+                Edit
+              </button>
+              <button
+                onClick={() => handleDeleteMemo(memo)}
+                className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition duration-300"
+              >
+                Delete
+              </button>
             </>
           )}
         </div>
@@ -239,32 +293,16 @@ const BranchMemos = () => {
 
       {isBranchAdmin && (
         <div className="mb-6 flex justify-end">
-          <button onClick={openCreateForm} className="rounded-lg bg-purple-600 px-5 py-3 font-semibold text-white transition hover:bg-purple-700">
-            Create Internal Memo
+          <button
+            onClick={openCreateForm}
+            className="bg-green-500 hover:bg-green-600 text-white px-6 py-3 rounded-lg font-semibold transition duration-300 shadow-lg flex items-center gap-2"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Create Memo
           </button>
         </div>
-      )}
-
-      {showForm && (
-        <form onSubmit={saveMemo} className="mb-6 rounded-xl bg-white p-6 shadow-md">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-xl font-bold text-purple-700">{editingMemo ? 'Edit Internal Memo' : 'Create Internal Memo'}</h2>
-            <button type="button" onClick={() => setShowForm(false)} className="rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700">Cancel</button>
-          </div>
-          <div className="grid gap-4 md:grid-cols-[1fr_180px]">
-            <input value={formState.title} onChange={(event) => setFormState((current) => ({ ...current, title: event.target.value }))} className="rounded-lg border border-gray-300 px-4 py-3" placeholder="Memo title" required />
-            <select value={formState.priority} onChange={(event) => setFormState((current) => ({ ...current, priority: event.target.value }))} className="rounded-lg border border-gray-300 px-4 py-3">
-              <option value="low">Low</option>
-              <option value="normal">Normal</option>
-              <option value="high">High</option>
-            </select>
-          </div>
-          <textarea value={formState.content} onChange={(event) => setFormState((current) => ({ ...current, content: event.target.value }))} className="mt-4 min-h-36 w-full rounded-lg border border-gray-300 px-4 py-3" placeholder="Memo content" required />
-          <input type="file" onChange={(event) => setFormState((current) => ({ ...current, attachment: event.target.files?.[0] || null }))} className="mt-4 w-full rounded-lg border border-gray-300 px-4 py-3" />
-          <button disabled={savingMemo} className="mt-4 rounded-lg bg-purple-600 px-5 py-3 font-semibold text-white transition hover:bg-purple-700 disabled:opacity-60">
-            {savingMemo ? 'Saving...' : editingMemo ? 'Save Changes' : 'Publish Memo'}
-          </button>
-        </form>
       )}
 
       {error && (
@@ -277,9 +315,9 @@ const BranchMemos = () => {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div className="bg-white rounded-xl shadow-md p-5 border-l-4 border-l-purple-600">
+        <div className="bg-white rounded-xl shadow-md p-5 border-l-4 border-l-primary">
           <p className="text-sm text-gray-500 font-medium">Total Memos</p>
-          <p className="text-3xl font-bold text-purple-600 mt-2">{summary.total}</p>
+          <p className="text-3xl font-bold text-primary mt-2">{summary.total}</p>
         </div>
         <div className="bg-white rounded-xl shadow-md p-5 border-l-4 border-l-red-500">
           <p className="text-sm text-gray-500 font-medium">High Priority</p>
@@ -298,7 +336,7 @@ const BranchMemos = () => {
             placeholder="Search memos by title, content, or author..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full px-4 py-3 pl-12 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-600 focus:border-transparent"
+            className="w-full px-4 py-3 pl-12 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
           />
           <svg className="w-5 h-5 text-gray-400 absolute left-4 top-1/2 transform -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -322,7 +360,7 @@ const BranchMemos = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
             <div className="sticky top-0 bg-white border-b border-gray-200 px-8 py-5 flex items-center justify-between">
-              <h3 className="text-2xl font-bold text-purple-600">Memo Details</h3>
+              <h3 className="text-2xl font-bold text-primary">Memo Details</h3>
               <button
                 onClick={closeViewModal}
                 className="text-gray-400 hover:text-gray-600 transition"
@@ -341,7 +379,7 @@ const BranchMemos = () => {
                     {(viewingMemo.priority || 'normal').toUpperCase()}
                   </span>
                 </div>
-                <div className="h-1 w-20 bg-purple-600 rounded-full"></div>
+                <div className="h-1 w-20 bg-primary rounded-full"></div>
               </div>
 
               <div className="mb-6">
@@ -355,7 +393,7 @@ const BranchMemos = () => {
                   {viewingMemo.content.length > 500 && (
                     <button
                       onClick={() => setExpandedContent(!expandedContent)}
-                      className="mt-3 text-purple-600 hover:text-purple-700 font-semibold text-sm transition"
+                      className="mt-3 text-primary hover:text-secondary font-semibold text-sm transition"
                     >
                       {expandedContent ? 'Show Less' : 'See More'}
                     </button>
@@ -366,9 +404,9 @@ const BranchMemos = () => {
               {viewingMemo.attachment_filename && (
                 <div className="mb-6">
                   <h4 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Attachment</h4>
-                  <div className="bg-purple-50 rounded-lg p-4 border border-purple-200 flex items-center justify-between">
+                  <div className="bg-blue-50 rounded-lg p-4 border border-blue-200 flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <svg className="w-8 h-8 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg className="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
                       </svg>
                       <div>
@@ -378,7 +416,7 @@ const BranchMemos = () => {
                     </div>
                     <button
                       onClick={() => handleDownloadAttachment(viewingMemo)}
-                      className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition"
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition"
                     >
                       Download
                     </button>
@@ -405,16 +443,131 @@ const BranchMemos = () => {
                 </div>
               </div>
 
+              <div className="flex gap-3">
+                <button
+                  onClick={closeViewModal}
+                  className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 py-3 rounded-lg font-semibold transition duration-300"
+                >
+                  Close
+                </button>
+                {isBranchAdmin && viewingMemo.is_mine && (
+                  <button
+                    onClick={() => {
+                      closeViewModal();
+                      openEditForm(viewingMemo);
+                    }}
+                    className="flex-1 bg-accent hover:bg-blue-600 text-white py-3 rounded-lg font-semibold transition duration-300"
+                  >
+                    Edit Memo
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showFormModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-2xl p-8 max-w-3xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-2xl font-bold text-primary mb-6">
+              {editingMemo ? 'Edit Internal Memo' : 'Create Internal Memo'}
+            </h3>
+
+            <div className="space-y-5">
+              <div>
+                <label className="block text-gray-700 font-semibold mb-2">Memo Title</label>
+                <input
+                  type="text"
+                  name="title"
+                  value={formState.title}
+                  onChange={handleInputChange}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
+                  placeholder="Administrative policy, internal announcement, or operations memo"
+                />
+              </div>
+
+              <div>
+                <label className="block text-gray-700 font-semibold mb-2">Memo Content</label>
+                <textarea
+                  name="content"
+                  value={formState.content}
+                  onChange={handleInputChange}
+                  rows="8"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
+                  placeholder="Write the full memo here..."
+                ></textarea>
+              </div>
+
+              <div>
+                <label className="block text-gray-700 font-semibold mb-2">Memo Priority</label>
+                <select
+                  name="priority"
+                  value={formState.priority}
+                  onChange={handleInputChange}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
+                >
+                  <option value="low">Low</option>
+                  <option value="normal">Normal</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-gray-700 font-semibold mb-2">Attachment (Optional)</label>
+                <input
+                  type="file"
+                  onChange={handleFileChange}
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.jpg,.jpeg,.png"
+                  className="mb-4 w-full cursor-pointer rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm shadow-sm file:mr-4 file:rounded-xl file:border-0 file:bg-[#0f2f5f] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:border-blue-400 hover:bg-slate-50 focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-slate-200 transition"
+                />
+                {formState.attachment && (
+                  <p className="mt-2 text-sm text-gray-600">
+                    Selected: <span className="font-semibold">{formState.attachment.name}</span>
+                  </p>
+                )}
+                {editingMemo && editingMemo.attachment_filename && !formState.attachment && (
+                  <p className="mt-2 text-sm text-blue-600">
+                    Current: <span className="font-semibold">{editingMemo.attachment_filename}</span>
+                  </p>
+                )}
+                <p className="mt-2 text-xs text-gray-500">
+                  Supported formats: PDF, Word, Excel, Text, Images (Max 10MB)
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-4 mt-8">
               <button
-                onClick={closeViewModal}
-                className="w-full bg-purple-600 hover:bg-purple-700 text-white py-3 rounded-lg font-semibold transition duration-300"
+                onClick={closeFormModal}
+                className="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-700 py-3 rounded-lg font-semibold transition duration-300"
               >
-                Close
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveMemo}
+                disabled={saving}
+                className="flex-1 bg-primary hover:bg-secondary text-white py-3 rounded-lg font-semibold transition duration-300 disabled:opacity-50"
+              >
+                {saving ? 'Saving...' : editingMemo ? 'Update Memo' : 'Issue Memo'}
               </button>
             </div>
           </div>
         </div>
       )}
+
+      <DeleteConfirmationModal
+        open={Boolean(memoToDelete)}
+        title="Delete this internal memo?"
+        message={`This will permanently remove "${memoToDelete?.title || 'this memo'}" from the Internal Memos module.`}
+        details={[
+          { label: 'Author', value: memoToDelete?.author || 'Branch Admin' },
+          { label: 'Created', value: memoToDelete?.created_at ? formatDateTime(memoToDelete.created_at) : 'N/A' },
+        ]}
+        onCancel={() => setMemoToDelete(null)}
+        onConfirm={() => handleDeleteMemo()}
+        isLoading={saving}
+      />
     </div>
   );
 };
