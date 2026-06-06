@@ -79,6 +79,8 @@ const ForgotPassword = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [emailError, setEmailError] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [confirmPasswordError, setConfirmPasswordError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -87,16 +89,40 @@ const ForgotPassword = () => {
     [],
   );
 
+  const getForgotPasswordEmailError = (value) => {
+    if (!String(value || '').trim()) {
+      return 'Please enter your Email Address.';
+    }
+
+    return getEmailValidationMessage(value, { required: false }).replace('Please enter a valid email address.', 'Please enter a valid Email Address.');
+  };
+
+  const getNewPasswordError = (value) => {
+    if (!String(value || '')) {
+      return 'Please enter your New Password.';
+    }
+
+    return getPasswordValidationMessage(value);
+  };
+
+  const getConfirmPasswordError = (nextPassword, nextConfirmPassword) => {
+    if (!String(nextConfirmPassword || '')) {
+      return 'Please confirm your New Password.';
+    }
+
+    return nextPassword === nextConfirmPassword ? '' : 'Passwords do not match.';
+  };
+
   const handleRequestReset = async (event) => {
     event.preventDefault();
     setLoading(true);
     setError('');
     setSuccessMessage('');
 
-    const nextEmailError = getEmailValidationMessage(email);
+    const nextEmailError = getForgotPasswordEmailError(email);
     if (nextEmailError) {
       setEmailError(nextEmailError);
-      setError('Please correct the highlighted email field.');
+      setError(nextEmailError);
       setLoading(false);
       return;
     }
@@ -120,15 +146,19 @@ const ForgotPassword = () => {
     setError('');
     setSuccessMessage('');
 
-    const passwordValidationMessage = getPasswordValidationMessage(password);
-    if (passwordValidationMessage) {
-      setError(passwordValidationMessage);
+    const nextPasswordError = getNewPasswordError(password);
+    const nextConfirmPasswordError = getConfirmPasswordError(password, confirmPassword);
+    setPasswordError(nextPasswordError);
+    setConfirmPasswordError(nextConfirmPasswordError);
+
+    if (nextPasswordError) {
+      setError(nextPasswordError);
       setLoading(false);
       return;
     }
 
-    if (password !== confirmPassword) {
-      setError('New password and confirm password must match.');
+    if (nextConfirmPasswordError) {
+      setError(nextConfirmPasswordError);
       setLoading(false);
       return;
     }
@@ -172,17 +202,24 @@ const ForgotPassword = () => {
         ) : null}
 
         {token && !successMessage ? (
-          <form onSubmit={handleResetPassword} className="space-y-5">
+          <form onSubmit={handleResetPassword} noValidate className="space-y-5">
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-2">New Password</label>
               <div className="relative">
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  className={`w-full border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    setPassword(nextValue);
+                    setPasswordError(getNewPasswordError(nextValue));
+                    setConfirmPasswordError(getConfirmPasswordError(nextValue, confirmPassword));
+                    setError('');
+                  }}
+                  aria-invalid={passwordError ? 'true' : 'false'}
+                  className={`w-full border-2 rounded-xl focus:outline-none focus:ring-2 focus:border-transparent ${
                     showPasswordToggle ? 'px-4 py-3 pr-12' : 'px-4 py-3'
-                  }`}
+                  } ${passwordError ? 'border-red-300 bg-red-50 text-red-900 focus:ring-red-500/20' : 'border-gray-200 focus:ring-blue-500'}`}
                   autoComplete="new-password"
                   required
                 />
@@ -197,6 +234,9 @@ const ForgotPassword = () => {
                   </button>
                 ) : null}
               </div>
+              {passwordError ? (
+                <p className="mt-2 text-sm font-semibold text-red-600">{passwordError}</p>
+              ) : null}
             </div>
 
             <div>
@@ -205,10 +245,16 @@ const ForgotPassword = () => {
                 <input
                   type={showConfirmPassword ? 'text' : 'password'}
                   value={confirmPassword}
-                  onChange={(event) => setConfirmPassword(event.target.value)}
-                  className={`w-full border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    setConfirmPassword(nextValue);
+                    setConfirmPasswordError(getConfirmPasswordError(password, nextValue));
+                    setError('');
+                  }}
+                  aria-invalid={confirmPasswordError ? 'true' : 'false'}
+                  className={`w-full border-2 rounded-xl focus:outline-none focus:ring-2 focus:border-transparent ${
                     showConfirmPasswordToggle ? 'px-4 py-3 pr-12' : 'px-4 py-3'
-                  }`}
+                  } ${confirmPasswordError ? 'border-red-300 bg-red-50 text-red-900 focus:ring-red-500/20' : 'border-gray-200 focus:ring-blue-500'}`}
                   autoComplete="new-password"
                   required
                 />
@@ -223,6 +269,9 @@ const ForgotPassword = () => {
                   </button>
                 ) : null}
               </div>
+              {confirmPasswordError ? (
+                <p className="mt-2 text-sm font-semibold text-red-600">{confirmPasswordError}</p>
+              ) : null}
             </div>
 
             <button
@@ -234,7 +283,7 @@ const ForgotPassword = () => {
             </button>
           </form>
         ) : !token ? (
-          <form onSubmit={handleRequestReset} className="space-y-5">
+          <form onSubmit={handleRequestReset} noValidate className="space-y-5">
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-2">Registered Email</label>
               <input
@@ -242,8 +291,10 @@ const ForgotPassword = () => {
                 value={email}
                 onChange={(event) => {
                   setEmail(event.target.value);
-                  setEmailError(getEmailValidationMessage(event.target.value));
+                  setEmailError(getForgotPasswordEmailError(event.target.value));
+                  setError('');
                 }}
+                aria-invalid={emailError ? 'true' : 'false'}
                 className={`w-full px-4 py-3 border-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
                   emailError ? 'border-red-500 bg-red-50' : 'border-gray-200'
                 }`}
