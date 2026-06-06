@@ -69,8 +69,41 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
   const [showMfaSetup, setShowMfaSetup] = useState(false);
   const [mfaSetupData, setMfaSetupData] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [identifierError, setIdentifierError] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [totpError, setTotpError] = useState('');
   const navigate = useNavigate();
   const location = useLocation();
+
+  const getIdentifierLabel = () => 'Email Address';
+  const validateIdentifier = (value) => (String(value || '').trim() ? '' : `Please enter your ${getIdentifierLabel()}.`);
+  const validatePassword = (value) => (String(value || '') ? '' : 'Please enter your Password.');
+  const validateTotpCode = (value) => {
+    const trimmedValue = String(value || '').trim();
+    if (!trimmedValue) {
+      return 'Please enter your Authenticator Code.';
+    }
+    if (!/^\d{6}$/.test(trimmedValue)) {
+      return 'Please enter a valid 6-digit authenticator code.';
+    }
+    return '';
+  };
+
+  const normalizeLoginErrorMessage = (message) => {
+    const normalizedMessage = String(message || '').trim();
+    const lowerMessage = normalizedMessage.toLowerCase();
+
+    if (!normalizedMessage) {
+      return 'Login failed. Please try again.';
+    }
+    if (lowerMessage.includes('invalid credentials')) {
+      return 'Invalid Email Address or Password.';
+    }
+    if (lowerMessage === 'account is not active') {
+      return 'This account is currently inactive. Please contact an administrator.';
+    }
+    return normalizedMessage;
+  };
 
   const getRequestedPortal = () => {
     if (preferredPortal) {
@@ -350,6 +383,20 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
 
   const handleCredentialsSubmit = async (event) => {
     event.preventDefault();
+    const nextIdentifierError = validateIdentifier(identifier);
+    const nextPasswordError = validatePassword(password);
+    setIdentifierError(nextIdentifierError);
+    setPasswordError(nextPasswordError);
+    setTotpError('');
+    if (nextIdentifierError && nextPasswordError) {
+      setError(`Please enter your ${getIdentifierLabel()} and Password.`);
+      return;
+    }
+    if (nextIdentifierError || nextPasswordError) {
+      setError(nextIdentifierError || nextPasswordError);
+      return;
+    }
+
     const guardState = readGuardState(identifier);
     if (guardState.lockedUntil && guardState.lockedUntil > Date.now()) {
       setError(getLockMessage(guardState.lockedUntil));
@@ -389,7 +436,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
       redirectAfterLogin(response.data.portal);
     } catch (err) {
       const portal = err.response?.headers?.['x-auth-portal'] || getSubmissionPortal() || 'default';
-      const detail = err.response?.data?.detail || 'Login failed. Please try again.';
+      const detail = normalizeLoginErrorMessage(err.response?.data?.detail || 'Login failed. Please try again.');
       const requiresEmailVerification = err.response?.headers?.['x-requires-email-verification'] === 'true';
 
       if (requiresEmailVerification && portal === 'public') {
@@ -440,6 +487,13 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
 
   const handleTotpSubmit = async (event) => {
     event.preventDefault();
+    const nextTotpError = validateTotpCode(totpCode);
+    setTotpError(nextTotpError);
+    if (nextTotpError) {
+      setError(nextTotpError);
+      return;
+    }
+
     const guardState = readGuardState(identifier);
     if (guardState.lockedUntil && guardState.lockedUntil > Date.now()) {
       setError(getLockMessage(guardState.lockedUntil));
@@ -466,7 +520,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
     } catch (err) {
       const portal = err.response?.headers?.['x-auth-portal'] || getSubmissionPortal() || detectedPortal;
       lockDetectedPortal(portal);
-      const detail = err.response?.data?.detail || 'Invalid TOTP code. Please try again.';
+      const detail = normalizeLoginErrorMessage(err.response?.data?.detail || 'Invalid TOTP code. Please try again.');
       const updatedGuardState = registerFailedAttempt(identifier, portal || getActivePortal());
       setError(updatedGuardState.lockedUntil ? getLockMessage(updatedGuardState.lockedUntil) : detail);
       setTotpCode('');
@@ -510,18 +564,26 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
         )}
 
         {step === 'credentials' && (
-          <form onSubmit={handleCredentialsSubmit} className="space-y-5">
+          <form onSubmit={handleCredentialsSubmit} noValidate className="space-y-5">
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">Email Address</label>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">{getIdentifierLabel()}</label>
               <input
                 type="text"
                 value={identifier}
-                onChange={(event) => setIdentifier(event.target.value)}
-                className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                onChange={(event) => {
+                  setIdentifier(event.target.value);
+                  setIdentifierError(validateIdentifier(event.target.value));
+                  setError('');
+                }}
+                aria-invalid={identifierError ? 'true' : 'false'}
+                className={`w-full px-4 py-3 border-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${identifierError ? 'border-red-300 bg-red-50 text-red-900 focus:ring-red-500/20' : 'border-gray-200'}`}
                 placeholder="name@example.com"
                 required
                 autoComplete="email"
               />
+              {identifierError ? (
+                <p className="mt-2 text-sm font-semibold text-red-600">{identifierError}</p>
+              ) : null}
             </div>
 
             <div>
@@ -530,10 +592,15 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  className={`w-full border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                  onChange={(event) => {
+                    setPassword(event.target.value);
+                    setPasswordError(validatePassword(event.target.value));
+                    setError('');
+                  }}
+                  aria-invalid={passwordError ? 'true' : 'false'}
+                  className={`w-full border-2 rounded-xl focus:outline-none focus:ring-2 focus:border-transparent ${
                     showPasswordToggle ? 'px-4 py-3 pr-12' : 'px-4 py-3'
-                  }`}
+                  } ${passwordError ? 'border-red-300 bg-red-50 text-red-900 focus:ring-red-500/20' : 'border-gray-200 focus:ring-blue-500'}`}
                   required
                   autoComplete="current-password"
                 />
@@ -548,6 +615,9 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
                   </button>
                 ) : null}
               </div>
+              {passwordError ? (
+                <p className="mt-2 text-sm font-semibold text-red-600">{passwordError}</p>
+              ) : null}
               <div className="mt-2 text-right">
                 <Link
                   to={`/forgot-password${getActivePortal() ? `?portal=${getActivePortal()}` : ''}`}
@@ -586,7 +656,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
         )}
 
         {step === 'totp' && (
-          <form onSubmit={handleTotpSubmit} className="space-y-5">
+          <form onSubmit={handleTotpSubmit} noValidate className="space-y-5">
             <div className="text-center">
               <p className="text-sm text-gray-600">Enter the 6-digit code from your authenticator app.</p>
               <p className="mt-2 text-xs text-gray-500">
@@ -599,13 +669,22 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
               <input
                 type="text"
                 value={totpCode}
-                onChange={(event) => setTotpCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
-                className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl text-center text-2xl tracking-[0.4em] font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                onChange={(event) => {
+                  const nextValue = event.target.value.replace(/\D/g, '').slice(0, 6);
+                  setTotpCode(nextValue);
+                  setTotpError(validateTotpCode(nextValue));
+                  setError('');
+                }}
+                aria-invalid={totpError ? 'true' : 'false'}
+                className={`w-full px-4 py-3 border-2 rounded-xl text-center text-2xl tracking-[0.4em] font-mono focus:outline-none focus:ring-2 focus:border-transparent ${totpError ? 'border-red-300 bg-red-50 text-red-900 focus:ring-red-500/20' : 'border-gray-200 focus:ring-blue-500'}`}
                 placeholder="000000"
                 required
                 maxLength="6"
                 autoComplete="one-time-code"
               />
+              {totpError ? (
+                <p className="mt-2 text-sm font-semibold text-red-600">{totpError}</p>
+              ) : null}
             </div>
 
             {requiresCaptcha && (

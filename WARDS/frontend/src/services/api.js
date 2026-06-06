@@ -63,7 +63,7 @@ api.interceptors.response.use(
   (error) => {
     const url = error?.config?.url || '';
     const status = error?.response?.status;
-    if (status && !shouldSuppressGlobalErrorModal(error)) {
+    if (status && !error?.config?.suppressGlobalErrorModal && !shouldSuppressGlobalErrorModal(error)) {
       window.dispatchEvent(new CustomEvent('wards:system-message', {
         detail: {
           tone: getModalToneForError(error),
@@ -92,13 +92,15 @@ api.interceptors.response.use(
 
     // Check if this is a password confirmation error (incorrect password, not session expiration)
     const errorDetail = error?.response?.data?.detail || '';
+    const requestPayload = error?.config?.data;
+    const isProtectedPasswordRequest = typeof requestPayload === 'string' && requestPayload.toLowerCase().includes('current_admin_password');
     const isPasswordConfirmationError = 
       errorDetail.toLowerCase().includes('incorrect') && 
-      (errorDetail.toLowerCase().includes('password') || errorDetail.toLowerCase().includes('super admin') || errorDetail.toLowerCase().includes('main admin'));
+      (errorDetail.toLowerCase().includes('password') || errorDetail.toLowerCase().includes('super admin') || errorDetail.toLowerCase().includes('main admin') || errorDetail.toLowerCase().includes('branch admin'));
 
     if (hasAdminToken && isAdminRequest && (!error.response || [401, 403].includes(error.response.status))) {
       // Don't redirect if it's a password confirmation error - let the component handle it
-      if (isPasswordConfirmationError) {
+      if (isPasswordConfirmationError || (url.includes('/accounts') && isProtectedPasswordRequest)) {
         return Promise.reject(error);
       }
       
@@ -362,8 +364,8 @@ export const accountAPI = {
   getAll: (params) => api.get('/accounts', { params }),
   create: (data) => api.post('/accounts', data),
   update: (id, data) => api.put(`/accounts/${id}`, data),
-  delete: (id, role, data) => api.delete(`/accounts/${id}`, { params: { role }, data }),
-  deactivate: (id, role, data) => api.put(`/accounts/${id}/deactivate`, data, { params: { role } }),
+  delete: (id, role, data, config = {}) => api.delete(`/accounts/${id}`, { params: { role }, data, ...config }),
+  deactivate: (id, role, data, config = {}) => api.put(`/accounts/${id}/deactivate`, data, { params: { role }, ...config }),
 };
 
 export const ocrAPI = {

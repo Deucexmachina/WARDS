@@ -16,7 +16,6 @@ import {
 
 const API_URL = 'http://localhost:8000';
 const RECAPTCHA_SITE_KEY = '6LdOdsAsAAAAAKW-mZvEfaesLvdAwCm_SnZoiirK';
-
 const EyeIcon = ({ open }) => (
   <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
     {open ? (
@@ -41,6 +40,47 @@ const initialFormState = {
   confirmPassword: '',
 };
 
+const getRegistrationEmailError = (value) => {
+  if (!String(value || '').trim()) {
+    return 'Please enter your Email Address.';
+  }
+
+  return getEmailValidationMessage(value, { required: false }).replace('Please enter a valid email address.', 'Please enter a valid Email Address.');
+};
+
+const getRegistrationFullNameError = (value) => {
+  if (!String(value || '').trim()) {
+    return 'Please enter your Full Name.';
+  }
+
+  return validateCitizenFullName(value);
+};
+
+const getRegistrationContactError = (value) => {
+  if (!String(value || '').trim()) {
+    return 'Please enter your Contact Number.';
+  }
+
+  return validatePhilippineContactDigits(value)
+    .replace('Contact number must begin with 9 and contain exactly 10 digits.', 'Please enter a valid Contact Number.');
+};
+
+const getRegistrationPasswordError = (value) => {
+  if (!String(value || '')) {
+    return 'Please enter your Password.';
+  }
+
+  return validateStrongPassword(value);
+};
+
+const getRegistrationConfirmPasswordError = (password, confirmPassword) => {
+  if (!String(confirmPassword || '')) {
+    return 'Please confirm your Password.';
+  }
+
+  return password === confirmPassword ? '' : 'Passwords do not match.';
+};
+
 const UserRegister = () => {
   const navigate = useNavigate();
   const agreementScrollRef = useRef(null);
@@ -53,6 +93,7 @@ const UserRegister = () => {
   const [fullNameError, setFullNameError] = useState('');
   const [contactError, setContactError] = useState('');
   const [passwordError, setPasswordError] = useState('');
+  const [confirmPasswordError, setConfirmPasswordError] = useState('');
   const [recaptchaToken, setRecaptchaToken] = useState('');
   const [agreement, setAgreement] = useState(null);
   const [agreementError, setAgreementError] = useState('');
@@ -145,83 +186,40 @@ const UserRegister = () => {
   const handleChange = (event) => {
     const { name, value } = event.target;
     setFormData((previous) => ({ ...previous, [name]: value }));
+    setError('');
 
     if (name === 'email') {
-      setEmailError(getEmailValidationMessage(value));
+      setEmailError(getRegistrationEmailError(value));
     }
 
     if (name === 'full_name') {
-      setFullNameError(validateCitizenFullName(value));
+      setFullNameError(getRegistrationFullNameError(value));
     }
 
     if (name === 'contact_number') {
       const normalizedDigits = normalizePhilippineContactDigits(value);
       setFormData((current) => ({ ...current, contact_number: normalizedDigits }));
-      setContactError(validatePhilippineContactDigits(normalizedDigits));
+      setContactError(getRegistrationContactError(normalizedDigits));
       return;
     }
 
     if (name === 'password') {
-      setPasswordError(validateStrongPassword(value));
+      setPasswordError(getRegistrationPasswordError(value));
+      setConfirmPasswordError(getRegistrationConfirmPasswordError(value, formData.confirmPassword));
     }
 
-    if (name === 'confirmPassword' || name === 'password' || name === 'email') {
-      setError('');
+    if (name === 'confirmPassword') {
+      setConfirmPasswordError(getRegistrationConfirmPasswordError(formData.password, value));
     }
   };
 
-  const confirmPasswordError = useMemo(() => {
-    if (!formData.confirmPassword) {
-      return '';
-    }
-    return formData.password === formData.confirmPassword ? '' : 'Passwords do not match';
-  }, [formData.confirmPassword, formData.password]);
-
-  const requiredFieldsValid = useMemo(() => {
-    const requiredFieldsFilled = Boolean(
-      formData.email.trim() &&
-      formData.full_name.trim() &&
-      formData.contact_number.trim() &&
-      formData.password &&
-      formData.confirmPassword
-    );
-
-    return (
-      requiredFieldsFilled &&
-      !emailError &&
-      !fullNameError &&
-      !contactError &&
-      !passwordError &&
-      !confirmPasswordError
-    );
-  }, [
-    confirmPasswordError,
-    contactError,
-    emailError,
-    formData.confirmPassword,
-    formData.contact_number,
-    formData.email,
-    formData.full_name,
-    formData.password,
-    fullNameError,
-    passwordError,
-  ]);
-
   const canSubmit = useMemo(() => {
     return (
-      requiredFieldsValid &&
       !agreementLoading &&
-      !agreementError &&
-      hasAcceptedAgreement &&
-      Boolean(recaptchaToken) &&
       !showAgreementModal
     );
   }, [
-    agreementError,
     agreementLoading,
-    hasAcceptedAgreement,
-    recaptchaToken,
-    requiredFieldsValid,
     showAgreementModal,
   ]);
 
@@ -235,51 +233,38 @@ const UserRegister = () => {
     setLoading(true);
     setError('');
 
-    const nextEmailError = getEmailValidationMessage(formData.email);
-    if (nextEmailError) {
-      setEmailError(nextEmailError);
-      setError('Please correct the highlighted email field.');
-      setLoading(false);
-      return;
-    }
+    const nextEmailError = getRegistrationEmailError(formData.email);
+    const nextFullNameError = getRegistrationFullNameError(formData.full_name);
+    const nextContactError = getRegistrationContactError(formData.contact_number);
+    const nextPasswordError = getRegistrationPasswordError(formData.password);
+    const nextConfirmPasswordError = getRegistrationConfirmPasswordError(formData.password, formData.confirmPassword);
 
-    const nextFullNameError = validateCitizenFullName(formData.full_name);
-    if (nextFullNameError) {
-      setFullNameError(nextFullNameError);
-      setError('Please correct the highlighted full name field.');
-      setLoading(false);
-      return;
-    }
+    setEmailError(nextEmailError);
+    setFullNameError(nextFullNameError);
+    setContactError(nextContactError);
+    setPasswordError(nextPasswordError);
+    setConfirmPasswordError(nextConfirmPasswordError);
 
-    const nextContactError = validatePhilippineContactDigits(formData.contact_number);
-    if (nextContactError) {
-      setContactError(nextContactError);
-      setError('Please correct the highlighted contact number field.');
-      setLoading(false);
-      return;
-    }
-
-    if (formData.password !== formData.confirmPassword) {
-      setError('Passwords do not match');
-      setLoading(false);
-      return;
-    }
-
-    const passwordValidationError = validateStrongPassword(formData.password);
-    if (passwordValidationError) {
-      setPasswordError(passwordValidationError);
+    if (
+      nextEmailError ||
+      nextFullNameError ||
+      nextContactError ||
+      nextPasswordError ||
+      nextConfirmPasswordError
+    ) {
+      setError('Please review the highlighted fields.');
       setLoading(false);
       return;
     }
 
     if (!hasAcceptedAgreement || !agreement?.version) {
-      setError('Please complete the Data Privacy Agreement review before registering.');
+      setError('You must accept the Data Privacy Agreement before registering.');
       setLoading(false);
       return;
     }
 
     if (!recaptchaToken) {
-      setError('Please complete the reCAPTCHA verification before registering.');
+      setError('Please complete the reCAPTCHA verification.');
       setLoading(false);
       return;
     }
@@ -360,7 +345,7 @@ const UserRegister = () => {
               </div>
             ) : null}
 
-            <form onSubmit={handleSubmit} className="mt-5 flex flex-col gap-5">
+            <form onSubmit={handleSubmit} noValidate className="mt-5 flex flex-col gap-5">
               <div className="grid gap-5 lg:grid-cols-[1.02fr_0.98fr]">
                 <div className="rounded-[26px] border border-slate-200 bg-slate-50/70 px-4 py-5 sm:px-5">
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Personal Information</p>
@@ -373,6 +358,7 @@ const UserRegister = () => {
                         value={formData.full_name}
                         onChange={handleChange}
                         placeholder="Juan Dela Cruz"
+                        aria-invalid={fullNameError ? 'true' : 'false'}
                         className={`w-full rounded-2xl border px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 ${fullNameError ? 'border-rose-400 bg-rose-50' : 'border-slate-200 bg-white'}`}
                         required
                       />
@@ -387,7 +373,7 @@ const UserRegister = () => {
                         value={formData.email}
                         onChange={handleChange}
                         placeholder="your.email@example.com"
-                        pattern="^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$"
+                        aria-invalid={emailError ? 'true' : 'false'}
                         className={`w-full rounded-2xl border px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 ${emailError ? 'border-rose-400 bg-rose-50' : 'border-slate-200 bg-white'}`}
                         required
                       />
@@ -406,6 +392,7 @@ const UserRegister = () => {
                           inputMode="numeric"
                           maxLength={10}
                           placeholder="9123456789"
+                          aria-invalid={contactError ? 'true' : 'false'}
                           className="w-full bg-transparent px-4 py-3 text-sm text-slate-900 outline-none"
                           required
                         />
@@ -472,7 +459,8 @@ const UserRegister = () => {
                             value={formData.password}
                             onChange={handleChange}
                             placeholder="Create a strong password"
-                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 pr-12 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+                            aria-invalid={passwordError ? 'true' : 'false'}
+                            className={`w-full rounded-2xl border px-4 py-3 pr-12 text-sm text-slate-900 outline-none transition focus:ring-4 ${passwordError ? 'border-rose-400 bg-rose-50 focus:border-rose-500 focus:ring-rose-100' : 'border-slate-200 bg-white focus:border-emerald-500 focus:ring-emerald-100'}`}
                             required
                           />
                           {formData.password ? (
@@ -502,7 +490,8 @@ const UserRegister = () => {
                             value={formData.confirmPassword}
                             onChange={handleChange}
                             placeholder="Re-enter your password"
-                            className={`w-full rounded-2xl border bg-white px-4 py-3 pr-12 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 ${confirmPasswordError ? 'border-rose-400 bg-rose-50' : 'border-slate-200'}`}
+                            aria-invalid={confirmPasswordError ? 'true' : 'false'}
+                            className={`w-full rounded-2xl border px-4 py-3 pr-12 text-sm text-slate-900 outline-none transition focus:ring-4 ${confirmPasswordError ? 'border-rose-400 bg-rose-50 focus:border-rose-500 focus:ring-rose-100' : 'border-slate-200 bg-white focus:border-emerald-500 focus:ring-emerald-100'}`}
                             required
                           />
                           {formData.confirmPassword ? (
@@ -574,7 +563,7 @@ const UserRegister = () => {
                   </Link>
                   <button
                     type="submit"
-                    disabled={!canSubmit || loading}
+                    disabled={loading || !canSubmit}
                     className="rounded-2xl bg-emerald-600 px-7 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-900/15 transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-300"
                   >
                     {loading ? 'Creating Account...' : 'Register'}

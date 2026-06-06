@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
@@ -13,7 +13,13 @@ import time
 from database.models import CitizenUser, ActivityLog, EmailVerificationToken, get_db
 from services.email_service import send_citizen_verification_link_email, smtp_is_configured
 from utils.field_crypto import apply_citizen_user_security, apply_email_verification_token_security, find_citizen_by_email, hash_optional_value, serialize_citizen_user
-from utils.security_validation import ensure_email_is_unique, normalize_email, validate_strong_password
+from utils.security_validation import (
+    ensure_email_is_unique,
+    normalize_citizen_full_name,
+    normalize_email,
+    normalize_ph_contact_number,
+    validate_strong_password,
+)
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -32,19 +38,19 @@ RATE_LIMIT_WINDOW = 60
 MAX_REQUESTS_PER_WINDOW = 10
 
 class UserRegisterRequest(BaseModel):
-    email: EmailStr
+    email: str
     full_name: str
     contact_number: str
     password: str
     address: Optional[str] = None
 
 class UserLoginRequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str
     otp: Optional[str] = None
 
 class OTPRequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str
 
 class Token(BaseModel):
@@ -141,6 +147,8 @@ async def register_user(request: Request, user_data: UserRegisterRequest, db: Se
         )
     
     normalized_email = normalize_email(user_data.email, check_deliverability=True)
+    normalized_full_name = normalize_citizen_full_name(user_data.full_name)
+    normalized_contact_number = normalize_ph_contact_number(user_data.contact_number)
     ensure_email_is_unique(db, normalized_email)
 
     validate_public_password(user_data.password)
@@ -149,8 +157,8 @@ async def register_user(request: Request, user_data: UserRegisterRequest, db: Se
     hashed_password = pwd_context.hash(user_data.password)
     new_user = CitizenUser(
         email=normalized_email,
-        full_name=user_data.full_name,
-        contact_number=user_data.contact_number,
+        full_name=normalized_full_name,
+        contact_number=normalized_contact_number,
         address=user_data.address,
         hashed_password=hashed_password,
         is_verified=not verification_required,

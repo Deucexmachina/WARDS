@@ -12,6 +12,7 @@ import {
 import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 import PasswordField from '../../components/PasswordField';
+import SystemMessageModal from '../../components/SystemMessageModal';
 
 const DEFAULT_PAGE_SIZE = 100;
 const INTERNAL_BRANCH_EMAIL_PATTERN = /^[A-Za-z0-9._-]+@branch\.local$/i;
@@ -87,6 +88,13 @@ const Accounts = () => {
   const [fullNameError, setFullNameError] = useState('');
   const [authPasswordError, setAuthPasswordError] = useState('');
   const [jumpPage, setJumpPage] = useState('');
+  const [actionModal, setActionModal] = useState({
+    open: false,
+    tone: 'info',
+    title: '',
+    message: '',
+    buttonLabel: 'OK',
+  });
 
   const managerEyebrow = isBranchPortal ? 'Branch Admin Dashboard' : 'Main Admin Dashboard';
   const managerSubtitle = isBranchPortal
@@ -442,6 +450,16 @@ const Accounts = () => {
     setPendingAccountSave(null);
   };
 
+  const openActionModal = ({ tone, title, message, buttonLabel = 'OK' }) => {
+    setActionModal({
+      open: true,
+      tone,
+      title,
+      message,
+      buttonLabel,
+    });
+  };
+
   const handleConfirmProtectedAction = async () => {
     if (!authModal.password) {
       setAuthPasswordError(`Please enter your ${verifierLabelLower} password to continue.`);
@@ -481,10 +499,17 @@ const Accounts = () => {
       if (authModal.mode === 'delete' && authModal.account) {
         await accountAPI.delete(authModal.account.id, authModal.account.role, {
           current_admin_password: authModal.password,
+        }, {
+          suppressGlobalErrorModal: true,
         });
         const nextPage = accounts.length === 1 && pagination.page > 1 ? pagination.page - 1 : pagination.page;
         await fetchAccounts(nextPage);
-        setSuccessMessage('Account deleted successfully.');
+        openActionModal({
+          tone: 'success',
+          title: 'Account Deleted Successfully',
+          message: 'The selected account has been successfully deleted.',
+          buttonLabel: 'OK',
+        });
         window.dispatchEvent(new Event('wards-accounts-refresh'));
       }
 
@@ -496,7 +521,16 @@ const Accounts = () => {
         setAuthPasswordError('Incorrect password. Please try again.');
         setError('');
       } else {
-        setError(errorDetail);
+        if (authModal.mode === 'delete') {
+          openActionModal({
+            tone: 'error',
+            title: 'Deletion Failed',
+            message: 'An error occurred while deleting the account. Please try again.',
+            buttonLabel: 'OK',
+          });
+        } else {
+          setError(errorDetail);
+        }
         setAuthPasswordError('');
       }
     } finally {
@@ -1121,6 +1155,21 @@ const Accounts = () => {
           </div>
         </div>
       )}
+
+      <SystemMessageModal
+        open={actionModal.open}
+        tone={actionModal.tone}
+        title={actionModal.title}
+        message={actionModal.message}
+        buttonLabel={actionModal.buttonLabel}
+        onClose={() => setActionModal({
+          open: false,
+          tone: 'info',
+          title: '',
+          message: '',
+          buttonLabel: 'OK',
+        })}
+      />
     </div>
   );
 };
