@@ -683,76 +683,79 @@ const ReceiptManagement = () => {
           return;
         }
 
+        // Use safe DOM API instead of document.write to prevent XSS
         iframeDocument.open();
-        iframeDocument.write(`
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <title>Print Receipt</title>
-              <style>
-                html, body {
-                  margin: 0;
-                  padding: 0;
-                  background: white;
-                }
-                body {
-                  display: flex;
-                  justify-content: center;
-                  align-items: flex-start;
-                  min-height: 100vh;
-                }
-                .print-container {
-                  width: 100%;
-                  max-width: 100%;
-                  padding: 10mm;
-                  box-sizing: border-box;
-                }
-                img {
-                  display: block;
-                  width: auto;
-                  height: 95vh;
-                  max-width: 95vw;
-                  max-height: 95vh;
-                  object-fit: contain;
-                  margin: 0 auto;
-                }
-                @page {
-                  size: auto;
-                  margin: 10mm;
-                }
-                @media print {
-                  body {
-                    margin: 0;
-                    padding: 0;
-                    display: flex;
-                    justify-content: center;
-                    align-items: flex-start;
-                  }
-                  .print-container {
-                    padding: 0;
-                    width: 100%;
-                    max-width: 100%;
-                  }
-                  img {
-                    width: auto;
-                    height: 95vh;
-                    max-width: 95vw;
-                    max-height: 95vh;
-                    page-break-inside: avoid;
-                  }
-                }
-              </style>
-            </head>
-            <body>
-              <div class="print-container">
-                <img id="receipt-image" src="${imageSrc}" alt="Receipt record" />
-              </div>
-            </body>
-          </html>
-        `);
+        iframeDocument.write('<!DOCTYPE html><html><head><title>Print Receipt</title></head><body></body></html>');
         iframeDocument.close();
 
-        const receiptImage = iframeDocument.getElementById('receipt-image');
+        // Create style element using safe DOM API
+        const style = iframeDocument.createElement('style');
+        style.textContent = `
+          html, body {
+            margin: 0;
+            padding: 0;
+            background: white;
+          }
+          body {
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+          }
+          .print-container {
+            width: 100%;
+            max-width: 100%;
+            padding: 10mm;
+            box-sizing: border-box;
+          }
+          img {
+            display: block;
+            width: auto;
+            height: 95vh;
+            max-width: 95vw;
+            max-height: 95vh;
+            object-fit: contain;
+            margin: 0 auto;
+          }
+          @page {
+            size: auto;
+            margin: 10mm;
+          }
+          @media print {
+            body {
+              margin: 0;
+              padding: 0;
+              display: flex;
+              justify-content: center;
+              align-items: flex-start;
+            }
+            .print-container {
+              padding: 0;
+              width: 100%;
+              max-width: 100%;
+            }
+            img {
+              width: auto;
+              height: 95vh;
+              max-width: 95vw;
+              max-height: 95vh;
+              page-break-inside: avoid;
+            }
+          }
+        `;
+        iframeDocument.head.appendChild(style);
+
+        // Create container and image using safe DOM API
+        const container = iframeDocument.createElement('div');
+        container.className = 'print-container';
+        
+        const receiptImage = iframeDocument.createElement('img');
+        receiptImage.id = 'receipt-image';
+        receiptImage.src = imageSrc;
+        receiptImage.alt = 'Receipt record';
+        
+        container.appendChild(receiptImage);
+        iframeDocument.body.appendChild(container);
         if (!receiptImage) {
           cleanup();
           setError('Failed to prepare receipt image for printing.');
