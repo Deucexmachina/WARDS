@@ -1,4 +1,5 @@
 import { useNavigate, useParams } from 'react-router-dom';
+import { usePublicLanguage } from '../../utils/publicLanguage';
 
 const LABELS = {
   bt: {
@@ -16,11 +17,50 @@ const LABELS = {
 const PayTaxesPlaceholder = () => {
   const navigate = useNavigate();
   const { taxType } = useParams();
+  const [language] = usePublicLanguage();
+
+  const copy = {
+    backToService: language === 'en' ? 'Back to Choose Your Tax Service' : 'Bumalik sa Pumili ng Iyong Serbisyong Buwis',
+      bt: {
+        title: language === 'en' ? 'Business Tax' : 'Business Tax',
+        code: 'BT',
+        hero: language === 'en' ? 'Welcome to Business Tax Assessment' : 'Maligayang Pagdating sa Business Tax Assessment',
+      serviceTitle: language === 'en' ? '2026 Business Tax' : '2026 Business Tax',
+      serviceSubtitle: language === 'en' ? 'Proceed and Pay Online' : 'Magpatuloy at Magbayad Online',
+      serviceBody: language === 'en'
+        ? 'You can now submit your Online Sales Declaration along with your Financial Statements and other requirements online. Assessment and settlement of payment can also be done through this portal.'
+        : 'Maaari mo nang isumite ang iyong Online Sales Declaration kasama ang iyong Financial Statements at iba pang kailangan online. Maaari ring gawin sa portal na ito ang assessment at pag-settle ng bayad.',
+      serviceButton: language === 'en' ? 'Proceed with Business Tax Assessment' : 'Magpatuloy sa Business Tax Assessment',
+      appointmentTitle: language === 'en' ? 'Appointment' : 'Appointment',
+      appointmentBody: language === 'en'
+        ? 'Do you have any concerns regarding your Business Tax Assessment? You may visit the City Treasurer\'s Office by scheduling an appointment below:'
+        : 'Mayroon ka bang mga alalahanin tungkol sa iyong Business Tax Assessment? Maaari mong bisitahin ang City Treasurer\'s Office sa pamamagitan ng pag-schedule ng appointment sa ibaba:',
+        appointmentButton: language === 'en' ? 'Set an Appointment' : 'Mag-iskedyul ng Appointment',
+      },
+    misc: {
+      title: language === 'en' ? 'Miscellaneous Tax' : 'Miscellaneous Tax',
+      code: 'MISC',
+      message: language === 'en'
+        ? 'The Miscellaneous Tax online payment workflow is not wired in yet. This route is intentionally reserved so the user can choose it from the tax service selector.'
+        : 'Hindi pa naka-wire ang online payment workflow ng Miscellaneous Tax. Nakareserba ang route na ito upang mapili ito ng user mula sa tax service selector.',
+      backButton: language === 'en' ? 'Back to Tax Service Selection' : 'Bumalik sa Pagpili ng Tax Service',
+      openButton: language === 'en' ? 'Open RPT Module' : 'Buksan ang RPT Module',
+    },
+  };
 
   if (taxType === 'bt') {
     return (
       <section className="min-h-screen bg-[radial-gradient(circle_at_top,#e7f0ff_0%,#f7f9fc_38%,#eef4fb_100%)] py-14">
         <div className="mx-auto max-w-[1840px] px-4 sm:px-6 lg:px-8">
+          <div className="mb-4 flex justify-start">
+            <button
+              type="button"
+              onClick={() => navigate('/pay-taxes')}
+              className="rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-bold uppercase tracking-[0.12em] text-slate-700 transition hover:border-[#0f5b83] hover:text-[#0f5b83]"
+            >
+              {copy.backToService}
+            </button>
+          </div>
           <div className="overflow-hidden rounded-[34px] border border-blue-100 bg-white shadow-[0_24px_55px_rgba(15,52,108,0.12)]">
             <div className="relative h-40 w-full overflow-hidden bg-[linear-gradient(135deg,#0f2f5f_0%,#18437f_38%,#2d69b3_100%)]">
               <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_30%,rgba(255,255,255,0.18),transparent_28%),radial-gradient(circle_at_80%_20%,rgba(255,255,255,0.12),transparent_24%),linear-gradient(90deg,transparent_0%,rgba(255,255,255,0.08)_50%,transparent_100%)]"></div>
@@ -35,24 +75,23 @@ const PayTaxesPlaceholder = () => {
 
             <div className="px-8 py-8 text-center sm:px-12">
               <h1 className="text-3xl font-semibold uppercase tracking-wide text-[#123f8f] sm:text-5xl">
-                Welcome to <span className="text-[#0f2f5f]">Business Tax Assessment</span>
+                {language === 'en' ? 'Welcome to' : 'Maligayang Pagdating sa'} <span className="text-[#0f2f5f]">{language === 'en' ? 'Business Tax Assessment' : 'Business Tax Assessment'}</span>
               </h1>
               <p className="mx-auto mt-5 max-w-5xl text-base leading-8 text-slate-600 sm:text-xl">
-                This WARDS public module helps business owners start their Business Tax transaction online and connect with the City Treasurer&apos;s Office through the proper service channel.
               </p>
             </div>
 
             <div className="grid gap-6 px-4 pb-4 sm:px-6 sm:pb-6 lg:grid-cols-2">
               <article className="rounded-[28px] border border-blue-100 bg-[linear-gradient(180deg,#eef5ff_0%,#dbe9fb_100%)] px-6 py-8 text-center shadow-[0_14px_35px_rgba(26,83,151,0.08)]">
                 <h2 className="text-2xl font-semibold uppercase tracking-wide text-[#123f8f] sm:text-4xl">
-                  2026 Business Tax
+                  {copy.bt.serviceTitle}
                 </h2>
                 <div className="mt-4 border-t border-white/90"></div>
                 <h3 className="mt-6 text-2xl font-medium text-slate-900 sm:text-4xl">
-                  Proceed and Pay Online
+                  {copy.bt.serviceSubtitle}
                 </h3>
                 <p className="mx-auto mt-8 max-w-4xl text-base leading-8 text-slate-700 sm:text-2xl">
-                  You can now submit your Online Sales Declaration along with your Financial Statements and other requirements online. Assessment and settlement of payment can also be done through this portal.
+                  {copy.bt.serviceBody}
                 </p>
                 <div className="mt-10">
                   <button
@@ -60,18 +99,18 @@ const PayTaxesPlaceholder = () => {
                     onClick={() => navigate('/pay-taxes/bt/online')}
                     className="rounded-full bg-[linear-gradient(90deg,#3c67be_0%,#567ecf_100%)] px-8 py-4 text-base font-bold uppercase tracking-wide text-white shadow-[0_12px_24px_rgba(60,103,190,0.22)] transition hover:brightness-110 sm:px-14 sm:py-5 sm:text-2xl"
                   >
-                    Proceed with Business Tax Assessment
+                    {copy.bt.serviceButton}
                   </button>
                 </div>
               </article>
 
               <article className="rounded-[28px] border border-[#d9e8fb] bg-[linear-gradient(180deg,#f4f8ff_0%,#e4eefc_100%)] px-6 py-8 text-center shadow-[0_14px_35px_rgba(15,47,95,0.08)]">
                 <h2 className="text-2xl font-semibold uppercase tracking-wide text-[#123f8f] sm:text-4xl">
-                  Appointment
+                  {copy.bt.appointmentTitle}
                 </h2>
                 <div className="mt-4 border-t border-white/90"></div>
                 <p className="mx-auto mt-14 max-w-4xl text-base leading-8 text-slate-700 sm:text-2xl">
-                  Do you have any concerns regarding your Business Tax Assessment? You may visit the City Treasurer&apos;s Office by scheduling an appointment below:
+                  {copy.bt.appointmentBody}
                 </p>
                 <div className="mt-10">
                   <button
@@ -79,7 +118,7 @@ const PayTaxesPlaceholder = () => {
                     onClick={() => navigate('/get-queue?service=Business%20Tax&queueType=appointment')}
                     className="rounded-full bg-[linear-gradient(90deg,#0f56d8_0%,#0b45b8_100%)] px-8 py-4 text-base font-bold uppercase tracking-wide text-white shadow-[0_14px_28px_rgba(11,69,184,0.24)] transition hover:brightness-110 sm:px-14 sm:py-5 sm:text-2xl"
                   >
-                    Set an Appointment
+                    {copy.bt.appointmentButton}
                   </button>
                 </div>
               </article>
@@ -91,9 +130,11 @@ const PayTaxesPlaceholder = () => {
   }
 
   const config = LABELS[taxType] || {
-    title: 'Tax Module',
+    title: language === 'en' ? 'Tax Module' : 'Modyul ng Buwis',
     code: 'TAX',
-    message: 'This tax module is reserved for a future implementation pass.',
+    message: language === 'en'
+      ? 'This tax module is reserved for a future implementation pass.'
+      : 'Nakareserba ang tax module na ito para sa susunod na implementasyon.',
   };
 
   return (
@@ -111,14 +152,14 @@ const PayTaxesPlaceholder = () => {
               onClick={() => navigate('/pay-taxes')}
               className="rounded-full bg-[#0f5b83] px-6 py-3 text-sm font-bold uppercase tracking-[0.12em] text-white transition hover:bg-[#0c4d6f]"
             >
-              Back to Tax Service Selection
+              {language === 'en' ? 'Back to Tax Service Selection' : 'Bumalik sa Pagpili ng Tax Service'}
             </button>
             <button
               type="button"
               onClick={() => navigate('/pay-taxes/rpt')}
               className="rounded-full border border-slate-300 bg-white px-6 py-3 text-sm font-bold uppercase tracking-[0.12em] text-slate-700 transition hover:border-[#0f5b83] hover:text-[#0f5b83]"
             >
-              Open RPT Module
+              {language === 'en' ? 'Open RPT Module' : 'Buksan ang RPT Module'}
             </button>
           </div>
         </div>

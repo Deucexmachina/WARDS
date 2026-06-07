@@ -24,8 +24,8 @@ from utils.announcement_attachments import (
     attachment_bytes,
 )
 from services.email_service import send_payment_receipt_email
-from routes.payments import revert_linked_request_status_for_declined_payment, update_linked_request_status
-from utils.field_crypto import apply_announcement_view_security, apply_memo_security, apply_memo_view_security, apply_queue_security, decrypt_optional_value, find_announcement_view, find_memo_view, get_announcement_viewed_ids, get_decrypted_or_raw, get_memo_viewed_ids, hash_aware_any, hash_aware_match, hash_optional_value, queue_value
+from routes.payments import apply_business_tax_application_security_fields, revert_linked_request_status_for_declined_payment, update_linked_request_status
+from utils.field_crypto import apply_announcement_view_security, apply_memo_security, apply_memo_view_security, apply_payment_security, apply_queue_security, apply_receipt_request_security, decrypt_optional_value, find_announcement_view, find_memo_view, get_announcement_viewed_ids, get_decrypted_or_raw, get_memo_viewed_ids, hash_aware_any, hash_aware_match, hash_optional_value, queue_value
 from utils.security_validation import format_tin
 from utils.branch_system_settings import get_branch_setting_value
 from utils.system_settings import SYSTEM_DISABLED_MESSAGE, get_setting_value
@@ -737,6 +737,135 @@ def deduplicate_branch_payments(payments: list[Payment]) -> list[Payment]:
     )
 
 
+def resolve_branch_by_name_or_hash(db: Session, branch_name: str | None) -> Branch | None:
+    normalized = (branch_name or "").strip()
+    if not normalized:
+        return None
+
+    direct_match = db.query(Branch).filter(Branch.name == normalized).first()
+    if direct_match:
+        return direct_match
+
+    target_hash = hash_optional_value(normalized)
+    if target_hash:
+        hashed_match = db.query(Branch).filter(Branch.name_hash == target_hash).first()
+        if hashed_match:
+            return hashed_match
+
+    for branch in db.query(Branch).all():
+        candidate = get_decrypted_or_raw(branch, "name") or branch.name or ""
+        if candidate == normalized:
+            return branch
+        if hash_optional_value(candidate) == target_hash:
+            return branch
+    return None
+
+
+def repair_branch_payment_association(payment: Payment, db: Session) -> bool:
+    changed = False
+    metadata = parse_payment_metadata(payment)
+
+    current_branch = db.query(Branch).filter(Branch.id == payment.branch_id).first() if payment.branch_id else None
+    current_branch_name = (get_decrypted_or_raw(current_branch, "name") or current_branch.name) if current_branch else None
+    payment_branch_name = (get_decrypted_or_raw(payment, "branch") or payment.branch or "").strip()
+
+    if current_branch and current_branch_name:
+        if payment_branch_name != current_branch_name:
+            payment.branch = current_branch_name
+            apply_payment_security(payment)
+            changed = True
+
+    if payment.source_module == "business_tax_online_payment" and payment.related_request_id:
+        application = (
+            db.query(BusinessTaxApplication)
+            .filter(BusinessTaxApplication.tracking_number == payment.related_request_id)
+            .first()
+        )
+        if application:
+            application_branch = db.query(Branch).filter(Branch.id == application.branch_id).first() if application.branch_id else None
+            if not application_branch:
+                application_branch = resolve_branch_by_name_or_hash(
+                    db,
+                    get_decrypted_or_raw(application, "branch_name") or application.branch_name,
+                )
+
+            if application_branch:
+                application_branch_name = get_decrypted_or_raw(application_branch, "name") or application_branch.name
+                if application.branch_id != application_branch.id:
+                    application.branch_id = application_branch.id
+                    changed = True
+                if (get_decrypted_or_raw(application, "branch_name") or application.branch_name) != application_branch_name:
+                    application.branch_name = application_branch_name
+                    apply_business_tax_application_security_fields(application)
+                    changed = True
+                if payment.branch_id != application_branch.id:
+                    payment.branch_id = application_branch.id
+                    changed = True
+                if payment_branch_name != application_branch_name:
+                    payment.branch = application_branch_name
+                    apply_payment_security(payment)
+                    changed = True
+
+    if payment.source_module == "receipt_request" and payment.related_request_id:
+        receipt_request = (
+            db.query(ReceiptRequest)
+            .filter(hash_aware_match(ReceiptRequest, "request_id", payment.related_request_id))
+            .first()
+        )
+        receipt_history = (
+            db.query(ReceiptRequestHistory)
+            .filter(hash_aware_match(ReceiptRequestHistory, "request_id", payment.related_request_id))
+            .first()
+        )
+        related_branch_id = None
+        if receipt_request and receipt_request.branch_id:
+            related_branch_id = receipt_request.branch_id
+        elif receipt_history and receipt_history.branch_id:
+            related_branch_id = receipt_history.branch_id
+
+        related_branch = db.query(Branch).filter(Branch.id == related_branch_id).first() if related_branch_id else None
+        if not related_branch and payment_branch_name:
+            related_branch = resolve_branch_by_name_or_hash(db, payment_branch_name)
+
+        if related_branch:
+            related_branch_name = get_decrypted_or_raw(related_branch, "name") or related_branch.name
+            if receipt_request and receipt_request.branch_id != related_branch.id:
+                receipt_request.branch_id = related_branch.id
+                apply_receipt_request_security(receipt_request)
+                changed = True
+            if payment.branch_id != related_branch.id:
+                payment.branch_id = related_branch.id
+                changed = True
+            if payment_branch_name != related_branch_name:
+                payment.branch = related_branch_name
+                apply_payment_security(payment)
+                changed = True
+
+    if payment.source_module == "rpt_online_payment":
+        branch = current_branch
+        if not branch:
+            selected_branch_id = metadata.get("selected_branch_id")
+            if selected_branch_id is not None:
+                try:
+                    branch = db.query(Branch).filter(Branch.id == int(selected_branch_id)).first()
+                except (TypeError, ValueError):
+                    branch = None
+        if not branch:
+            branch = resolve_branch_by_name_or_hash(db, metadata.get("selected_branch_name") or payment_branch_name)
+
+        if branch:
+            branch_name = get_decrypted_or_raw(branch, "name") or branch.name
+            if payment.branch_id != branch.id:
+                payment.branch_id = branch.id
+                changed = True
+            if payment_branch_name != branch_name:
+                payment.branch = branch_name
+                apply_payment_security(payment)
+                changed = True
+
+    return changed
+
+
 def payment_belongs_to_branch(payment: Payment, branch: Branch, current_staff: BranchStaff, db: Session) -> bool:
     branch_id = current_staff.branch_id
     branch_name = get_decrypted_or_raw(branch, "name") or branch.name
@@ -837,6 +966,11 @@ def get_branch_payments(current_staff: BranchStaff, branch: Branch, db: Session)
         .order_by(Payment.created_at.asc(), Payment.id.asc())
         .all()
     )
+    repaired = False
+    for payment in candidate_payments:
+        repaired = repair_branch_payment_association(payment, db) or repaired
+    if repaired:
+        db.flush()
     matched_payments = [
         payment
         for payment in candidate_payments

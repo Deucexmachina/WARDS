@@ -443,11 +443,6 @@ const PaymentGatewayExperience = ({
                   {selectedMethod.id === 'credit_card' ? <DetailRow label={copy.cardEntry} value={copy.paymongoSecure} /> : null}
                   {referenceNumber ? <DetailRow label={copy.reference} value={referenceNumber} /> : null}
                 </div>
-                <p className="mt-4 text-xs leading-5 text-slate-500">
-                  {isTagalog
-                    ? 'Suriin ang awtomatikong kinuwentang RPT amount, pagkatapos ay kumpletuhin ang detalye ng magbabayad sa checkout sa ibaba.'
-                    : copy.afterConfirm}
-                </p>
               </div>
               <div className="mt-4 grid gap-3 sm:grid-cols-[0.7fr_1.3fr]">
                 <button
