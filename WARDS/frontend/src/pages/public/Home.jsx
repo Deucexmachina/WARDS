@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import api from '../../services/api';
 import { buildAttachmentUrl } from '../../components/AnnouncementAttachments';
 import ViewMyTicket from '../../components/ViewMyTicket';
+import { appendLanguageParam, usePublicLanguage } from '../../utils/publicLanguage';
 
 const announcementsPerPage = 5;
 
@@ -233,10 +234,33 @@ const buildPaginationItems = (totalPages, activePage) => {
 const Home = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const [language] = usePublicLanguage();
   const [announcements, setAnnouncements] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedAnnouncement, setSelectedAnnouncement] = useState(null);
   const [showTicketModal, setShowTicketModal] = useState(false);
+
+  const heroText = language === 'tl'
+    ? {
+        title: 'Maligayang Pagdating sa Online Tax Services',
+        subtitle: 'Magbayad ng iyong buwis online at humingi ng opisyal na resibo sa pamamagitan ng aming ligtas at maaasahang government portal.',
+        getQueueNumber: 'Kumuha ng Queue Number',
+        viewMyTicket: 'Tingnan ang Aking Ticket',
+        payTaxesOnline: 'Magbayad ng Buwis Online',
+        requestReceipt: 'Humiling ng Resibo',
+        latestAnnouncements: 'Mga Pinakabagong Anunsyo',
+        latestAnnouncementsSubtitle: "Manatiling updated sa mahahalagang anunsyo at abiso mula sa City Treasurer's Office.",
+      }
+    : {
+        title: 'Welcome to Online Tax Services',
+        subtitle: 'Pay your taxes online and request official receipts through our secure government portal.',
+        getQueueNumber: 'Get Queue Number',
+        viewMyTicket: 'View My Ticket',
+        payTaxesOnline: 'Pay Taxes Online',
+        requestReceipt: 'Request Receipt',
+        latestAnnouncements: 'Latest Announcements',
+        latestAnnouncementsSubtitle: "Stay updated with important notices from the City Treasurer's Office.",
+      };
 
   useEffect(() => {
     fetchAnnouncements();
@@ -310,7 +334,7 @@ const Home = () => {
   const closeTicketModal = () => {
     setShowTicketModal(false);
     if (searchParams.get('modal') === 'ticket') {
-      navigate('/', { replace: true });
+      navigate(appendLanguageParam('/', language), { replace: true });
     }
   };
 
@@ -319,10 +343,10 @@ const Home = () => {
       <section className="bg-gradient-to-br from-primary to-secondary py-16">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">
-            Welcome to Online Tax Services
+            {heroText.title}
           </h1>
           <p className="text-blue-200 text-lg md:text-xl mb-8 max-w-3xl mx-auto">
-            Pay your taxes online and request official receipts through our secure government portal.
+            {heroText.subtitle}
           </p>
           <div className="flex flex-wrap justify-center gap-4">
             <Link
@@ -332,7 +356,7 @@ const Home = () => {
               <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path>
               </svg>
-              Get Queue Number
+              {heroText.getQueueNumber}
             </Link>
             <button
               onClick={() => setShowTicketModal(true)}
@@ -341,7 +365,7 @@ const Home = () => {
               <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z"></path>
               </svg>
-              View My Ticket
+              {heroText.viewMyTicket}
             </button>
             <Link
               to="/pay-taxes"
@@ -350,7 +374,7 @@ const Home = () => {
               <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path>
               </svg>
-              Pay Taxes Online
+              {heroText.payTaxesOnline}
             </Link>
             <Link
               to="/request-receipt"
@@ -359,7 +383,7 @@ const Home = () => {
               <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
               </svg>
-              Request Receipt
+              {heroText.requestReceipt}
             </Link>
           </div>
         </div>
@@ -368,8 +392,8 @@ const Home = () => {
       <section className="py-16 bg-lightbg">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-10">
-            <h2 className="text-3xl font-bold text-primary mb-3">Latest Announcements</h2>
-            <p className="text-gray-600">Stay updated with important notices from the City Treasurer's Office</p>
+            <h2 className="text-3xl font-bold text-primary mb-3">{heroText.latestAnnouncements}</h2>
+            <p className="text-gray-600">{heroText.latestAnnouncementsSubtitle}</p>
           </div>
 
           {announcements.length === 0 ? (

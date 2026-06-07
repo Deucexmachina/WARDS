@@ -5,7 +5,7 @@ import ActionConfirmationModal from './ActionConfirmationModal';
 import api from '../services/api';
 import { clearSession } from '../utils/auth';
 import { clearStoredPublicUser, getStoredPublicUser, PUBLIC_USER_STORAGE_EVENT } from '../utils/publicSession';
-import { usePublicLanguage } from '../utils/publicLanguage';
+import { appendLanguageParam, usePublicLanguage } from '../utils/publicLanguage';
 
 const hasPublicSession = () =>
   Boolean(
@@ -83,6 +83,13 @@ const Navbar = () => {
     setMenuOpen(false);
   };
 
+  const handleLanguageToggle = () => {
+    const nextLanguage = language === 'en' ? 'tl' : 'en';
+    setLanguage(nextLanguage);
+    const nextPath = appendLanguageParam(`${location.pathname}${location.search}${location.hash}`, nextLanguage);
+    navigate(nextPath, { replace: true });
+  };
+
   const navigationLinks = [
     { to: '/', label: 'Home' },
     { to: '/pay-taxes', label: 'Pay Taxes' },
@@ -104,10 +111,10 @@ const Navbar = () => {
           
           <div className="flex items-center space-x-4">
             <button
-              onClick={() => setLanguage((current) => (current === 'en' ? 'tl' : 'en'))}
+              onClick={handleLanguageToggle}
               className="bg-accent hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition duration-300 text-sm font-medium"
             >
-              {language === 'en' ? 'English' : 'Tagalog'}
+              {language === 'en' ? 'Tagalog' : 'English'}
             </button>
             {isTaxpayerLoggedIn ? (
               <div className="flex items-center space-x-3">

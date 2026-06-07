@@ -2,11 +2,27 @@ import { useState, useEffect } from 'react';
 import api from '../services/api';
 import { formatUtc8DateTime } from '../utils/dateTime';
 import { printQueueTicket } from '../utils/queueTicketPrint';
+import { usePublicLanguage } from '../utils/publicLanguage';
 
 const ViewMyTicket = ({ onClose }) => {
+  const [language] = usePublicLanguage();
   const [ticket, setTicket] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  const modalText = language === 'tl'
+    ? {
+        title: 'Aking Queue Ticket',
+        emptyTitle: 'Wala Kang Aktibong Queue Ticket',
+        emptyMessage: 'Wala kang aktibong queue ticket sa kasalukuyan.',
+        close: 'Isara',
+      }
+    : {
+        title: 'My Queue Ticket',
+        emptyTitle: 'No Active Queue Ticket',
+        emptyMessage: "You don't have any active queue ticket at the moment.",
+        close: 'Close',
+      };
 
   useEffect(() => {
     fetchTicket();
@@ -99,11 +115,11 @@ const ViewMyTicket = ({ onClose }) => {
         <div className="w-full max-w-2xl rounded-2xl bg-white shadow-2xl">
           <div className="border-b border-slate-200 px-6 py-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-xl font-bold text-primary">My Queue Ticket</h3>
+              <h3 className="text-xl font-bold text-primary">{modalText.title}</h3>
               <button
                 onClick={onClose}
                 className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition"
-                aria-label="Close"
+                aria-label={modalText.close}
               >
                 <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
@@ -120,7 +136,7 @@ const ViewMyTicket = ({ onClose }) => {
               onClick={onClose}
               className="mt-6 rounded-lg bg-primary px-6 py-2.5 text-sm font-semibold text-white hover:bg-secondary transition"
             >
-              Close
+              {modalText.close}
             </button>
           </div>
         </div>
@@ -134,11 +150,11 @@ const ViewMyTicket = ({ onClose }) => {
         <div className="w-full max-w-2xl rounded-2xl bg-white shadow-2xl">
           <div className="border-b border-slate-200 px-6 py-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-xl font-bold text-primary">My Queue Ticket</h3>
+              <h3 className="text-xl font-bold text-primary">{modalText.title}</h3>
               <button
                 onClick={onClose}
                 className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition"
-                aria-label="Close"
+                aria-label={modalText.close}
               >
                 <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
@@ -150,15 +166,15 @@ const ViewMyTicket = ({ onClose }) => {
             <svg className="mx-auto h-16 w-16 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
             </svg>
-            <h4 className="mt-4 text-lg font-semibold text-slate-700">No Active Queue Ticket</h4>
+            <h4 className="mt-4 text-lg font-semibold text-slate-700">{modalText.emptyTitle}</h4>
             <p className="mt-2 text-sm text-slate-500">
-              You don't have any active queue ticket at the moment.
+              {modalText.emptyMessage}
             </p>
             <button
               onClick={onClose}
               className="mt-6 rounded-lg bg-primary px-6 py-2.5 text-sm font-semibold text-white hover:bg-secondary transition"
             >
-              Close
+              {modalText.close}
             </button>
           </div>
         </div>
@@ -172,11 +188,11 @@ const ViewMyTicket = ({ onClose }) => {
         {/* Header */}
         <div className="border-b border-slate-200 bg-white px-6 py-4 print:hidden sticky top-0 z-10">
           <div className="flex items-center justify-between">
-            <h3 className="text-xl font-bold text-primary">My Queue Ticket</h3>
+            <h3 className="text-xl font-bold text-primary">{modalText.title}</h3>
             <button
               onClick={onClose}
               className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition"
-              aria-label="Close"
+              aria-label={modalText.close}
             >
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
@@ -278,7 +294,7 @@ const ViewMyTicket = ({ onClose }) => {
               onClick={onClose}
               className="rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
             >
-              Close
+              {modalText.close}
             </button>
             <button
               onClick={handlePrint}
