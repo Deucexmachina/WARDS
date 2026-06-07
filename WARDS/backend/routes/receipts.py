@@ -68,6 +68,8 @@ RECEIPT_REQUEST_REASON_OPTIONS = {
     "Government compliance",
     "Other",
 }
+OCR_EXTRACTION_FAILED_MESSAGE = "Unable to extract all required receipt information. Please verify the uploaded receipt and try again."
+UNSUPPORTED_RECEIPT_FORMAT_MESSAGE = "The uploaded receipt format is not recognized by the OCR engine."
 
 
 def unique_receipt_request_id() -> str:
@@ -721,17 +723,125 @@ def validate_receipt_document_analysis(
         return
     raise HTTPException(
         status_code=400,
-        detail=(
-            "The uploaded file does not appear to be a valid receipt document. "
-            "Please upload a legitimate receipt image with readable receipt details."
-        ),
+        detail=UNSUPPORTED_RECEIPT_FORMAT_MESSAGE,
     )
+
+
+def get_missing_required_receipt_fields(
+    *,
+    ref_number: str | None,
+    taxpayer_name: str | None,
+    amount: float | None,
+) -> list[str]:
+    missing_fields = []
+    if not (ref_number or "").strip():
+        missing_fields.append("reference")
+    if not (taxpayer_name or "").strip():
+        missing_fields.append("taxpayer_name")
+    if amount in (None, ""):
+        missing_fields.append("amount")
+    return missing_fields
+
+
+def validate_required_receipt_fields(
+    *,
+    ref_number: str | None,
+    taxpayer_name: str | None,
+    amount: float | None,
+):
+    missing_fields = get_missing_required_receipt_fields(
+        ref_number=ref_number,
+        taxpayer_name=taxpayer_name,
+        amount=amount,
+    )
+    if missing_fields:
+        raise HTTPException(status_code=400, detail=OCR_EXTRACTION_FAILED_MESSAGE)
 
 
 def compare_taxpayer_names(left: str | None, right: str | None) -> bool:
     if not left or not right:
         return False
     return normalize_receipt_filename_for_compare(left) == normalize_receipt_filename_for_compare(right)
+
+
+def normalize_receipt_identifier_for_compare(value: str | None) -> str:
+    return re.sub(r"[^A-Z0-9]+", "", (value or "").upper())
+
+
+def normalize_receipt_text_for_compare(value: str | None) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^A-Z0-9]+", " ", (value or "").upper())).strip()
+
+
+def normalize_receipt_date_for_compare(value: str | None) -> str:
+    normalized = (value or "").strip()
+    if not normalized:
+        return ""
+
+    for pattern in (
+        "%m/%d/%Y",
+        "%m/%d/%y",
+        "%m-%d-%Y",
+        "%m-%d-%y",
+        "%Y/%m/%d",
+        "%Y-%m-%d",
+        "%B %d, %Y",
+        "%b %d, %Y",
+        "%b. %d, %Y",
+    ):
+        try:
+            return datetime.strptime(normalized, pattern).strftime("%m/%d/%Y")
+        except ValueError:
+            continue
+
+    return normalized
+
+
+def receipt_amount_matches(left: float | None, right: float | None) -> bool:
+    if left is None or right is None:
+        return False
+    return abs(float(left) - float(right)) < 0.01
+
+
+def duplicate_match_details(
+    record: ReceiptRecord,
+    *,
+    receipt_number: str | None = None,
+    ref_number: str | None = None,
+    txn_id: str | None = None,
+    taxpayer_name: str | None = None,
+    transaction_date: str | None = None,
+    amount: float | None = None,
+) -> dict[str, bool]:
+    record_receipt_number = normalize_receipt_identifier_for_compare(receipt_record_value(record, "receipt_number"))
+    record_ref_number = normalize_receipt_identifier_for_compare(receipt_record_value(record, "ref_number"))
+    record_txn_id = normalize_receipt_identifier_for_compare(receipt_record_value(record, "txn_id"))
+    record_taxpayer_name = receipt_record_value(record, "taxpayer_name")
+    record_transaction_date = normalize_receipt_date_for_compare(receipt_record_value(record, "transaction_date"))
+    record_amount = record.amount
+
+    normalized_receipt_number = normalize_receipt_identifier_for_compare(receipt_number)
+    normalized_ref_number = normalize_receipt_identifier_for_compare(ref_number)
+    normalized_txn_id = normalize_receipt_identifier_for_compare(txn_id)
+    normalized_transaction_date = normalize_receipt_date_for_compare(transaction_date)
+
+    return {
+        "receipt_number": bool(normalized_receipt_number and normalized_receipt_number == record_receipt_number),
+        "ref_number": bool(normalized_ref_number and normalized_ref_number == record_ref_number),
+        "txn_id": bool(normalized_txn_id and normalized_txn_id == record_txn_id),
+        "taxpayer_name": compare_taxpayer_names(taxpayer_name, record_taxpayer_name),
+        "transaction_date": bool(normalized_transaction_date and normalized_transaction_date == record_transaction_date),
+        "amount": receipt_amount_matches(amount, record_amount),
+    }
+
+
+def duplicate_match_is_critical(match_details: dict[str, bool]) -> bool:
+    identifier_matches = sum(1 for key in ("receipt_number", "ref_number", "txn_id") if match_details.get(key))
+    supporting_matches = sum(1 for key in ("taxpayer_name", "transaction_date", "amount") if match_details.get(key))
+    return (
+        identifier_matches >= 2
+        or (identifier_matches >= 1 and supporting_matches >= 1)
+        or supporting_matches >= 3
+    )
 
 
 def ahash_distance(hash_a: str | None, hash_b: str | None) -> int:
@@ -758,23 +868,47 @@ def find_duplicate_receipt_record(
     db: Session,
     image_sha256: str,
     image_ahash: str,
+    *,
+    branch_id: int | None = None,
+    tax_type: str | None = None,
+    receipt_number: str | None = None,
+    ref_number: str | None = None,
+    txn_id: str | None = None,
+    taxpayer_name: str | None = None,
+    transaction_date: str | None = None,
+    amount: float | None = None,
 ) -> tuple[ReceiptRecord | None, str | None]:
-    exact_match = (
-        db.query(ReceiptRecord)
-        .filter(ReceiptRecord.source_image_sha256 == image_sha256)
-        .order_by(ReceiptRecord.created_at.desc())
-        .first()
-    )
+    exact_match_query = db.query(ReceiptRecord).filter(ReceiptRecord.source_image_sha256 == image_sha256)
+    if branch_id:
+        exact_match_query = exact_match_query.filter(ReceiptRecord.branch_id == branch_id)
+    if tax_type:
+        exact_match_query = exact_match_query.filter(hash_aware_match(ReceiptRecord, "tax_type", tax_type))
+
+    exact_match = exact_match_query.order_by(ReceiptRecord.created_at.desc()).first()
     if exact_match:
         return exact_match, "exact"
 
-    similar_records = (
-        db.query(ReceiptRecord)
-        .filter(ReceiptRecord.source_image_ahash.isnot(None))
-        .all()
-    )
+    similar_records_query = db.query(ReceiptRecord).filter(ReceiptRecord.source_image_ahash.isnot(None))
+    if branch_id:
+        similar_records_query = similar_records_query.filter(ReceiptRecord.branch_id == branch_id)
+    if tax_type:
+        similar_records_query = similar_records_query.filter(hash_aware_match(ReceiptRecord, "tax_type", tax_type))
+
+    similar_records = similar_records_query.all()
     for record in similar_records:
-        if ahash_distance(record.source_image_ahash, image_ahash) <= 3:
+        if ahash_distance(record.source_image_ahash, image_ahash) > 3:
+            continue
+
+        match_details = duplicate_match_details(
+            record,
+            receipt_number=receipt_number,
+            ref_number=ref_number,
+            txn_id=txn_id,
+            taxpayer_name=taxpayer_name,
+            transaction_date=transaction_date,
+            amount=amount,
+        )
+        if duplicate_match_is_critical(match_details):
             return record, "similar"
 
     return None, None
@@ -823,16 +957,29 @@ def save_receipt_record_payload(
         db,
         payload.source_image_sha256 or "",
         payload.source_image_ahash or "",
+        branch_id=branch_id,
+        tax_type=normalized_tax_type,
+        receipt_number=payload.receipt_number,
+        ref_number=payload.ref_number,
+        txn_id=payload.txn_id,
+        taxpayer_name=payload.taxpayer_name,
+        transaction_date=payload.transaction_date,
+        amount=payload.amount,
     )
     if duplicate_record:
         if duplicate_type == "exact":
             raise HTTPException(status_code=409, detail=f"This receipt image already exists as record #{duplicate_record.id}.")
         raise HTTPException(
             status_code=409,
-            detail=f"This receipt image is too similar to existing record #{duplicate_record.id}. Please upload a different image.",
+            detail=f"This receipt appears to match existing record #{duplicate_record.id} based on critical receipt details. Please review the uploaded receipt.",
         )
 
     normalized_ref_number = normalize_reference_number(payload.ref_number)
+    validate_required_receipt_fields(
+        ref_number=normalized_ref_number,
+        taxpayer_name=payload.taxpayer_name,
+        amount=payload.amount,
+    )
     if normalized_ref_number:
         existing_reference_record = (
             db.query(ReceiptRecord)
@@ -933,7 +1080,13 @@ def build_receipt_ocr_result(
     normalized_category = normalize_receipt_category(category)
     image_sha256 = compute_image_sha256(image_data)
     image_ahash = compute_image_ahash(image_data)
-    duplicate_record, duplicate_type = find_duplicate_receipt_record(db, image_sha256, image_ahash)
+    duplicate_record, duplicate_type = find_duplicate_receipt_record(
+        db,
+        image_sha256,
+        image_ahash,
+        branch_id=branch_id,
+        tax_type=normalized_category,
+    )
 
     if duplicate_type == "exact" and not allow_exact_duplicate_match:
         raise HTTPException(
@@ -958,13 +1111,10 @@ def build_receipt_ocr_result(
 
     raw_detected_category = (result.get("detected_category") or normalized_category).strip().upper()
     if raw_detected_category == "UNKNOWN":
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "The uploaded file does not appear to be a valid receipt document. "
-                "Please upload a legitimate receipt image with readable receipt details."
-            ),
-        )
+        result["detected_category"] = normalized_category
+        result["category_match"] = True
+        result["category_warning"] = ""
+        raw_detected_category = normalized_category
     detected_category = normalize_receipt_category(raw_detected_category)
     category_match = result.get("category_match", True)
     if detected_category != normalized_category or category_match is False:
@@ -976,13 +1126,27 @@ def build_receipt_ocr_result(
             ),
         )
 
+    duplicate_record, duplicate_type = find_duplicate_receipt_record(
+        db,
+        image_sha256,
+        image_ahash,
+        branch_id=branch_id,
+        tax_type=normalized_category,
+        receipt_number=result.get("receipt_number"),
+        ref_number=result.get("ref_number"),
+        txn_id=result.get("txn_id"),
+        taxpayer_name=result.get("taxpayer_name"),
+        transaction_date=result.get("transaction_date"),
+        amount=result.get("amount"),
+    )
+
     duplicate_warning = ""
     save_blocked = False
     if duplicate_type == "similar" and duplicate_record:
         save_blocked = True
         duplicate_warning = (
-            f"This receipt image looks very similar to existing record #{duplicate_record.id}. "
-            "Please upload a different receipt image."
+            f"This receipt appears to match existing record #{duplicate_record.id} based on critical receipt details. "
+            "Please review the extracted information before saving."
         )
 
     validate_receipt_document_analysis(
@@ -992,6 +1156,14 @@ def build_receipt_ocr_result(
         transaction_date=result.get("transaction_date"),
         amount=result.get("amount"),
     )
+    missing_required_fields = get_missing_required_receipt_fields(
+        ref_number=result.get("ref_number"),
+        taxpayer_name=result.get("taxpayer_name"),
+        amount=result.get("amount"),
+    )
+    extraction_warning = OCR_EXTRACTION_FAILED_MESSAGE if missing_required_fields else ""
+    if missing_required_fields:
+        save_blocked = True
 
     filename_validation = build_receipt_filename_validation(
         filename=file.filename or os.path.basename(file_path),
@@ -1012,6 +1184,10 @@ def build_receipt_ocr_result(
     result["duplicate_record"] = serialize_duplicate_record(duplicate_record)
     result["duplicate_warning"] = duplicate_warning
     result["save_blocked"] = save_blocked
+    result["required_fields_complete"] = not missing_required_fields
+    result["missing_fields"] = missing_required_fields
+    result["extraction_warning"] = extraction_warning
+    result["save_blocked_message"] = extraction_warning or duplicate_warning
     result["source_image_original_filename"] = os.path.basename(file.filename or os.path.basename(file_path))
     result["source_image_suggested_filename"] = filename_validation["suggested_filename"]
     result["filename_matches_taxpayer"] = filename_validation["filename_matches_taxpayer"]

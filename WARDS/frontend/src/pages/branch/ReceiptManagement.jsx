@@ -306,6 +306,7 @@ const ReceiptManagement = () => {
     ocrDraft?.save_blocked || categoryMismatch || ocrDraft?.duplicate_detected || filenameMismatchBlocked
   );
   const duplicateWarning = ocrDraft?.duplicate_warning || '';
+  const extractionWarning = ocrDraft?.extraction_warning || '';
   const activeProcessingModal = useMemo(() => {
     if (processingFeedback) {
       return processingFeedback;
@@ -357,6 +358,12 @@ const ReceiptManagement = () => {
       return;
     }
 
+    if (extractionWarning) {
+      setError(extractionWarning);
+      setSuccessMessage('');
+      return;
+    }
+
     if (filenameMismatchBlocked) {
       setError(
         ocrDraft?.file_name_validation_message ||
@@ -364,7 +371,7 @@ const ReceiptManagement = () => {
       );
       setSuccessMessage('');
     }
-  }, [ocrDraft, categoryMismatch, effectiveDetectedCategory, effectiveSelectedCategory, duplicateWarning, filenameMismatchBlocked]);
+  }, [ocrDraft, categoryMismatch, effectiveDetectedCategory, effectiveSelectedCategory, duplicateWarning, extractionWarning, filenameMismatchBlocked]);
 
   const normalizedRecords = useMemo(
     () =>
@@ -1496,6 +1503,12 @@ const ReceiptManagement = () => {
                   ) : null}
                 </div>
               )}
+              {extractionWarning && (
+                <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
+                  <p className="font-semibold">OCR Extraction Failed</p>
+                  <p>{extractionWarning}</p>
+                </div>
+              )}
               {filenameMismatchBlocked && (
                 <div className="rounded-lg border border-blue-300 bg-blue-50 px-4 py-3 text-sm text-blue-800">
                   <p className="font-semibold">File name needs correction</p>
@@ -1509,7 +1522,7 @@ const ReceiptManagement = () => {
                       ...current,
                       auto_rename_source_image: true,
                       filename_matches_taxpayer: true,
-                      save_blocked: Boolean(current?.duplicate_detected),
+                      save_blocked: Boolean(current?.duplicate_detected || current?.extraction_warning),
                     }))}
                     className="mt-3 rounded-lg bg-blue-600 px-3 py-2 font-semibold text-white transition hover:bg-blue-700"
                   >

@@ -1538,6 +1538,12 @@ const QueueManagement = () => {
 
             {completionMode === 'review' && receiptDraft ? (
               <div className="mt-6 space-y-5">
+                {receiptDraft.extraction_warning ? (
+                  <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+                    <p className="font-semibold">OCR Extraction Failed</p>
+                    <p className="mt-1">{receiptDraft.extraction_warning}</p>
+                  </div>
+                ) : null}
                 {receiptDraft.duplicate_warning || receiptDraft.category_warning ? (
                   <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                     {receiptDraft.duplicate_warning || receiptDraft.category_warning}
@@ -1556,7 +1562,7 @@ const QueueManagement = () => {
                         ...current,
                         auto_rename_source_image: true,
                         filename_matches_taxpayer: true,
-                        save_blocked: Boolean(current?.duplicate_detected),
+                        save_blocked: Boolean(current?.duplicate_detected || current?.extraction_warning),
                       }))}
                       className="mt-3 rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white transition hover:bg-blue-700"
                     >

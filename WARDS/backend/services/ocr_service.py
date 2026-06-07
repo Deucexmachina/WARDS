@@ -4,6 +4,7 @@ import re
 import threading
 import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
 
@@ -289,21 +290,28 @@ class OCRService:
     def _parse_receipt_text(self, text: str, filename: str, category: str) -> Dict[str, Any]:
         fallback_source = f"{filename}\n{text}".strip()
 
+        receipt_number = self._clean_reference_value(self._extract_receipt_number(fallback_source))
+        txn_id = self._clean_reference_value(self._extract_machine_validation_number(fallback_source))
         ref_number = self._clean_reference_value(self._extract_reference_value(fallback_source, category))
         taxpayer_name = self._extract_taxpayer_name(fallback_source, category)
         transaction_date = self._normalize_transaction_date(self._extract_transaction_date(fallback_source))
         amount = self._extract_amount(fallback_source, category)
+        if not ref_number:
+            ref_number = receipt_number or txn_id
+        if not txn_id:
+            txn_id = receipt_number or ref_number
 
         confidence = 0.45 if text else 0.0
         populated_fields = sum(
-            1 for value in [ref_number, taxpayer_name, transaction_date, amount] if value not in ("", None)
+            1 for value in [receipt_number, txn_id, ref_number, taxpayer_name, transaction_date, amount] if value not in ("", None)
         )
         if text:
             confidence = min(0.97, 0.55 + (populated_fields * 0.08))
 
         return {
+            "receipt_number": receipt_number or "",
             "ref_number": ref_number or "",
-            "txn_id": ref_number or "",
+            "txn_id": txn_id or "",
             "taxpayer_name": taxpayer_name,
             "transaction_date": transaction_date,
             "amount": amount,
@@ -364,6 +372,14 @@ class OCRService:
             scores["BUSINESS"] += 2
             evidence["BUSINESS"].append("Permit number format")
 
+        if re.search(r"\b\d{2}-\d{6}\s+[A-Z0-9 .,&'-]{4,}\b", normalized):
+            scores["BUSINESS"] += 3
+            evidence["BUSINESS"].append("Permit number with business name")
+
+        if re.search(r"\b(?:INC\.?|CORP\.?|CORPORATION|COMPANY|CO\.|LLC|LTD\.?)\b", normalized):
+            scores["BUSINESS"] += 2
+            evidence["BUSINESS"].append("Business entity suffix")
+
         if "MISC" in normalized and "BUSINESS" not in normalized and "PROPERTY" not in normalized:
             scores["MISC"] += 1
             evidence["MISC"].append("MISC keyword")
@@ -393,6 +409,8 @@ class OCRService:
         if category == "RPT":
             return self._match(
                 [
+                    r"\b([A-Z]-\d{3}-\d{5,})\b",
+                    r"(?:or\s*(?:no\.?|number)?)[:#\s-]*([A-Z0-9-]{6,})",
                     r"(?:bil(?:l)?\s*number)[:#\s-]*([A-Z0-9-]{8,})",
                     r"\b(R-\d{4}-\d{2,4}-\d{2,8}-[A-Z0-9]+)\b",
                     r"\b(R-\d{4}-\d{2,4}-\d{2,8})\b",
@@ -406,20 +424,44 @@ class OCRService:
                 [
                     r"\b(\d{2}-\d{6})\b",
                     r"(?:mayor'?s?\s*permit(?:\s*no\.?)?)[:#\s-]*([A-Z0-9-]{6,})",
+                    r"\b([A-Z]-\d{3}-\d{5,})\b",
                 ],
                 text,
             )
 
         return self._match(
             [
+                r"\b(\d{2}-\d{6})\b",
                 r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\s+([0-9]{5,}\s*[A-Z]?)\b",
-                r"(?:official\s*receipt\s*)?(?:no\.?|number|n[o0]?)\s*[:#\s-]*([0-9]{5,}\s*[A-Z]?)\b",
+                r"(?:official\s*receipt\s*)?(?:no\.?|number|n[o0]\.?)\s*[:#\s-]*([0-9]{5,}\s*[A-Z]?)\b",
+                r"(?:or\s*(?:no\.?|number)?)[:#\s-]*([A-Z0-9-]{6,})",
                 r"(?:machine\s*validation\s*no\.?)[:#\s-]*([A-Z0-9-]{10,})",
                 r"(?:reference\s*(?:no\.?|number)?)[:#\s-]*([A-Z0-9-]{6,})",
                 r"\b([A-Z]-\d{3}-\d{5})\b",
             ],
             text,
         )
+
+    def _extract_receipt_number(self, text: str) -> str:
+        return self._match(
+            [
+                r"(?:or\s*(?:no\.?|number)?)[:#\s-]*([A-Z0-9-]{6,})",
+                r"(?:official\s*receipt\s*)?(?:no\.?|number|n[o0]\.?)\s*[:#\s-]*([A-Z0-9-]{6,})",
+                r"\b([A-Z]-\d{3}-\d{5,})\b",
+            ],
+            text,
+        )
+
+    def _extract_machine_validation_number(self, text: str) -> str:
+        candidate = self._match(
+            [
+                r"(?:machine\s*validation\s*no\.?)[:#\s-]*([A-Z0-9-]{4,}(?:\s+[A-Z0-9-]{1,})?)",
+            ],
+            text,
+        )
+        if any(fragment in candidate.upper() for fragment in ("MACHINE", "BILL", "NATURE", "TOTAL", "AMOUNT")):
+            return ""
+        return candidate
 
     def _extract_taxpayer_name(self, text: str, category: str) -> str:
         lines = [line.strip() for line in text.splitlines() if line.strip()]
@@ -433,6 +475,14 @@ class OCRService:
             "DATE",
         )
         name_labels = r"payor|payor'?s?|payer|pavor|payr|taxpayer|received\s*from|name"
+        structural_markers = (
+            "BILL NUMBER",
+            "MACHINE VALIDATION",
+            "NATURE OF COLLECTION",
+            "FUND AND ACCOUNT CODE",
+            "AMOUNT",
+            "TOTAL",
+        )
 
         for index, line in enumerate(lines):
             if re.search(rf"\b({name_labels})\b", line, re.IGNORECASE):
@@ -458,6 +508,22 @@ class OCRService:
                 if candidate:
                     return candidate.title()
 
+        for index, line in enumerate(lines):
+            upper_line = line.upper()
+            if "BILL NUMBER" in upper_line or "MACHINE VALIDATION" in upper_line:
+                for next_line in lines[index + 1:index + 5]:
+                    candidate = self._extract_taxpayer_name_candidate(next_line, category)
+                    if candidate:
+                        return candidate.title()
+
+        for line in lines:
+            candidate = self._extract_taxpayer_name_candidate(line, category)
+            if candidate:
+                upper_candidate = candidate.upper()
+                if any(marker in upper_candidate for marker in structural_markers):
+                    continue
+                return candidate.title()
+
         fallback = self._match(
             [
                 r"\b([A-Z][A-Z\s,.'-]{5,})\b",
@@ -470,6 +536,8 @@ class OCRService:
     def _extract_transaction_date(self, text: str) -> str:
         return self._match(
             [
+                r"\b((?:JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\s+\d{1,2},\s+\d{4})\b",
+                r"\b((?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|SEPT|OCT|NOV|DEC)\.?\s+\d{1,2},\s+\d{4})\b",
                 r"\b(\d{1,2}/\d{1,2}/\d{4})\b",
                 r"\b(\d{1,2}/\d{1,2}/\d{2})\b",
                 r"\b(\d{1,2}-\d{1,2}-\d{4})\b",
@@ -548,6 +616,30 @@ class OCRService:
             if value is not None and 0 < value < 1000000
         ]
 
+    def _extract_taxpayer_name_candidate(self, line: str, category: str) -> str:
+        candidate = (line or "").strip()
+        if not candidate:
+            return ""
+        if any(fragment in candidate.upper() for fragment in ("BILL NUMBER", "MACHINE VALIDATION", "NATURE OF COLLECTION", "TOTAL", "AMOUNT")):
+            return ""
+
+        if category in {"BUSINESS", "MISC"}:
+            permit_prefixed = re.match(r"^\d{2}-\d{6}\s+(.+)$", candidate)
+            if permit_prefixed:
+                candidate = permit_prefixed.group(1).strip()
+
+        if re.fullmatch(r"[A-Z][A-Z\s,.'-]{3,}", candidate):
+            cleaned = self._clean_name_candidate(candidate)
+            if cleaned:
+                return cleaned
+
+        if re.fullmatch(r"[A-Z][a-z]+(?:\s+[A-Z][A-Za-z.'-]+)+", candidate):
+            cleaned = self._clean_name_candidate(candidate)
+            if cleaned:
+                return cleaned
+
+        return ""
+
     def _clean_name_candidate(self, value: str | None) -> str:
         candidate = re.sub(r"[^A-Za-zÀ-ÿ,.' -]", " ", value or "")
         candidate = re.sub(r"\s{2,}", " ", candidate).strip(" ,.-:")
@@ -599,6 +691,14 @@ class OCRService:
     def _normalize_transaction_date(self, value: str) -> str:
         if not value:
             return ""
+
+        normalized = value.strip()
+        for pattern in ("%B %d, %Y", "%b %d, %Y", "%b. %d, %Y"):
+            try:
+                parsed = datetime.strptime(normalized, pattern)
+                return parsed.strftime("%m/%d/%Y")
+            except ValueError:
+                continue
 
         separator = "/" if "/" in value else "-"
         parts = value.split(separator)
