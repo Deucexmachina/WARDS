@@ -3,6 +3,7 @@ import api from '../../services/api';
 import { getEmailValidationMessage, validateStrongPassword } from '../../utils/validation';
 import WardsPageHero from '../../components/WardsPageHero';
 import PasswordField from '../../components/PasswordField';
+import { safeNavigate } from '../../utils/urlValidator';
 
 const slugifyBranchName = (name) => {
   const slug = name
@@ -456,7 +457,8 @@ const Branches = () => {
       localStorage.setItem('branchToken', response.data.access_token);
       localStorage.setItem('branchUser', JSON.stringify(response.data.user));
       localStorage.setItem('branchAuthenticatedAt', new Date().toISOString());
-      window.location.href = response.data.user?.dashboard_url || buildBranchDashboardUrl(branch.name || 'branch');
+      const dashboardUrl = response.data.user?.dashboard_url || buildBranchDashboardUrl(branch.name || 'branch');
+      safeNavigate(dashboardUrl);
     } catch (error) {
       setPageError(error.response?.data?.detail || 'Unable to open this branch dashboard as Superadmin.');
     }

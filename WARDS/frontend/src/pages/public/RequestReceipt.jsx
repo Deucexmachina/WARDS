@@ -7,6 +7,7 @@ import PaymentGatewayExperience from '../../components/PaymentGatewayExperience'
 import { getStoredPublicUser, PUBLIC_USER_STORAGE_EVENT } from '../../utils/publicSession';
 import { getEmailValidationMessage } from '../../utils/validation';
 import { appendLanguageParam, usePublicLanguage } from '../../utils/publicLanguage';
+import { safeReplace, safeNavigate } from '../../utils/urlValidator';
 
 const DEFAULT_DISABLED_MESSAGE = 'This service is currently unavailable because it has been disabled by system administration.';
 const ACTIVE_RECEIPT_REQUEST_STORAGE_KEY_PREFIX = 'activeReceiptRequestId';
@@ -512,12 +513,12 @@ const RequestReceipt = () => {
           language
         );
         if (checkoutWindow && !checkoutWindow.closed) {
-          checkoutWindow.location.replace(paymentResponse.data.checkoutUrl);
+          safeReplace(paymentResponse.data.checkoutUrl, checkoutWindow);
           navigate(paymentStatusPath);
           return;
         }
 
-        window.location.href = paymentResponse.data.checkoutUrl;
+        safeNavigate(paymentResponse.data.checkoutUrl);
         return;
       }
 

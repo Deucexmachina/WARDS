@@ -7,6 +7,7 @@ import { paymentAPI, taxpayerAccountAPI } from '../../services/api';
 import { getStoredPublicUser } from '../../utils/publicSession';
 import { getEmailValidationMessage } from '../../utils/validation';
 import { appendLanguageParam, usePublicLanguage } from '../../utils/publicLanguage';
+import { safeReplace, safeNavigate } from '../../utils/urlValidator';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 const RECAPTCHA_SITE_KEY = '6LdOdsAsAAAAAKW-mZvEfaesLvdAwCm_SnZoiirK';
@@ -781,9 +782,9 @@ const PayTaxesRPT = () => {
 
       if (response.data.checkoutUrl) {
         if (checkoutWindow && !checkoutWindow.closed) {
-          checkoutWindow.location.replace(response.data.checkoutUrl);
+          safeReplace(response.data.checkoutUrl, checkoutWindow);
         } else {
-          window.location.href = response.data.checkoutUrl;
+          safeNavigate(response.data.checkoutUrl);
         }
         navigate(appendLanguageParam(`/payment/status?ref=${encodeURIComponent(response.data.refNumber || paymentReference.refNumber)}`, language));
         return;
