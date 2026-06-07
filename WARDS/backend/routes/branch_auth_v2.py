@@ -518,12 +518,19 @@ async def verify_branch_email(token: str, db: Session = Depends(get_db)):
     safe_dashboard_url = None
     if dashboard_url and is_safe_url(dashboard_url):
         safe_dashboard_url = escape(dashboard_url, quote=True)
+    
+    # Escape all dynamic values for defense-in-depth
+    safe_status_title = escape(status_title, quote=True)
+    safe_status_message = escape(status_message, quote=True)
+    safe_status_color = escape(status_color, quote=True)
+    safe_status_background = escape(status_background, quote=True)
+    safe_status_border = escape(status_border, quote=True)
 
     return HTMLResponse(
         f"""
         <html>
           <head>
-            <title>{status_title}</title>
+            <title>{safe_status_title}</title>
             <script>
               setTimeout(function() {{
                 window.close();
@@ -531,9 +538,9 @@ async def verify_branch_email(token: str, db: Session = Depends(get_db)):
             </script>
           </head>
           <body style="font-family:Arial,Helvetica,sans-serif;background:#f3f6fb;padding:40px;color:#1f2937;">
-            <div style="max-width:620px;margin:0 auto;background:#ffffff;border-radius:18px;padding:32px;box-shadow:0 18px 40px rgba(15,39,68,.10);border:1px solid {status_border};background:{status_background};">
-              <h1 style="margin:0 0 16px;color:{status_color};">{status_title}</h1>
-              <p style="margin:0 0 12px;line-height:1.7;">{status_message}</p>
+            <div style="max-width:620px;margin:0 auto;background:#ffffff;border-radius:18px;padding:32px;box-shadow:0 18px 40px rgba(15,39,68,.10);border:1px solid {safe_status_border};background:{safe_status_background};">
+              <h1 style="margin:0 0 16px;color:{safe_status_color};">{safe_status_title}</h1>
+              <p style="margin:0 0 12px;line-height:1.7;">{safe_status_message}</p>
               {"<p style='margin:0 0 20px;line-height:1.7;'>You can now open the branch dashboard and sign in with your branch username and password.</p>" if safe_dashboard_url else "<p style='margin:0 0 20px;line-height:1.7;'>This window will close automatically in 3 seconds.</p>"}
               {f'<p style="margin:0 0 16px;"><a href="{safe_dashboard_url}" style="display:inline-block;background:#166534;color:#ffffff;text-decoration:none;padding:14px 22px;border-radius:10px;font-weight:700;">Open Branch Dashboard</a></p>' if safe_dashboard_url else ''}
               <p style="margin:0;font-size:14px;color:#6b7280;">This window will close automatically in 3 seconds. If it stays open, you can close it manually.</p>
