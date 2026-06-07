@@ -6,6 +6,7 @@ import smtplib
 import ssl
 from datetime import datetime, timedelta
 from email.message import EmailMessage
+from html import escape as html_escape
 from json import JSONDecodeError, loads
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
@@ -13,6 +14,22 @@ from urllib.request import urlopen
 
 
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _safe_html(text: str | None) -> str:
+    """
+    Safely escape text for HTML email templates.
+    Prevents XSS by escaping HTML special characters.
+
+    Args:
+        text: The text to escape
+
+    Returns:
+        Escaped HTML-safe string, or empty string if input is None
+    """
+    if text is None:
+        return ""
+    return html_escape(str(text), quote=True)
 
 
 class TaxpayerAuthError(Exception):
@@ -152,14 +169,14 @@ def send_otp_email(recipient_email: str, otp_code: str) -> None:
                 Verification Code
               </div>
               <div style="font-size:36px;line-height:1;letter-spacing:8px;font-weight:700;color:#0f172a;">
-                {otp_code}
+                {_safe_html(otp_code)}
               </div>
             </div>
             <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 24px;">
               <tr>
                 <td style="padding:16px 18px;background-color:#f9fafb;border-radius:12px;border:1px solid #e5e7eb;">
                   <p style="margin:0;font-size:14px;line-height:1.7;color:#4b5563;">
-                    This code will expire in <strong>{expiry_minutes} minutes</strong>.
+                    This code will expire in <strong>{_safe_html(str(expiry_minutes))} minutes</strong>.
                     For your security, do not share this code with anyone.
                   </p>
                 </td>

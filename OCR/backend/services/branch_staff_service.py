@@ -8,6 +8,7 @@ import ssl
 import struct
 from datetime import datetime
 from email.message import EmailMessage
+from html import escape as html_escape
 from typing import Dict, List, Optional
 from urllib.parse import quote
 
@@ -17,6 +18,22 @@ from core.security_crypto import decrypt_optional_value, encrypt_optional_value
 from core.security_hash import hash_optional_value
 from core.security_phase2 import build_redacted_email, build_redacted_text, phase2_redaction_enabled
 from database.models import BranchStaffAccount, ServiceWindowConfig
+
+
+def _safe_html(text: str | None) -> str:
+    """
+    Safely escape text for HTML email templates.
+    Prevents XSS by escaping HTML special characters.
+
+    Args:
+        text: The text to escape
+
+    Returns:
+        Escaped HTML-safe string, or empty string if input is None
+    """
+    if text is None:
+        return ""
+    return html_escape(str(text), quote=True)
 
 
 WINDOW_CATALOG = [
@@ -220,25 +237,25 @@ def send_branch_staff_credentials_email(
       <div style="background:#ffffff;border:1px solid #dbe7f3;border-radius:18px;overflow:hidden;">
         <div style="background:#123b6d;color:#ffffff;padding:24px 28px;">
           <div style="font-size:12px;letter-spacing:1.5px;text-transform:uppercase;opacity:0.85;">WARDS Queue Staff Portal</div>
-          <h1 style="margin:10px 0 0;font-size:28px;line-height:1.2;">{window_label} account credentials</h1>
+          <h1 style="margin:10px 0 0;font-size:28px;line-height:1.2;">{_safe_html(window_label)} account credentials</h1>
         </div>
         <div style="padding:28px;">
           <p style="margin:0 0 18px;font-size:15px;line-height:1.7;">
             A queue-only branch staff account has been generated for this service window.
           </p>
           <div style="padding:18px;border:1px solid #dbe7f3;border-radius:14px;background:#f8fbff;">
-            <p style="margin:0 0 8px;"><strong>Username:</strong> {username}</p>
-            <p style="margin:0;"><strong>Temporary Password:</strong> {temporary_password}</p>
+            <p style="margin:0 0 8px;"><strong>Username:</strong> {_safe_html(username)}</p>
+            <p style="margin:0;"><strong>Temporary Password:</strong> {_safe_html(temporary_password)}</p>
           </div>
           <div style="margin-top:18px;padding:18px;border:1px solid #e5e7eb;border-radius:14px;background:#fcfcfd;">
-            <p style="margin:0 0 8px;"><strong>Microsoft Authenticator manual key:</strong> {mfa_secret}</p>
+            <p style="margin:0 0 8px;"><strong>Microsoft Authenticator manual key:</strong> {_safe_html(mfa_secret)}</p>
             <p style="margin:0;font-size:14px;line-height:1.7;">
               During first login, add this account to Microsoft Authenticator using the manual key above,
               then enter the 6-digit OTP shown in the app.
             </p>
           </div>
           <p style="margin:18px 0 0;font-size:14px;line-height:1.7;">
-            Setup link: <a href="{otpauth_uri}">{otpauth_uri}</a>
+            Setup link: <a href="{_safe_html(otpauth_uri)}">{_safe_html(otpauth_uri)}</a>
           </p>
         </div>
       </div>
