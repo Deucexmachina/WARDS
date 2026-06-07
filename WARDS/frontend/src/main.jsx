@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client'
 import axios from 'axios'
 import App from './App.jsx'
 import './index.css'
-import { sanitizeApiResponseData } from './utils/responseSanitizer'
+import { stripPlaceholderSuffixInResponse } from './utils/responseSanitizer'
 import { getFriendlyErrorMessage, getModalToneForError, shouldSuppressGlobalErrorModal } from './utils/errorMessages'
 
 const dispatchSystemErrorModal = (error) => {
@@ -28,7 +28,7 @@ axios.interceptors.response.use(
       return response
     }
 
-    response.data = sanitizeApiResponseData(response.data)
+    response.data = stripPlaceholderSuffixInResponse(response.data)
     return response
   },
   (error) => {

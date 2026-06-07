@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { sanitizeApiResponseData } from '../utils/responseSanitizer';
+import { stripPlaceholderSuffixInResponse } from '../utils/responseSanitizer';
 import { getFriendlyErrorMessage, getModalToneForError, shouldSuppressGlobalErrorModal } from '../utils/errorMessages';
 
 const API_BASE_URL = 'http://localhost:8000/api';
@@ -57,7 +57,7 @@ api.interceptors.response.use(
       return response;
     }
 
-    response.data = sanitizeApiResponseData(response.data);
+    response.data = stripPlaceholderSuffixInResponse(response.data);
     return response;
   },
   (error) => {
