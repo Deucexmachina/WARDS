@@ -823,7 +823,7 @@ const Branches = () => {
   }
 
   return (
-    <div>
+    <div className="mx-auto w-full max-w-[1600px] space-y-6">
       <WardsPageHero
         eyebrow="Main Admin Dashboard"
         title="Manage Branches"
@@ -839,34 +839,37 @@ const Branches = () => {
       />
 
       {pageError && (
-        <div className="mb-6 bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded">
+        <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded">
           <p className="font-semibold">{pageError}</p>
         </div>
       )}
 
       {successMessage && (
-        <div className="mb-6 bg-green-100 border-l-4 border-green-500 text-green-700 p-4 rounded">
+        <div className="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 rounded">
           <p className="font-semibold">{successMessage}</p>
         </div>
       )}
 
       {pendingNotice && (
-        <div className="mb-6 bg-yellow-100 border-l-4 border-yellow-500 text-yellow-800 p-4 rounded">
+        <div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-800 p-4 rounded">
           <p className="font-semibold">{pendingNotice}</p>
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid w-full grid-cols-1 gap-6 [grid-template-columns:repeat(auto-fit,minmax(19rem,1fr))]">
         {branches.length === 0 ? (
           <div className="col-span-full text-center py-12">
             <p className="text-gray-500 text-lg">No branches found. Click "+ Add New Branch" to create one.</p>
           </div>
         ) : (
           branches.map((branch) => (
-          <div key={branch.id} className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition duration-300">
-            <div className="flex justify-between items-start mb-4">
+          <div
+            key={branch.id}
+            className="flex h-full flex-col rounded-xl border border-slate-200 bg-white p-6 shadow-lg transition duration-300 hover:shadow-xl"
+          >
+            <div className="mb-4 flex items-start justify-between gap-4">
               <h3 className="text-xl font-bold text-primary">{branch.name}</h3>
-              <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+              <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${
                 branch.verification_status === 'Pending'
                   ? 'bg-yellow-100 text-yellow-800'
                   : branch.verification_status === 'Active'
@@ -876,40 +879,40 @@ const Branches = () => {
                 {branch.verification_status || branch.status}
               </span>
             </div>
-            <div className="space-y-2 mb-4">
+            <div className="flex-1 space-y-2">
               <div className="flex items-start">
-                <svg className="w-5 h-5 text-gray-500 mr-2 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="mr-2 mt-0.5 h-5 w-5 shrink-0 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
                 </svg>
-                <span className="text-gray-600 text-sm">{branch.location}</span>
+                <span className="text-sm text-gray-600">{branch.location}</span>
               </div>
               <div className="flex items-center">
-                <svg className="w-5 h-5 text-gray-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="mr-2 h-5 w-5 shrink-0 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"></path>
                 </svg>
-                <span className="text-gray-600 text-sm">{branch.contact}</span>
+                <span className="text-sm text-gray-600">{branch.contact}</span>
               </div>
               <div className="flex items-center">
-                <svg className="w-5 h-5 text-gray-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="mr-2 h-5 w-5 shrink-0 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"></path>
                 </svg>
-                <span className="text-gray-600 text-sm">{branch.counters} Service Counters</span>
+                <span className="text-sm text-gray-600">{branch.counters} Service Counters</span>
               </div>
               {branch.dashboard_url && (
                 <div className="flex items-start">
-                  <svg className="w-5 h-5 text-gray-500 mr-2 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="mr-2 mt-0.5 h-5 w-5 shrink-0 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 010 5.656l-4 4a4 4 0 01-5.656-5.656l1.5-1.5M10.172 13.828a4 4 0 010-5.656l4-4a4 4 0 115.656 5.656l-1.5 1.5"></path>
                   </svg>
-                  <span className="text-gray-600 text-sm break-all">{branch.dashboard_url}</span>
+                  <span className="break-all text-sm text-gray-600">{branch.dashboard_url}</span>
                 </div>
               )}
             </div>
-            <div className="flex gap-2">
+            <div className="mt-6 grid grid-cols-2 gap-3">
               {branch.verification_status === 'Pending' && (
                 <button
                   onClick={() => handleResendVerification(branch)}
-                  className="flex-1 bg-yellow-500 hover:bg-yellow-600 text-white py-2 rounded-lg font-semibold transition duration-300"
+                  className="w-full rounded-lg bg-yellow-500 py-2 font-semibold text-white transition duration-300 hover:bg-yellow-600"
                 >
                   Resend Verification
                 </button>
@@ -917,22 +920,22 @@ const Branches = () => {
               {isSuperadmin && (
                 <button
                   onClick={() => handleManageBranch(branch)}
-                  className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-2 rounded-lg font-semibold transition duration-300"
+                  className="w-full rounded-lg bg-purple-600 py-2 font-semibold text-white transition duration-300 hover:bg-purple-700"
                 >
                   Manage
                 </button>
               )}
-              <button 
+              <button
                 onClick={() => handleEditBranch(branch)}
-                className="flex-1 bg-accent hover:bg-blue-600 text-white py-2 rounded-lg font-semibold transition duration-300"
+                className="w-full rounded-lg bg-accent py-2 font-semibold text-white transition duration-300 hover:bg-blue-600"
               >
                 Edit
               </button>
-              <button 
-                  onClick={() => handleDeleteBranch(branch.id, branch.name)}
-                  className="flex-1 bg-red-500 hover:bg-red-600 text-white py-2 rounded-lg font-semibold transition duration-300"
-                >
-                  Delete
+              <button
+                onClick={() => handleDeleteBranch(branch.id, branch.name)}
+                className="w-full rounded-lg bg-red-500 py-2 font-semibold text-white transition duration-300 hover:bg-red-600"
+              >
+                Delete
               </button>
             </div>
           </div>

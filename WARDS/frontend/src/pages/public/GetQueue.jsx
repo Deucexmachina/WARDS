@@ -791,7 +791,7 @@ const GetQueue = () => {
         {!selectedBranch && (
           <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
             <h2 className="text-2xl font-bold text-gray-800 mb-4">
-              {language === 'en' ? 'Step 1: Select Branch' : 'Hakbang 1: Pumili ng Sangay'}
+              {language === 'en' ? 'Step 1: Select Branch' : 'Hakbang 1: Pumili ng Sangay ng Opisina'}
             </h2>
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
               {branches.map((branch) => (
@@ -828,7 +828,7 @@ const GetQueue = () => {
               <div className="flex justify-between items-center">
                 <div>
                   <p className="font-semibold text-blue-800">
-                    {language === 'en' ? 'Selected Branch:' : 'Napiling Sangay:'} {selectedBranch.name}
+                    {language === 'en' ? 'Selected Branch:' : 'Napiling Sangay ng Opisina:'} {selectedBranch.name}
                   </p>
                   <p className="text-sm text-blue-600">{selectedBranch.location}</p>
                 </div>
@@ -938,7 +938,7 @@ const GetQueue = () => {
                         disabled={queueUnavailable || selectedService?.requires_appointment || (selectedBranch && immediateAvailability && !immediateAvailability.is_available)}
                         className="mr-2"
                       />
-                      <span>{language === 'en' ? 'Immediate' : 'Agad'}</span>
+                      <span>{language === 'en' ? 'Immediate' : 'Agaran'}</span>
                     </label>
                     <label className="flex items-center">
                       <input
@@ -950,7 +950,7 @@ const GetQueue = () => {
                         disabled={queueUnavailable}
                         className="mr-2"
                       />
-                      <span>{language === 'en' ? 'Appointment' : 'Tipanan'}</span>
+                      <span>{language === 'en' ? 'Appointment' : 'Takdang-Araw'}</span>
                     </label>
                   </div>
                   {formData.queue_type === 'immediate' && selectedBranch && immediateAvailability && !immediateAvailability.is_available ? (
@@ -974,7 +974,7 @@ const GetQueue = () => {
                 {formData.queue_type === 'appointment' && (
                   <div>
                     <label className="block text-gray-700 font-semibold mb-2">
-                      {language === 'en' ? 'Appointment Date & Time' : 'Petsa at Oras ng Tipanan'}
+                      {language === 'en' ? 'Appointment Date & Time' : 'Petsa at Oras ng Takdang-Araw'}
                     </label>
                     <div className="grid gap-4 md:grid-cols-2">
                       <input
