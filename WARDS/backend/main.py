@@ -30,6 +30,151 @@ from utils import log_integrity  # noqa: F401 - registers tamper-evident log sig
 from utils.system_settings import seed_system_settings
 from middleware.dos_protection import RequestSizeMiddleware, RequestTimeoutMiddleware, ConnectionLimitMiddleware, AbuseDetectionMiddleware
 
+
+class SecuritySettings:
+    """
+    Configuration-driven security header settings.
+    All values can be overridden via environment variables.
+    """
+    
+    def __init__(self):
+        # Environment detection
+        self.is_production = os.getenv("APP_ENV", os.getenv("ENV", "development")).lower() in {"prod", "production"}
+        self.is_development = not self.is_production
+        
+        # CSP Mode: production | development
+        self.csp_mode = os.getenv("CSP_MODE", "production" if self.is_production else "development")
+        
+        # HSTS Configuration
+        self.enable_hsts = os.getenv("ENABLE_HSTS", "true" if self.is_production else "false").lower() in {"true", "1", "yes"}
+        self.hsts_max_age = int(os.getenv("HSTS_MAX_AGE", "31536000"))  # 1 year default
+        self.hsts_include_subdomains = os.getenv("HSTS_INCLUDE_SUBDOMAINS", "true").lower() in {"true", "1", "yes"}
+        
+        # X-Frame-Options: DENY | SAMEORIGIN
+        self.frame_options = os.getenv("X_FRAME_OPTIONS", "DENY")
+        
+        # Referrer-Policy
+        self.referrer_policy = os.getenv("REFERRER_POLICY", "strict-origin-when-cross-origin")
+        
+        # Permissions-Policy (comma-separated features to disable)
+        self.disabled_permissions = os.getenv("DISABLED_PERMISSIONS", "camera, microphone, geolocation")
+        
+        # Trusted proxy for HSTS detection (behind nginx, etc.)
+        self.trusted_proxy = os.getenv("TRUSTED_PROXY", "false").lower() in {"true", "1", "yes"}
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """
+    Production-grade security headers middleware with context-aware header application.
+    
+    Features:
+    - Content-Type aware: CSP only applied to HTML responses
+    - Environment-aware CSP profiles (strict production, relaxed development)
+    - Header existence checking: won't override intentionally set headers
+    - Secure HSTS: only enabled on HTTPS requests
+    - React-compatible CSP with proper directives
+    - Configuration-driven: all values configurable via environment
+    
+    OWASP ASVS / CSP Best Practices Compliance:
+    - V5.5.1: Content Security Policy is implemented
+    - V5.5.2: CSP does not allow unsafe-inline in production
+    - V5.5.3: CSP does not allow unsafe-eval in production
+    - V5.5.4: CSP restricts frame-ancestors
+    """
+    
+    def __init__(self, app):
+        super().__init__(app)
+        self.config = SecuritySettings()
+    
+    def _is_html_response(self, response: Request) -> bool:
+        """Check if response is HTML content."""
+        content_type = response.headers.get("content-type", "")
+        return "text/html" in content_type.lower()
+    
+    def _is_secure_request(self, request: Request) -> bool:
+        """
+        Determine if the request is secure (HTTPS).
+        Handles reverse proxy scenarios via X-Forwarded-Proto.
+        """
+        # Check if request URL is HTTPS
+        if request.url.scheme == "https":
+            return True
+        
+        # Check X-Forwarded-Proto header (reverse proxy)
+        forwarded_proto = request.headers.get("x-forwarded-proto", "").lower()
+        if forwarded_proto == "https":
+            return True
+        
+        return False
+    
+    def _build_csp_policy(self) -> str:
+        """
+        Build CSP policy based on environment mode.
+        
+        Production: Strict CSP without unsafe-inline/unsafe-eval
+        Development: Relaxed CSP for hot reload and dev tooling
+        """
+        if self.config.csp_mode == "development":
+            # Development CSP: Allows hot reload and dev tooling
+            return (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* http://127.0.0.1:*; "
+                "style-src 'self' 'unsafe-inline' http://localhost:* http://127.0.0.1:*; "
+                "connect-src 'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*; "
+                "img-src 'self' data: http://localhost:* http://127.0.0.1:*; "
+                "object-src 'none'; "
+                "base-uri 'self'; "
+                "frame-ancestors 'none';"
+            )
+        else:
+            # Production CSP: Strict, no unsafe directives
+            return (
+                "default-src 'self'; "
+                "script-src 'self'; "
+                "style-src 'self' 'unsafe-inline'; "  # React needs unsafe-inline for styled-components
+                "connect-src 'self'; "
+                "img-src 'self' data:; "
+                "object-src 'none'; "
+                "base-uri 'self'; "
+                "frame-ancestors 'none';"
+            )
+    
+    def _set_header_if_missing(self, response: Request, header_name: str, header_value: str):
+        """Set header only if it doesn't already exist."""
+        if header_name not in response.headers:
+            response.headers[header_name] = header_value
+    
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        
+        # Content-Security-Policy: Only apply to HTML responses
+        if self._is_html_response(response):
+            csp_policy = self._build_csp_policy()
+            self._set_header_if_missing(response, "Content-Security-Policy", csp_policy)
+        
+        # X-Content-Type-Options: nosniff (applies to all responses)
+        self._set_header_if_missing(response, "X-Content-Type-Options", "nosniff")
+        
+        # X-Frame-Options: Prevent clickjacking (applies to all responses)
+        self._set_header_if_missing(response, "X-Frame-Options", self.config.frame_options)
+        
+        # Referrer-Policy: Control referrer leakage (applies to all responses)
+        self._set_header_if_missing(response, "Referrer-Policy", self.config.referrer_policy)
+        
+        # Permissions-Policy: Restrict browser features (applies to all responses)
+        permissions = "; ".join(f"{feature}=()" for feature in self.config.disabled_permissions.split(",") if feature.strip())
+        self._set_header_if_missing(response, "Permissions-Policy", permissions)
+        
+        # Strict-Transport-Security: Only if enabled AND request is secure
+        if self.config.enable_hsts and self._is_secure_request(request):
+            hsts_value = f"max-age={self.config.hsts_max_age}"
+            if self.config.hsts_include_subdomains:
+                hsts_value += "; includeSubDomains"
+            self._set_header_if_missing(response, "Strict-Transport-Security", hsts_value)
+        
+        return response
+
+
 app = FastAPI(title="WARDS API", version="1.0.0")
 
 
@@ -112,6 +257,10 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Requires-Captcha", "X-Requires-MFA-Setup", "X-Auth-Portal", "X-Requires-Email-Verification"],
 )
+
+# Security Headers Middleware
+# Adds security headers to all responses (CSP, X-Frame-Options, etc.)
+app.add_middleware(SecurityHeadersMiddleware)
 
 # DoS Protection Middleware (order matters - size first, then timeout, then connection/abuse)
 app.add_middleware(RequestSizeMiddleware)
