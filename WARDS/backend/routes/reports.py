@@ -14,7 +14,7 @@ import json
 from database.models import (
     Report, get_db, ActivityLog, Branch, Queue, Payment,
     ReceiptRequest, QueueActivity, QueueHistory, ReceiptRequestHistory,
-    Service, DiscrepancyReport, BranchSystemSetting
+    Service, DiscrepancyReport, BranchSystemSetting, ReportHistory
 )
 from middleware.admin_auth import get_current_admin_user
 from middleware.branch_auth import get_current_branch_staff, require_any_branch_staff
@@ -2039,6 +2039,54 @@ async def get_branch_reports(
 
     return build_report_history_response(query, page=page, page_size=page_size)
 
+@router.get("/history")
+async def get_report_history(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(DEFAULT_REPORT_PAGE_SIZE, ge=1, le=MAX_REPORT_PAGE_SIZE),
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_admin_user)
+):
+    require_permission("view_all_branches")(current_user)
+    query = db.query(ReportHistory)
+    
+    total = query.count()
+    total_pages = max(1, (total + page_size - 1) // page_size) if total else 1
+    history_items = (
+        query.order_by(ReportHistory.deleted_at.desc(), ReportHistory.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    
+    return {
+        "items": [
+            {
+                "id": item.id,
+                "original_report_id": item.original_report_id,
+                "title": item.title,
+                "branch_id": item.branch_id,
+                "branch": item.branch,
+                "report_type": item.report_type,
+                "service_type": item.service_type or "All Services",
+                "transaction_category": item.transaction_category or "All Categories",
+                "date_from": item.date_from,
+                "date_to": item.date_to,
+                "generated_by": item.generated_by,
+                "submitted_by": item.submitted_by,
+                "submitted_at": item.submitted_at.isoformat() if item.submitted_at else None,
+                "created_at": item.created_at.isoformat() if item.created_at else None,
+                "deleted_at": item.deleted_at.isoformat() if item.deleted_at else None,
+                "deleted_by": item.deleted_by,
+                "status": item.status,
+            }
+            for item in history_items
+        ],
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "total_pages": total_pages,
+    }
+
 @router.get("/{report_id}")
 async def get_report_details(
     report_id: int,
@@ -2070,6 +2118,114 @@ async def get_report_details(
         "report": serialize_report_summary(report),
         "metrics": metrics
     }
+
+
+@branch_router.get("/history")
+async def get_branch_report_history(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(DEFAULT_REPORT_PAGE_SIZE, ge=1, le=MAX_REPORT_PAGE_SIZE),
+    db: Session = Depends(get_db),
+    current_staff = Depends(get_current_branch_staff),
+):
+    query = db.query(ReportHistory).filter(ReportHistory.branch_id == current_staff.branch_id)
+    
+    total = query.count()
+    total_pages = max(1, (total + page_size - 1) // page_size) if total else 1
+    history_items = (
+        query.order_by(ReportHistory.deleted_at.desc(), ReportHistory.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    
+    return {
+        "items": [
+            {
+                "id": item.id,
+                "original_report_id": item.original_report_id,
+                "title": item.title,
+                "branch_id": item.branch_id,
+                "branch": item.branch,
+                "report_type": item.report_type,
+                "service_type": item.service_type or "All Services",
+                "transaction_category": item.transaction_category or "All Categories",
+                "date_from": item.date_from,
+                "date_to": item.date_to,
+                "generated_by": item.generated_by,
+                "submitted_by": item.submitted_by,
+                "submitted_at": item.submitted_at.isoformat() if item.submitted_at else None,
+                "created_at": item.created_at.isoformat() if item.created_at else None,
+                "deleted_at": item.deleted_at.isoformat() if item.deleted_at else None,
+                "deleted_by": item.deleted_by,
+                "status": item.status,
+            }
+            for item in history_items
+        ],
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "total_pages": total_pages,
+    }
+
+
+@branch_router.get("/{report_id}/export/{format}")
+async def export_branch_report(
+    report_id: int,
+    format: str,
+    db: Session = Depends(get_db),
+    current_staff = Depends(get_current_branch_staff),
+):
+    """Export branch report in PDF or Excel format
+    
+    Note: Metrics are ALWAYS recalculated fresh from the database to ensure
+    exported reports contain current and accurate data.
+    """
+    report = db.query(Report).filter(
+        Report.id == report_id,
+        Report.branch_id == current_staff.branch_id,
+    ).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    
+    if format.lower() not in ["pdf", "excel"]:
+        raise HTTPException(status_code=400, detail="Invalid format. Use 'pdf' or 'excel'")
+    
+    branch_id = get_report_branch_id(db, report)
+    
+    # Recalculate metrics fresh from database for current, accurate export data
+    metrics = calculate_report_metrics_sync(
+        db=db,
+        branch_id=branch_id,
+        date_from=report.date_from,
+        date_to=report.date_to,
+        service_type=normalize_service_type(report.service_type),
+        transaction_category=normalize_transaction_category(report.transaction_category)
+    )
+    
+    base_filename = sanitize_filename(report.title)
+    export_format = format.lower()
+    filename = f"{base_filename}.pdf" if export_format == "pdf" else f"{base_filename}.xls"
+    
+    # Log activity
+    log = ActivityLog(
+        action="Branch Report Exported",
+        user=current_staff.username,
+        details=f"Exported branch report '{report.title}' as {format.upper()}",
+        type="report"
+    )
+    db.add(log)
+    db.commit()
+    
+    if export_format == "pdf":
+        content = build_pdf_export(report, metrics)
+        media_type = "application/pdf"
+    else:
+        content = build_excel_export(report, metrics)
+        media_type = "application/vnd.ms-excel"
+    
+    response = Response(content=content, media_type=media_type)
+    response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
 
 
 @branch_router.get("/{report_id}")
@@ -2171,15 +2327,109 @@ async def delete_report(
         raise HTTPException(status_code=404, detail="Report not found")
 
     title = report.title
+    
+    # Move to ReportHistory instead of permanent deletion
+    history_entry = ReportHistory(
+        original_report_id=report.id,
+        title=report.title,
+        branch_id=report.branch_id,
+        branch=report.branch,
+        report_type=report.report_type,
+        service_type=report.service_type,
+        transaction_category=report.transaction_category,
+        date_from=report.date_from,
+        date_to=report.date_to,
+        generated_by=report.generated_by,
+        submitted_by=report.submitted_by,
+        submitted_at=report.submitted_at,
+        created_at=report.created_at,
+        deleted_at=datetime.utcnow(),
+        deleted_by=current_user.username,
+        status="Archived"
+    )
+    db.add(history_entry)
+    
     db.add(ActivityLog(
-        action="Report Deleted",
+        action="Report Archived",
         user=current_user.username,
-        details=f"Deleted submitted report '{title}'",
+        details=f"Archived submitted report '{title}' to Report History",
         type="report",
     ))
     db.delete(report)
     db.commit()
-    return {"deleted_id": report_id, "title": title}
+    return {"archived_id": report_id, "title": title}
+
+
+@router.post("/history/{history_id}/recover")
+async def recover_report(
+    history_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_admin_user),
+):
+    require_permission("view_all_branches")(current_user)
+    history_entry = db.query(ReportHistory).filter(ReportHistory.id == history_id).first()
+    if not history_entry:
+        raise HTTPException(status_code=404, detail="Report history entry not found")
+
+    # Check if a report with the same original_id already exists in active reports
+    if history_entry.original_report_id:
+        existing_report = db.query(Report).filter(Report.id == history_entry.original_report_id).first()
+        if existing_report:
+            raise HTTPException(status_code=400, detail="A report with this ID already exists in active reports")
+
+    # Create new report from history entry
+    recovered_report = Report(
+        title=history_entry.title,
+        branch_id=history_entry.branch_id,
+        branch=history_entry.branch,
+        report_type=history_entry.report_type,
+        service_type=history_entry.service_type,
+        transaction_category=history_entry.transaction_category,
+        date_from=history_entry.date_from,
+        date_to=history_entry.date_to,
+        generated_by=history_entry.generated_by,
+        submitted_by=history_entry.submitted_by,
+        submitted_at=history_entry.submitted_at,
+        created_at=history_entry.created_at,
+    )
+    db.add(recovered_report)
+    db.flush()  # Get the new report ID
+
+    # Delete the history entry after successful recovery
+    db.delete(history_entry)
+
+    db.add(ActivityLog(
+        action="Report Recovered",
+        user=current_user.username,
+        details=f"Recovered report '{history_entry.title}' from Report History to Active Reports",
+        type="report",
+    ))
+    db.commit()
+    return {"recovered_id": recovered_report.id, "title": history_entry.title}
+
+
+@router.delete("/history/{history_id}")
+async def delete_report_history(
+    history_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_admin_user),
+):
+    require_permission("view_all_branches")(current_user)
+    history_entry = db.query(ReportHistory).filter(ReportHistory.id == history_id).first()
+    if not history_entry:
+        raise HTTPException(status_code=404, detail="Report history entry not found")
+
+    title = history_entry.title
+    
+    db.add(ActivityLog(
+        action="Report History Deleted",
+        user=current_user.username,
+        details=f"Permanently deleted report '{title}' from Report History",
+        type="report",
+    ))
+    db.delete(history_entry)
+    db.commit()
+    return {"deleted_id": history_id, "title": title}
 
 
 @branch_router.delete("/{report_id}")
@@ -2196,12 +2446,34 @@ async def delete_branch_report(
         raise HTTPException(status_code=404, detail="Report not found")
 
     title = report.title
+    
+    # Move to ReportHistory instead of permanent deletion
+    history_entry = ReportHistory(
+        original_report_id=report.id,
+        title=report.title,
+        branch_id=report.branch_id,
+        branch=report.branch,
+        report_type=report.report_type,
+        service_type=report.service_type,
+        transaction_category=report.transaction_category,
+        date_from=report.date_from,
+        date_to=report.date_to,
+        generated_by=report.generated_by,
+        submitted_by=report.submitted_by,
+        submitted_at=report.submitted_at,
+        created_at=report.created_at,
+        deleted_at=datetime.utcnow(),
+        deleted_by=current_staff.username,
+        status="Archived"
+    )
+    db.add(history_entry)
+    
     db.add(ActivityLog(
-        action="Branch Report Deleted",
+        action="Branch Report Archived",
         user=current_staff.username,
-        details=f"Deleted branch report '{title}'",
+        details=f"Archived branch report '{title}' to Report History",
         type="report",
     ))
     db.delete(report)
     db.commit()
-    return {"deleted_id": report_id, "title": title}
+    return {"archived_id": report_id, "title": title}

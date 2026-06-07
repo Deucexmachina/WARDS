@@ -11,6 +11,23 @@ import {
   markBranchReportViewed,
 } from '../../utils/branchReportViews';
 
+const buildExportFilename = (response, fallback) => {
+  const disposition = response.headers?.['content-disposition'] || response.headers?.['Content-Disposition'];
+  const match = disposition?.match(/filename="?(?<filename>[^"]+)"?/i);
+  return match?.groups?.filename || fallback;
+};
+
+const downloadBlobResponse = (response, fallbackName) => {
+  const blobUrl = window.URL.createObjectURL(new Blob([response.data]));
+  const link = document.createElement('a');
+  link.href = blobUrl;
+  link.download = buildExportFilename(response, fallbackName);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(blobUrl);
+};
+
 const REPORT_TYPES = ['Operational', 'Daily', 'Weekly', 'Monthly', 'Quarterly', 'Annual'];
 const SERVICE_TYPES = ['All Services', 'Real Property Tax', 'Business Tax', 'Miscellaneous Tax', 'Document Request'];
 const TRANSACTION_CATEGORIES = ['All Categories', 'Real Property Tax', 'Business Tax', 'Miscellaneous Tax', 'Receipt Request Fee'];
@@ -67,13 +84,13 @@ const ReportMetricsModal = ({ report, metrics, onClose }) => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6">
-      <div className="max-h-[92vh] w-full max-w-7xl overflow-y-auto rounded-3xl bg-slate-50 shadow-2xl">
-        <div className="sticky top-0 z-10 flex justify-end border-b border-slate-200 bg-white/95 px-6 py-4 backdrop-blur md:px-8">
+      <div className="flex max-h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-3xl bg-slate-50 shadow-2xl">
+        <div className="flex shrink-0 justify-end border-b border-slate-200 bg-white/95 px-6 py-4 backdrop-blur md:px-8">
           <button onClick={onClose} className="rounded-xl bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-300">
             Close
           </button>
         </div>
-        <div className="px-6 py-6 md:px-8">
+        <div className="flex-1 overflow-y-auto px-6 py-6 md:px-8">
           <GeneratedReportContent report={report} metrics={metrics} contextLabel="Submitted To Main Admin" />
         </div>
       </div>
@@ -82,17 +99,22 @@ const ReportMetricsModal = ({ report, metrics, onClose }) => {
 };
 
 const BranchReports = () => {
+  const [activeTab, setActiveTab] = useState('active');
   const [filters, setFilters] = useState(initialFilters);
   const [generationMode, setGenerationMode] = useState('manual');
   const [reportsState, setReportsState] = useState({ items: [], page: 1, page_size: PAGE_SIZE, total: 0, total_pages: 1 });
+  const [historyState, setHistoryState] = useState({ items: [], page: 1, page_size: PAGE_SIZE, total: 0, total_pages: 1 });
   const [loading, setLoading] = useState(true);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  const [exportingKey, setExportingKey] = useState('');
   const [error, setError] = useState('');
   const [selectedReport, setSelectedReport] = useState(null);
   const [selectedMetrics, setSelectedMetrics] = useState(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [reportToDelete, setReportToDelete] = useState(null);
+  const [historyReportToView, setHistoryReportToView] = useState(null);
   const [automation, setAutomation] = useState({
     enabled: false,
     frequency: 'daily',
@@ -122,6 +144,26 @@ const BranchReports = () => {
     }
   };
 
+  const fetchReportHistory = async (page = 1) => {
+    try {
+      setHistoryLoading(true);
+      const response = await branchReportAPI.getHistory({ page, page_size: PAGE_SIZE });
+      setHistoryState(response.data);
+    } catch (fetchError) {
+      console.error('Failed to fetch report history:', fetchError);
+      window.dispatchEvent(new CustomEvent('wards:system-message', {
+        detail: {
+          tone: 'error',
+          title: 'Unable to Load Report History',
+          message: 'An error occurred while loading report history. Please try again.',
+          buttonLabel: 'OK',
+        },
+      }));
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchReports();
     branchReportAPI.getAutomation()
@@ -130,6 +172,12 @@ const BranchReports = () => {
         console.error('Failed to fetch report automation settings:', fetchError);
       });
   }, []);
+
+  useEffect(() => {
+    if (activeTab === 'history') {
+      fetchReportHistory(reportsState.page);
+    }
+  }, [activeTab]);
 
   const summary = useMemo(() => ({
     total: reportsState.total || 0,
@@ -228,6 +276,14 @@ const BranchReports = () => {
         setSelectedMetrics(null);
       }
       setReportToDelete(null);
+      window.dispatchEvent(new CustomEvent('wards:system-message', {
+        detail: {
+          tone: 'success',
+          title: 'Report Archived Successfully',
+          message: 'The report has been removed from active records and stored in Report History.',
+          buttonLabel: 'OK',
+        },
+      }));
       window.dispatchEvent(new CustomEvent(BRANCH_REPORTS_UPDATED_EVENT, { detail: { deletedReportId: reportToDelete.id } }));
     } catch (deleteError) {
       console.error('Failed to delete branch report:', deleteError);
@@ -235,6 +291,24 @@ const BranchReports = () => {
     } finally {
       setDeletingId(null);
     }
+  };
+
+  const handleExport = async (reportId, format) => {
+    const key = `${reportId}-${format}`;
+    try {
+      setExportingKey(key);
+      const response = await branchReportAPI.export(reportId, format);
+      downloadBlobResponse(response, `branch-report-${reportId}.${format === 'pdf' ? 'pdf' : 'xls'}`);
+    } catch (exportError) {
+      console.error(`Failed to export report as ${format}:`, exportError);
+      setError(exportError.response?.data?.detail || `Failed to export the report as ${format.toUpperCase()}.`);
+    } finally {
+      setExportingKey('');
+    }
+  };
+
+  const handleViewHistoryReport = (historyReport) => {
+    setHistoryReportToView(historyReport);
   };
 
   const handleSaveAutomation = async () => {
@@ -540,16 +614,43 @@ const BranchReports = () => {
 
       <section className="overflow-hidden rounded-2xl bg-white shadow">
         <div className="border-b border-slate-100 px-6 py-5">
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <h2 className="text-xl font-bold text-primary">Submitted Report History</h2>
               <p className="mt-2 text-sm text-slate-500">View, review, and delete branch reports already submitted to Main Admin.</p>
             </div>
-            <div className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700">
-              {reportsState.total} total reports
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setActiveTab('active')}
+                className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                  activeTab === 'active'
+                    ? 'bg-primary text-white'
+                    : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                }`}
+              >
+                Active Reports ({reportsState.total})
+              </button>
+              <button
+                onClick={() => setActiveTab('history')}
+                className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                  activeTab === 'history'
+                    ? 'bg-primary text-white'
+                    : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                }`}
+              >
+                Report History ({historyState.total})
+              </button>
             </div>
           </div>
         </div>
+
+        {activeTab === 'active' ? (
+          <>
+            <div className="border-b border-slate-100 px-6 py-3 bg-slate-50">
+              <p className="text-sm text-slate-600">
+                {reportsState.total} total reports
+              </p>
+            </div>
 
         {loading ? (
           <div className="px-6 py-12 text-center text-slate-500">Loading branch reports...</div>
@@ -593,6 +694,20 @@ const BranchReports = () => {
                             View
                           </button>
                           <button
+                            onClick={() => handleExport(report.id, 'pdf')}
+                            disabled={exportingKey === `${report.id}-pdf`}
+                            className="rounded-lg bg-primary px-4 py-2 font-semibold text-white transition hover:bg-secondary disabled:opacity-60"
+                          >
+                            {exportingKey === `${report.id}-pdf` ? 'PDF...' : 'PDF'}
+                          </button>
+                          <button
+                            onClick={() => handleExport(report.id, 'excel')}
+                            disabled={exportingKey === `${report.id}-excel`}
+                            className="rounded-lg bg-emerald-600 px-4 py-2 font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
+                          >
+                            {exportingKey === `${report.id}-excel` ? 'Excel...' : 'Excel'}
+                          </button>
+                          <button
                             onClick={() => handleDelete(report.id)}
                             disabled={deletingId === report.id}
                             className="rounded-lg bg-red-600 px-4 py-2 font-semibold text-white transition hover:bg-red-700 disabled:opacity-50"
@@ -630,6 +745,83 @@ const BranchReports = () => {
         ) : (
           <div className="px-6 py-12 text-center text-slate-500">No submitted branch reports yet.</div>
         )}
+          </>
+        ) : (
+          <>
+            <div className="border-b border-slate-100 px-6 py-3 bg-slate-50">
+              <p className="text-sm text-slate-600">
+                {historyState.total} archived reports
+              </p>
+            </div>
+
+            {historyLoading ? (
+              <div className="px-6 py-12 text-center text-slate-500">Loading report history...</div>
+            ) : historyState.items.length ? (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        <th className="px-6 py-3 text-left font-semibold text-slate-600">Title</th>
+                        <th className="px-6 py-3 text-left font-semibold text-slate-600">Service Type</th>
+                        <th className="px-6 py-3 text-left font-semibold text-slate-600">Period</th>
+                        <th className="px-6 py-3 text-left font-semibold text-slate-600">Submitted</th>
+                        <th className="px-6 py-3 text-left font-semibold text-slate-600">Deleted</th>
+                        <th className="px-6 py-3 text-left font-semibold text-slate-600">Deleted By</th>
+                        <th className="px-6 py-3 text-left font-semibold text-slate-600">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 bg-white">
+                      {historyState.items.map((report) => (
+                        <tr key={report.id} className="hover:bg-slate-50">
+                          <td className="px-6 py-4">
+                            <p className="font-semibold text-primary">{report.title}</p>
+                            <p className="mt-1 text-xs uppercase tracking-[0.16em] text-slate-400">{report.report_type}</p>
+                          </td>
+                          <td className="px-6 py-4 text-slate-700">{report.service_type}</td>
+                          <td className="px-6 py-4 text-slate-700">{report.date_from} to {report.date_to}</td>
+                          <td className="px-6 py-4 text-slate-500">{report.submitted_at ? formatUtc8DateTime(report.submitted_at) : 'N/A'}</td>
+                          <td className="px-6 py-4 text-slate-500">{report.deleted_at ? formatUtc8DateTime(report.deleted_at) : 'N/A'}</td>
+                          <td className="px-6 py-4 text-slate-700">{report.deleted_by || 'N/A'}</td>
+                          <td className="px-6 py-4">
+                            <button
+                              onClick={() => handleViewHistoryReport(report)}
+                              className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-secondary"
+                            >
+                              View
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="flex flex-col gap-3 border-t border-slate-100 px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-sm text-slate-500">Page {historyState.page} of {historyState.total_pages}</p>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setHistoryState((current) => ({ ...current, page: Math.max(1, current.page - 1) }))}
+                      disabled={historyState.page <= 1}
+                      className="rounded-xl bg-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-300 disabled:opacity-50"
+                    >
+                      Previous
+                    </button>
+                    <button
+                      onClick={() => setHistoryState((current) => ({ ...current, page: Math.min(historyState.total_pages, current.page + 1) }))}
+                      disabled={historyState.page >= historyState.total_pages}
+                      className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-secondary disabled:opacity-50"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="px-6 py-12 text-center text-slate-500">No archived reports yet.</div>
+            )}
+          </>
+        )}
       </section>
 
       {selectedReport && selectedMetrics ? (
@@ -655,6 +847,62 @@ const BranchReports = () => {
         onConfirm={() => handleDelete()}
         isLoading={Boolean(deletingId)}
       />
+
+      {historyReportToView && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+          <div className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl bg-white shadow-xl">
+            <div className="flex shrink-0 items-center justify-between px-6 py-6">
+              <h3 className="text-xl font-bold text-primary">Report History - {historyReportToView.title}</h3>
+              <button
+                onClick={() => setHistoryReportToView(null)}
+                className="rounded-lg bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-300"
+              >
+                Close
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-6 pb-6 space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm font-semibold text-slate-600">Report Type</p>
+                  <p className="text-slate-800">{historyReportToView.report_type}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-slate-600">Service Type</p>
+                  <p className="text-slate-800">{historyReportToView.service_type}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-slate-600">Transaction Category</p>
+                  <p className="text-slate-800">{historyReportToView.transaction_category}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-slate-600">Date Range</p>
+                  <p className="text-slate-800">{historyReportToView.date_from} to {historyReportToView.date_to}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-slate-600">Generated By</p>
+                  <p className="text-slate-800">{historyReportToView.generated_by}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-slate-600">Submitted By</p>
+                  <p className="text-slate-800">{historyReportToView.submitted_by}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-slate-600">Submitted At</p>
+                  <p className="text-slate-800">{historyReportToView.submitted_at ? formatUtc8DateTime(historyReportToView.submitted_at) : 'N/A'}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-slate-600">Deleted At</p>
+                  <p className="text-slate-800">{historyReportToView.deleted_at ? formatUtc8DateTime(historyReportToView.deleted_at) : 'N/A'}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-slate-600">Deleted By</p>
+                  <p className="text-slate-800">{historyReportToView.deleted_by}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

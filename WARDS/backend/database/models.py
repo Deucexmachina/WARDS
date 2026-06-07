@@ -1201,6 +1201,30 @@ class Report(Base):
 
     branch_record = relationship("Branch", backref="reports")
 
+
+class ReportHistory(Base):
+    __tablename__ = "report_history"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    original_report_id = Column(Integer, nullable=True, index=True)
+    title = Column(String)
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=True)
+    branch = Column(String)
+    report_type = Column(String)
+    service_type = Column(String, nullable=True)
+    transaction_category = Column(String, nullable=True)
+    date_from = Column(String, nullable=True)
+    date_to = Column(String, nullable=True)
+    generated_by = Column(String, nullable=True)
+    submitted_by = Column(String, nullable=True)
+    submitted_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=True)
+    deleted_at = Column(DateTime, default=datetime.utcnow)
+    deleted_by = Column(String, nullable=True)
+    status = Column(String, default="Archived")
+
+    branch_record = relationship("Branch", backref="report_history")
+
 class QueueActivity(Base):
     __tablename__ = "queue_activity"
     

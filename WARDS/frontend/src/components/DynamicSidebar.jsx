@@ -102,17 +102,41 @@ const DynamicSidebar = () => {
       fetchSidebarModuleCounts();
     }, 10000);
     const handleAdminMemoRead = (event) => {
-      setUnreadMemoCount((current) => resolveUnreadCount(event, current));
-      fetchUnreadMemoCount();
+      const newCount = resolveUnreadCount(event, unreadMemoCount);
+      setUnreadMemoCount(newCount);
+      if (newCount === 0) {
+        fetchUnreadMemoCount();
+      }
     };
     const handleAdminPolicyRead = (event) => {
-      setUnreadPolicyCount((current) => resolveUnreadCount(event, current));
-      fetchUnreadPolicyCount();
+      const newCount = resolveUnreadCount(event, unreadPolicyCount);
+      setUnreadPolicyCount(newCount);
+      if (newCount === 0) {
+        fetchUnreadPolicyCount();
+      }
     };
     const handleAdminPolicyUpdated = () => fetchUnreadPolicyCount();
-    const handleBranchDiscrepancyViewed = () => fetchUnreadDiscrepancyCount();
-    const handleAdminDiscrepancyReviewed = () => fetchUnreadDiscrepancyCount();
-    const handleAdminDiscrepancyViewed = () => fetchUnreadDiscrepancyCount();
+    const handleBranchDiscrepancyViewed = (event) => {
+      const newCount = resolveUnreadCount(event, unreadDiscrepancyCount);
+      setUnreadDiscrepancyCount(newCount);
+      if (newCount === 0) {
+        fetchUnreadDiscrepancyCount();
+      }
+    };
+    const handleAdminDiscrepancyReviewed = (event) => {
+      const newCount = resolveUnreadCount(event, unreadDiscrepancyCount);
+      setUnreadDiscrepancyCount(newCount);
+      if (newCount === 0) {
+        fetchUnreadDiscrepancyCount();
+      }
+    };
+    const handleAdminDiscrepancyViewed = (event) => {
+      const newCount = resolveUnreadCount(event, unreadDiscrepancyCount);
+      setUnreadDiscrepancyCount(newCount);
+      if (newCount === 0) {
+        fetchUnreadDiscrepancyCount();
+      }
+    };
     const handleAnnouncementViewed = (event) => {
       const explicitCount = event?.detail?.unreadCount;
       if (Number.isFinite(explicitCount)) {
@@ -124,8 +148,32 @@ const DynamicSidebar = () => {
       fetchSidebarModuleCounts();
     };
     const handleBranchPaymentUpdated = () => fetchSidebarModuleCounts();
-    const handleBranchReportViewed = () => fetchSidebarModuleCounts();
-    const handleBranchReportsUpdated = () => fetchSidebarModuleCounts();
+    const handleBranchReportViewed = (event) => {
+      const reportId = event?.detail?.reportId;
+      if (reportId && moduleCounts.reports > 0) {
+        setModuleCounts((current) => ({
+          ...current,
+          reports: Math.max(0, current.reports - 1),
+        }));
+      }
+      fetchSidebarModuleCounts();
+    };
+    const handleBranchReportsUpdated = (event) => {
+      const deletedReportId = event?.detail?.deletedReportId;
+      const unreadCount = event?.detail?.unreadCount;
+      
+      if (Number.isFinite(unreadCount)) {
+        setModuleCounts((current) => ({
+          ...current,
+          reports: Math.max(0, Number(unreadCount)),
+        }));
+      } else if (deletedReportId) {
+        // When a report is deleted/archived, refresh the count
+        fetchSidebarModuleCounts();
+      } else {
+        fetchSidebarModuleCounts();
+      }
+    };
     const handleBranchReceiptUpdated = (event) => {
       const eventRequests = event?.detail?.requests;
       if (!Array.isArray(eventRequests)) {

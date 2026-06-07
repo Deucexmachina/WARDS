@@ -337,7 +337,7 @@ const buildGroupedDetailSections = (rows) => {
 };
 
 const DetailSectionCard = ({ section }) => (
-  <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
+  <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
     <div className="border-b border-slate-200 bg-gradient-to-r from-slate-50 via-white to-slate-50 px-5 py-5 sm:px-6">
       <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
         <div className="min-w-0">
@@ -682,7 +682,7 @@ export default function GeneratedReportContent({ report, metrics, contextLabel =
         )}
       >
         <div className="space-y-5">
-          <div className="rounded-[28px] border border-slate-200 bg-white shadow-sm">
+          <div className="rounded-3xl border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-200 bg-slate-50/80 px-5 py-4">
               <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
                 <div>
@@ -762,7 +762,7 @@ export default function GeneratedReportContent({ report, metrics, contextLabel =
           {visibleDetailSection ? (
             <>
               <DetailSectionCard section={visibleDetailSection} />
-              <div className="rounded-[28px] border border-slate-200 bg-white shadow-sm">
+              <div className="rounded-3xl border border-slate-200 bg-white shadow-sm">
                 <div className="flex flex-col gap-4 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Transaction Pagination</p>

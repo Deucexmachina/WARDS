@@ -227,6 +227,9 @@ export const reportAPI = {
   getDetails: (reportId) => api.get(`/reports/${reportId}`),
   export: (reportId, format) => api.get(`/reports/${reportId}/export/${format}`, { responseType: 'blob' }),
   delete: (reportId) => api.delete(`/reports/${reportId}`),
+  getHistory: (params) => api.get('/reports/history', { params }),
+  recover: (historyId) => api.post(`/reports/history/${historyId}/recover`),
+  deleteHistory: (historyId) => api.delete(`/reports/history/${historyId}`),
 };
 
 export const branchReportAPI = {
@@ -236,6 +239,8 @@ export const branchReportAPI = {
   delete: (reportId) => api.delete(`/branch/reports/${reportId}`),
   getAutomation: () => api.get('/branch/reports/automation'),
   updateAutomation: (data) => api.put('/branch/reports/automation', data),
+  getHistory: (params) => api.get('/branch/reports/history', { params }),
+  export: (reportId, format) => api.get(`/branch/reports/${reportId}/export/${format}`, { responseType: 'blob' }),
 };
 
 export const branchSettingsAPI = {
