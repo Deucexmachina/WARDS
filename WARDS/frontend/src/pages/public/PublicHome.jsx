@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { usePublicLanguage } from '../../utils/publicLanguage';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 
@@ -9,7 +10,7 @@ const PublicHome = () => {
   const [branches, setBranches] = useState([]);
   const [announcements, setAnnouncements] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [language, setLanguage] = useState('en');
+  const [language] = usePublicLanguage();
 
   useEffect(() => {
     fetchPublicData();
@@ -62,22 +63,6 @@ const PublicHome = () => {
               </p>
             </div>
             <div className="flex gap-3">
-              <button
-                onClick={() => setLanguage('en')}
-                className={`px-4 py-2 rounded-lg font-semibold transition ${
-                  language === 'en' ? 'bg-white text-blue-600' : 'bg-blue-700 text-white hover:bg-blue-800'
-                }`}
-              >
-                English
-              </button>
-              <button
-                onClick={() => setLanguage('tl')}
-                className={`px-4 py-2 rounded-lg font-semibold transition ${
-                  language === 'tl' ? 'bg-white text-blue-600' : 'bg-blue-700 text-white hover:bg-blue-800'
-                }`}
-              >
-                Tagalog
-              </button>
               <button
                 onClick={() => navigate('/login')}
                 className="bg-white text-blue-600 px-6 py-2 rounded-lg font-semibold hover:bg-blue-50 transition"

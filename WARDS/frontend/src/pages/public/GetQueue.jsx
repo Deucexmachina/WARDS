@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
 import { buildManilaDateTimeValue, formatUtc8DateTime, parseManilaDateTimeValue } from '../../utils/dateTime';
 import { getStoredPublicUser, PUBLIC_USER_STORAGE_EVENT } from '../../utils/publicSession';
+import { usePublicLanguage } from '../../utils/publicLanguage';
 import { printQueueTicket } from '../../utils/queueTicketPrint';
 import {
   getEmailValidationMessage,
@@ -163,7 +164,7 @@ const GetQueue = () => {
   const [loading, setLoading] = useState(true);
   const [registering, setRegistering] = useState(false);
   const [queueResult, setQueueResult] = useState(null);
-  const [language, setLanguage] = useState('en');
+  const [language, setLanguage] = usePublicLanguage();
   const [nameError, setNameError] = useState('');
   const [contactError, setContactError] = useState('');
   const [emailError, setEmailError] = useState('');
@@ -772,12 +773,6 @@ const GetQueue = () => {
                 {language === 'en' ? 'Register online and skip the line' : 'Magrehistro online at laktawan ang pila'}
               </p>
             </div>
-            <button
-              onClick={() => setLanguage(language === 'en' ? 'tl' : 'en')}
-              className="bg-blue-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-blue-700"
-            >
-              {language === 'en' ? 'TL' : 'EN'}
-            </button>
           </div>
         </div>
 

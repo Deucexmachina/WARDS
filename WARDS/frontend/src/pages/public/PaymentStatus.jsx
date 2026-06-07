@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { paymentAPI } from '../../services/api';
+import { appendLanguageParam, resolvePublicLanguage, setPublicLanguage } from '../../utils/publicLanguage';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 const SUCCESS_STATUSES = new Set(['confirmed', 'verified', 'paid', 'succeeded', 'successful', 'success']);
@@ -65,6 +66,8 @@ const PaymentStatus = () => {
   const intervalIdRef = useRef(null);
 
   const refNumber = searchParams.get('ref');
+  const urlLanguage = searchParams.get('lang');
+  const language = resolvePublicLanguage(searchParams);
   const receiptFlow = searchParams.get('receiptFlow') || '';
   const isMerchantReturn = searchParams.get('merchant_return') === '1';
   const hasOpenerWindow = typeof window !== 'undefined' && window.opener && !window.opener.closed;
@@ -93,6 +96,12 @@ const PaymentStatus = () => {
   const isStandaloneReceiptPayment = isReceiptRequestPayment && receiptFlow === 'standalone';
 
   useEffect(() => {
+    if (urlLanguage === 'en' || urlLanguage === 'tl') {
+      setPublicLanguage(urlLanguage);
+    }
+  }, [urlLanguage]);
+
+  useEffect(() => {
     if (shouldHandOffMerchantReturn) {
       setLoading(false);
 
@@ -117,7 +126,7 @@ const PaymentStatus = () => {
 
     const resolvePaymentStatus = async () => {
       if (!refNumber) {
-        setError('No payment reference found.');
+        setError(language === 'en' ? 'No payment reference found.' : 'Walang nahanap na payment reference.');
         setLoading(false);
         return;
       }
@@ -144,7 +153,7 @@ const PaymentStatus = () => {
           clearInterval(intervalIdRef.current);
         }
       } catch (err) {
-        setError(err.response?.data?.detail || 'Failed to verify payment status.');
+        setError(err.response?.data?.detail || (language === 'en' ? 'Failed to verify payment status.' : 'Nabigong beripikahin ang katayuan ng bayad.'));
         setLoading(false);
         if (intervalIdRef.current) clearInterval(intervalIdRef.current);
       }
@@ -164,7 +173,7 @@ const PaymentStatus = () => {
     }
 
     if (isFailed || isExpired) {
-      navigate(`/payment/failed?ref=${encodeURIComponent(refNumber || '')}`, { replace: true });
+      navigate(appendLanguageParam(`/payment/failed?ref=${encodeURIComponent(refNumber || '')}`, language), { replace: true });
     }
   }, [isExpired, isFailed, navigate, refNumber, shouldHandOffMerchantReturn]);
 
@@ -210,9 +219,13 @@ const PaymentStatus = () => {
       <section className="py-16 bg-lightbg min-h-screen flex items-center justify-center">
         <div className="text-center max-w-lg px-6">
           <div className="mx-auto mb-6 h-16 w-16 animate-spin rounded-full border-b-4 border-accent"></div>
-          <h2 className="text-2xl font-bold text-primary mb-2">Returning to Payment Processing</h2>
+          <h2 className="text-2xl font-bold text-primary mb-2">
+            {language === 'en' ? 'Returning to Payment Processing' : 'Bumabalik sa Pagproseso ng Bayad'}
+          </h2>
           <p className="text-gray-600">
-            This window will close automatically so you can continue on the original payment processing page.
+            {language === 'en'
+              ? 'This window will close automatically so you can continue on the original payment processing page.'
+              : 'Magsasara ang window na ito nang awtomatiko upang makabalik ka sa orihinal na pahina ng pagproseso ng bayad.'}
           </p>
         </div>
       </section>
@@ -234,7 +247,9 @@ const PaymentStatus = () => {
         ? await paymentAPI.uploadBusinessTaxProof(payment.ref_number, formData)
         : await paymentAPI.uploadRptProof(payment.ref_number, formData);
       setPayment(response.data);
-      setUploadMessage('Payment proof uploaded. Your transaction is now queued for branch treasury validation.');
+      setUploadMessage(language === 'en'
+        ? 'Payment proof uploaded. Your transaction is now queued for branch treasury validation.'
+        : 'Na-upload na ang payment proof. Nakapila na ngayon ang iyong transaksyon para sa beripikasyon ng branch treasury.');
       setSelectedProofFile(null);
     } catch (err) {
       setUploadMessage(err.response?.data?.detail || 'Failed to upload payment proof.');
@@ -275,9 +290,13 @@ const PaymentStatus = () => {
       <section className="py-16 bg-lightbg min-h-screen flex items-center justify-center">
         <div className="text-center max-w-xl px-6">
           <div className="animate-spin rounded-full h-20 w-20 border-b-4 border-accent mx-auto mb-6"></div>
-          <h2 className="text-3xl font-bold text-primary mb-3">Waiting for Payment Result</h2>
+          <h2 className="text-3xl font-bold text-primary mb-3">
+            {language === 'en' ? 'Waiting for Payment Result' : 'Naghihintay sa Resulta ng Bayad'}
+          </h2>
           <p className="text-gray-600 text-lg">
-            Complete your payment in the PayMongo tab. WARDS will automatically update this page after the sandbox payment session responds.
+            {language === 'en'
+              ? 'Complete your payment in the PayMongo tab. WARDS will automatically update this page after the sandbox payment session responds.'
+              : 'Tapusin ang iyong bayad sa PayMongo tab. Awtomatikong mag-a-update ang WARDS sa pahinang ito kapag tumugon na ang sandbox payment session.'}
           </p>
         </div>
       </section>
@@ -294,13 +313,15 @@ const PaymentStatus = () => {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
-            <h2 className="text-3xl font-bold text-gray-900 mb-3">Unable to Track Payment</h2>
+            <h2 className="text-3xl font-bold text-gray-900 mb-3">
+              {language === 'en' ? 'Unable to Track Payment' : 'Hindi Ma-track ang Bayad'}
+            </h2>
             <p className="text-gray-600 mb-8 text-lg">{error}</p>
             <button
-              onClick={() => navigate(isReceiptRequestPayment ? '/request-receipt' : '/pay-taxes')}
+              onClick={() => navigate(appendLanguageParam(isReceiptRequestPayment ? '/request-receipt' : '/pay-taxes', language))}
               className="w-full bg-accent hover:bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold transition-all duration-300 shadow-md hover:shadow-lg"
             >
-              Retry from Payment Page
+              {language === 'en' ? 'Retry from Payment Page' : 'Subukan Muli Mula sa Pahina ng Bayad'}
             </button>
           </div>
         </div>
@@ -312,7 +333,7 @@ const PaymentStatus = () => {
     ? 'Pending Transaction'
     : rawStatus
     ? rawStatus.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
-    : (isVerified ? 'Payment Verified' : 'Payment Processing');
+    : (isVerified ? (language === 'en' ? 'Payment Verified' : 'Nakumpirma ang Bayad') : (language === 'en' ? 'Payment Processing' : 'Pinoproseso ang Bayad'));
 
   return (
     <section className="py-16 bg-lightbg min-h-screen">
@@ -332,37 +353,43 @@ const PaymentStatus = () => {
             </div>
             <h2 className="text-4xl font-bold text-primary mb-3">
               {isReceiptRequestPendingVerification
-                ? 'Pending Branch Verification'
+                ? (language === 'en' ? 'Pending Branch Verification' : 'Naghihintay ng Beripikasyon ng Sanga')
                 : ((isRptPayment && RPT_POST_PAYMENT_STAGES.has(rawStatus)) || (isBusinessTaxPayment && BT_POST_PAYMENT_STAGES.has(rawStatus))
-                  ? 'Payment Submitted to Treasury Workflow'
+                  ? (language === 'en' ? 'Payment Submitted to Treasury Workflow' : 'Naipasa na ang Bayad sa Treasury Workflow')
                   : isVerified
-                    ? 'Payment Verified!'
-                    : 'Payment Processing')}
+                    ? (language === 'en' ? 'Payment Verified!' : 'Nakumpirma ang Bayad!')
+                    : (language === 'en' ? 'Payment Processing' : 'Pinoproseso ang Bayad'))}
             </h2>
             <p className="text-gray-600 text-lg">
               {isReceiptRequestPendingVerification
-                ? 'Your receipt request payment was captured successfully and is now waiting for Branch Admin verification before release can continue.'
+                ? (language === 'en'
+                  ? 'Your receipt request payment was captured successfully and is now waiting for Branch Admin verification before release can continue.'
+                  : 'Matagumpay na nakuha ang bayad para sa request ng resibo at naghihintay ngayon ng beripikasyon ng Branch Admin bago maipagpatuloy ang release.')
                 : ((isRptPayment && RPT_POST_PAYMENT_STAGES.has(rawStatus)) || (isBusinessTaxPayment && BT_POST_PAYMENT_STAGES.has(rawStatus))
-                  ? 'Your PayMongo sandbox payment has been captured. WARDS is now waiting for branch treasury validation and supporting proof.'
-                  : 'Your transaction is being monitored. This page updates automatically as PayMongo responds.')}
+                  ? (language === 'en'
+                    ? 'Your PayMongo sandbox payment has been captured. WARDS is now waiting for branch treasury validation and supporting proof.'
+                    : 'Nakuha na ang iyong PayMongo sandbox payment. Naghihintay ngayon ang WARDS ng beripikasyon ng branch treasury at karagdagang patunay.')
+                  : (language === 'en'
+                    ? 'Your transaction is being monitored. This page updates automatically as PayMongo responds.'
+                    : 'Minomonitor ang iyong transaksyon. Awtomatikong nag-a-update ang pahinang ito habang sumasagot ang PayMongo.'))}
             </p>
           </div>
 
           <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl p-6 md:p-8 text-left border border-gray-200 shadow-inner">
-            <h3 className="text-lg font-bold text-primary mb-4 border-b pb-2">Transaction Summary</h3>
+            <h3 className="text-lg font-bold text-primary mb-4 border-b pb-2">{language === 'en' ? 'Transaction Summary' : 'Buod ng Transaksyon'}</h3>
             <div className="space-y-4">
-              <div className="flex justify-between items-center"><span className="text-gray-700 font-medium">Reference Number:</span><span className="text-accent font-bold text-lg">{payment?.ref_number || refNumber}</span></div>
-              <div className="flex justify-between items-center"><span className="text-gray-700 font-medium">WARDS Transaction Number:</span><span className="text-gray-900 font-semibold">{payment?.transaction_id || 'Pending assignment'}</span></div>
-              <div className="flex justify-between items-center"><span className="text-gray-700 font-medium">Taxpayer Name:</span><span className="text-gray-900 font-semibold">{payment?.taxpayer_name || 'Processing'}</span></div>
-              <div className="flex justify-between items-center"><span className="text-gray-700 font-medium">Tax Type:</span><span className="text-gray-900 font-semibold">{payment?.tax_type || 'Processing'}</span></div>
-              <div className="flex justify-between items-center"><span className="text-gray-700 font-medium">Payment Method:</span><span className="text-gray-900 font-semibold capitalize">{payment?.payment_method || 'Processing'}</span></div>
-              <div className="flex justify-between items-center"><span className="text-gray-700 font-medium">Branch:</span><span className="text-gray-900 font-semibold">{payment?.branch || 'Processing'}</span></div>
-              <div className="flex justify-between items-center"><span className="text-gray-700 font-medium">Payment Timestamp:</span><span className="text-gray-900 font-semibold">{formatTimestamp(payment?.verified_at || payment?.created_at)}</span></div>
-              <div className="flex justify-between items-center pt-3 border-t"><span className="text-gray-700 font-medium text-lg">Total Amount</span><span className="text-3xl font-bold text-primary">{formatCurrency(payment?.amount)}</span></div>
-              <div className="flex justify-between items-center"><span className="text-gray-700 font-medium">Current Stage</span><span className="px-4 py-2 rounded-full text-sm font-bold shadow-md bg-blue-600 text-white">{stageLabel}</span></div>
+              <div className="flex justify-between items-center"><span className="text-gray-700 font-medium">{language === 'en' ? 'Reference Number:' : 'Numero ng Sanggunian:'}</span><span className="text-accent font-bold text-lg">{payment?.ref_number || refNumber}</span></div>
+              <div className="flex justify-between items-center"><span className="text-gray-700 font-medium">{language === 'en' ? 'WARDS Transaction Number:' : 'Numero ng Transaksyon ng WARDS:'}</span><span className="text-gray-900 font-semibold">{payment?.transaction_id || (language === 'en' ? 'Pending assignment' : 'Nakabinbin pa')}</span></div>
+              <div className="flex justify-between items-center"><span className="text-gray-700 font-medium">{language === 'en' ? 'Taxpayer Name:' : 'Pangalan ng Nagbabayad:'}</span><span className="text-gray-900 font-semibold">{payment?.taxpayer_name || (language === 'en' ? 'Processing' : 'Pinoproseso')}</span></div>
+              <div className="flex justify-between items-center"><span className="text-gray-700 font-medium">{language === 'en' ? 'Tax Type:' : 'Uri ng Buwis:'}</span><span className="text-gray-900 font-semibold">{payment?.tax_type || (language === 'en' ? 'Processing' : 'Pinoproseso')}</span></div>
+              <div className="flex justify-between items-center"><span className="text-gray-700 font-medium">{language === 'en' ? 'Payment Method:' : 'Paraan ng Pagbayad:'}</span><span className="text-gray-900 font-semibold capitalize">{payment?.payment_method || (language === 'en' ? 'Processing' : 'Pinoproseso')}</span></div>
+              <div className="flex justify-between items-center"><span className="text-gray-700 font-medium">{language === 'en' ? 'Branch:' : 'Sangay:'}</span><span className="text-gray-900 font-semibold">{payment?.branch || (language === 'en' ? 'Processing' : 'Pinoproseso')}</span></div>
+              <div className="flex justify-between items-center"><span className="text-gray-700 font-medium">{language === 'en' ? 'Payment Timestamp:' : 'Oras ng Bayad:'}</span><span className="text-gray-900 font-semibold">{formatTimestamp(payment?.verified_at || payment?.created_at)}</span></div>
+              <div className="flex justify-between items-center pt-3 border-t"><span className="text-gray-700 font-medium text-lg">{language === 'en' ? 'Total Amount' : 'Kabuuang Halaga'}</span><span className="text-3xl font-bold text-primary">{formatCurrency(payment?.amount)}</span></div>
+              <div className="flex justify-between items-center"><span className="text-gray-700 font-medium">{language === 'en' ? 'Current Stage' : 'Kasalukuyang Yugto'}</span><span className="px-4 py-2 rounded-full text-sm font-bold shadow-md bg-blue-600 text-white">{stageLabel}</span></div>
               {isRptPayment && payment?.metadata?.cart_items?.length ? (
                 <div className="pt-3 border-t">
-                  <p className="text-gray-700 font-medium mb-3">RPT Cart Entries</p>
+                  <p className="text-gray-700 font-medium mb-3">{language === 'en' ? 'RPT Cart Entries' : 'Mga Nasa Cart na RPT'}</p>
                   <div className="space-y-3">
                     {payment.metadata.cart_items.map((item) => (
                       <div key={item.tdn} className="rounded-xl bg-white border border-slate-200 px-4 py-3">
@@ -371,7 +398,7 @@ const PaymentStatus = () => {
                             <p className="font-semibold text-slate-900">{item.tdn}</p>
                             <p className="text-sm text-slate-600">{item.property_address}</p>
                             <p className="text-sm text-slate-600">
-                              Payment Mode: {item.payment_option ? item.payment_option.charAt(0).toUpperCase() + item.payment_option.slice(1) : 'Full'}
+                              {language === 'en' ? 'Payment Mode:' : 'Paraan ng Bayad:'} {item.payment_option ? item.payment_option.charAt(0).toUpperCase() + item.payment_option.slice(1) : (language === 'en' ? 'Full' : 'Buong Bayad')}
                               {item.bill_coverage ? ` • ${item.bill_coverage}` : ''}
                             </p>
                           </div>
@@ -384,12 +411,12 @@ const PaymentStatus = () => {
               ) : null}
               {isBusinessTaxPayment ? (
                 <div className="pt-3 border-t">
-                  <p className="text-gray-700 font-medium mb-3">Business Tax Record</p>
+                  <p className="text-gray-700 font-medium mb-3">{language === 'en' ? 'Business Tax Record' : 'Rekord ng Business Tax'}</p>
                   <div className="rounded-xl bg-white border border-slate-200 px-4 py-3 space-y-1">
-                    <p className="font-semibold text-slate-900">{payment?.metadata?.business_name || 'Business Tax Application'}</p>
-                    <p className="text-sm text-slate-600">Mayor&apos;s Permit Number: {payment?.metadata?.mayor_permit_number || payment?.property_ref_number || 'N/A'}</p>
-                    <p className="text-sm text-slate-600">SEC/DTI/CDA Number: {payment?.metadata?.sec_dti_cda_number || 'N/A'}</p>
-                    <p className="text-sm text-slate-600">Owner: {payment?.metadata?.owner_name || payment?.taxpayer_name || 'N/A'}</p>
+                    <p className="font-semibold text-slate-900">{payment?.metadata?.business_name || (language === 'en' ? 'Business Tax Application' : 'Aplikasyon sa Business Tax')}</p>
+                    <p className="text-sm text-slate-600">{language === 'en' ? 'Mayor&apos;s Permit Number:' : 'Numero ng Mayor&apos;s Permit:'} {payment?.metadata?.mayor_permit_number || payment?.property_ref_number || 'N/A'}</p>
+                    <p className="text-sm text-slate-600">{language === 'en' ? 'SEC/DTI/CDA Number:' : 'Numero ng SEC/DTI/CDA:'} {payment?.metadata?.sec_dti_cda_number || 'N/A'}</p>
+                    <p className="text-sm text-slate-600">{language === 'en' ? 'Owner:' : 'May-ari:'} {payment?.metadata?.owner_name || payment?.taxpayer_name || 'N/A'}</p>
                   </div>
                 </div>
               ) : null}
@@ -411,9 +438,13 @@ const PaymentStatus = () => {
               </svg>
             </button>
 
-            <p className="text-sm font-semibold uppercase tracking-[0.14em] text-[#0f5b83]">Instructions</p>
+            <p className="text-sm font-semibold uppercase tracking-[0.14em] text-[#0f5b83]">
+              {language === 'en' ? 'Instructions' : 'Mga Tagubilin'}
+            </p>
             <h3 className="mt-2 text-2xl font-bold text-slate-900 sm:text-3xl">
-              {isBusinessTaxPayment ? 'Online Payment of Business Tax' : 'Online Payment of Real Property Tax'}
+              {isBusinessTaxPayment
+                ? (language === 'en' ? 'Online Payment of Business Tax' : 'Online na Bayad ng Business Tax')
+                : (language === 'en' ? 'Online Payment of Real Property Tax' : 'Online na Bayad ng Real Property Tax')}
             </h3>
 
             <div className="mx-auto mt-10 flex h-28 w-28 items-center justify-center rounded-[28px] bg-[#0f5b83] text-white">
@@ -425,13 +456,19 @@ const PaymentStatus = () => {
 
             <div className="mt-10 space-y-6 text-lg leading-9 text-slate-800">
               <p>
-                Your payment was completed through a third-party payment provider. WARDS has received the PayMongo transaction result and recorded your payment for treasury-assisted validation.
+                {language === 'en'
+                  ? 'Your payment was completed through a third-party payment provider. WARDS has received the PayMongo transaction result and recorded your payment for treasury-assisted validation.'
+                  : 'Nakumpleto ang iyong bayad sa pamamagitan ng third-party payment provider. Natanggap ng WARDS ang resulta ng PayMongo transaction at naitala ang iyong bayad para sa treasury-assisted validation.'}
               </p>
               <p>
-                Please review the transaction details below. If payment proof is still required for your branch workflow, upload it in the <span className="font-semibold">Upload Payment Proof</span> section before waiting for branch treasury validation and Official Receipt processing.
+                {language === 'en'
+                  ? <>Please review the transaction details below. If payment proof is still required for your branch workflow, upload it in the <span className="font-semibold">Upload Payment Proof</span> section before waiting for branch treasury validation and Official Receipt processing.</>
+                  : <>Pakisuri ang mga detalye ng transaksyon sa ibaba. Kung kailangan pa ng payment proof para sa workflow ng inyong sangay, i-upload ito sa seksyong <span className="font-semibold">I-upload ang Patunay ng Bayad</span> bago maghintay sa branch treasury validation at pagproseso ng Official Receipt.</>}
               </p>
               <p>
-                If you have any concerns, please contact us via{' '}
+                {language === 'en'
+                  ? <>If you have any concerns, please contact us via{' '} </>
+                  : <>Kung may alalahanin ka, mangyaring makipag-ugnayan sa amin sa pamamagitan ng{' '} </>}
                 <a href="mailto:rptpayment@quezoncity.gov.ph" className="font-semibold text-[#0f5b83] underline underline-offset-4">
                   rptpayment@quezoncity.gov.ph
                 </a>.
@@ -443,7 +480,7 @@ const PaymentStatus = () => {
               onClick={() => setShowPostPaymentInstructions(false)}
               className="mt-8 w-full rounded-full bg-[#0f5b83] px-6 py-4 text-sm font-bold uppercase tracking-[0.12em] text-white transition hover:bg-[#0c4d6f]"
             >
-              Continue
+              {language === 'en' ? 'Continue' : 'Magpatuloy'}
             </button>
           </div>
         </div>
@@ -452,17 +489,21 @@ const PaymentStatus = () => {
       {(isRptPayment || isBusinessTaxPayment) && (
         <div className="mt-8 space-y-6">
               <div className="rounded-xl border border-blue-200 bg-blue-50 px-5 py-4">
-                <p className="font-semibold text-blue-900 mb-1">Branch Treasury Validation Queue</p>
+                <p className="font-semibold text-blue-900 mb-1">{language === 'en' ? 'Branch Treasury Validation Queue' : 'Nakahintong Beripikasyon ng Branch Treasury'}</p>
                 <p className="text-blue-800 text-sm">
-                  After PayMongo payment, this transaction is routed to the selected branch treasury office for validation. Official Receipt authorization remains with the branch treasury personnel.
+                  {language === 'en'
+                    ? 'After PayMongo payment, this transaction is routed to the selected branch treasury office for validation. Official Receipt authorization remains with the branch treasury personnel.'
+                    : 'Pagkatapos ng PayMongo payment, ang transaksyong ito ay inilalagay sa napiling branch treasury office para sa beripikasyon. Nananatili sa branch treasury personnel ang awtorisasyon para sa Official Receipt.'}
                 </p>
               </div>
 
               {shouldShowProofUpload && (
                 <div className="rounded-xl border border-slate-200 bg-white px-6 py-5">
-                  <h3 className="text-lg font-bold text-slate-900 mb-3">Upload Payment Proof</h3>
+                  <h3 className="text-lg font-bold text-slate-900 mb-3">{language === 'en' ? 'Upload Payment Proof' : 'I-upload ang Patunay ng Bayad'}</h3>
                   <p className="text-sm text-slate-600 mb-4">
-                    Upload a payment proof document in PDF, DOC, or DOCX format. Maximum file size is 5MB.
+                    {language === 'en'
+                      ? 'Upload a payment proof document in PDF, DOC, or DOCX format. Maximum file size is 5MB.'
+                      : 'Mag-upload ng dokumento ng patunay ng bayad sa format na PDF, DOC, o DOCX. Ang maximum na laki ng file ay 5MB.'}
                   </p>
                   <input
                     type="file"
@@ -476,7 +517,7 @@ const PaymentStatus = () => {
                     disabled={!selectedProofFile || uploadingProof}
                     className="mt-4 bg-accent hover:bg-blue-600 text-white px-5 py-3 rounded-lg font-semibold transition disabled:opacity-50"
                   >
-                    {uploadingProof ? 'Uploading...' : 'Submit Payment Proof'}
+                    {uploadingProof ? (language === 'en' ? 'Uploading...' : 'Ina-upload...') : (language === 'en' ? 'Submit Payment Proof' : 'Isumite ang Patunay ng Bayad')}
                   </button>
                   {uploadMessage && <p className="mt-3 text-sm text-slate-700">{uploadMessage}</p>}
                 </div>
@@ -484,25 +525,29 @@ const PaymentStatus = () => {
 
               {payment?.has_payment_proof && (
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4">
-                  <p className="font-semibold text-emerald-900">Payment proof uploaded</p>
+                  <p className="font-semibold text-emerald-900">{language === 'en' ? 'Payment proof uploaded' : 'Na-upload na ang patunay ng bayad'}</p>
                   <p className="text-sm text-emerald-800">
-                    Uploaded on {formatTimestamp(payment.proof_uploaded_at)} as {payment.proof_file_name}.
+                    {language === 'en'
+                      ? <>Uploaded on {formatTimestamp(payment.proof_uploaded_at)} as {payment.proof_file_name}.</>
+                      : <>Na-upload noong {formatTimestamp(payment.proof_uploaded_at)} bilang {payment.proof_file_name}.</>}
                   </p>
                 </div>
               )}
 
               {payment?.treasury_remarks && (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-4">
-                  <p className="font-semibold text-amber-900">Treasury Remarks</p>
+                  <p className="font-semibold text-amber-900">{language === 'en' ? 'Treasury Remarks' : 'Mga Komento ng Treasury'}</p>
                   <p className="text-sm text-amber-800">{payment.treasury_remarks}</p>
                 </div>
               )}
 
               {rawStatus === 'PAYMENT_VERIFIED' && (
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4">
-                  <p className="font-semibold text-emerald-900">Payment Approved by Treasury</p>
+                  <p className="font-semibold text-emerald-900">{language === 'en' ? 'Payment Approved by Treasury' : 'Naaprubahan ang Bayad ng Treasury'}</p>
                   <p className="text-sm text-emerald-800">
-                    Branch treasury personnel have verified your payment. Official Receipt generation or release updates will appear here when available.
+                    {language === 'en'
+                      ? 'Branch treasury personnel have verified your payment. Official Receipt generation or release updates will appear here when available.'
+                      : 'Na-verify na ng branch treasury personnel ang iyong bayad. Ang pagbuo o paglabas ng Official Receipt ay lalabas dito kapag available na.'}
                   </p>
                 </div>
               )}
@@ -513,7 +558,7 @@ const PaymentStatus = () => {
                   rel="noreferrer"
                   className="inline-flex rounded-lg bg-emerald-600 px-5 py-3 text-sm font-semibold text-white"
                 >
-                  Download Official Receipt
+                  {language === 'en' ? 'Download Official Receipt' : 'I-download ang Official Receipt'}
                 </a>
               ) : null}
             </div>
@@ -529,7 +574,7 @@ const PaymentStatus = () => {
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
-              {downloadingReceipt ? 'Preparing PDF...' : 'Download E-Receipt'}
+              {downloadingReceipt ? (language === 'en' ? 'Preparing PDF...' : 'Ihahanda ang PDF...') : (language === 'en' ? 'Download E-Receipt' : 'I-download ang E-Resibo')}
             </button>
 
             {/* Secondary Actions Grid */}
@@ -537,19 +582,19 @@ const PaymentStatus = () => {
               <button
                 onClick={() => navigate(
                   isRptPayment
-                    ? `/pay-taxes/rpt${shouldResetRptWorkflowOnReturn ? '?reset=1' : ''}`
+                    ? appendLanguageParam(`/pay-taxes/rpt${shouldResetRptWorkflowOnReturn ? '?reset=1' : ''}`, language)
                     : isBusinessTaxPayment
-                      ? `/pay-taxes/bt/online${payment?.metadata?.tracking_number ? `?tracking=${encodeURIComponent(payment.metadata.tracking_number)}` : ''}`
+                      ? appendLanguageParam(`/pay-taxes/bt/online${payment?.metadata?.tracking_number ? `?tracking=${encodeURIComponent(payment.metadata.tracking_number)}` : ''}`, language)
                       : isReceiptRequestPayment
-                        ? '/request-receipt'
-                        : '/pay-taxes'
+                        ? appendLanguageParam('/request-receipt', language)
+                        : appendLanguageParam('/pay-taxes', language)
                 )}
                 className="w-full bg-accent hover:bg-blue-600 text-white py-3 rounded-lg font-semibold transition-all duration-300 shadow-md hover:shadow-lg flex items-center justify-center gap-2"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
-                Return to Payment Page
+                {language === 'en' ? 'Return to Payment Page' : 'Bumalik sa Pahina ng Bayad'}
               </button>
               <button
                 onClick={() => navigate('/')}
@@ -558,14 +603,14 @@ const PaymentStatus = () => {
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
                 </svg>
-                Return to Home
+                {language === 'en' ? 'Return to Home' : 'Bumalik sa Home'}
               </button>
             </div>
 
             {/* Tertiary Actions - Receipt-specific */}
             {(isQueueLinkedReceiptPayment || isStandaloneReceiptPayment) && (
               <div className="pt-4 border-t border-gray-200">
-                <p className="text-sm text-gray-600 mb-3 text-center font-medium">Additional Options</p>
+                <p className="text-sm text-gray-600 mb-3 text-center font-medium">{language === 'en' ? 'Additional Options' : 'Mga Karagdagang Opsyon'}</p>
                 <div className="flex flex-col sm:flex-row gap-3 justify-center">
                   {isQueueLinkedReceiptPayment && (
                     <button
@@ -576,19 +621,19 @@ const PaymentStatus = () => {
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" />
                       </svg>
-                      View My Ticket
+                      {language === 'en' ? 'View My Ticket' : 'Tingnan ang Aking Ticket'}
                     </button>
                   )}
                   {isStandaloneReceiptPayment && (
                     <button
                       type="button"
-                      onClick={() => navigate('/request-receipt?new=1')}
+                      onClick={() => navigate(appendLanguageParam('/request-receipt?new=1', language))}
                       className="w-full sm:w-auto bg-gray-100 hover:bg-gray-200 text-gray-700 px-5 py-2.5 rounded-lg font-semibold transition flex items-center justify-center gap-2"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                       </svg>
-                      Request Another Copy
+                      {language === 'en' ? 'Request Another Copy' : 'Humiling ng Panibagong Kopya'}
                     </button>
                   )}
                 </div>

@@ -6,6 +6,7 @@ import { paymentAPI, receiptAPI } from '../../services/api';
 import PaymentGatewayExperience from '../../components/PaymentGatewayExperience';
 import { getStoredPublicUser, PUBLIC_USER_STORAGE_EVENT } from '../../utils/publicSession';
 import { getEmailValidationMessage } from '../../utils/validation';
+import { appendLanguageParam, usePublicLanguage } from '../../utils/publicLanguage';
 
 const DEFAULT_DISABLED_MESSAGE = 'This service is currently unavailable because it has been disabled by system administration.';
 const ACTIVE_RECEIPT_REQUEST_STORAGE_KEY_PREFIX = 'activeReceiptRequestId';
@@ -37,6 +38,7 @@ const RequestReceipt = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [storedUser, setStoredUser] = useState(() => getStoredPublicUser());
+  const [language] = usePublicLanguage();
   const authenticatedProfileName = (storedUser?.full_name || '').trim();
   const [branches, setBranches] = useState([]);
   const [requestStatus, setRequestStatus] = useState(null);
@@ -301,7 +303,10 @@ const RequestReceipt = () => {
       });
 
       if (paymentResponse.data.checkoutUrl) {
-        const paymentStatusPath = `/payment/status?ref=${encodeURIComponent(paymentResponse.data.refNumber || initiateResponse.data.paymentRefNumber)}&receiptFlow=standalone`;
+        const paymentStatusPath = appendLanguageParam(
+          `/payment/status?ref=${encodeURIComponent(paymentResponse.data.refNumber || initiateResponse.data.paymentRefNumber)}&receiptFlow=standalone`,
+          language
+        );
         if (checkoutWindow && !checkoutWindow.closed) {
           checkoutWindow.location.replace(paymentResponse.data.checkoutUrl);
           navigate(paymentStatusPath);
@@ -571,7 +576,8 @@ const RequestReceipt = () => {
                             onContinue={(details) => handlePayFee(null, details)}
                             processing={paying}
                             referenceNumber={requestStatus.requestId}
-                            title="Request Fee Checkout"
+                            title={language === 'en' ? 'Request Fee Checkout' : 'Checkout ng Bayad sa Request'}
+                            language={language}
                           />
                         </div>
                       </div>

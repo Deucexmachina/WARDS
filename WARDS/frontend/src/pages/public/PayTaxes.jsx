@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { usePublicLanguage } from '../../utils/publicLanguage';
 
 const TAX_SERVICES = [
   {
@@ -38,8 +38,6 @@ const TAX_SERVICES = [
   },
 ];
 
-const PAY_TAXES_LANGUAGE_STORAGE_KEY = 'wards-pay-taxes-language';
-
 const PAGE_TEXT = {
   en: {
     eyebrow: "City Treasurer's Office",
@@ -65,11 +63,7 @@ const PAGE_TEXT = {
 
 const PayTaxes = () => {
   const navigate = useNavigate();
-  const [language, setLanguage] = useState(() => sessionStorage.getItem(PAY_TAXES_LANGUAGE_STORAGE_KEY) || 'en');
-
-  useEffect(() => {
-    sessionStorage.setItem(PAY_TAXES_LANGUAGE_STORAGE_KEY, language);
-  }, [language]);
+  const [language] = usePublicLanguage();
 
   const text = PAGE_TEXT[language] || PAGE_TEXT.en;
 
@@ -85,14 +79,6 @@ const PayTaxes = () => {
                 className="inline-flex w-full items-center justify-center rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/20 sm:w-auto"
               >
                 {text.backHome}
-              </button>
-              <button
-                type="button"
-                onClick={() => setLanguage((current) => (current === 'en' ? 'tl' : 'en'))}
-                className="inline-flex w-full items-center justify-center rounded-full bg-white px-4 py-2 text-sm font-semibold text-[#0f2f5f] transition hover:bg-blue-50 sm:w-auto"
-                aria-label={text.languageButtonAria}
-              >
-                {text.languageButton}
               </button>
             </div>
             <p className="text-xs font-semibold uppercase tracking-[0.32em] text-blue-100">{text.eyebrow}</p>

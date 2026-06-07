@@ -5,6 +5,7 @@ import ActionConfirmationModal from './ActionConfirmationModal';
 import api from '../services/api';
 import { clearSession } from '../utils/auth';
 import { clearStoredPublicUser, getStoredPublicUser, PUBLIC_USER_STORAGE_EVENT } from '../utils/publicSession';
+import { usePublicLanguage } from '../utils/publicLanguage';
 
 const hasPublicSession = () =>
   Boolean(
@@ -15,7 +16,7 @@ const hasPublicSession = () =>
   );
 
 const Navbar = () => {
-  const [language, setLanguage] = useState('English');
+  const [language, setLanguage] = usePublicLanguage();
   const [publicUser, setPublicUser] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -23,10 +24,6 @@ const Navbar = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const displayPublicUser = publicUser || getStoredPublicUser();
-
-  const toggleLanguage = () => {
-    setLanguage(language === 'English' ? 'Tagalog' : 'English');
-  };
 
   useEffect(() => {
     const syncPublicUser = () => {
@@ -107,10 +104,10 @@ const Navbar = () => {
           
           <div className="flex items-center space-x-4">
             <button
-              onClick={toggleLanguage}
+              onClick={() => setLanguage((current) => (current === 'en' ? 'tl' : 'en'))}
               className="bg-accent hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition duration-300 text-sm font-medium"
             >
-              {language}
+              {language === 'en' ? 'English' : 'Tagalog'}
             </button>
             {isTaxpayerLoggedIn ? (
               <div className="flex items-center space-x-3">

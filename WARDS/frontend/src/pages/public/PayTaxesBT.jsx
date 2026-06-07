@@ -4,6 +4,7 @@ import PaymentGatewayExperience from '../../components/PaymentGatewayExperience'
 import { paymentAPI, taxpayerAccountAPI } from '../../services/api';
 import { getStoredPublicUser } from '../../utils/publicSession';
 import { formatTin } from '../../utils/validation';
+import { appendLanguageParam, usePublicLanguage } from '../../utils/publicLanguage';
 
 const API_ORIGIN = 'http://localhost:8000';
 const SEARCH_OPTIONS = [
@@ -36,6 +37,7 @@ const PayTaxesBT = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const publicUser = getStoredPublicUser();
+  const [language] = usePublicLanguage();
 
   const [loading, setLoading] = useState(true);
   const [submittingValidation, setSubmittingValidation] = useState(false);
@@ -302,7 +304,7 @@ const PayTaxesBT = () => {
 
       if (response.data?.checkoutUrl) {
         window.open(response.data.checkoutUrl, 'wardsBusinessTaxCheckout');
-        navigate(`/payment/status?ref=${encodeURIComponent(selectedApplication.payment_ref_number)}`);
+        navigate(appendLanguageParam(`/payment/status?ref=${encodeURIComponent(selectedApplication.payment_ref_number)}`, language));
       }
     } catch (paymentError) {
       setError(paymentError.response?.data?.detail || 'Failed to open PayMongo checkout for Business Tax.');
@@ -647,7 +649,8 @@ const PayTaxesBT = () => {
                             onContinue={selectedApplication.payment_ref_number ? handleProceedToPayment : handleGenerateReference}
                             processing={generatingReference || processingPayment}
                             referenceNumber={selectedApplication.payment_ref_number}
-                            title="Business Tax Checkout"
+                            title={language === 'en' ? 'Business Tax Checkout' : 'Checkout ng Business Tax'}
+                            language={language}
                           />
                         </div>
                       </div>

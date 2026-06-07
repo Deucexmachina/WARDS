@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import axios from 'axios';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import ReCAPTCHA from 'react-google-recaptcha';
@@ -6,10 +6,10 @@ import PaymentGatewayExperience from '../../components/PaymentGatewayExperience'
 import { paymentAPI, taxpayerAccountAPI } from '../../services/api';
 import { getStoredPublicUser } from '../../utils/publicSession';
 import { getEmailValidationMessage } from '../../utils/validation';
+import { appendLanguageParam, usePublicLanguage } from '../../utils/publicLanguage';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 const RECAPTCHA_SITE_KEY = '6LdOdsAsAAAAAKW-mZvEfaesLvdAwCm_SnZoiirK';
-const RPT_LANGUAGE_STORAGE_KEY = 'wards-rpt-language';
 const RPT_SEARCH_GUARD_STORAGE_KEY = 'wards-rpt-search-guard';
 const RPT_FAILED_SEARCH_THRESHOLD = 3;
 const RPT_LOCKOUT_DURATION_MS = 120 * 1000;
@@ -268,9 +268,9 @@ const OutlineCard = ({ title, children, className = '' }) => (
 );
 
 const DetailStat = ({ label, value, tone = 'default' }) => (
-  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">{label}</p>
-    <p className={`mt-2 text-sm font-semibold ${tone === 'success' ? 'text-emerald-700' : tone === 'primary' ? 'text-[#0f5b83]' : 'text-slate-900'}`}>{value}</p>
+  <div className="flex h-full min-h-[96px] flex-col rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+    <p className="min-h-[2.5rem] text-[11px] font-semibold uppercase leading-5 tracking-[0.16em] text-slate-400">{label}</p>
+    <p className={`mt-auto pt-2 text-sm font-semibold ${tone === 'success' ? 'text-emerald-700' : tone === 'primary' ? 'text-[#0f5b83]' : 'text-slate-900'}`}>{value}</p>
   </div>
 );
 
@@ -302,7 +302,7 @@ const PayTaxesRPT = () => {
   const transactionSummaryRef = useRef(null);
   const recaptchaRef = useRef(null);
   const publicUser = getStoredPublicUser();
-  const [language, setLanguage] = useState(() => sessionStorage.getItem(RPT_LANGUAGE_STORAGE_KEY) || 'en');
+  const [language] = usePublicLanguage();
   const [branches, setBranches] = useState([]);
   const [systemStatus, setSystemStatus] = useState(null);
   const [loadingPage, setLoadingPage] = useState(true);
@@ -348,10 +348,6 @@ const PayTaxesRPT = () => {
   const [recaptchaToken, setRecaptchaToken] = useState('');
   const [lockoutUntil, setLockoutUntil] = useState(() => getStoredSearchLockoutUntil());
   const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    sessionStorage.setItem(RPT_LANGUAGE_STORAGE_KEY, language);
-  }, [language]);
 
   useEffect(() => {
     sessionStorage.setItem(`${RPT_SEARCH_GUARD_STORAGE_KEY}:failed`, String(failedSearchAttempts));
@@ -789,7 +785,7 @@ const PayTaxesRPT = () => {
         } else {
           window.location.href = response.data.checkoutUrl;
         }
-        navigate(`/payment/status?ref=${encodeURIComponent(response.data.refNumber || paymentReference.refNumber)}`);
+        navigate(appendLanguageParam(`/payment/status?ref=${encodeURIComponent(response.data.refNumber || paymentReference.refNumber)}`, language));
         return;
       }
 
@@ -883,42 +879,32 @@ const PayTaxesRPT = () => {
     <section className="min-h-screen bg-[#f7f9fc] pb-20 pt-10">
       <div className="mx-auto max-w-[1240px] px-4 sm:px-6 lg:px-8">
         <div className="mb-5 grid gap-3 lg:grid-cols-[auto_auto_auto_1fr_auto] lg:items-center">
-          <button
-            type="button"
-            onClick={() => navigate('/pay-taxes')}
-            className="rounded-full border border-slate-300 bg-white px-6 py-3 text-sm font-bold text-slate-700 transition hover:border-[#0f5b83] hover:text-[#0f5b83]"
-          >
-            {text.backToServiceChooser}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setGuideIndex(0);
-              setGuideOpen(true);
-            }}
-            className="rounded-full bg-[#df3b39] px-6 py-3 text-sm font-bold text-white shadow-[0_10px_25px_rgba(223,59,57,0.28)] transition hover:bg-[#c6312f]"
-          >
-            {text.guideButton}
-          </button>
-          <button
-            type="button"
-            onClick={() => setLanguage((current) => (current === 'en' ? 'tl' : 'en'))}
-            className="rounded-full bg-[#0f5b83] px-6 py-3 text-sm font-bold text-white transition hover:bg-[#0c4d6f]"
-          >
-            {text.languageButton}
-          </button>
-          {hasResolvedSearchState && !paymentDetailsOpen ? (
+          {!hasResolvedSearchState ? (
             <button
               type="button"
-              onClick={scrollToTransactionSummary}
-              disabled={!hasStartedCheckoutFlow}
-              className="rounded-full bg-[#0f5b83] px-6 py-3 text-sm font-bold text-white transition hover:bg-[#0c4d6f] disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={() => navigate('/pay-taxes')}
+              className="rounded-full border border-slate-300 bg-white px-6 py-3 text-sm font-bold text-slate-700 transition hover:border-[#0f5b83] hover:text-[#0f5b83]"
             >
-              {text.goToSummary}
+              {text.backToServiceChooser}
             </button>
           ) : (
             <div />
           )}
+          {!hasResolvedSearchState ? (
+            <button
+              type="button"
+              onClick={() => {
+                setGuideIndex(0);
+                setGuideOpen(true);
+              }}
+              className="rounded-full bg-[#df3b39] px-6 py-3 text-sm font-bold text-white shadow-[0_10px_25px_rgba(223,59,57,0.28)] transition hover:bg-[#c6312f]"
+            >
+              {text.guideButton}
+            </button>
+          ) : (
+            <div />
+          )}
+          <div />
           <div />
           {hasResolvedSearchState && !paymentDetailsOpen ? (
             <button
@@ -977,7 +963,7 @@ const PayTaxesRPT = () => {
                     </div>
                     <button
                       type="button"
-                      onClick={() => navigate(`/payment/status?ref=${encodeURIComponent(activePendingPayment.ref_number)}`)}
+                      onClick={() => navigate(appendLanguageParam(`/payment/status?ref=${encodeURIComponent(activePendingPayment.ref_number)}`, language))}
                       className="rounded-full bg-[#0f5b83] px-6 py-3 text-sm font-bold uppercase tracking-[0.12em] text-white transition hover:bg-[#0c4d6f]"
                     >
                       {text.pendingButton}
@@ -1131,7 +1117,7 @@ const PayTaxesRPT = () => {
                   </div>
 
                   {!showPaymentOptionStage ? (
-                    <OutlineCard title={language === 'en' ? 'Possible properties you might own' : 'Mga posibleng property na sa iyo'}>
+                    <OutlineCard title={language === 'en' ? 'Possible properties you might own' : 'Mga posibleng property na Pagmamay-ari mo'}>
                       <div className="overflow-hidden rounded-[24px] border border-slate-200">
                         <div className="overflow-x-auto">
                           <table className="min-w-full divide-y divide-slate-200 text-sm">
@@ -1328,7 +1314,7 @@ const PayTaxesRPT = () => {
                             <DetailStat label={language === 'en' ? 'Amount Due' : 'Halagang Dapat Bayaran'} value={formatCurrency(cartItems.reduce((sum, item) => sum + Number(item.basic_tax_due || 0) + Number(item.sef_tax || 0), 0))} />
                             <DetailStat label={language === 'en' ? 'SHTTC Applied' : 'Inilapat na SHTTC'} value={formatCurrency(0)} />
                             <DetailStat label={language === 'en' ? 'Discount' : 'Diskwento'} value={formatCurrency(cartItems.reduce((sum, item) => sum + Number(item.discounts || 0), 0))} tone="success" />
-                            <DetailStat label={language === 'en' ? 'Penalty Fee' : 'Bayad sa Parusa'} value={formatCurrency(cartItems.reduce((sum, item) => sum + Number(item.penalties || 0), 0))} />
+                            <DetailStat label={language === 'en' ? 'Penalty Fee' : 'Penalty Fee'} value={formatCurrency(cartItems.reduce((sum, item) => sum + Number(item.penalties || 0), 0))} />
                             <DetailStat label={language === 'en' ? 'Total' : 'Kabuuan'} value={formatCurrency(cartTotal)} tone="primary" />
                           </div>
                         </div>
@@ -1396,12 +1382,6 @@ const PayTaxesRPT = () => {
                       </button>
                     </div>
 
-                    <div className="rounded-[26px] bg-gradient-to-r from-[#0f5b83] to-[#1b6f9d] px-6 py-6 text-white shadow-[0_18px_36px_rgba(15,91,131,0.18)]">
-                      <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-100">{language === 'en' ? 'Amount to Pay' : 'Halagang Babayaran'}</p>
-                      <p className="mt-3 text-4xl font-bold">{formatCurrency(cartTotal)}</p>
-                      <p className="mt-2 max-w-xl text-sm text-blue-100">{language === 'en' ? 'The total is system-computed from the selected RPT entries and is read-only.' : 'Ang kabuuan ay awtomatikong kinukwenta mula sa napiling RPT entries at read-only ito.'}</p>
-                    </div>
-
                     <PaymentGatewayExperience
                       amount={cartTotal}
                       bankCode={selectedBank}
@@ -1425,7 +1405,8 @@ const PayTaxesRPT = () => {
                       onContinue={handleGenerateReference}
                       processing={generatingReference}
                       referenceNumber={paymentReference?.refNumber}
-                      title="RPT Payment Checkout"
+                      title={language === 'en' ? 'RPT Payment Checkout' : 'Checkout ng RPT Payment'}
+                      language={language}
                     />
 
                     <div className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-700">
@@ -1620,7 +1601,7 @@ const PayTaxesRPT = () => {
                 <div className="mt-5 space-y-2 text-sm text-slate-600">
                   <div className="flex justify-between gap-4"><span>{language === 'en' ? 'Amount Due' : 'Halagang Dapat Bayaran'}</span><span>{formatCurrency((Number(searchedProperty.basic_tax_due || 0) + Number(searchedProperty.sef_tax || 0)) / 4)}</span></div>
                   <div className="flex justify-between gap-4"><span>{language === 'en' ? 'Discount' : 'Diskwento'}</span><span>-{formatCurrency(searchedProperty.discounts)}</span></div>
-                  <div className="flex justify-between gap-4"><span>{language === 'en' ? 'Penalty Fee' : 'Bayad sa Parusa'}</span><span>{formatCurrency(searchedProperty.penalties)}</span></div>
+                  <div className="flex justify-between gap-4"><span>{language === 'en' ? 'Penalty Fee' : 'Penalty Fee'}</span><span>{formatCurrency(searchedProperty.penalties)}</span></div>
                   <div className="flex justify-between gap-4 border-t border-slate-200 pt-3 text-base font-bold text-slate-900">
                     <span>{language === 'en' ? 'Total' : 'Kabuuan'}</span>
                     <span>{formatCurrency(getQuarterlyAmount(searchedProperty))}</span>
@@ -1641,7 +1622,7 @@ const PayTaxesRPT = () => {
                 <div className="mt-5 space-y-2 text-sm text-slate-600">
                   <div className="flex justify-between gap-4"><span>{language === 'en' ? 'Amount Due' : 'Halagang Dapat Bayaran'}</span><span>{formatCurrency(Number(searchedProperty.basic_tax_due || 0) + Number(searchedProperty.sef_tax || 0))}</span></div>
                   <div className="flex justify-between gap-4"><span>{language === 'en' ? 'Discount' : 'Diskwento'}</span><span>-{formatCurrency(searchedProperty.discounts)}</span></div>
-                  <div className="flex justify-between gap-4"><span>{language === 'en' ? 'Penalty Fee' : 'Bayad sa Parusa'}</span><span>{formatCurrency(searchedProperty.penalties)}</span></div>
+                  <div className="flex justify-between gap-4"><span>{language === 'en' ? 'Penalty Fee' : 'Penalty Fee'}</span><span>{formatCurrency(searchedProperty.penalties)}</span></div>
                   <div className="flex justify-between gap-4 border-t border-slate-200 pt-3 text-base font-bold text-slate-900">
                     <span>{language === 'en' ? 'Total' : 'Kabuuan'}</span>
                     <span>{formatCurrency(searchedProperty.final_total_amount_due)}</span>

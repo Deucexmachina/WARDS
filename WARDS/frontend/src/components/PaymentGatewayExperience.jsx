@@ -2,14 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import creditCardLogo from '../assets/payment/credit-card-logo.png';
 import gcashLogo from '../assets/payment/gcash-logo.jpeg';
 import mayaLogo from '../assets/payment/maya-logo.jpeg';
+import { getPublicLanguage } from '../utils/publicLanguage';
 
 export const PAYMENT_METHOD_OPTIONS = [
   {
     id: 'gcash',
-    label: 'GCash',
+    label: { en: 'GCash', tl: 'GCash' },
     short: 'G',
     logo: gcashLogo,
-    description: 'Wallet authorization',
+    description: { en: 'Wallet authorization', tl: 'Wallet authorization' },
     accent: 'bg-[#0f2f5f]',
     border: 'border-[#0f2f5f]',
     soft: 'bg-[#f3f7fc]',
@@ -17,10 +18,10 @@ export const PAYMENT_METHOD_OPTIONS = [
   },
   {
     id: 'maya',
-    label: 'Maya',
+    label: { en: 'Maya', tl: 'Maya' },
     short: 'M',
     logo: mayaLogo,
-    description: 'Wallet authorization',
+    description: { en: 'Wallet authorization', tl: 'Wallet authorization' },
     accent: 'bg-[#0f2f5f]',
     border: 'border-[#0f2f5f]',
     soft: 'bg-[#f3f7fc]',
@@ -28,10 +29,10 @@ export const PAYMENT_METHOD_OPTIONS = [
   },
   {
     id: 'credit_card',
-    label: 'Credit Card',
+    label: { en: 'Credit Card', tl: 'Credit Card' },
     short: 'CC',
     logo: creditCardLogo,
-    description: 'Secure card checkout',
+    description: { en: 'Secure card checkout', tl: 'Secure card checkout' },
     accent: 'bg-[#0f2f5f]',
     border: 'border-[#0f2f5f]',
     soft: 'bg-[#f3f7fc]',
@@ -84,6 +85,7 @@ const PaymentGatewayExperience = ({
   className = '',
   customer = {},
   disabled = false,
+  language: languageProp,
   method = 'gcash',
   onContinue,
   onCustomerChange,
@@ -92,6 +94,57 @@ const PaymentGatewayExperience = ({
   referenceNumber,
   title = 'Payment Method',
 }) => {
+  const language = languageProp || getPublicLanguage();
+  const isTagalog = language === 'tl';
+  const copy = {
+    checkout: isTagalog ? 'WARDS Checkout' : 'WARDS Checkout',
+    amountToPay: isTagalog ? 'Halagang Babayaran' : 'Amount to Pay',
+    subtotal: isTagalog ? 'Subtotal' : 'Subtotal',
+    fees: 'Fees',
+    free: 'Free',
+    totalDueToday: isTagalog ? 'Kabuuang Dapat Bayaran' : 'Total due today',
+    selectedMethod: isTagalog ? 'Napiling Paraan' : 'Selected Method',
+    stepMethod: isTagalog ? 'Paraan' : 'Method',
+    stepDetails: isTagalog ? 'Detalye' : 'Details',
+    stepConfirm: isTagalog ? 'Kumpirmahin' : 'Confirm',
+    paymentMethod: 'Payment method',
+    reviewPayment: isTagalog ? 'Suriin ang Bayad' : 'Review Payment',
+    paymentDetails: isTagalog ? 'Mga Detalye ng Bayad' : 'Payment Details',
+    name: isTagalog ? 'Pangalan' : 'Name',
+    cardholderName: isTagalog ? 'Pangalan ng Cardholder' : 'Cardholder Name',
+    email: isTagalog ? 'Email' : 'Email',
+    mobileNumber: isTagalog ? 'Numero ng Mobile' : 'Mobile Number',
+    transactionSummary: isTagalog ? 'Buod ng Transaksyon' : 'Transaction Summary',
+    cardEntry: isTagalog ? 'Paglalagay ng Card' : 'Card Entry',
+    paymongoSecure: isTagalog ? 'Ligtas na checkout ng PayMongo' : 'PayMongo secure checkout',
+    afterConfirm:
+      isTagalog
+        ? 'Pagkatapos kumpirmahin, ipapadala ng WARDS ang transaksyon sa PayMongo para sa huling resulta: successful, failed, cancelled, o pending.'
+        : 'After confirming, WARDS will send the transaction to PayMongo for the final result: success, failed, cancelled, or pending.',
+    edit: isTagalog ? 'I-edit' : 'Edit',
+    confirmAndProcess: isTagalog ? 'Kumpirmahin at Iproseso' : 'Confirm And Process',
+    openingPaymongo: isTagalog ? 'Binubuksan ang PayMongo...' : 'Opening PayMongo...',
+    poweredBy: 'Powered by',
+    reference: isTagalog ? 'Sanggunian' : 'Reference',
+    detailsFor: isTagalog ? 'Mga detalye para sa' : 'details',
+    enterPayerDetails: (methodLabel) =>
+      isTagalog
+        ? `Ilagay ang mga detalye ng magbabayad para sa ${methodLabel}.`
+        : `Enter the payer details for ${methodLabel}.`,
+    finalNote:
+      isTagalog
+        ? 'Ilagay ang mga detalye ng magbabayad para sa Credit Card.'
+        : 'WARDS verifies payer details first. PayMongo securely collects the card number, expiry, and CVC on the final checkout page.',
+    errors: {
+      nameRequired: isTagalog ? 'Kinakailangan ang pangalan.' : 'Name is required.',
+      nameInvalid: isTagalog ? 'Tanging mga letra at espasyo lamang ang pinapayagan sa pangalan.' : 'Name must contain letters and spaces only.',
+      mobileRequired: isTagalog ? 'Kinakailangan ang mobile number.' : 'Mobile number is required.',
+      mobileInvalid: isTagalog ? 'Maglagay ng wastong Philippine mobile number.' : 'Enter a valid Philippine mobile number.',
+      emailRequired: isTagalog ? 'Kinakailangan ang email address.' : 'Email address is required.',
+      emailInvalid: isTagalog ? 'Maglagay ng wastong email address.' : 'Enter a valid email address.',
+    },
+  };
+
   const [step, setStep] = useState('details');
   const [details, setDetails] = useState({
     name: customer.name || '',
@@ -105,6 +158,8 @@ const PaymentGatewayExperience = ({
     () => PAYMENT_METHOD_OPTIONS.find((option) => option.id === effectiveMethod) || PAYMENT_METHOD_OPTIONS[0],
     [effectiveMethod],
   );
+  const selectedMethodLabel = selectedMethod.label?.[language] || selectedMethod.label?.en || selectedMethod.label;
+  const selectedMethodDescription = selectedMethod.description?.[language] || selectedMethod.description?.en || selectedMethod.description;
   const needsMobile = selectedMethod.id === 'gcash' || selectedMethod.id === 'maya';
   const needsEmail = selectedMethod.id === 'credit_card';
 
@@ -148,24 +203,24 @@ const PaymentGatewayExperience = ({
     const mobile = normalizeMobile(details.mobile);
 
     if (!name) {
-      nextErrors.name = 'Name is required.';
+      nextErrors.name = copy.errors.nameRequired;
     } else if (!NAME_PATTERN.test(name)) {
-      nextErrors.name = 'Name must contain letters and spaces only.';
+      nextErrors.name = copy.errors.nameInvalid;
     }
 
     if (needsMobile) {
       if (!mobile) {
-        nextErrors.mobile = 'Mobile number is required.';
+        nextErrors.mobile = copy.errors.mobileRequired;
       } else if (!PH_MOBILE_PATTERN.test(mobile)) {
-        nextErrors.mobile = 'Enter a valid Philippine mobile number.';
+        nextErrors.mobile = copy.errors.mobileInvalid;
       }
     }
 
     if (needsEmail) {
       if (!email) {
-        nextErrors.email = 'Email address is required.';
+        nextErrors.email = copy.errors.emailRequired;
       } else if (!validateEmail(email)) {
-        nextErrors.email = 'Enter a valid email address.';
+        nextErrors.email = copy.errors.emailInvalid;
       }
     }
 
@@ -201,37 +256,37 @@ const PaymentGatewayExperience = ({
             <h3 className="mt-4 text-2xl font-black leading-tight">{title}</h3>
             {referenceNumber ? (
               <p className="mt-2 break-all text-xs font-bold uppercase tracking-[0.16em] text-white/70">
-                Reference {referenceNumber}
+                {copy.reference} {referenceNumber}
               </p>
             ) : null}
 
             <div className="mt-10">
-              <p className="text-sm font-semibold text-white/75">Amount to pay</p>
+              <p className="text-sm font-semibold text-white/75">{copy.amountToPay}</p>
               <p className="mt-2 text-4xl font-black tracking-tight sm:text-5xl">{formatCurrency(amount).replace('PHP ', 'PHP ')}</p>
             </div>
 
             <div className="mt-10 space-y-4 border-t border-white/25 pt-6">
               <div className="flex items-center justify-between gap-4 text-sm">
-                <span className="text-white/75">Subtotal</span>
+                <span className="text-white/75">{copy.subtotal}</span>
                 <span className="font-bold">{formatCurrency(amount)}</span>
               </div>
               <div className="flex items-center justify-between gap-4 text-sm">
-                <span className="text-white/75">Fees</span>
-                <span className="font-bold">Free</span>
+                <span className="text-white/75">{copy.fees}</span>
+                <span className="font-bold">{copy.free}</span>
               </div>
               <div className="flex items-center justify-between gap-4 border-t border-white/25 pt-4 text-base">
-                <span className="font-bold">Total due today</span>
+                <span className="font-bold">{copy.totalDueToday}</span>
                 <span className="font-black">{formatCurrency(amount)}</span>
               </div>
             </div>
 
             <div className="mt-10 rounded-3xl bg-white/15 p-4 backdrop-blur">
-              <p className="text-xs font-black uppercase tracking-[0.18em] text-white/70">Selected Method</p>
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-white/70">{copy.selectedMethod}</p>
               <div className="mt-3 flex items-center gap-3">
                 {selectedMethod.logo ? (
                   <img
                     src={selectedMethod.logo}
-                    alt={`${selectedMethod.label} logo`}
+                    alt={`${selectedMethodLabel} logo`}
                     className="h-10 w-10 rounded-2xl object-cover shadow-sm"
                   />
                 ) : (
@@ -240,8 +295,8 @@ const PaymentGatewayExperience = ({
                   </span>
                 )}
                 <div>
-                  <p className="font-black">{selectedMethod.label}</p>
-                  <p className="text-xs text-white/70">{selectedMethod.description}</p>
+                  <p className="font-black">{selectedMethodLabel}</p>
+                  <p className="text-xs text-white/70">{selectedMethodDescription}</p>
                 </div>
               </div>
             </div>
@@ -250,15 +305,15 @@ const PaymentGatewayExperience = ({
 
         <section className="bg-white p-6 sm:p-8">
           <div className="mb-6 flex flex-wrap gap-2">
-            <StepPill active number="1" label="Method" />
-            <StepPill active={step === 'details' || step === 'review'} number="2" label="Details" />
-            <StepPill active={step === 'review'} number="3" label="Confirm" />
+            <StepPill active number="1" label={copy.stepMethod} />
+            <StepPill active={step === 'details' || step === 'review'} number="2" label={copy.stepDetails} />
+            <StepPill active={step === 'review'} number="3" label={copy.stepConfirm} />
           </div>
 
           {step === 'details' ? (
             <>
               <div>
-                <p className="text-sm font-black uppercase tracking-[0.16em] text-slate-400">Payment method</p>
+                <p className="text-sm font-black uppercase tracking-[0.16em] text-slate-400">{copy.paymentMethod}</p>
                 <div className="mt-3 grid gap-3 sm:grid-cols-3">
                   {PAYMENT_METHOD_OPTIONS.map((option) => {
                     const selected = option.id === selectedMethod.id;
@@ -292,8 +347,8 @@ const PaymentGatewayExperience = ({
                             }`}
                           />
                         </div>
-                        <p className="mt-4 text-sm font-black text-slate-950">{option.label}</p>
-                        <p className="mt-1 text-xs leading-5 text-slate-500">{option.description}</p>
+                        <p className="mt-4 text-sm font-black text-slate-950">{option.label?.[language] || option.label}</p>
+                        <p className="mt-1 text-xs leading-5 text-slate-500">{option.description?.[language] || option.description}</p>
                       </button>
                     );
                   })}
@@ -304,11 +359,9 @@ const PaymentGatewayExperience = ({
                 <div className="rounded-[24px] bg-white p-5 shadow-[0_12px_35px_rgba(15,23,42,0.06)]">
                   <div className="mb-5 flex items-start justify-between gap-4">
                     <div>
-                      <p className={`text-xs font-black uppercase tracking-[0.18em] ${selectedMethod.text}`}>{selectedMethod.label} details</p>
+                      <p className={`text-xs font-black uppercase tracking-[0.18em] ${selectedMethod.text}`}>{selectedMethodLabel} {copy.detailsFor}</p>
                       <p className="mt-2 text-sm leading-5 text-slate-500">
-                        {selectedMethod.id === 'credit_card'
-                          ? 'WARDS verifies payer details first. PayMongo securely collects the card number, expiry, and CVC on the final checkout page.'
-                          : `Enter the payer details for ${selectedMethod.label}. WARDS validates these before opening PayMongo for final authorization.`}
+                        {selectedMethod.id === 'credit_card' ? copy.finalNote : copy.enterPayerDetails(selectedMethodLabel)}
                       </p>
                     </div>
                     <span className={`shrink-0 rounded-2xl px-3 py-2 text-xs font-black text-white ${selectedMethod.accent}`}>PayMongo</span>
@@ -317,7 +370,7 @@ const PaymentGatewayExperience = ({
                   <div className="grid gap-4">
                     <div>
                       <label className="mb-2 block text-sm font-semibold text-slate-700">
-                        {selectedMethod.id === 'credit_card' ? 'Cardholder Name' : 'Name'}
+                        {selectedMethod.id === 'credit_card' ? copy.cardholderName : copy.name}
                       </label>
                       <input
                         value={details.name}
@@ -333,7 +386,7 @@ const PaymentGatewayExperience = ({
 
                     {needsEmail ? (
                       <div>
-                        <label className="mb-2 block text-sm font-semibold text-slate-700">Email</label>
+                        <label className="mb-2 block text-sm font-semibold text-slate-700">{copy.email}</label>
                         <input
                           type="email"
                           value={details.email}
@@ -350,7 +403,7 @@ const PaymentGatewayExperience = ({
 
                     {needsMobile ? (
                       <div>
-                        <label className="mb-2 block text-sm font-semibold text-slate-700">Mobile Number</label>
+                        <label className="mb-2 block text-sm font-semibold text-slate-700">{copy.mobileNumber}</label>
                         <input
                           type="tel"
                           value={details.mobile}
@@ -366,22 +419,13 @@ const PaymentGatewayExperience = ({
                     ) : null}
                   </div>
 
-                  {selectedMethod.id === 'credit_card' ? (
-                    <div className="mt-5 rounded-3xl border border-indigo-100 bg-indigo-50 p-4">
-                      <p className="text-sm font-black text-slate-950">Secure card entry happens on PayMongo.</p>
-                      <p className="mt-2 text-xs leading-5 text-slate-500">
-                        This keeps WARDS out of raw card data handling while still giving users a clean review step before payment.
-                      </p>
-                    </div>
-                  ) : null}
-
                   <button
                     type="button"
                     onClick={handleReview}
                     disabled={disabled || processing}
                     className={`mt-6 w-full rounded-2xl px-5 py-3 text-sm font-black uppercase tracking-[0.12em] text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60 ${selectedMethod.accent}`}
                   >
-                    Review Payment
+                    {copy.reviewPayment}
                   </button>
                 </div>
               </div>
@@ -389,18 +433,20 @@ const PaymentGatewayExperience = ({
           ) : (
             <>
               <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5">
-                <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Transaction Summary</p>
+                <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">{copy.transactionSummary}</p>
                 <h4 className="mt-2 text-3xl font-black text-slate-950">{formatCurrency(amount)}</h4>
                 <div className="mt-5 rounded-2xl bg-white px-4">
-                  <DetailRow label="Payment Method" value={selectedMethod.label} />
-                  <DetailRow label="Name" value={details.name} />
-                  {needsEmail ? <DetailRow label="Email" value={details.email} /> : null}
-                  {needsMobile ? <DetailRow label="Mobile" value={normalizeMobile(details.mobile)} /> : null}
-                  {selectedMethod.id === 'credit_card' ? <DetailRow label="Card Entry" value="PayMongo secure checkout" /> : null}
-                  {referenceNumber ? <DetailRow label="Reference" value={referenceNumber} /> : null}
+                  <DetailRow label={copy.paymentMethod} value={selectedMethodLabel} />
+                  <DetailRow label={copy.name} value={details.name} />
+                  {needsEmail ? <DetailRow label={copy.email} value={details.email} /> : null}
+                  {needsMobile ? <DetailRow label={copy.mobileNumber} value={normalizeMobile(details.mobile)} /> : null}
+                  {selectedMethod.id === 'credit_card' ? <DetailRow label={copy.cardEntry} value={copy.paymongoSecure} /> : null}
+                  {referenceNumber ? <DetailRow label={copy.reference} value={referenceNumber} /> : null}
                 </div>
                 <p className="mt-4 text-xs leading-5 text-slate-500">
-                  After confirming, WARDS will send the transaction to PayMongo for the final result: success, failed, cancelled, or pending.
+                  {isTagalog
+                    ? 'Suriin ang awtomatikong kinuwentang RPT amount, pagkatapos ay kumpletuhin ang detalye ng magbabayad sa checkout sa ibaba.'
+                    : copy.afterConfirm}
                 </p>
               </div>
               <div className="mt-4 grid gap-3 sm:grid-cols-[0.7fr_1.3fr]">
@@ -410,7 +456,7 @@ const PaymentGatewayExperience = ({
                   disabled={processing}
                   className="rounded-2xl border border-slate-300 px-5 py-3 text-sm font-black uppercase tracking-[0.12em] text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
                 >
-                  Edit
+                  {copy.edit}
                 </button>
                 <button
                   type="button"
@@ -418,7 +464,7 @@ const PaymentGatewayExperience = ({
                   disabled={disabled || processing}
                   className={`rounded-2xl px-5 py-3 text-sm font-black uppercase tracking-[0.12em] text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60 ${selectedMethod.accent}`}
                 >
-                  {processing ? 'Opening PayMongo...' : 'Confirm And Process'}
+                  {processing ? copy.openingPaymongo : copy.confirmAndProcess}
                 </button>
               </div>
             </>
@@ -427,7 +473,7 @@ const PaymentGatewayExperience = ({
       </div>
 
       <p className="border-t border-slate-100 bg-white py-4 text-center text-sm text-slate-500">
-        Powered by <span className="font-black text-slate-600">PayMongo</span>
+        {copy.poweredBy} <span className="font-black text-slate-600">PayMongo</span>
       </p>
     </div>
   );
