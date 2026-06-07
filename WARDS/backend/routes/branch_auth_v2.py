@@ -22,6 +22,9 @@ import io
 import base64
 import requests
 import time
+import re
+from urllib.parse import urlparse
+from html import escape
 
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -35,6 +38,40 @@ from utils.system_settings import get_setting_value
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 SERVER_STARTED_AT = datetime.utcnow().isoformat()
+
+
+def is_safe_url(url: str) -> bool:
+    """
+    Validate that a URL is safe for use in href attributes.
+    Only allows http:// and https:// schemes.
+    Rejects javascript:, data:, vbscript:, and malformed URLs.
+    
+    Implements OWASP XSS Prevention Cheat Sheet Rule #3: Input Validation.
+    
+    Args:
+        url: The URL string to validate
+        
+    Returns:
+        True if the URL is safe, False otherwise
+    """
+    if not url or not isinstance(url, str):
+        return False
+    
+    try:
+        parsed = urlparse(url)
+        # Only allow http and https schemes
+        if parsed.scheme not in ("http", "https"):
+            return False
+        # Ensure there's a scheme present (prevents protocol-relative URLs like //evil.com)
+        if not parsed.scheme:
+            return False
+        # Ensure there's a netloc (domain) present
+        if not parsed.netloc:
+            return False
+        return True
+    except Exception:
+        # Malformed URL
+        return False
 
 # Rate limiting configuration
 limiter = Limiter(key_func=get_remote_address)
@@ -476,6 +513,12 @@ async def verify_branch_email(token: str, db: Session = Depends(get_db)):
     elif invite and invite.expires_at < datetime.utcnow():
         status_message = "This verification link has expired. Please request a new verification email."
 
+    # Validate and encode dashboard_url to prevent XSS
+    # Implements OWASP XSS Prevention Cheat Sheet Rule #3 (Input Validation) and Rule #1 (Output Encoding)
+    safe_dashboard_url = None
+    if dashboard_url and is_safe_url(dashboard_url):
+        safe_dashboard_url = escape(dashboard_url, quote=True)
+
     return HTMLResponse(
         f"""
         <html>
@@ -491,8 +534,8 @@ async def verify_branch_email(token: str, db: Session = Depends(get_db)):
             <div style="max-width:620px;margin:0 auto;background:#ffffff;border-radius:18px;padding:32px;box-shadow:0 18px 40px rgba(15,39,68,.10);border:1px solid {status_border};background:{status_background};">
               <h1 style="margin:0 0 16px;color:{status_color};">{status_title}</h1>
               <p style="margin:0 0 12px;line-height:1.7;">{status_message}</p>
-              {"<p style='margin:0 0 20px;line-height:1.7;'>You can now open the branch dashboard and sign in with your branch username and password.</p>" if dashboard_url else "<p style='margin:0 0 20px;line-height:1.7;'>This window will close automatically in 3 seconds.</p>"}
-              {f'<p style="margin:0 0 16px;"><a href="{dashboard_url}" style="display:inline-block;background:#166534;color:#ffffff;text-decoration:none;padding:14px 22px;border-radius:10px;font-weight:700;">Open Branch Dashboard</a></p>' if dashboard_url else ''}
+              {"<p style='margin:0 0 20px;line-height:1.7;'>You can now open the branch dashboard and sign in with your branch username and password.</p>" if safe_dashboard_url else "<p style='margin:0 0 20px;line-height:1.7;'>This window will close automatically in 3 seconds.</p>"}
+              {f'<p style="margin:0 0 16px;"><a href="{safe_dashboard_url}" style="display:inline-block;background:#166534;color:#ffffff;text-decoration:none;padding:14px 22px;border-radius:10px;font-weight:700;">Open Branch Dashboard</a></p>' if safe_dashboard_url else ''}
               <p style="margin:0;font-size:14px;color:#6b7280;">This window will close automatically in 3 seconds. If it stays open, you can close it manually.</p>
             </div>
           </body>
