@@ -287,7 +287,7 @@ const BranchAnnouncements = () => {
         )}
       />
 
-      <div className="mb-6 rounded-xl border border-blue-100 bg-blue-50 px-5 py-4 text-blue-900">
+      <div className="mt-4 mb-4 rounded-xl border border-blue-100 bg-blue-50 px-5 py-4 text-blue-900 sm:mt-6 sm:mb-6">
         Active branch announcements are shown on the public website with your branch name attached as the source label.
       </div>
 
@@ -303,7 +303,7 @@ const BranchAnnouncements = () => {
         </div>
       )}
 
-      <div className="space-y-6">
+      <div className="space-y-6 pb-6 sm:pb-8">
         {announcements.length === 0 ? (
           <div className="bg-white rounded-xl shadow-lg p-12 text-center">
             <p className="text-gray-500 text-lg">No announcements yet. Create your first announcement!</p>

@@ -299,7 +299,7 @@ const Announcements = () => {
         </div>
       )}
 
-      <div className="space-y-6">
+      <div className="space-y-6 py-6 sm:py-8">
         {announcements.length === 0 ? (
           <div className="bg-white rounded-xl shadow-lg p-12 text-center">
             <p className="text-gray-500 text-lg">No announcements yet. Create your first announcement!</p>
