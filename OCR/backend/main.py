@@ -1,6 +1,8 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 import os
 
 from database.config import Base, engine, SessionLocal
@@ -22,6 +24,41 @@ from routes import (
 )
 from services.rpt_payment_service import initialize_rpt_demo_data
 
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware to add security headers including Content-Security-Policy.
+    Implements OWASP XSS Prevention recommendations.
+    """
+    async def dispatch(self, request: Request, call_next):
+        response: Response = await call_next(request)
+        
+        # Content-Security-Policy: Strict policy to prevent XSS
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self'; "
+            "object-src 'none'; "
+            "base-uri 'self'; "
+            "frame-ancestors 'none'; "
+            "img-src 'self' data:; "
+            "connect-src 'self';"
+        )
+        
+        # X-Content-Type-Options: Prevent MIME sniffing
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        
+        # X-Frame-Options: Prevent clickjacking
+        response.headers["X-Frame-Options"] = "DENY"
+        
+        # Referrer-Policy: Control referrer information
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        
+        # Permissions-Policy: Disable unnecessary browser features
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        
+        return response
+
+
 app = FastAPI(title="WARDS Queue Management System")
 
 
@@ -36,6 +73,11 @@ def on_startup():
         apply_phase2_plaintext_redaction(db)
     finally:
         db.close()
+
+# =========================
+# 🔐 SECURITY HEADERS
+# =========================
+app.add_middleware(SecurityHeadersMiddleware)
 
 # =========================
 # 🔐 CORS CONFIG
