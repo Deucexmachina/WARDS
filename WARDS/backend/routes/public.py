@@ -843,9 +843,7 @@ async def register_queue(
         raise HTTPException(status_code=400, detail=SYSTEM_DISABLED_MESSAGE)
     queue_type = normalize_queue_type(registration.queue_type)
     service = db.query(Service).filter(hash_aware_match(Service, "name", registration.service_type), Service.is_active == True).first()
-    if not service:
-        raise HTTPException(status_code=404, detail="Selected service is not available.")
-    if service.requires_appointment and queue_type != "appointment":
+    if service and service.requires_appointment and queue_type != "appointment":
         raise HTTPException(
             status_code=400,
             detail="Queue registration failed: Immediate queueing is unavailable because this service requires an appointment schedule. Please choose Appointment queueing.",
