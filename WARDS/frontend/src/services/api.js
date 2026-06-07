@@ -364,7 +364,7 @@ export const accountAPI = {
   getAll: (params) => api.get('/accounts', { params }),
   create: (data) => api.post('/accounts', data),
   update: (id, data) => api.put(`/accounts/${id}`, data),
-  delete: (id, role, data, config = {}) => api.delete(`/accounts/${id}`, { params: { role }, data, ...config }),
+  delete: (id, role, data, config = {}) => api.delete(`/accounts/${id}`, { params: { role }, data: data, ...config }),
   deactivate: (id, role, data, config = {}) => api.put(`/accounts/${id}/deactivate`, data, { params: { role }, ...config }),
 };
 
