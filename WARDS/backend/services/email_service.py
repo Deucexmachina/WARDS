@@ -5,11 +5,28 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from email.utils import make_msgid
 from datetime import timezone
+from html import escape as html_escape
 try:
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 except ImportError:
     ZoneInfo = None
     ZoneInfoNotFoundError = Exception
+
+
+def _safe_html(text: str | None) -> str:
+    """
+    Safely escape text for HTML email templates.
+    Prevents XSS by escaping HTML special characters.
+    
+    Args:
+        text: The text to escape
+        
+    Returns:
+        Escaped HTML-safe string, or empty string if input is None
+    """
+    if text is None:
+        return ""
+    return html_escape(str(text), quote=True)
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -280,7 +297,7 @@ def _build_branch_access_html(
             Do not use the dashboard email and password until this verification step is complete.
           </p>
           <p style="margin:0;">
-            <a href="{verification_url}" style="display:inline-block;background:#d97706;color:#ffffff;text-decoration:none;padding:14px 22px;border-radius:10px;font-weight:700;">
+            <a href="{_safe_html(verification_url)}" style="display:inline-block;background:#d97706;color:#ffffff;text-decoration:none;padding:14px 22px;border-radius:10px;font-weight:700;">
               Verify Email Address
             </a>
           </p>
@@ -293,9 +310,9 @@ def _build_branch_access_html(
             f"""
             <tr>
               <td style="padding:12px 0;border-bottom:1px solid #e5e7eb;vertical-align:top;">
-                <div style="font-weight:700;color:#0f2744;">Window {account.get('assigned_window_number')} - {account.get('window_label') or account.get('service_window')}</div>
-                <div style="margin-top:4px;font-size:14px;color:#475569;">Login Email: <strong>{account['email']}</strong></div>
-                <div style="margin-top:4px;font-size:14px;color:#475569;">Temporary Password: <strong>{account['temporary_password']}</strong></div>
+                <div style="font-weight:700;color:#0f2744;">Window {_safe_html(str(account.get('assigned_window_number')))} - {_safe_html(account.get('window_label') or account.get('service_window', ''))}</div>
+                <div style="margin-top:4px;font-size:14px;color:#475569;">Login Email: <strong>{_safe_html(account['email'])}</strong></div>
+                <div style="margin-top:4px;font-size:14px;color:#475569;">Temporary Password: <strong>{_safe_html(account['temporary_password'])}</strong></div>
                 <div style="margin-top:4px;font-size:13px;color:#6b7280;">Queue-only access with Microsoft Authenticator MFA required on first login.</div>
               </td>
             </tr>
@@ -326,16 +343,16 @@ def _build_branch_access_html(
       <div style="background:#ffffff;border-radius:0 0 18px 18px;padding:28px;box-shadow:0 18px 40px rgba(15,39,68,.10);">
         <p style="margin:0 0 16px;font-size:16px;line-height:1.7;">
           You have been granted access to the WARDS branch dashboard for
-          <strong>{branch_name}</strong>.
+          <strong>{_safe_html(branch_name)}</strong>.
         </p>
 
         {verification_block}
 
         <div style="background:#f8fbff;border:1px solid #d7e5f5;border-radius:14px;padding:18px 20px;margin:20px 0;">
           <h2 style="margin:0 0 14px;font-size:17px;color:#0f2744;">Step 2: Branch Access Details</h2>
-          <p style="margin:0 0 10px;font-size:15px;"><strong>Branch dashboard:</strong> <a href="{dashboard_url}" style="color:#1d4ed8;text-decoration:none;">{dashboard_url}</a></p>
-          <p style="margin:0 0 10px;font-size:15px;"><strong>Login email:</strong> {login_email}</p>
-          <p style="margin:0;font-size:15px;"><strong>{"Temporary password" if password else "Password"}:</strong> {password or "Use your existing branch password"}</p>
+          <p style="margin:0 0 10px;font-size:15px;"><strong>Branch dashboard:</strong> <a href="{_safe_html(dashboard_url)}" style="color:#1d4ed8;text-decoration:none;">{_safe_html(dashboard_url)}</a></p>
+          <p style="margin:0 0 10px;font-size:15px;"><strong>Login email:</strong> {_safe_html(login_email)}</p>
+          <p style="margin:0;font-size:15px;"><strong>{"Temporary password" if password else "Password"}:</strong> {_safe_html(password or "Use your existing branch password")}</p>
         </div>
 
         <div style="background:#fff8e8;border:1px solid #f4d58d;border-radius:14px;padding:18px 20px;margin:20px 0;">
@@ -399,7 +416,7 @@ def _build_citizen_verification_html(verification_code: str, expires_minutes: in
         <div style="background:#f8fbff;border:1px solid #dbe7f3;border-radius:18px;padding:20px 22px;margin:0 0 22px;">
           <h2 style="margin:0 0 12px;font-size:17px;color:#0f2744;">Registration Confirmation</h2>
           <p style="margin:0 0 8px;font-size:14px;line-height:1.7;color:#546273;"><strong>Account Type:</strong> Citizen User</p>
-          <p style="margin:0;font-size:14px;line-height:1.7;color:#546273;"><strong>Registered On:</strong> {registered_at}</p>
+          <p style="margin:0;font-size:14px;line-height:1.7;color:#546273;"><strong>Registered On:</strong> {_safe_html(registered_at)}</p>
         </div>
         <div style="background:#f8fbff;border:1px solid #dbe7f3;border-radius:18px;padding:20px 22px;margin:0 0 22px;">
           <h2 style="margin:0 0 10px;font-size:17px;color:#0f2744;">Verify and Activate Your Account</h2>
@@ -409,8 +426,8 @@ def _build_citizen_verification_html(verification_code: str, expires_minutes: in
         </div>
         <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:16px;padding:18px 20px;margin:0 0 22px;text-align:center;">
           <p style="margin:0 0 8px;font-size:13px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#64748b;">Verification Code</p>
-          <p style="margin:0;font-size:34px;line-height:1.2;font-weight:800;letter-spacing:.28em;color:#166534;">{verification_code}</p>
-          <p style="margin:10px 0 0;font-size:13px;line-height:1.7;color:#5b6471;">This code expires in {expires_minutes} minutes.</p>
+          <p style="margin:0;font-size:34px;line-height:1.2;font-weight:800;letter-spacing:.28em;color:#166534;">{_safe_html(verification_code)}</p>
+          <p style="margin:10px 0 0;font-size:13px;line-height:1.7;color:#5b6471;">This code expires in {_safe_html(str(expires_minutes))} minutes.</p>
         </div>
         <p style="margin:22px 0 0;font-size:14px;line-height:1.7;color:#5b6471;">
           If you did not create this account, you can safely ignore this message.
@@ -546,13 +563,13 @@ def send_citizen_verification_link_email(recipient_email: str, verification_url:
           </p>
         </div>
         <div style="text-align:center;margin:0 0 22px;">
-          <a href="{verification_url}" style="display:inline-block;background:#166534;color:#ffffff;text-decoration:none;padding:14px 24px;border-radius:10px;font-weight:700;">
+          <a href="{_safe_html(verification_url)}" style="display:inline-block;background:#166534;color:#ffffff;text-decoration:none;padding:14px 24px;border-radius:10px;font-weight:700;">
             Verify My Account
           </a>
         </div>
         <p style="margin:0;font-size:14px;line-height:1.7;color:#546273;word-break:break-word;">
           If the button does not open, use this link:<br>
-          <a href="{verification_url}" style="color:#166534;">{verification_url}</a>
+          <a href="{_safe_html(verification_url)}" style="color:#166534;">{_safe_html(verification_url)}</a>
         </p>
         <p style="margin:22px 0 0;font-size:14px;line-height:1.7;color:#5b6471;">
           If you did not create this account, you can safely ignore this message.
@@ -618,8 +635,8 @@ def send_receipt_release_email(
         f"""
         <html>
           <body style="font-family:Arial,Helvetica,sans-serif;color:#1f2937;">
-            <p>Hello <strong>{taxpayer_name}</strong>,</p>
-            <p>Your requested receipt copy <strong>{request_id}</strong> has been processed by <strong>{branch_name}</strong>.</p>
+            <p>Hello <strong>{_safe_html(taxpayer_name)}</strong>,</p>
+            <p>Your requested receipt copy <strong>{_safe_html(request_id)}</strong> has been processed by <strong>{_safe_html(branch_name)}</strong>.</p>
             <p>The finished copy is attached to this email.</p>
             <p>City Treasurer's Office<br><strong>WARDS Admin</strong></p>
           </body>
@@ -685,7 +702,7 @@ def _build_payment_receipt_html(payment_details: dict, logos: list[dict]) -> str
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>{document_title}</title>
+    <title>{_safe_html(document_title)}</title>
     <style>
       body {{
         margin: 0;
@@ -762,20 +779,20 @@ def _build_payment_receipt_html(payment_details: dict, logos: list[dict]) -> str
       {_build_email_shell_header(header_title, header_subtitle, [])}
       <div class="content">
         <div class="summary">
-          <strong>{summary_title}</strong>
+          <strong>{_safe_html(summary_title)}</strong>
           <span>{summary_text}</span>
         </div>
         <table class="grid" role="presentation">
-          <tr><td class="label">Payment Reference Number</td><td class="value">{payment_details["ref_number"]}</td></tr>
-          <tr><td class="label">Transaction Date and Time</td><td class="value">{payment_details["verified_at"]}</td></tr>
-          <tr><td class="label">Taxpayer Name</td><td class="value">{payment_details["taxpayer_name"]}</td></tr>
-          <tr><td class="label">TIN</td><td class="value">{payment_details["tin"]}</td></tr>
-          <tr><td class="label">Payment Type</td><td class="value">{payment_details["tax_type"]}</td></tr>
-          <tr><td class="label">Payment Method</td><td class="value">{payment_details["payment_method"]}</td></tr>
-          <tr><td class="label">Amount Paid</td><td class="value">{payment_details["amount"]}</td></tr>
-          <tr><td class="label">{status_label}</td><td class="value"><span class="status">{payment_details["status"]}</span></td></tr>
-          <tr><td class="label">Branch</td><td class="value">{payment_details["branch"]}</td></tr>
-          <tr><td class="label">Receipt Email</td><td class="value">{payment_details["email"]}</td></tr>
+          <tr><td class="label">Payment Reference Number</td><td class="value">{_safe_html(payment_details["ref_number"])}</td></tr>
+          <tr><td class="label">Transaction Date and Time</td><td class="value">{_safe_html(payment_details["verified_at"])}</td></tr>
+          <tr><td class="label">Taxpayer Name</td><td class="value">{_safe_html(payment_details["taxpayer_name"])}</td></tr>
+          <tr><td class="label">TIN</td><td class="value">{_safe_html(payment_details["tin"])}</td></tr>
+          <tr><td class="label">Payment Type</td><td class="value">{_safe_html(payment_details["tax_type"])}</td></tr>
+          <tr><td class="label">Payment Method</td><td class="value">{_safe_html(payment_details["payment_method"])}</td></tr>
+          <tr><td class="label">Amount Paid</td><td class="value">{_safe_html(payment_details["amount"])}</td></tr>
+          <tr><td class="label">{_safe_html(status_label)}</td><td class="value"><span class="status">{_safe_html(payment_details["status"])}</span></td></tr>
+          <tr><td class="label">Branch</td><td class="value">{_safe_html(payment_details["branch"])}</td></tr>
+          <tr><td class="label">Receipt Email</td><td class="value">{_safe_html(payment_details["email"])}</td></tr>
         </table>
         <p class="footer">
           {footer_text}
@@ -1067,7 +1084,7 @@ def _build_login_notice_html(
         login_rows.append(("Device / Browser", _truncate_user_agent(user_agent)))
 
     rows_html = "".join(
-        f"<tr><td style=\"padding:10px 0;border-bottom:1px solid #e5e7eb;font-weight:700;color:#475569;width:38%;\">{label}</td><td style=\"padding:10px 0 10px 14px;border-bottom:1px solid #e5e7eb;color:#111827;\">{value}</td></tr>"
+        f"<tr><td style=\"padding:10px 0;border-bottom:1px solid #e5e7eb;font-weight:700;color:#475569;width:38%;\">{_safe_html(label)}</td><td style=\"padding:10px 0 10px 14px;border-bottom:1px solid #e5e7eb;color:#111827;\">{_safe_html(value)}</td></tr>"
         for label, value in login_rows
     )
 
@@ -1078,7 +1095,7 @@ def _build_login_notice_html(
     <div style="max-width:640px;margin:0 auto;padding:32px 20px;">
       {_build_email_shell_header("Successful Login Notice", "This security message confirms that your WARDS account was accessed successfully.", [])}
       <div style="background:#ffffff;border-radius:0 0 24px 24px;padding:30px 30px 32px;box-shadow:0 18px 40px rgba(15,39,68,.10);border:1px solid #dbe3ef;border-top:none;">
-        <p style="margin:0 0 20px;font-size:16px;line-height:1.75;">Hello <strong>{display_name}</strong>,</p>
+        <p style="margin:0 0 20px;font-size:16px;line-height:1.75;">Hello <strong>{_safe_html(display_name)}</strong>,</p>
         <table style="width:100%;border-collapse:collapse;table-layout:fixed;">{rows_html}</table>
         <p style="margin:22px 0 0;font-size:14px;line-height:1.7;color:#5b6471;">
           If this login was not you, please change your password immediately and contact your system administrator.
@@ -1172,7 +1189,7 @@ def send_security_incident_alert_email(
         "WARDS Security Monitor",
     ])
 
-    html_recovery = "".join(f"<li>{line[2:]}</li>" for line in recovery_lines)
+    html_recovery = "".join(f"<li>{_safe_html(line[2:])}</li>" for line in recovery_lines)
     html = f"""
 <!DOCTYPE html>
 <html lang="en">
@@ -1180,13 +1197,13 @@ def send_security_incident_alert_email(
     <div style="max-width:680px;margin:0 auto;padding:32px 20px;">
       {_build_email_shell_header("Security Incident Alert", "A security incident was logged by the WARDS monitoring system.", [])}
       <div style="background:#ffffff;border-radius:0 0 24px 24px;padding:30px;border:1px solid #dbe3ef;border-top:none;">
-        <h2 style="margin:0 0 14px;color:#991b1b;">SEC-{incident.get('id')} - {incident.get('severity_level')}</h2>
-        <p style="line-height:1.7;margin:0 0 18px;">{incident.get('description') or 'No description provided.'}</p>
+        <h2 style="margin:0 0 14px;color:#991b1b;">SEC-{_safe_html(str(incident.get('id')))} - {_safe_html(incident.get('severity_level', ''))}</h2>
+        <p style="line-height:1.7;margin:0 0 18px;">{_safe_html(incident.get('description') or 'No description provided.')}</p>
         <table style="width:100%;border-collapse:collapse;">
-          <tr><td style="padding:8px 0;font-weight:700;">Incident Type</td><td>{incident.get('incident_type')}</td></tr>
-          <tr><td style="padding:8px 0;font-weight:700;">Status</td><td>{incident.get('status')}</td></tr>
-          <tr><td style="padding:8px 0;font-weight:700;">Target</td><td>{detection.get('target_name') if detection else 'N/A'}</td></tr>
-          <tr><td style="padding:8px 0;font-weight:700;">Change Type</td><td>{detection.get('change_type') if detection else 'N/A'}</td></tr>
+          <tr><td style="padding:8px 0;font-weight:700;">Incident Type</td><td>{_safe_html(incident.get('incident_type', ''))}</td></tr>
+          <tr><td style="padding:8px 0;font-weight:700;">Status</td><td>{_safe_html(incident.get('status', ''))}</td></tr>
+          <tr><td style="padding:8px 0;font-weight:700;">Target</td><td>{_safe_html(detection.get('target_name') if detection else 'N/A')}</td></tr>
+          <tr><td style="padding:8px 0;font-weight:700;">Change Type</td><td>{_safe_html(detection.get('change_type') if detection else 'N/A')}</td></tr>
         </table>
         <h3 style="margin:22px 0 10px;color:#0f2744;">Recovery Summary</h3>
         <ul style="line-height:1.7;">{html_recovery}</ul>
@@ -1244,10 +1261,10 @@ def _build_registration_notice_html(
     <div style="max-width:640px;margin:0 auto;padding:32px 20px;">
       {_build_email_shell_header("Registration Confirmation", "Your WARDS account has been set up successfully and is ready for secure access.", [])}
       <div style="background:#ffffff;border-radius:0 0 24px 24px;padding:30px 30px 32px;box-shadow:0 18px 40px rgba(15,39,68,.10);border:1px solid #dbe3ef;border-top:none;">
-        <p style="margin:0 0 18px;font-size:16px;line-height:1.75;">Hello <strong>{display_name}</strong>,</p>
+        <p style="margin:0 0 18px;font-size:16px;line-height:1.75;">Hello <strong>{_safe_html(display_name)}</strong>,</p>
         <div style="background:#f8fbff;border:1px solid #dbe7f3;border-radius:18px;padding:20px 22px;">
-          <p style="margin:0 0 8px;font-size:14px;line-height:1.7;color:#546273;"><strong>Account Type:</strong> {_resolve_account_type_label(account_type)}</p>
-          <p style="margin:0;font-size:14px;line-height:1.7;color:#546273;"><strong>Registered On:</strong> {_format_manila_timestamp(registered_at)}</p>
+          <p style="margin:0 0 8px;font-size:14px;line-height:1.7;color:#546273;"><strong>Account Type:</strong> {_safe_html(_resolve_account_type_label(account_type))}</p>
+          <p style="margin:0;font-size:14px;line-height:1.7;color:#546273;"><strong>Registered On:</strong> {_safe_html(_format_manila_timestamp(registered_at))}</p>
         </div>
         <p style="margin:22px 0 0;font-size:14px;line-height:1.7;color:#5b6471;">
           You can now sign in using your registered account credentials.
@@ -1332,7 +1349,7 @@ def _build_account_change_html(
     changed_fields: list[str],
 ) -> str:
     field_rows = "".join(
-        f"<li style=\"margin:0 0 6px;color:#475569;\">{field}</li>"
+        f"<li style=\"margin:0 0 6px;color:#475569;\">{_safe_html(field)}</li>"
         for field in (changed_fields or ["Account information"])
     )
     return f"""
@@ -1342,11 +1359,11 @@ def _build_account_change_html(
     <div style="max-width:640px;margin:0 auto;padding:32px 20px;">
       {_build_email_shell_header("Account Change Notice", "This security message confirms a recent change to your WARDS account.", [])}
       <div style="background:#ffffff;border-radius:0 0 24px 24px;padding:30px 30px 32px;box-shadow:0 18px 40px rgba(15,39,68,.10);border:1px solid #dbe3ef;border-top:none;">
-        <p style="margin:0 0 18px;font-size:16px;line-height:1.75;">Hello <strong>{display_name}</strong>,</p>
+        <p style="margin:0 0 18px;font-size:16px;line-height:1.75;">Hello <strong>{_safe_html(display_name)}</strong>,</p>
         <div style="background:#f8fbff;border:1px solid #dbe7f3;border-radius:18px;padding:20px 22px;margin:0 0 22px;">
-          <p style="margin:0 0 10px;font-size:14px;line-height:1.7;color:#546273;"><strong>Account Type:</strong> {_resolve_account_type_label(account_type)}</p>
-          <p style="margin:0 0 10px;font-size:14px;line-height:1.7;color:#546273;"><strong>Change:</strong> {change_summary}</p>
-          <p style="margin:0;font-size:14px;line-height:1.7;color:#546273;"><strong>Changed On:</strong> {_format_manila_timestamp()}</p>
+          <p style="margin:0 0 10px;font-size:14px;line-height:1.7;color:#546273;"><strong>Account Type:</strong> {_safe_html(_resolve_account_type_label(account_type))}</p>
+          <p style="margin:0 0 10px;font-size:14px;line-height:1.7;color:#546273;"><strong>Change:</strong> {_safe_html(change_summary)}</p>
+          <p style="margin:0;font-size:14px;line-height:1.7;color:#546273;"><strong>Changed On:</strong> {_safe_html(_format_manila_timestamp())}</p>
         </div>
         <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:16px;padding:16px 18px;">
           <p style="margin:0 0 10px;font-size:13px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#64748b;">Changed Fields</p>
