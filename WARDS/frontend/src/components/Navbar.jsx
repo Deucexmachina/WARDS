@@ -138,47 +138,49 @@ const Navbar = () => {
                 Sign In
               </Link>
             )}
-            <button
-              type="button"
-              onClick={() => setMenuOpen((current) => !current)}
-              className="inline-flex items-center justify-center rounded-lg border border-white/15 bg-white/10 p-2 text-white transition hover:bg-white/20"
-              aria-label="Toggle navigation menu"
-              aria-expanded={menuOpen}
-            >
-              <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                {menuOpen ? (
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                ) : (
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
-                )}
-              </svg>
-            </button>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setMenuOpen((current) => !current)}
+                className="inline-flex items-center justify-center rounded-lg border border-white/15 bg-white/10 p-2 text-white transition hover:bg-white/20"
+                aria-label="Toggle navigation menu"
+                aria-expanded={menuOpen}
+              >
+                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  {menuOpen ? (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                  ) : (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
+                  )}
+                </svg>
+              </button>
+
+              {menuOpen && (
+                <div className="absolute right-0 top-full z-50 mt-3 w-[280px] rounded-2xl border border-white/10 bg-[#102b4d]/95 p-3 shadow-[0_18px_45px_rgba(15,23,42,0.35)] backdrop-blur-xl">
+                  <div className="mb-2 px-3 pb-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-blue-200/80">Navigation</p>
+                  </div>
+                  <div className="space-y-1">
+                    {drawerLinks.map((link) => (
+                      <Link
+                        key={link.to}
+                        to={link.to}
+                        onClick={() => setMenuOpen(false)}
+                        className="flex items-center justify-between rounded-xl px-3 py-3 text-sm font-medium text-white transition hover:bg-white/10"
+                      >
+                        <span>{link.label}</span>
+                        <svg className="h-4 w-4 text-blue-200/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
+                        </svg>
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
-
-      {menuOpen && (
-        <div className="absolute right-4 top-[72px] z-50 w-[280px] rounded-2xl border border-white/10 bg-[#102b4d]/95 p-3 shadow-[0_18px_45px_rgba(15,23,42,0.35)] backdrop-blur-xl">
-          <div className="mb-2 px-3 pb-2">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-blue-200/80">Navigation</p>
-          </div>
-          <div className="space-y-1">
-            {drawerLinks.map((link) => (
-              <Link
-                key={link.to}
-                to={link.to}
-                onClick={() => setMenuOpen(false)}
-                className="flex items-center justify-between rounded-xl px-3 py-3 text-sm font-medium text-white transition hover:bg-white/10"
-              >
-                <span>{link.label}</span>
-                <svg className="h-4 w-4 text-blue-200/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
-                </svg>
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
 
       <ActionConfirmationModal
         open={showLogoutConfirm}
