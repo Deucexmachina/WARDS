@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect } from 'react';
 import axios from 'axios';
 import WardsPageHero from '../../components/WardsPageHero';
 import SystemMessageModal from '../../components/SystemMessageModal';
+import CollectionReportView from '../../components/admin/CollectionReportView';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 const PAYMENT_TIME_ZONE = 'Asia/Manila';
@@ -1216,23 +1217,16 @@ const PaymentManagement = () => {
                 </button>
               </div>
             </div>
-            <div className="min-h-0 flex-1 overflow-hidden bg-slate-100">
-              <iframe
-                title="Tax Collection Report Preview"
-                src={(() => {
-                  const reportHtml = buildCollectionReportHtml({ includeToolbar: false });
-                  const blob = new Blob([reportHtml], { type: 'text/html' });
-                  return URL.createObjectURL(blob);
-                })()}
-                className="h-full w-full border-0"
-                sandbox=""
-                onLoad={(e) => {
-                  // Clean up blob URL after iframe loads
-                  const iframe = e.target;
-                  if (iframe.src.startsWith('blob:')) {
-                    URL.revokeObjectURL(iframe.src);
-                  }
-                }}
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <CollectionReportView
+                title={collectionReportTitle}
+                generatedAt={new Date().toLocaleString('en-PH', { timeZone: PAYMENT_TIME_ZONE })}
+                mainCollectionAmount={mainCollectionAmount}
+                verifiedAmount={paymentStats.verifiedAmount}
+                pendingRemittanceAmount={pendingRemittanceAmount}
+                branchAnalytics={branchAnalytics}
+                rankedBranches={rankedBranches}
+                branchSummaries={branchSummaries}
               />
             </div>
           </div>

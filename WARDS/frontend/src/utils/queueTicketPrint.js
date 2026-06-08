@@ -240,16 +240,11 @@ export const printQueueTicket = ({
   contactNumber,
   message,
 }) => {
-  const printWindow = window.open('', '_blank', 'width=820,height=900');
-  if (!printWindow) {
-    return false;
-  }
-
   const queueTypeLabel = String(queueType ?? '').trim()
     ? `${String(queueType).charAt(0).toUpperCase()}${String(queueType).slice(1)}`
     : 'N/A';
 
-  // Use safe Blob URL instead of document.write to prevent XSS
+  // Build ticket HTML with all values escaped
   const ticketHtml = buildTicketMarkup({
     title,
     queueNumber,
@@ -264,12 +259,37 @@ export const printQueueTicket = ({
     contactNumber: formatContactNumber(contactNumber),
     message,
   });
-  const blob = new Blob([ticketHtml], { type: 'text/html' });
-  const url = URL.createObjectURL(blob);
-  printWindow.location.href = url;
-  // Clean up blob URL after window loads
-  printWindow.onload = () => {
-    URL.revokeObjectURL(url);
+
+  // Use hidden iframe with srcdoc instead of blob URL + window.open
+  // This eliminates a browser execution surface (no Blob URL, no popup)
+  const iframe = document.createElement('iframe');
+  iframe.setAttribute('title', 'Queue Ticket Print');
+  iframe.style.position = 'absolute';
+  iframe.style.left = '-9999px';
+  iframe.style.top = '0';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = 'none';
+  iframe.srcdoc = ticketHtml;
+  document.body.appendChild(iframe);
+
+  iframe.onload = () => {
+    try {
+      iframe.contentWindow.print();
+    } catch {
+      // Some browsers block iframe print; fallback is silent
+    }
+    // Remove iframe after print dialog closes or after timeout
+    const cleanup = () => {
+      if (iframe.parentNode) {
+        iframe.parentNode.removeChild(iframe);
+      }
+    };
+    if (iframe.contentWindow) {
+      iframe.contentWindow.onafterprint = cleanup;
+    }
+    setTimeout(cleanup, 60000);
   };
+
   return true;
 };

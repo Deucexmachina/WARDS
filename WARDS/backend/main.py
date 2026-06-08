@@ -135,8 +135,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "connect-src 'self'; "
                 "img-src 'self' data:; "
                 "object-src 'none'; "
+                "frame-src 'self'; "  # Only same-origin frames (srcdoc, sandboxed iframes); no external frames
+                "form-action 'self'; "  # Prevent form submission to external origins
                 "base-uri 'self'; "
-                "frame-ancestors 'none';"
+                "frame-ancestors 'none'; "
+                "upgrade-insecure-requests;"
             )
     
     def _set_header_if_missing(self, response: Request, header_name: str, header_value: str):

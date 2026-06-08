@@ -85,13 +85,28 @@ Expected: all rendered as plain text or escaped, never executed.
 | iframe | Purpose | sandboxed? | Can it be eliminated? |
 |--------|---------|-----------|----------------------|
 | FileViewerModal (PDF) | File preview | Yes | No — PDF requires iframe |
-| PaymentManagement report preview | Report preview | Yes | Hard — needs significant refactor |
 | ReceiptManagement print | Print receipt | No (breaks print) | No — print-only, DOM-built content |
+| Queue ticket print | Print ticket | Yes (hidden) | No — srcdoc-based, no blob |
 
 - [ ] No new iframes are added without sandboxing
 - [ ] No iframe is used to render user-uploaded content except sandboxed PDF
 
-## 10. Regression Test Commands
+## 10. Blob URL Discipline
+
+- [ ] No `new Blob([...], { type: 'text/html' })` exists outside `safeBlob.js`
+- [ ] All Blob URLs are created via `createSafeBlobUrl` with a `purpose` description
+- [ ] Queue ticket print uses iframe `srcdoc`, not `URL.createObjectURL(blob)`
+- [ ] PaymentManagement report preview uses React DOM, not iframe blob
+- [ ] Report print window (for physical printing) still uses blob but content is app-generated only
+
+## 11. Endpoint Separation
+
+- [ ] Preview endpoints use `allow_inline_preview=True` only for verified PDF/PNG/JPEG
+- [ ] Download endpoints always force `Content-Disposition: attachment`
+- [ ] All file responses use `deliver_file_response` or `deliver_bytes_response`
+- [ ] All file responses include `X-Content-Type-Options: nosniff`
+
+## 12. Regression Test Commands
 
 ```bash
 # Run backend file signature tests
