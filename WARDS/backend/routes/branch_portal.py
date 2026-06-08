@@ -2456,13 +2456,36 @@ async def preview_branch_announcement_attachment(
     attachment_id: int,
     db: Session = Depends(get_db),
 ):
+    """Inline preview for browser-renderable types (images, PDFs).
+    
+    Only serves inline preview for verified safe types (PDF, PNG, JPEG).
+    All other types are forced to download as attachment.
+    Sends X-Content-Type-Options: nosniff to prevent MIME sniffing.
+    """
+    from utils.file_validation import SafeFileType
+    
     attachment = _get_branch_attachment_for_download(db, announcement_id, attachment_id)
+    
+    mime_type = attachment.mime_type or "application/octet-stream"
+    is_safe_preview = SafeFileType.is_safe_for_preview(mime_type)
+    
+    # For non-previewable types, force download as attachment
+    disposition = "inline" if is_safe_preview else "attachment"
+    
     content = attachment_bytes(attachment)
     if content is not None:
-        return Response(content=content, media_type=attachment.mime_type or "application/octet-stream")
+        headers = {
+            "Content-Disposition": f'{disposition}; filename="{attachment.original_filename}"',
+            "X-Content-Type-Options": "nosniff",
+        }
+        if not is_safe_preview:
+            headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
+        return Response(content=content, media_type=mime_type, headers=headers)
     return FileResponse(
         attachment.file_path,
-        media_type=attachment.mime_type or "application/octet-stream",
+        media_type=mime_type,
+        filename=attachment.original_filename,
+        headers={"X-Content-Type-Options": "nosniff"},
     )
 
 
