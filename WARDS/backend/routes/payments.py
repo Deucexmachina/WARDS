@@ -2874,6 +2874,7 @@ async def download_remittance_report(
         report_path,
         filename=remittance.report_file_name or report_path.name,
         media_type=remittance.report_file_mime or "application/octet-stream",
+        headers={"X-Content-Type-Options": "nosniff"},
     )
 
 
@@ -3144,7 +3145,11 @@ async def download_business_tax_application_file(
     file_path, file_name = path_map[file_type]
     if not file_path:
         raise HTTPException(status_code=404, detail="Business Tax file not found.")
-    return FileResponse(file_path, filename=file_name or Path(file_path).name)
+    return FileResponse(
+        file_path,
+        filename=file_name or Path(file_path).name,
+        headers={"X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.get("/bt/applications/{tracking_number}/official-receipt")
@@ -3159,6 +3164,7 @@ async def download_business_tax_official_receipt(
     return FileResponse(
         application.official_receipt_path,
         filename=Path(application.official_receipt_path).name,
+        headers={"X-Content-Type-Options": "nosniff"},
     )
 
 
@@ -3169,7 +3175,11 @@ async def download_payment_proof(payment_id: int, db: Session = Depends(get_db))
     proof_name = payment_value(payment, "proof_file_name") if payment else None
     if not payment or not proof_path:
         raise HTTPException(status_code=404, detail="Payment proof not found")
-    return FileResponse(proof_path, filename=proof_name or Path(proof_path).name)
+    return FileResponse(
+        proof_path,
+        filename=proof_name or Path(proof_path).name,
+        headers={"X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.get("/{payment_id}/official-receipt")
@@ -3178,7 +3188,11 @@ async def download_official_receipt(payment_id: int, db: Session = Depends(get_d
     official_receipt_path = payment_value(payment, "official_receipt_path") if payment else None
     if not payment or not official_receipt_path:
         raise HTTPException(status_code=404, detail="Official receipt not found")
-    return FileResponse(official_receipt_path, filename=Path(official_receipt_path).name)
+    return FileResponse(
+        official_receipt_path,
+        filename=Path(official_receipt_path).name,
+        headers={"X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.get("/{payment_id}/payment-confirmation")
@@ -3191,7 +3205,10 @@ async def download_payment_confirmation(payment_id: int, db: Session = Depends(g
     return StreamingResponse(
         BytesIO(pdf_bytes),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 

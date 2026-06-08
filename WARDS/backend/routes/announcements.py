@@ -639,7 +639,10 @@ async def download_announcement_attachment(
         return Response(
             content=content,
             media_type=attachment.mime_type or "application/octet-stream",
-            headers={"Content-Disposition": f'attachment; filename="{attachment.original_filename}"'},
+            headers={
+                "Content-Disposition": f'attachment; filename="{attachment.original_filename}"',
+                "X-Content-Type-Options": "nosniff",
+            },
         )
     import os as _os
     if not _os.path.exists(attachment.file_path):
@@ -648,6 +651,7 @@ async def download_announcement_attachment(
         attachment.file_path,
         media_type=attachment.mime_type or "application/octet-stream",
         filename=attachment.original_filename,
+        headers={"X-Content-Type-Options": "nosniff"},
     )
 
 

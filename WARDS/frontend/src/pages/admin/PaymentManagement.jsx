@@ -561,7 +561,7 @@ const PaymentManagement = () => {
       <!doctype html>
       <html>
         <head>
-          <title>WARDS ${collectionReportTitle}</title>
+          <title>WARDS ${escapeHtml(collectionReportTitle)}</title>
           <style>
             * { box-sizing: border-box; }
             body { font-family: Arial, sans-serif; color: #0f172a; margin: 0; background: #edf3f8; }
@@ -628,7 +628,7 @@ const PaymentManagement = () => {
             <div class="preview-toolbar">
               <div class="toolbar-copy">
                 <span>WARDS Main Admin</span>
-                <strong>${collectionReportTitle} Preview</strong>
+                <strong>${escapeHtml(collectionReportTitle)} Preview</strong>
                 <p class="toolbar-note">Review branch rankings, collection analytics, and remittance totals before printing.</p>
               </div>
               <div class="toolbar-actions">
@@ -639,8 +639,8 @@ const PaymentManagement = () => {
             <main class="report-page">
               <div class="header">
                 <div class="eyebrow">WARDS Main Admin</div>
-                <h1>${collectionReportTitle}</h1>
-                <div class="meta">Generated ${generatedAt}</div>
+                <h1>${escapeHtml(collectionReportTitle)}</h1>
+                <div class="meta">Generated ${escapeHtml(generatedAt)}</div>
               </div>
               <div class="kpis">
                 <div class="kpi"><span>Main Collection Account</span><strong>${formatCurrency(mainCollectionAmount)}</strong></div>
@@ -1225,6 +1225,7 @@ const PaymentManagement = () => {
                   return URL.createObjectURL(blob);
                 })()}
                 className="h-full w-full border-0"
+                sandbox=""
                 onLoad={(e) => {
                   // Clean up blob URL after iframe loads
                   const iframe = e.target;

@@ -2441,12 +2441,16 @@ async def download_branch_announcement_attachment(
         return Response(
             content=content,
             media_type=attachment.mime_type or "application/octet-stream",
-            headers={"Content-Disposition": f'attachment; filename="{attachment.original_filename}"'},
+            headers={
+                "Content-Disposition": f'attachment; filename="{attachment.original_filename}"',
+                "X-Content-Type-Options": "nosniff",
+            },
         )
     return FileResponse(
         attachment.file_path,
         media_type=attachment.mime_type or "application/octet-stream",
         filename=attachment.original_filename,
+        headers={"X-Content-Type-Options": "nosniff"},
     )
 
 
@@ -2632,7 +2636,8 @@ async def download_branch_memo_attachment(
     return FileResponse(
         path=attachment_path,
         filename=attachment_filename or "attachment",
-        media_type="application/octet-stream"
+        media_type="application/octet-stream",
+        headers={"X-Content-Type-Options": "nosniff"},
     )
 
 @router.get("/memos/unread-count")

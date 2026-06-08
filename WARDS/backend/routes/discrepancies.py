@@ -425,7 +425,11 @@ async def download_branch_discrepancy_attachment(
     if not attachment_path.exists():
         raise HTTPException(status_code=404, detail="Attached file could not be found")
 
-    return FileResponse(path=attachment_path, filename=discrepancy_value(report, "attachment_filename"))
+    return FileResponse(
+        path=attachment_path,
+        filename=discrepancy_value(report, "attachment_filename"),
+        headers={"X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.get("/admin/{report_id}/attachment")
@@ -444,7 +448,11 @@ async def download_admin_discrepancy_attachment(
     if not attachment_path.exists():
         raise HTTPException(status_code=404, detail="Attached file could not be found")
 
-    return FileResponse(path=attachment_path, filename=discrepancy_value(report, "attachment_filename"))
+    return FileResponse(
+        path=attachment_path,
+        filename=discrepancy_value(report, "attachment_filename"),
+        headers={"X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.put("/branch/{report_id}/mark-viewed")

@@ -1665,6 +1665,7 @@ async def download_receipt_record_image(
         source_image_path,
         media_type="application/octet-stream",
         filename=os.path.basename(source_image_path),
+        headers={"X-Content-Type-Options": "nosniff"},
     )
 
 
@@ -2011,6 +2012,7 @@ async def download_release_copy(
         release_copy_path,
         media_type=mimetypes.guess_type(release_copy_filename or release_copy_path)[0] or "application/octet-stream",
         filename=release_copy_filename or os.path.basename(release_copy_path),
+        headers={"X-Content-Type-Options": "nosniff"},
     )
 
 

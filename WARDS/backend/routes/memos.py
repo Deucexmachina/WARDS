@@ -332,7 +332,8 @@ async def download_attachment(
     return FileResponse(
         path=attachment_path,
         filename=attachment_filename or "attachment",
-        media_type="application/octet-stream"
+        media_type="application/octet-stream",
+        headers={"X-Content-Type-Options": "nosniff"},
     )
 
 @router.get("/unread-count")

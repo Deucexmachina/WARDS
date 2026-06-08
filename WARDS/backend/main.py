@@ -131,7 +131,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             return (
                 "default-src 'self'; "
                 "script-src 'self'; "
-                "style-src 'self'; "  # No unsafe-inline - app uses Tailwind CSS and style prop
+                "style-src 'self' 'unsafe-inline'; "  # Required for React style prop; XSS risk is minimal for CSS vs JS
                 "connect-src 'self'; "
                 "img-src 'self' data:; "
                 "object-src 'none'; "
