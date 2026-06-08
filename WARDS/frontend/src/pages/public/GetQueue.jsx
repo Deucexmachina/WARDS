@@ -634,23 +634,9 @@ const GetQueue = () => {
     if (!queueResult) {
       return;
     }
-
-    const opened = printQueueTicket({
-      title: 'Queue Registration Receipt',
-      queueNumber: queueResult.queue_number,
-      branchName: queueResult.branch_name,
-      queueType: queueResult.queue_type,
-      serviceType: queueResult.service_type,
-      appointmentTime: queueResult.appointment_time,
-      recommendedArrival: queueResult.recommended_arrival,
-      estimatedWaitTime: queueResult.estimated_wait_time,
-      createdAt: queueResult.created_at,
-      taxpayerName: normalizeCitizenFullName(formData.taxpayer_name),
-      contactNumber: toCanonicalPhilippineContactNumber(formData.contact_number),
-      message: queueResult.message,
-    });
+    const opened = printQueueTicket();
     if (!opened) {
-      setFormError('Unable to open the print preview. Please allow pop-ups and try again.');
+      setFormError('Unable to print. Please try again.');
     }
   };
 
@@ -682,7 +668,7 @@ const GetQueue = () => {
     return (
       <div className="min-h-screen bg-gray-50 py-12">
         <div className="container mx-auto px-4 max-w-2xl">
-          <div className="bg-white rounded-xl shadow-lg p-8 text-center">
+          <div className="bg-white rounded-xl shadow-lg p-8 text-center" data-print-ticket>
             <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
               <svg className="w-12 h-12 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>

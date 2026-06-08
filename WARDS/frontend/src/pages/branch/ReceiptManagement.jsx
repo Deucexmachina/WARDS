@@ -8,7 +8,7 @@ import ProcessingModal from '../../components/ProcessingModal';
 
 const SECTION_PAGE_SIZE = 5;
 const MAX_RELEASE_IMAGE_SIZE = 5 * 1024 * 1024;
-const ALLOWED_RELEASE_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const ALLOWED_RELEASE_IMAGE_TYPES = ['image/jpeg', 'image/png'];
 const BRANCH_RECEIPT_UPDATED_EVENT = 'branch-receipt-updated';
 const PROCESSING_SUCCESS_DELAY_MS = 1100;
 
@@ -492,14 +492,15 @@ const ReceiptManagement = () => {
       return;
     }
 
-    if (!file.type.startsWith('image/')) {
+    const ALLOWED_PREVIEW_TYPES = ['image/png', 'image/jpeg', 'image/jpg'];
+    if (!ALLOWED_PREVIEW_TYPES.includes(file.type)) {
       setSelectedFile(null);
       if (previewUrl) {
         URL.revokeObjectURL(previewUrl);
       }
       setPreviewUrl(null);
       setOcrDraft(null);
-      setError('Please select a valid receipt image file.');
+      setError('Only PNG and JPEG files are allowed for preview.');
       setSuccessMessage('');
       event.target.value = '';
       return;
@@ -639,11 +640,18 @@ const ReceiptManagement = () => {
   const handlePrintReleaseCopy = async (requestId) => {
     try {
       const response = await receiptAPI.downloadReleaseCopy(requestId);
-      const blobUrl = window.URL.createObjectURL(new Blob([response.data]));
-      window.open(blobUrl, '_blank');
-      setTimeout(() => window.URL.revokeObjectURL(blobUrl), 60000);
+      const contentType = response.headers?.['content-type'] || 'application/octet-stream';
+      const blob = response.data instanceof Blob ? response.data : new Blob([response.data], { type: contentType });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `release-copy-${requestId}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => window.URL.revokeObjectURL(url), 60000);
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to open finished receipt copy.');
+      setError(err.response?.data?.detail || 'Failed to download finished receipt copy.');
     }
   };
 
@@ -655,126 +663,43 @@ const ReceiptManagement = () => {
       const reader = new FileReader();
       reader.onloadend = () => {
         const imageSrc = reader.result;
-        const iframe = document.createElement('iframe');
-        iframe.setAttribute('title', 'Receipt Print Frame');
-        iframe.style.position = 'fixed';
-        iframe.style.left = '-10000px';
-        iframe.style.top = '0';
-        iframe.style.width = '900px';
-        iframe.style.height = '1300px';
-        iframe.style.border = '0';
-        iframe.style.opacity = '0';
-        iframe.style.pointerEvents = 'none';
-
-        const cleanup = () => {
-          setTimeout(() => {
-            if (iframe.parentNode) {
-              iframe.parentNode.removeChild(iframe);
-            }
-          }, 1000);
-        };
-
-        document.body.appendChild(iframe);
-
-        const iframeDocument = iframe.contentWindow?.document;
-        if (!iframeDocument) {
-          cleanup();
-          setError('Failed to prepare print preview.');
+        const printWindow = window.open('', '_blank', 'width=900,height=1300');
+        if (!printWindow) {
+          setError('Allow pop-ups to print the receipt record.');
           return;
         }
 
-        // Use safe DOM API instead of document.write to prevent XSS
-        iframeDocument.open();
-        iframeDocument.write('<!DOCTYPE html><html><head><title>Print Receipt</title></head><body></body></html>');
-        iframeDocument.close();
+        const doc = printWindow.document;
+        doc.title = 'Receipt Record';
 
-        // Create style element using safe DOM API
-        const style = iframeDocument.createElement('style');
+        const style = doc.createElement('style');
         style.textContent = `
-          html, body {
-            margin: 0;
-            padding: 0;
-            background: white;
-          }
-          body {
-            display: flex;
-            justify-content: center;
-            align-items: flex-start;
-            min-height: 100vh;
-          }
-          .print-container {
-            width: 100%;
-            max-width: 100%;
-            padding: 10mm;
-            box-sizing: border-box;
-          }
-          img {
-            display: block;
-            width: auto;
-            height: 95vh;
-            max-width: 95vw;
-            max-height: 95vh;
-            object-fit: contain;
-            margin: 0 auto;
-          }
-          @page {
-            size: auto;
-            margin: 10mm;
-          }
+          html, body { margin: 0; padding: 0; background: white; }
+          body { display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; }
+          .print-container { width: 100%; max-width: 100%; padding: 10mm; box-sizing: border-box; }
+          img { display: block; width: auto; height: 95vh; max-width: 95vw; max-height: 95vh; object-fit: contain; margin: 0 auto; }
+          @page { size: auto; margin: 10mm; }
           @media print {
-            body {
-              margin: 0;
-              padding: 0;
-              display: flex;
-              justify-content: center;
-              align-items: flex-start;
-            }
-            .print-container {
-              padding: 0;
-              width: 100%;
-              max-width: 100%;
-            }
-            img {
-              width: auto;
-              height: 95vh;
-              max-width: 95vw;
-              max-height: 95vh;
-              page-break-inside: avoid;
-            }
+            body { margin: 0; padding: 0; display: flex; justify-content: center; align-items: flex-start; }
+            .print-container { padding: 0; width: 100%; max-width: 100%; }
+            img { width: auto; height: 95vh; max-width: 95vw; max-height: 95vh; page-break-inside: avoid; }
           }
         `;
-        iframeDocument.head.appendChild(style);
+        doc.head.appendChild(style);
 
-        // Create container and image using safe DOM API
-        const container = iframeDocument.createElement('div');
+        const container = doc.createElement('div');
         container.className = 'print-container';
-        
-        const receiptImage = iframeDocument.createElement('img');
-        receiptImage.id = 'receipt-image';
+
+        const receiptImage = doc.createElement('img');
         receiptImage.src = imageSrc;
         receiptImage.alt = 'Receipt record';
-        
+
         container.appendChild(receiptImage);
-        iframeDocument.body.appendChild(container);
-        if (!receiptImage) {
-          cleanup();
-          setError('Failed to prepare receipt image for printing.');
-          return;
-        }
+        doc.body.appendChild(container);
 
         receiptImage.onload = () => {
-          const frameWindow = iframe.contentWindow;
-          if (!frameWindow) {
-            cleanup();
-            setError('Failed to open print preview.');
-            return;
-          }
-
-          frameWindow.onafterprint = cleanup;
-          frameWindow.focus();
-          setTimeout(() => {
-            frameWindow.print();
-          }, 150);
+          printWindow.focus();
+          setTimeout(() => printWindow.print(), 150);
         };
       };
       reader.readAsDataURL(blob);

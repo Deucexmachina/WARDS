@@ -502,12 +502,12 @@ const PaymentStatus = () => {
                   <h3 className="text-lg font-bold text-slate-900 mb-3">{language === 'en' ? 'Upload Payment Proof' : 'I-upload ang Patunay ng Bayad'}</h3>
                   <p className="text-sm text-slate-600 mb-4">
                     {language === 'en'
-                      ? 'Upload a payment proof document in PDF, DOC, or DOCX format. Maximum file size is 5MB.'
-                      : 'Mag-upload ng dokumento ng patunay ng bayad sa format na PDF, DOC, o DOCX. Ang maximum na laki ng file ay 5MB.'}
+                      ? 'Upload a payment proof document in PDF, PNG, or JPEG format. Maximum file size is 5MB.'
+                      : 'Mag-upload ng dokumento ng patunay ng bayad sa format na PDF, PNG, o JPEG. Ang maximum na laki ng file ay 5MB.'}
                   </p>
                   <input
                     type="file"
-                    accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    accept=".pdf,.png,.jpg,.jpeg"
                     onChange={(event) => setSelectedProofFile(event.target.files?.[0] || null)}
                     className="block w-full text-sm text-slate-700"
                   />

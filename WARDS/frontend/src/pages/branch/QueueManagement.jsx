@@ -1480,7 +1480,7 @@ const QueueManagement = () => {
                   <span className="mb-2 block text-sm font-semibold text-slate-700">Receipt Image</span>
                   <input
                     type="file"
-                    accept="image/*"
+                    accept="image/png,image/jpeg"
                     onChange={(event) => {
                       setCompletionError('');
                       setReceiptUploadFile(event.target.files?.[0] || null);

@@ -1247,12 +1247,12 @@ const PaymentManagement = () => {
               <input
                 key={remittanceReportFile ? 'selected-remittance-report' : 'empty-remittance-report'}
                 type="file"
-                accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx"
+                accept=".pdf,.jpg,.jpeg,.png"
                 onChange={(event) => setRemittanceReportFile(event.target.files?.[0] || null)}
                 className="w-full rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm shadow-sm file:mr-4 file:rounded-xl file:border-0 file:bg-[#0f2f5f] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-slate-200"
               />
               <span className="mt-2 block text-xs text-slate-500">
-                Accepted formats: PDF, JPG, PNG, DOC, DOCX, XLS, XLSX. Maximum 10MB.
+                Accepted formats: PDF, PNG, JPEG only. Maximum 10MB.
               </span>
             </label>
             <button

@@ -12,9 +12,17 @@ Run this checklist before every release that touches uploads, previews, announce
 - [ ] Upload a legitimate JPEG — must succeed, MIME type stored as `image/jpeg`
 - [ ] Upload a renamed SVG with `.pdf` extension — backend must reject
 - [ ] Upload DOCX, XLSX, TXT, CSV, JSON — backend must reject (allowlist is PDF/PNG/JPEG only)
+- [ ] Upload WEBP — backend must reject
 - [ ] Upload a zero-byte file — backend must reject
 - [ ] Upload a file > 25 MB to announcements — backend must reject
 - [ ] Upload a file > 10 MB to tax assessment — backend must reject
+- [ ] Upload a file > 5 MB to receipt release copy — backend must reject
+- [ ] Upload a file > 10 MB to remittance report — backend must reject
+- [ ] Upload a non-image to receipt OCR — backend must reject
+- [ ] Upload an invalid file to memo attachment — backend must reject
+- [ ] Upload an invalid file to discrepancy report — backend must reject
+- [ ] Upload an invalid file to payment proof — backend must reject
+- [ ] Upload an invalid file to business tax application — backend must reject
 
 ## 2. File Preview / Inline Rendering
 
@@ -31,20 +39,23 @@ Run this checklist before every release that touches uploads, previews, announce
 - [ ] Every HTML response includes `Content-Security-Policy` header
 - [ ] Production CSP has `script-src 'self'` (no `unsafe-inline`, no `unsafe-eval`)
 - [ ] Production CSP has `style-src 'self' 'unsafe-inline'` (required for React style prop)
+- [ ] Production CSP has `frame-src 'self'` (no external frames)
+- [ ] Production CSP has `form-action 'self'` (no external form submissions)
 - [ ] Production CSP has `object-src 'none'`
 - [ ] Production CSP has `frame-ancestors 'none'`
+- [ ] Production CSP has `upgrade-insecure-requests`
 - [ ] Every response includes `X-Content-Type-Options: nosniff`
 - [ ] Every response includes `X-Frame-Options: DENY` or `SAMEORIGIN`
 - [ ] No `text/html` is served for user-uploaded files
 
 ## 4. HTML Template / Blob URL Flows
 
-- [ ] Payment checkout loading page (`PayTaxesRPT`, `RequestReceipt`) uses static localized text only
-- [ ] Queue ticket print HTML escapes all dynamic values via `escapeHtml()`
-- [ ] Collection report HTML escapes all branch names, remittedBy, verifiedBy via `escapeHtml()`
+- [ ] Payment checkout loading page (`PayTaxesRPT`, `RequestReceipt`) uses safe DOM APIs, no blob URL
+- [ ] Queue ticket print uses on-page `[data-print-ticket]` element, no hidden iframe or blob
+- [ ] Collection report preview uses React DOM (`CollectionReportView`), no iframe or blob
+- [ ] Collection report print HTML escapes all branch names, remittedBy, verifiedBy via `escapeHtml()`
 - [ ] No `innerHTML`, `document.write`, or `dangerouslySetInnerHTML` is used with user data
-- [ ] Report preview iframe is sandboxed (`sandbox=""`)
-- [ ] File preview iframe is sandboxed (`sandbox=""`) for PDFs
+- [ ] File preview iframe is sandboxed (`sandbox=""`) for PDFs only
 
 ## 5. URL Navigation and Links
 
@@ -85,19 +96,19 @@ Expected: all rendered as plain text or escaped, never executed.
 | iframe | Purpose | sandboxed? | Can it be eliminated? |
 |--------|---------|-----------|----------------------|
 | FileViewerModal (PDF) | File preview | Yes | No — PDF requires iframe |
-| ReceiptManagement print | Print receipt | No (breaks print) | No — print-only, DOM-built content |
-| Queue ticket print | Print ticket | Yes (hidden) | No — srcdoc-based, no blob |
 
 - [ ] No new iframes are added without sandboxing
 - [ ] No iframe is used to render user-uploaded content except sandboxed PDF
+- [ ] No hidden iframes are used for printing or previewing content
 
 ## 10. Blob URL Discipline
 
 - [ ] No `new Blob([...], { type: 'text/html' })` exists outside `safeBlob.js`
 - [ ] All Blob URLs are created via `createSafeBlobUrl` with a `purpose` description
-- [ ] Queue ticket print uses iframe `srcdoc`, not `URL.createObjectURL(blob)`
+- [ ] Queue ticket print uses on-page `[data-print-ticket]`, no blob or iframe
 - [ ] PaymentManagement report preview uses React DOM, not iframe blob
 - [ ] Report print window (for physical printing) still uses blob but content is app-generated only
+- [ ] Payment checkout loading pages use safe DOM APIs, no blob URL
 
 ## 11. Endpoint Separation
 
@@ -105,6 +116,15 @@ Expected: all rendered as plain text or escaped, never executed.
 - [ ] Download endpoints always force `Content-Disposition: attachment`
 - [ ] All file responses use `deliver_file_response` or `deliver_bytes_response`
 - [ ] All file responses include `X-Content-Type-Options: nosniff`
+- [ ] Announcement preview fallback (disk file) includes `Content-Disposition` header
+- [ ] Branch announcement preview fallback (disk file) includes `Content-Disposition` header
+- [ ] Remittance report download forces download
+- [ ] Payment proof download forces download
+- [ ] Official receipt download forces download
+- [ ] Release copy download forces download
+- [ ] Memo attachment download forces download
+- [ ] Discrepancy attachment download forces download
+- [ ] Business tax file download forces download
 
 ## 12. Regression Test Commands
 
@@ -121,6 +141,12 @@ curl -I http://localhost:8000/ | grep -i "x-frame-options"
 # Verify file delivery headers
 curl -I http://localhost:8000/api/announcements/1/attachments/1/preview | grep -i "x-content-type-options"
 curl -I http://localhost:8000/api/announcements/1/attachments/1/preview | grep -i "content-disposition"
+curl -I http://localhost:8000/api/branch/announcements/1/attachments/1/preview | grep -i "content-disposition"
+curl -I http://localhost:8000/api/payments/1/proof | grep -i "content-disposition"
+curl -I http://localhost:8000/api/payments/1/official-receipt | grep -i "content-disposition"
+curl -I http://localhost:8000/api/receipts/requests/1/release-copy | grep -i "content-disposition"
+curl -I http://localhost:8000/api/memos/1/download-attachment | grep -i "content-disposition"
+curl -I http://localhost:8000/api/discrepancies/branch/1/attachment | grep -i "content-disposition"
 ```
 
 ---

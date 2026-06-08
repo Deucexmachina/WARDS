@@ -16,6 +16,8 @@ from sqlalchemy.exc import OperationalError
 
 from database.models import ActivityLog, Announcement, AnnouncementAttachment, AnnouncementView, Branch, BranchStaff, BusinessTaxApplication, CollectionAccount, Memo, MemoView, Payment, Policy, PolicyView, Queue, QueueHistory, ReceiptRequest, ReceiptRequestHistory, Remittance, RemittanceItem, get_db
 from middleware.branch_auth import get_current_branch_staff, require_any_branch_staff
+from utils.file_delivery import deliver_file_response
+from utils.file_validation import validate_upload_file
 from utils.announcement_attachments import (
     enforce_attachment_limit,
     remove_attachment_file,
@@ -33,7 +35,7 @@ from utils.system_settings import SYSTEM_DISABLED_MESSAGE, get_setting_value
 router = APIRouter()
 REMITTANCE_REPORT_DIR = Path(__file__).resolve().parents[1] / "uploads" / "remittance_reports"
 REMITTANCE_REPORT_DIR.mkdir(parents=True, exist_ok=True)
-ALLOWED_REMITTANCE_REPORT_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".doc", ".docx", ".xls", ".xlsx"}
+ALLOWED_REMITTANCE_REPORT_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
 MAX_REMITTANCE_REPORT_SIZE_BYTES = 10 * 1024 * 1024
 OUTPUT_DIR = Path(__file__).resolve().parents[1] / "output" / "payments" / "business-tax"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -1062,25 +1064,23 @@ def serialize_remittance(db: Session, remittance: Remittance) -> dict:
 
 async def store_remittance_report_file(file: UploadFile, remittance_number: str) -> tuple[str, str, str | None]:
     original_name = (file.filename or "").strip()
-    extension = Path(original_name).suffix.lower()
-    if extension not in ALLOWED_REMITTANCE_REPORT_EXTENSIONS:
-        raise HTTPException(
-            status_code=400,
-            detail="Upload a valid remittance report file: PDF, JPG, PNG, DOC, DOCX, XLS, or XLSX.",
-        )
-
     file_bytes = await file.read()
     if not file_bytes:
         raise HTTPException(status_code=400, detail="Remittance report file is required.")
-    if len(file_bytes) > MAX_REMITTANCE_REPORT_SIZE_BYTES:
-        raise HTTPException(status_code=400, detail="Maximum remittance report file size is 10MB.")
+
+    extension, detected_mime = validate_upload_file(
+        file,
+        file_bytes,
+        allowed_extensions=ALLOWED_REMITTANCE_REPORT_EXTENSIONS,
+        max_size_bytes=MAX_REMITTANCE_REPORT_SIZE_BYTES,
+    )
 
     safe_original = re.sub(r"[^A-Za-z0-9._-]+", "_", original_name).strip("._") or f"remittance-report{extension}"
     safe_remittance = re.sub(r"[^A-Za-z0-9-]+", "-", remittance_number).strip("-") or "remittance"
     stored_name = f"{safe_remittance}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{safe_original}"
     destination = REMITTANCE_REPORT_DIR / stored_name
     destination.write_bytes(file_bytes)
-    return str(destination), original_name or safe_original, file.content_type
+    return str(destination), original_name or safe_original, detected_mime
 
 
 def create_branch_remittance_record(
@@ -2051,13 +2051,20 @@ def _require_branch_admin_memo_access(current_staff: BranchStaff):
 def _store_memo_attachment(attachment: Optional[UploadFile]) -> tuple[str | None, str | None]:
     if not attachment or not attachment.filename:
         return None, None
+
+    file_bytes = attachment.file.read()
+    validate_upload_file(
+        attachment,
+        file_bytes,
+        allowed_extensions={".pdf", ".png", ".jpg", ".jpeg"},
+    )
+
     upload_dir = Path("uploads/memos")
     upload_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", attachment.filename)
     file_path = upload_dir / f"{timestamp}_{safe_name}"
-    with file_path.open("wb") as buffer:
-        shutil.copyfileobj(attachment.file, buffer)
+    file_path.write_bytes(file_bytes)
     return str(file_path), attachment.filename
 
 
@@ -2489,7 +2496,10 @@ async def preview_branch_announcement_attachment(
         attachment.file_path,
         media_type=mime_type,
         filename=attachment.original_filename,
-        headers={"X-Content-Type-Options": "nosniff"},
+        headers={
+            "Content-Disposition": f'{disposition}; filename="{attachment.original_filename}"',
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 

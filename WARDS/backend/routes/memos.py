@@ -8,6 +8,9 @@ import os
 import shutil
 from pathlib import Path
 
+from utils.file_delivery import deliver_file_response
+from utils.file_validation import validate_upload_file
+
 from database.models import Memo, MemoView, get_db, ActivityLog, User, Branch
 from middleware.admin_auth import get_current_admin_user, require_main_admin
 from utils.field_crypto import apply_memo_security, apply_memo_view_security, get_decrypted_or_raw, get_memo_viewed_ids, find_memo_view
@@ -122,18 +125,23 @@ async def create_memo(
     
     attachment_path = None
     attachment_filename = None
-    
+
     if attachment and attachment.filename:
+        file_bytes = attachment.file.read()
+        validate_upload_file(
+            attachment,
+            file_bytes,
+            allowed_extensions={".pdf", ".png", ".jpg", ".jpeg"},
+        )
+
         upload_dir = Path("uploads/memos")
         upload_dir.mkdir(parents=True, exist_ok=True)
-        
+
         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         safe_filename = f"{timestamp}_{attachment.filename}"
         file_path = upload_dir / safe_filename
-        
-        with file_path.open("wb") as buffer:
-            shutil.copyfileobj(attachment.file, buffer)
-        
+        file_path.write_bytes(file_bytes)
+
         attachment_path = str(file_path)
         attachment_filename = attachment.filename
     
@@ -202,17 +210,22 @@ async def update_memo(
                 os.remove(existing_attachment_path)
             except Exception as e:
                 print(f"Failed to delete old attachment: {e}")
-        
+
+        file_bytes = attachment.file.read()
+        validate_upload_file(
+            attachment,
+            file_bytes,
+            allowed_extensions={".pdf", ".png", ".jpg", ".jpeg"},
+        )
+
         upload_dir = Path("uploads/memos")
         upload_dir.mkdir(parents=True, exist_ok=True)
-        
+
         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         safe_filename = f"{timestamp}_{attachment.filename}"
         file_path = upload_dir / safe_filename
-        
-        with file_path.open("wb") as buffer:
-            shutil.copyfileobj(attachment.file, buffer)
-        
+        file_path.write_bytes(file_bytes)
+
         db_memo.attachment_path = str(file_path)
         db_memo.attachment_filename = attachment.filename
     
@@ -329,11 +342,10 @@ async def download_attachment(
     if not attachment_path or not os.path.exists(attachment_path):
         raise HTTPException(status_code=404, detail="Attachment not found")
     
-    return FileResponse(
-        path=attachment_path,
+    return deliver_file_response(
+        attachment_path,
         filename=attachment_filename or "attachment",
-        media_type="application/octet-stream",
-        headers={"X-Content-Type-Options": "nosniff"},
+        allow_inline_preview=False,
     )
 
 @router.get("/unread-count")

@@ -12,17 +12,18 @@ from sqlalchemy.orm import Session
 from database.models import ActivityLog, Branch, BranchStaff, DiscrepancyReport, get_db
 from middleware.admin_auth import require_main_admin
 from middleware.branch_auth import get_current_branch_staff, require_branch_admin
+from utils.file_delivery import deliver_file_response
+from utils.file_validation import validate_upload_file
 from utils.field_crypto import apply_discrepancy_report_security, get_decrypted_or_raw
 
 router = APIRouter()
 UPLOAD_DIR = Path("uploads/discrepancies")
+# Discrepancy attachments are restricted to the same safe types as all other uploads.
+# Only PDF, PNG, and JPEG are allowed. All served files are forced to download.
 ALLOWED_ATTACHMENT_TYPES = {
     "application/pdf",
     "image/jpeg",
     "image/png",
-    "image/webp",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/msword",
 }
 MANILA_TZ = timezone(timedelta(hours=8))
 CLOSED_DISCREPANCY_STATUSES = {"Solved", "Rejected"}
@@ -213,17 +214,17 @@ async def save_attachment(attachment: UploadFile | None) -> tuple[str | None, st
     if not attachment or not attachment.filename:
         return None, None
 
-    if attachment.content_type and attachment.content_type not in ALLOWED_ATTACHMENT_TYPES:
-        raise HTTPException(
-            status_code=400,
-            detail="Attachment must be a PDF, image, or Word document",
-        )
+    content = await attachment.read()
+    extension, detected_mime = validate_upload_file(
+        attachment,
+        content,
+        allowed_extensions={".pdf", ".png", ".jpg", ".jpeg"},
+    )
 
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     safe_name = attachment.filename.replace("\\", "_").replace("/", "_").replace(" ", "_")
     stored_name = f"{uuid4().hex}_{safe_name}"
     file_path = UPLOAD_DIR / stored_name
-    content = await attachment.read()
     file_path.write_bytes(content)
     return str(file_path), attachment.filename
 
@@ -425,10 +426,10 @@ async def download_branch_discrepancy_attachment(
     if not attachment_path.exists():
         raise HTTPException(status_code=404, detail="Attached file could not be found")
 
-    return FileResponse(
-        path=attachment_path,
+    return deliver_file_response(
+        attachment_path,
         filename=discrepancy_value(report, "attachment_filename"),
-        headers={"X-Content-Type-Options": "nosniff"},
+        allow_inline_preview=False,
     )
 
 
@@ -448,10 +449,10 @@ async def download_admin_discrepancy_attachment(
     if not attachment_path.exists():
         raise HTTPException(status_code=404, detail="Attached file could not be found")
 
-    return FileResponse(
-        path=attachment_path,
+    return deliver_file_response(
+        attachment_path,
         filename=discrepancy_value(report, "attachment_filename"),
-        headers={"X-Content-Type-Options": "nosniff"},
+        allow_inline_preview=False,
     )
 
 

@@ -704,7 +704,10 @@ async def preview_announcement_attachment(
         attachment.file_path,
         media_type=mime_type,
         filename=attachment.original_filename,
-        headers={"X-Content-Type-Options": "nosniff"},
+        headers={
+            "Content-Disposition": f'{disposition}; filename="{attachment.original_filename}"',
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 

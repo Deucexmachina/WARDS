@@ -743,7 +743,7 @@ const PayTaxesBT = () => {
                       <div className="mt-6 grid gap-5 md:grid-cols-2">
                         <div>
                           <label className="mb-2 block text-sm font-semibold text-slate-700">{text.salesDeclarationFile}</label>
-                          <input type="file" accept=".pdf,.jpg,.jpeg,.png,.docx" onChange={(event) => setDocumentFiles((current) => ({ ...current, salesDeclaration: event.target.files?.[0] || null }))} className="w-full rounded-[18px] border border-slate-300 px-4 py-3 text-sm shadow-sm" />
+                          <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(event) => setDocumentFiles((current) => ({ ...current, salesDeclaration: event.target.files?.[0] || null }))} className="w-full rounded-[18px] border border-slate-300 px-4 py-3 text-sm shadow-sm" />
                           {selectedApplication.sales_declaration_name ? (
                             <a href={buildApiAssetUrl(selectedApplication.sales_declaration_download_url)} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs font-semibold text-[#123f8f] underline underline-offset-4">
                               {text.viewCurrentFile} {selectedApplication.sales_declaration_name}
@@ -752,7 +752,7 @@ const PayTaxesBT = () => {
                         </div>
                         <div>
                           <label className="mb-2 block text-sm font-semibold text-slate-700">{text.financialStatements}</label>
-                          <input type="file" accept=".pdf,.jpg,.jpeg,.png,.docx" onChange={(event) => setDocumentFiles((current) => ({ ...current, financialStatements: event.target.files?.[0] || null }))} className="w-full rounded-[18px] border border-slate-300 px-4 py-3 text-sm shadow-sm" />
+                          <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(event) => setDocumentFiles((current) => ({ ...current, financialStatements: event.target.files?.[0] || null }))} className="w-full rounded-[18px] border border-slate-300 px-4 py-3 text-sm shadow-sm" />
                           {selectedApplication.financial_statements_name ? (
                             <a href={buildApiAssetUrl(selectedApplication.financial_statements_download_url)} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs font-semibold text-[#123f8f] underline underline-offset-4">
                               {text.viewCurrentFile} {selectedApplication.financial_statements_name}
@@ -761,7 +761,7 @@ const PayTaxesBT = () => {
                         </div>
                         <div className="md:col-span-2">
                           <label className="mb-2 block text-sm font-semibold text-slate-700">{text.supportingDocuments}</label>
-                          <input type="file" accept=".pdf,.jpg,.jpeg,.png,.docx" onChange={(event) => setDocumentFiles((current) => ({ ...current, supportingDocuments: event.target.files?.[0] || null }))} className="w-full rounded-[18px] border border-slate-300 px-4 py-3 text-sm shadow-sm" />
+                          <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(event) => setDocumentFiles((current) => ({ ...current, supportingDocuments: event.target.files?.[0] || null }))} className="w-full rounded-[18px] border border-slate-300 px-4 py-3 text-sm shadow-sm" />
                           {selectedApplication.supporting_documents_name ? (
                             <a href={buildApiAssetUrl(selectedApplication.supporting_documents_download_url)} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs font-semibold text-[#123f8f] underline underline-offset-4">
                               {text.viewCurrentFile} {selectedApplication.supporting_documents_name}

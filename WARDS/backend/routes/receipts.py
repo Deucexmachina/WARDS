@@ -12,6 +12,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, R
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from fastapi.responses import FileResponse, StreamingResponse
+from utils.file_delivery import deliver_file_response
+from utils.file_validation import validate_upload_file
 from PIL import Image
 import qrcode
 from pydantic import BaseModel
@@ -55,9 +57,10 @@ limiter = Limiter(key_func=get_rate_limit_key)
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads", "receipts")
 RELEASE_UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads", "released_receipts")
 NAME_PATTERN = re.compile(r"^[A-Za-z.\-' ]+$")
-ALLOWED_RELEASE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
-ALLOWED_RELEASE_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
+ALLOWED_RELEASE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+ALLOWED_RELEASE_MIME_TYPES = {"image/jpeg", "image/png"}
 MAX_RELEASE_FILE_SIZE = 5 * 1024 * 1024
+ALLOWED_OCR_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 RECEIPT_REQUEST_FEE = 200.0
 RECEIPT_REQUEST_REASON_OPTIONS = {
     "Lost original receipt",
@@ -1371,6 +1374,11 @@ async def upload_receipt_for_ocr(
     normalized_category = normalize_receipt_category(category)
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     image_data = await file.read()
+    validate_upload_file(
+        file,
+        image_data,
+        allowed_extensions=ALLOWED_OCR_EXTENSIONS,
+    )
     ensure_valid_image_upload(image_data)
 
     original_name = os.path.basename(file.filename or "receipt.jpg")
@@ -1499,6 +1507,11 @@ async def upload_mobile_receipt_for_ocr(
 
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     image_data = await file.read()
+    validate_upload_file(
+        file,
+        image_data,
+        allowed_extensions=ALLOWED_OCR_EXTENSIONS,
+    )
     ensure_valid_image_upload(image_data)
 
     original_name = os.path.basename(file.filename or "mobile-receipt.jpg")
@@ -1893,15 +1906,16 @@ async def upload_release_copy(
     if receipt_request.branch_id != current_staff.branch_id:
         raise HTTPException(status_code=403, detail="Request belongs to another branch")
 
-    extension = os.path.splitext(file.filename or "")[1].lower()
-    if extension not in ALLOWED_RELEASE_EXTENSIONS:
-        raise HTTPException(status_code=400, detail="Only JPG, JPEG, PNG, and WEBP files are allowed")
-    if file.content_type and file.content_type.lower() not in ALLOWED_RELEASE_MIME_TYPES:
-        raise HTTPException(status_code=400, detail="Unsupported image format uploaded")
-
     file_bytes = await file.read()
     if len(file_bytes) > MAX_RELEASE_FILE_SIZE:
         raise HTTPException(status_code=400, detail="Image must not exceed 5 MB")
+
+    extension, detected_mime = validate_upload_file(
+        file,
+        file_bytes,
+        allowed_extensions=ALLOWED_RELEASE_EXTENSIONS,
+        max_size_bytes=MAX_RELEASE_FILE_SIZE,
+    )
     ensure_valid_image_upload(file_bytes)
 
     os.makedirs(RELEASE_UPLOAD_DIR, exist_ok=True)
@@ -2008,11 +2022,10 @@ async def download_release_copy(
     if not release_copy_path or not os.path.exists(release_copy_path):
         raise HTTPException(status_code=404, detail="No uploaded release copy found")
 
-    return FileResponse(
+    return deliver_file_response(
         release_copy_path,
-        media_type=mimetypes.guess_type(release_copy_filename or release_copy_path)[0] or "application/octet-stream",
         filename=release_copy_filename or os.path.basename(release_copy_path),
-        headers={"X-Content-Type-Options": "nosniff"},
+        allow_inline_preview=False,
     )
 
 
@@ -2157,4 +2170,10 @@ async def pay_request_fee(
 
 @router.post("/upload-proof")
 async def upload_proof(file: UploadFile = File(...)):
+    file_bytes = await file.read()
+    validate_upload_file(
+        file,
+        file_bytes,
+        allowed_extensions={".pdf", ".png", ".jpg", ".jpeg"},
+    )
     return {"message": "Proof uploaded successfully", "filename": file.filename}
