@@ -131,7 +131,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             return (
                 "default-src 'self'; "
                 "script-src 'self'; "
-                "style-src 'self' 'unsafe-inline'; "  # React needs unsafe-inline for styled-components
+                "style-src 'self'; "  # No unsafe-inline - app uses Tailwind CSS and style prop
                 "connect-src 'self'; "
                 "img-src 'self' data:; "
                 "object-src 'none'; "

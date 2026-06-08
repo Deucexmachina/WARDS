@@ -710,8 +710,15 @@ const PaymentManagement = () => {
       setPageError('Allow pop-ups to print the Tax Collection Report.');
       return;
     }
-    reportWindow.document.write(buildCollectionReportHtml({ includeToolbar: true }));
-    reportWindow.document.close();
+    // Use safe DOM API instead of document.write to prevent XSS
+    const reportHtml = buildCollectionReportHtml({ includeToolbar: true });
+    const blob = new Blob([reportHtml], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    reportWindow.location.href = url;
+    // Clean up blob URL after window loads
+    reportWindow.onload = () => {
+      URL.revokeObjectURL(url);
+    };
   };
 
   const downloadCollectionSpreadsheet = () => {
@@ -1212,8 +1219,19 @@ const PaymentManagement = () => {
             <div className="min-h-0 flex-1 overflow-hidden bg-slate-100">
               <iframe
                 title="Tax Collection Report Preview"
-                srcDoc={buildCollectionReportHtml({ includeToolbar: false })}
+                src={(() => {
+                  const reportHtml = buildCollectionReportHtml({ includeToolbar: false });
+                  const blob = new Blob([reportHtml], { type: 'text/html' });
+                  return URL.createObjectURL(blob);
+                })()}
                 className="h-full w-full border-0"
+                onLoad={(e) => {
+                  // Clean up blob URL after iframe loads
+                  const iframe = e.target;
+                  if (iframe.src.startsWith('blob:')) {
+                    URL.revokeObjectURL(iframe.src);
+                  }
+                }}
               />
             </div>
           </div>

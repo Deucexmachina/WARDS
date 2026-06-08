@@ -454,7 +454,8 @@ const RequestReceipt = () => {
       checkoutWindow = window.open('', 'wardsReceiptCheckout');
 
       if (checkoutWindow) {
-        checkoutWindow.document.write(`
+        // Use safe Blob URL instead of document.write to prevent XSS
+        const loadingHtml = `
           <html>
             <head><title>${text.requestFeeCheckout}</title></head>
             <body style="font-family: Arial, sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; background:#f8fafc; color:#1f2937;">
@@ -464,8 +465,14 @@ const RequestReceipt = () => {
               </div>
             </body>
           </html>
-        `);
-        checkoutWindow.document.close();
+        `;
+        const blob = new Blob([loadingHtml], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        checkoutWindow.location.href = url;
+        // Clean up blob URL after window loads
+        checkoutWindow.onload = () => {
+          URL.revokeObjectURL(url);
+        };
       }
 
       const paymentContext = requestStatus || {};

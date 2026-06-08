@@ -249,22 +249,27 @@ export const printQueueTicket = ({
     ? `${String(queueType).charAt(0).toUpperCase()}${String(queueType).slice(1)}`
     : 'N/A';
 
-  printWindow.document.write(
-    buildTicketMarkup({
-      title,
-      queueNumber,
-      branchName,
-      queueType: queueTypeLabel,
-      serviceType,
-      appointmentTime: formatDateTimeForPrint(appointmentTime, 'Not applicable'),
-      recommendedArrival: formatDateTimeForPrint(recommendedArrival),
-      estimatedWaitTime,
-      createdAt: formatDateTimeForPrint(createdAt || new Date().toISOString()),
-      taxpayerName,
-      contactNumber: formatContactNumber(contactNumber),
-      message,
-    }),
-  );
-  printWindow.document.close();
+  // Use safe Blob URL instead of document.write to prevent XSS
+  const ticketHtml = buildTicketMarkup({
+    title,
+    queueNumber,
+    branchName,
+    queueType: queueTypeLabel,
+    serviceType,
+    appointmentTime: formatDateTimeForPrint(appointmentTime, 'Not applicable'),
+    recommendedArrival: formatDateTimeForPrint(recommendedArrival),
+    estimatedWaitTime,
+    createdAt: formatDateTimeForPrint(createdAt || new Date().toISOString()),
+    taxpayerName,
+    contactNumber: formatContactNumber(contactNumber),
+    message,
+  });
+  const blob = new Blob([ticketHtml], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  printWindow.location.href = url;
+  // Clean up blob URL after window loads
+  printWindow.onload = () => {
+    URL.revokeObjectURL(url);
+  };
   return true;
 };

@@ -87,3 +87,21 @@ export const safeReplace = (url, windowObj = window) => {
   console.error('Unsafe URL blocked:', url);
   return false;
 };
+
+/**
+ * Safely opens a URL in a new window after validation.
+ * Returns true if window was opened, false otherwise.
+ * 
+ * @param {string} url - The URL to open
+ * @param {string} [windowName='_blank'] - The window name
+ * @param {string} [windowFeatures='noopener,noreferrer'] - Window features
+ * @param {Window} [windowObj=window] - The window object to use (for testing)
+ * @returns {Window|null} - The new window object if opened, null otherwise
+ */
+export const safeOpen = (url, windowName = '_blank', windowFeatures = 'noopener,noreferrer', windowObj = window) => {
+  if (isSafeUrl(url)) {
+    return windowObj.open(url, windowName, windowFeatures);
+  }
+  console.error('Unsafe URL blocked:', url);
+  return null;
+};

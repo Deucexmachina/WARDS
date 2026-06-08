@@ -5,6 +5,7 @@ import { paymentAPI, taxpayerAccountAPI } from '../../services/api';
 import { getStoredPublicUser } from '../../utils/publicSession';
 import { formatTin } from '../../utils/validation';
 import { appendLanguageParam, usePublicLanguage } from '../../utils/publicLanguage';
+import { safeOpen } from '../../utils/urlValidator';
 
 const API_ORIGIN = 'http://localhost:8000';
 const SEARCH_OPTIONS = [
@@ -461,7 +462,12 @@ const PayTaxesBT = () => {
       });
 
       if (response.data?.checkoutUrl) {
-        window.open(response.data.checkoutUrl, 'wardsBusinessTaxCheckout');
+        const safeCheckoutUrl = safeOpen(response.data.checkoutUrl, 'wardsBusinessTaxCheckout', 'noopener,noreferrer');
+        if (!safeCheckoutUrl) {
+          console.error('Blocked unsafe checkout URL:', response.data.checkoutUrl);
+          setError(text.openCheckoutFailed);
+          return;
+        }
         navigate(appendLanguageParam(`/payment/status?ref=${encodeURIComponent(selectedApplication.payment_ref_number)}`, language));
       }
     } catch (paymentError) {
