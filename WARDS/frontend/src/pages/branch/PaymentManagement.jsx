@@ -92,7 +92,11 @@ const getPaymentBucket = (payment) => {
   const normalizedStatus = normalizeStatus(payment?.status);
   const normalizedPaymongoStatus = normalizeStatus(payment?.paymongo_status);
   const normalizedWorkflowStatus = normalizeStatus(payment?.workflow_status);
-  const workflowStatus = (payment?.workflow_status || '').toString().trim().toUpperCase();
+  const workflowStatus = (payment?.workflow_status || '')
+    .toString()
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, '_');
   const isReceiptRequestPayment = payment?.source_module === 'receipt_request';
 
   if ([
@@ -103,6 +107,16 @@ const getPaymentBucket = (payment) => {
     'CLARIFICATION_REQUESTED',
     'VALIDATED',
   ].includes(workflowStatus)) {
+    return 'pending';
+  }
+
+  if (isReceiptRequestPayment) {
+    if (workflowStatus === 'VERIFIED' || workflowStatus === 'PAYMENT_VERIFIED' || payment?.verified_at || normalizedStatus === 'confirmed') {
+      return 'confirmed';
+    }
+    if (normalizedStatus === 'failed' || normalizedWorkflowStatus === 'failed') {
+      return 'failed';
+    }
     return 'pending';
   }
 
@@ -124,13 +138,6 @@ const getPaymentBucket = (payment) => {
     normalizedWorkflowStatus === 'expired'
   ) {
     return 'failed';
-  }
-
-  if (isReceiptRequestPayment) {
-    if (payment?.verified_at || normalizedStatus === 'confirmed' || normalizedWorkflowStatus === 'confirmed') {
-      return 'confirmed';
-    }
-    return 'pending';
   }
 
   return 'pending';

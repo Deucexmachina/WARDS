@@ -11,6 +11,9 @@ const MAX_RELEASE_IMAGE_SIZE = 5 * 1024 * 1024;
 const ALLOWED_RELEASE_IMAGE_TYPES = ['image/jpeg', 'image/png'];
 const BRANCH_RECEIPT_UPDATED_EVENT = 'branch-receipt-updated';
 const PROCESSING_SUCCESS_DELAY_MS = 1100;
+const OCR_REQUIRED_RECEIPT_CATEGORIES = new Set(['RPT', 'BUSINESS', 'MISC']);
+const OCR_EXTRACTION_FAILED_MESSAGE = 'Unable to extract all required receipt information. Please verify the uploaded receipt and try again.';
+const RECEIPT_CATEGORY_KEYS = ['RPT', 'BUSINESS', 'MISC', 'CTC', 'PTR', 'MARKET'];
 
 const wait = (ms) => new Promise((resolve) => {
   window.setTimeout(resolve, ms);
@@ -38,7 +41,11 @@ const normalizeReceiptCategory = (value) => {
     MISCELLANEOUS: 'MISC',
   };
 
-  return aliases[normalized] || normalized || 'RPT';
+  const resolved = aliases[normalized] || normalized || 'RPT';
+  if (/^QW\d+$/.test(resolved)) {
+    return 'MISC';
+  }
+  return resolved;
 };
 
 const detectReceiptCategoryFromDraft = (draft, fallbackCategory) => {
@@ -89,6 +96,61 @@ const detectReceiptCategoryFromDraft = (draft, fallbackCategory) => {
   }
 
   return normalizeReceiptCategory(draft?.detected_category || fallbackCategory || draft?.tax_type || 'RPT');
+};
+
+const normalizeReceiptFilenameForCompare = (value) => (value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+const buildSuggestedReceiptFilename = (filename, taxpayerName) => {
+  const extensionMatch = (filename || '').match(/(\.[^.]+)$/);
+  const extension = extensionMatch?.[1]?.toLowerCase() || '.jpg';
+  const baseName = (taxpayerName || '').trim() || 'receipt';
+  return `${baseName}${extension}`;
+};
+
+const getMissingRequiredReceiptFields = (draft, category) => {
+  if (!OCR_REQUIRED_RECEIPT_CATEGORIES.has((category || '').trim().toUpperCase())) {
+    return [];
+  }
+
+  const missingFields = [];
+  if (!(draft?.ref_number || '').trim()) {
+    missingFields.push('ref_number');
+  }
+  if (!(draft?.taxpayer_name || '').trim()) {
+    missingFields.push('taxpayer_name');
+  }
+  if (draft?.amount === '' || draft?.amount === null || draft?.amount === undefined || Number.isNaN(Number(draft?.amount))) {
+    missingFields.push('amount');
+  }
+  return missingFields;
+};
+
+const normalizeReceiptDraftReviewState = (draft) => {
+  if (!draft) {
+    return draft;
+  }
+
+  const taxpayerName = (draft.taxpayer_name || '').trim();
+  const originalFilename = draft.source_image_original_filename || draft.source_image_suggested_filename || '';
+  const suggestedFilename = taxpayerName
+    ? buildSuggestedReceiptFilename(originalFilename, taxpayerName)
+    : (draft.source_image_suggested_filename || '');
+  const filenameStem = (originalFilename || '').replace(/\.[^.]+$/, '');
+  const suggestedStem = suggestedFilename.replace(/\.[^.]+$/, '');
+  const filenameMatchesTaxpayer = taxpayerName
+    ? normalizeReceiptFilenameForCompare(filenameStem) === normalizeReceiptFilenameForCompare(suggestedStem)
+    : draft.filename_matches_taxpayer;
+  const shouldAutoRename = Boolean(taxpayerName && !filenameMatchesTaxpayer);
+
+  return {
+    ...draft,
+    source_image_suggested_filename: suggestedFilename,
+    filename_matches_taxpayer: taxpayerName ? filenameMatchesTaxpayer : draft.filename_matches_taxpayer,
+    file_name_validation_message: shouldAutoRename
+      ? `The uploaded file name must match the taxpayer name. Rename it to ${suggestedFilename} or use auto rename.`
+      : '',
+    auto_rename_source_image: shouldAutoRename ? true : Boolean(draft.auto_rename_source_image),
+  };
 };
 
 const paginateRows = (rows, page) => rows.slice((page - 1) * SECTION_PAGE_SIZE, page * SECTION_PAGE_SIZE);
@@ -150,19 +212,31 @@ const ReceiptManagement = () => {
     completedRPT: 1,
     completedBUSINESS: 1,
     completedMISC: 1,
+    completedCTC: 1,
+    completedPTR: 1,
+    completedMARKET: 1,
     recordsRPT: 1,
     recordsBUSINESS: 1,
     recordsMISC: 1,
+    recordsCTC: 1,
+    recordsPTR: 1,
+    recordsMARKET: 1,
   });
   const [recordSearch, setRecordSearch] = useState({
     RPT: '',
     BUSINESS: '',
     MISC: '',
+    CTC: '',
+    PTR: '',
+    MARKET: '',
   });
   const [historySearch, setHistorySearch] = useState({
     RPT: '',
     BUSINESS: '',
     MISC: '',
+    CTC: '',
+    PTR: '',
+    MARKET: '',
   });
 
   const getActiveReceiptBadgeCount = (items) => (
@@ -299,14 +373,20 @@ const ReceiptManagement = () => {
     effectiveDetectedCategory &&
     effectiveDetectedCategory !== effectiveSelectedCategory
   );
+  const missingRequiredFields = useMemo(
+    () => getMissingRequiredReceiptFields(ocrDraft, effectiveSelectedCategory),
+    [ocrDraft, effectiveSelectedCategory]
+  );
+  const extractionWarning = missingRequiredFields.length ? OCR_EXTRACTION_FAILED_MESSAGE : '';
   const filenameMismatchBlocked = Boolean(
-    ocrDraft?.filename_matches_taxpayer === false && !ocrDraft?.auto_rename_source_image
+    ocrDraft?.taxpayer_name &&
+    ocrDraft?.filename_matches_taxpayer === false &&
+    !ocrDraft?.auto_rename_source_image
   );
   const saveBlocked = Boolean(
-    ocrDraft?.save_blocked || categoryMismatch || ocrDraft?.duplicate_detected || filenameMismatchBlocked
+    categoryMismatch || ocrDraft?.duplicate_detected || filenameMismatchBlocked || missingRequiredFields.length
   );
   const duplicateWarning = ocrDraft?.duplicate_warning || '';
-  const extractionWarning = ocrDraft?.extraction_warning || '';
   const activeProcessingModal = useMemo(() => {
     if (processingFeedback) {
       return processingFeedback;
@@ -370,7 +450,10 @@ const ReceiptManagement = () => {
         'The uploaded file name must match the extracted taxpayer name before it can be saved.'
       );
       setSuccessMessage('');
+      return;
     }
+
+    setError('');
   }, [ocrDraft, categoryMismatch, effectiveDetectedCategory, effectiveSelectedCategory, duplicateWarning, extractionWarning, filenameMismatchBlocked]);
 
   const normalizedRecords = useMemo(
@@ -401,6 +484,9 @@ const ReceiptManagement = () => {
   const rptRecords = useMemo(() => filterRecordsByCategoryAndName('RPT'), [normalizedRecords, recordSearch]);
   const businessTaxRecords = useMemo(() => filterRecordsByCategoryAndName('BUSINESS'), [normalizedRecords, recordSearch]);
   const miscRecords = useMemo(() => filterRecordsByCategoryAndName('MISC'), [normalizedRecords, recordSearch]);
+  const ctcRecords = useMemo(() => filterRecordsByCategoryAndName('CTC'), [normalizedRecords, recordSearch]);
+  const ptrRecords = useMemo(() => filterRecordsByCategoryAndName('PTR'), [normalizedRecords, recordSearch]);
+  const marketRecords = useMemo(() => filterRecordsByCategoryAndName('MARKET'), [normalizedRecords, recordSearch]);
 
   const normalizedRequestHistory = useMemo(
     () =>
@@ -465,6 +551,60 @@ const ReceiptManagement = () => {
     [normalizedRequestHistory, historySearch.MISC]
   );
 
+  const releasedCtcRequests = useMemo(
+    () =>
+      normalizedRequestHistory
+        .filter((request) => {
+          const searchTerm = historySearch.CTC.trim().toLowerCase();
+          if (request.normalized_tax_type !== 'CTC') {
+            return false;
+          }
+          return !searchTerm || (request.taxpayerName || '').toLowerCase().includes(searchTerm);
+        })
+        .sort((left, right) => {
+          const leftDate = new Date(left.createdAt || left.created_at || left.archived_at || 0).getTime();
+          const rightDate = new Date(right.createdAt || right.created_at || right.archived_at || 0).getTime();
+          return leftDate - rightDate;
+        }),
+    [normalizedRequestHistory, historySearch.CTC]
+  );
+
+  const releasedPtrRequests = useMemo(
+    () =>
+      normalizedRequestHistory
+        .filter((request) => {
+          const searchTerm = historySearch.PTR.trim().toLowerCase();
+          if (request.normalized_tax_type !== 'PTR') {
+            return false;
+          }
+          return !searchTerm || (request.taxpayerName || '').toLowerCase().includes(searchTerm);
+        })
+        .sort((left, right) => {
+          const leftDate = new Date(left.createdAt || left.created_at || left.archived_at || 0).getTime();
+          const rightDate = new Date(right.createdAt || right.created_at || right.archived_at || 0).getTime();
+          return leftDate - rightDate;
+        }),
+    [normalizedRequestHistory, historySearch.PTR]
+  );
+
+  const releasedMarketRequests = useMemo(
+    () =>
+      normalizedRequestHistory
+        .filter((request) => {
+          const searchTerm = historySearch.MARKET.trim().toLowerCase();
+          if (request.normalized_tax_type !== 'MARKET') {
+            return false;
+          }
+          return !searchTerm || (request.taxpayerName || '').toLowerCase().includes(searchTerm);
+        })
+        .sort((left, right) => {
+          const leftDate = new Date(left.createdAt || left.created_at || left.archived_at || 0).getTime();
+          const rightDate = new Date(right.createdAt || right.created_at || right.archived_at || 0).getTime();
+          return leftDate - rightDate;
+        }),
+    [normalizedRequestHistory, historySearch.MARKET]
+  );
+
   useEffect(() => {
     setSectionPages((current) => ({
       ...current,
@@ -472,18 +612,30 @@ const ReceiptManagement = () => {
       completedRPT: Math.min(current.completedRPT, Math.max(1, Math.ceil(releasedRptRequests.length / SECTION_PAGE_SIZE))),
       completedBUSINESS: Math.min(current.completedBUSINESS, Math.max(1, Math.ceil(releasedBusinessRequests.length / SECTION_PAGE_SIZE))),
       completedMISC: Math.min(current.completedMISC, Math.max(1, Math.ceil(releasedMiscRequests.length / SECTION_PAGE_SIZE))),
+      completedCTC: Math.min(current.completedCTC, Math.max(1, Math.ceil(releasedCtcRequests.length / SECTION_PAGE_SIZE))),
+      completedPTR: Math.min(current.completedPTR, Math.max(1, Math.ceil(releasedPtrRequests.length / SECTION_PAGE_SIZE))),
+      completedMARKET: Math.min(current.completedMARKET, Math.max(1, Math.ceil(releasedMarketRequests.length / SECTION_PAGE_SIZE))),
       recordsRPT: Math.min(current.recordsRPT, Math.max(1, Math.ceil(rptRecords.length / SECTION_PAGE_SIZE))),
       recordsBUSINESS: Math.min(current.recordsBUSINESS, Math.max(1, Math.ceil(businessTaxRecords.length / SECTION_PAGE_SIZE))),
       recordsMISC: Math.min(current.recordsMISC, Math.max(1, Math.ceil(miscRecords.length / SECTION_PAGE_SIZE))),
+      recordsCTC: Math.min(current.recordsCTC, Math.max(1, Math.ceil(ctcRecords.length / SECTION_PAGE_SIZE))),
+      recordsPTR: Math.min(current.recordsPTR, Math.max(1, Math.ceil(ptrRecords.length / SECTION_PAGE_SIZE))),
+      recordsMARKET: Math.min(current.recordsMARKET, Math.max(1, Math.ceil(marketRecords.length / SECTION_PAGE_SIZE))),
     }));
   }, [
     onlineReceiptRequests.length,
     releasedRptRequests.length,
     releasedBusinessRequests.length,
     releasedMiscRequests.length,
+    releasedCtcRequests.length,
+    releasedPtrRequests.length,
+    releasedMarketRequests.length,
     rptRecords.length,
     businessTaxRecords.length,
     miscRecords.length,
+    ctcRecords.length,
+    ptrRecords.length,
+    marketRecords.length,
   ]);
 
   const handleFileSelect = (event) => {
@@ -536,7 +688,7 @@ const ReceiptManagement = () => {
       formData.append('file', selectedFile);
       formData.append('category', selectedCategory);
       const response = await receiptAPI.uploadForOCR(formData);
-      setOcrDraft(response.data);
+      setOcrDraft(normalizeReceiptDraftReviewState(response.data));
       setProcessingFeedback({
         status: 'success',
         title: 'OCR Complete',
@@ -554,9 +706,9 @@ const ReceiptManagement = () => {
 
   const handleDraftChange = (event) => {
     const { name, value } = event.target;
-    setOcrDraft((current) => ({
+    setOcrDraft((current) => normalizeReceiptDraftReviewState({
       ...current,
-      [name]: name === 'amount' ? Number(value) : value,
+      [name]: name === 'amount' ? (value === '' ? '' : Number(value)) : value,
     }));
   };
 
@@ -575,7 +727,7 @@ const ReceiptManagement = () => {
     setSuccessMessage('');
 
     try {
-      await receiptAPI.saveRecord(ocrDraft);
+      await receiptAPI.saveRecord(normalizeReceiptDraftReviewState(ocrDraft));
       if (previewUrl) {
         URL.revokeObjectURL(previewUrl);
       }
@@ -1365,6 +1517,9 @@ const ReceiptManagement = () => {
               <option value="RPT">RPT</option>
               <option value="BUSINESS">Business Tax</option>
               <option value="MISC">Miscellaneous</option>
+              <option value="CTC">CTC</option>
+              <option value="PTR">PTR</option>
+              <option value="MARKET">MARKET</option>
             </select>
           </div>
           <input
@@ -1446,11 +1601,10 @@ const ReceiptManagement = () => {
                   ) : null}
                   <button
                     type="button"
-                    onClick={() => setOcrDraft((current) => ({
+                    onClick={() => setOcrDraft((current) => normalizeReceiptDraftReviewState({
                       ...current,
                       auto_rename_source_image: true,
                       filename_matches_taxpayer: true,
-                      save_blocked: Boolean(current?.duplicate_detected || current?.extraction_warning),
                     }))}
                     className="mt-3 rounded-lg bg-blue-600 px-3 py-2 font-semibold text-white transition hover:bg-blue-700"
                   >
@@ -1592,6 +1746,24 @@ const ReceiptManagement = () => {
         rows: releasedMiscRequests,
       })}
 
+      {renderCompletedRequestSection({
+        title: 'Completed CTC Receipt Requests',
+        categoryKey: 'CTC',
+        rows: releasedCtcRequests,
+      })}
+
+      {renderCompletedRequestSection({
+        title: 'Completed PTR Receipt Requests',
+        categoryKey: 'PTR',
+        rows: releasedPtrRequests,
+      })}
+
+      {renderCompletedRequestSection({
+        title: 'Completed Market Receipt Requests',
+        categoryKey: 'MARKET',
+        rows: releasedMarketRequests,
+      })}
+
       {renderVerifiedRecordSection({
         title: 'Verified RPT Records',
         categoryKey: 'RPT',
@@ -1614,6 +1786,30 @@ const ReceiptManagement = () => {
         referenceLabelText: '',
         rows: miscRecords,
         showReferenceColumn: false,
+      })}
+
+      {renderVerifiedRecordSection({
+        title: 'Verified CTC Records',
+        categoryKey: 'CTC',
+        referenceLabelText: 'Reference Number',
+        rows: ctcRecords,
+        showReferenceColumn: true,
+      })}
+
+      {renderVerifiedRecordSection({
+        title: 'Verified PTR Records',
+        categoryKey: 'PTR',
+        referenceLabelText: 'Reference Number',
+        rows: ptrRecords,
+        showReferenceColumn: true,
+      })}
+
+      {renderVerifiedRecordSection({
+        title: 'Verified Market Records',
+        categoryKey: 'MARKET',
+        referenceLabelText: 'Reference Number',
+        rows: marketRecords,
+        showReferenceColumn: true,
       })}
 
       <DeleteConfirmationModal

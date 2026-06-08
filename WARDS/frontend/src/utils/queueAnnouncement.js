@@ -55,21 +55,20 @@ const getCharacterAudioPath = (char) => {
 };
 
 /**
- * Extract window number from service window
- * Examples: "RPT" -> 1, "BUSINESS" -> 2, "MISC" -> 3, "QW4" -> 4, "QW5" -> 5
+ * Extract window number from service window or assigned window value.
  */
 const getWindowNumber = (serviceWindow) => {
   if (typeof serviceWindow === 'number') {
-    return Math.min(Math.max(serviceWindow, 1), 5);
+    return Math.min(Math.max(serviceWindow, 1), 6);
   }
   if (!serviceWindow) return 1;
   
   const normalizedText = String(serviceWindow).trim();
-  if (/^[1-5]$/.test(normalizedText)) {
+  if (/^[1-6]$/.test(normalizedText)) {
     return Number(normalizedText);
   }
 
-  const explicitWindowMatch = normalizedText.match(/(?:WINDOW|QW)\s*([1-5])/i);
+  const explicitWindowMatch = normalizedText.match(/(?:WINDOW|QW)\s*([1-6])/i);
   if (explicitWindowMatch) {
     return Number(explicitWindowMatch[1]);
   }
@@ -85,6 +84,10 @@ const getWindowNumber = (serviceWindow) => {
     'BUSINESS TAX': 2,
     'MISC': 3,
     'MISCELLANEOUS': 3,
+    'CTC': 4,
+    'CEDULA': 4,
+    'PTR': 5,
+    'MARKET': 6,
     'QW4': 4,
     'QUEUE WINDOW 4': 4,
     'QW5': 5,
@@ -137,7 +140,11 @@ export const playQueueAnnouncement = async (queueNumber, serviceWindow) => {
     // 6. Play window announcement (normal speed for clarity)
     const windowNumber = getWindowNumber(serviceWindow);
     console.log(`Step 5: Playing window ${windowNumber} announcement`);
-    await playAudio(`${VOICELINES_BASE}/windows/window${windowNumber}.mp3`, 1.1);
+    if (windowNumber <= 10) {
+      await playAudio(`${VOICELINES_BASE}/windows/window${windowNumber}.mp3`, 1.1);
+    } else {
+      await playAudio(`${VOICELINES_BASE}/numbers/${String(windowNumber)[0]}.mp3`, 1.2);
+    }
     
     console.log(`✅ Queue announcement completed: ${queueNumber} -> Window ${windowNumber}`);
   } catch (error) {
@@ -196,7 +203,11 @@ export const playRecallAnnouncement = async (queueNumber, serviceWindow) => {
     // 6. Play window announcement (normal speed for clarity)
     const windowNumber = getWindowNumber(serviceWindow);
     console.log(`Step 5: Playing window ${windowNumber} announcement`);
-    await playAudio(`${VOICELINES_BASE}/windows/window${windowNumber}.mp3`, 1.1);
+    if (windowNumber <= 10) {
+      await playAudio(`${VOICELINES_BASE}/windows/window${windowNumber}.mp3`, 1.1);
+    } else {
+      await playAudio(`${VOICELINES_BASE}/numbers/${String(windowNumber)[0]}.mp3`, 1.2);
+    }
     
     console.log(`✅ Recall announcement completed: ${queueNumber} -> Window ${windowNumber}`);
   } catch (error) {

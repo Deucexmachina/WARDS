@@ -28,6 +28,7 @@ from services.ocr_runtime import run_ocr_in_executor
 from services.ocr_service import OCRProcessingError, ocr_service
 from services.email_service import send_receipt_release_email
 from utils.branch_appointment_settings import validate_branch_appointment_datetime
+from utils.branch_window_config import SERVICE_WINDOW_ALIASES
 from utils.branch_system_settings import get_branch_setting_value
 from utils.field_crypto import apply_payment_security, apply_receipt_record_security, apply_receipt_request_history_security, apply_receipt_request_security, find_citizen_by_email, find_payment_by_ref_number, get_decrypted_or_raw, hash_aware_any, hash_aware_match, hash_optional_value, queue_value, receipt_record_value, receipt_request_history_value, receipt_request_value, set_encrypted_hash_companions
 from utils.security_validation import normalize_email
@@ -73,6 +74,7 @@ RECEIPT_REQUEST_REASON_OPTIONS = {
 }
 OCR_EXTRACTION_FAILED_MESSAGE = "Unable to extract all required receipt information. Please verify the uploaded receipt and try again."
 UNSUPPORTED_RECEIPT_FORMAT_MESSAGE = "The uploaded receipt format is not recognized by the OCR engine."
+OCR_REQUIRED_RECEIPT_CATEGORIES = {"RPT", "BUSINESS", "MISC"}
 
 
 def unique_receipt_request_id() -> str:
@@ -172,12 +174,7 @@ def get_current_manila_date_value() -> str:
 
 
 def derive_tax_type_from_queue_service(service_type: str | None) -> str:
-    normalized = (service_type or "").strip().lower()
-    if "real property" in normalized or "rpt" in normalized or "amilyar" in normalized:
-        return "RPT"
-    if "business" in normalized or normalized == "bt" or "permit" in normalized:
-        return "BUSINESS"
-    return "MISC"
+    return normalize_receipt_category(service_type)
 
 
 def serialize_receipt_record(record: ReceiptRecord):
@@ -589,7 +586,7 @@ def archive_receipt_request(
 
 
 def normalize_receipt_category(value: str | None) -> str:
-    normalized = (value or "RPT").strip().upper()
+    normalized = re.sub(r"\s+", " ", (value or "RPT").strip().upper())
     aliases = {
         "BT": "BUSINESS",
         "BUSINESS TAX": "BUSINESS",
@@ -598,9 +595,12 @@ def normalize_receipt_category(value: str | None) -> str:
         "MISCELLANEOUS": "MISC",
     }
     resolved = aliases.get(normalized, normalized)
-    if resolved not in {"RPT", "BUSINESS", "MISC"}:
-        raise HTTPException(status_code=400, detail="Unsupported receipt category. Use RPT, BT/BUSINESS, or MISC.")
-    return resolved
+    alias_key = re.sub(r"[^A-Z0-9]+", "_", resolved).strip("_")
+    return SERVICE_WINDOW_ALIASES.get(alias_key, resolved or "RPT")
+
+
+def receipt_category_requires_ocr(category: str | None) -> bool:
+    return normalize_receipt_category(category) in OCR_REQUIRED_RECEIPT_CATEGORIES
 
 
 def compute_image_sha256(image_bytes: bytes) -> str:
@@ -946,11 +946,12 @@ def save_receipt_record_payload(
     normalized_tax_type = normalize_receipt_category(payload.tax_type)
     selected_category = normalize_receipt_category(payload.selected_category or normalized_tax_type)
     detected_category = normalize_receipt_category(payload.detected_category or normalized_tax_type)
+    requires_ocr = receipt_category_requires_ocr(normalized_tax_type)
 
     if selected_category != normalized_tax_type:
         raise HTTPException(status_code=400, detail="The verified tax type must match the selected receipt category.")
 
-    if detected_category != selected_category or payload.category_match is False:
+    if requires_ocr and (detected_category != selected_category or payload.category_match is False):
         raise HTTPException(
             status_code=400,
             detail=f"Category validation failed. The uploaded receipt appears to be {detected_category}, not {selected_category}.",
@@ -978,11 +979,12 @@ def save_receipt_record_payload(
         )
 
     normalized_ref_number = normalize_reference_number(payload.ref_number)
-    validate_required_receipt_fields(
-        ref_number=normalized_ref_number,
-        taxpayer_name=payload.taxpayer_name,
-        amount=payload.amount,
-    )
+    if requires_ocr:
+        validate_required_receipt_fields(
+            ref_number=normalized_ref_number,
+            taxpayer_name=payload.taxpayer_name,
+            amount=payload.amount,
+        )
     if normalized_ref_number:
         existing_reference_record = (
             db.query(ReceiptRecord)
@@ -1002,13 +1004,14 @@ def save_receipt_record_payload(
                 ),
             )
 
-    validate_receipt_document_analysis(
-        raw_text=payload.raw_text,
-        ref_number=normalized_ref_number,
-        taxpayer_name=payload.taxpayer_name,
-        transaction_date=payload.transaction_date,
-        amount=payload.amount,
-    )
+    if requires_ocr:
+        validate_receipt_document_analysis(
+            raw_text=payload.raw_text,
+            ref_number=normalized_ref_number,
+            taxpayer_name=payload.taxpayer_name,
+            transaction_date=payload.transaction_date,
+            amount=payload.amount,
+        )
 
     filename_validation = build_receipt_filename_validation(
         filename=payload.source_image_original_filename or payload.source_image_suggested_filename or payload.source_image_path,
@@ -1047,7 +1050,7 @@ def save_receipt_record_payload(
         source_image_path=renamed_source_image_path,
         raw_ocr_text=payload.raw_text,
         verification_status="Verified",
-        confidence=payload.confidence or 0.0,
+        confidence=payload.confidence or (0.0 if requires_ocr else 1.0),
         uploaded_by=uploaded_by,
     )
     apply_receipt_record_security(record)
@@ -1099,6 +1102,47 @@ def build_receipt_ocr_result(
                 f"on record #{duplicate_record.id}."
             ),
         )
+
+    if not receipt_category_requires_ocr(normalized_category):
+        filename_validation = build_receipt_filename_validation(
+            filename=file.filename or os.path.basename(file_path),
+            taxpayer_name=None,
+        )
+        return {
+            "receipt_number": "",
+            "ref_number": "",
+            "txn_id": "",
+            "taxpayer_name": "",
+            "transaction_date": "",
+            "amount": None,
+            "tax_type": normalized_category,
+            "raw_text": "",
+            "confidence": 1.0,
+            "source_image_path": file_path,
+            "source_image_sha256": image_sha256,
+            "source_image_ahash": image_ahash,
+            "branch_id": branch_id,
+            "uploaded_by": uploaded_by,
+            "category": normalized_category,
+            "selected_category": normalized_category,
+            "detected_category": normalized_category,
+            "category_match": True,
+            "duplicate_detected": duplicate_record is not None,
+            "duplicate_type": duplicate_type,
+            "duplicate_record": serialize_duplicate_record(duplicate_record),
+            "duplicate_warning": "",
+            "save_blocked": False,
+            "required_fields_complete": True,
+            "missing_fields": [],
+            "extraction_warning": "",
+            "save_blocked_message": "",
+            "source_image_original_filename": os.path.basename(file.filename or os.path.basename(file_path)),
+            "source_image_suggested_filename": filename_validation["suggested_filename"],
+            "filename_matches_taxpayer": True,
+            "file_name_validation_message": "",
+            "auto_rename_source_image": False,
+            "processing_mode": "file_only",
+        }
 
     try:
         result = ocr_service.process_receipt(
@@ -1196,6 +1240,7 @@ def build_receipt_ocr_result(
     result["filename_matches_taxpayer"] = filename_validation["filename_matches_taxpayer"]
     result["file_name_validation_message"] = filename_validation["message"]
     result["auto_rename_source_image"] = False
+    result["processing_mode"] = "ocr"
     return result
 
 
@@ -1946,7 +1991,12 @@ async def upload_release_copy(
 
     expected_taxpayer_name = receipt_request_value(receipt_request, "taxpayer_name")
     extracted_taxpayer_name = (analysis.get("taxpayer_name") or "").strip() or expected_taxpayer_name
-    if analysis.get("taxpayer_name") and expected_taxpayer_name and not compare_taxpayer_names(analysis.get("taxpayer_name"), expected_taxpayer_name):
+    if (
+        receipt_category_requires_ocr(expected_tax_type)
+        and analysis.get("taxpayer_name")
+        and expected_taxpayer_name
+        and not compare_taxpayer_names(analysis.get("taxpayer_name"), expected_taxpayer_name)
+    ):
         if os.path.exists(file_path):
             try:
                 os.remove(file_path)

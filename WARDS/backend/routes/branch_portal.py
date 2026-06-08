@@ -30,6 +30,13 @@ from routes.payments import apply_business_tax_application_security_fields, reve
 from utils.field_crypto import apply_announcement_view_security, apply_memo_security, apply_memo_view_security, apply_payment_security, apply_queue_security, apply_receipt_request_security, decrypt_optional_value, find_announcement_view, find_memo_view, get_announcement_viewed_ids, get_decrypted_or_raw, get_memo_viewed_ids, hash_aware_any, hash_aware_match, hash_optional_value, queue_value
 from utils.security_validation import format_tin
 from utils.branch_system_settings import get_branch_setting_value
+from utils.branch_window_config import (
+    default_assigned_window_number as resolve_default_assigned_window_number,
+    get_branch_window_metadata,
+    get_configured_window_accounts as load_configured_window_accounts,
+    get_service_window_display_label,
+    infer_service_window,
+)
 from utils.system_settings import SYSTEM_DISABLED_MESSAGE, get_setting_value
 
 router = APIRouter()
@@ -40,24 +47,6 @@ MAX_REMITTANCE_REPORT_SIZE_BYTES = 10 * 1024 * 1024
 OUTPUT_DIR = Path(__file__).resolve().parents[1] / "output" / "payments" / "business-tax"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 MANILA_TIMEZONE = timezone(timedelta(hours=8))
-SERVICE_WINDOW_RULES = {
-    "RPT": ("rpt", "real property", "amilyar", "property tax", "assessment"),
-    "BUSINESS": ("business", "mayor", "permit", "bt", "city tax", "garbage fee", "sanitary", "zoning", "occupancy"),
-}
-SERVICE_WINDOW_DEFAULT_WINDOW_NUMBERS = {
-    "RPT": 1,
-    "BUSINESS": 2,
-    "MISC": 3,
-    "QW4": 4,
-    "QW5": 5,
-}
-SERVICE_WINDOW_DEFAULT_LABELS = {
-    "RPT": "RPT Window",
-    "BUSINESS": "BT Window",
-    "MISC": "MISC Window",
-    "QW4": "Queue Window 4",
-    "QW5": "Queue Window 5",
-}
 STALE_CALLED_QUEUE_MINUTES = max(1, int(os.getenv("STALE_CALLED_QUEUE_MINUTES", "15")))
 
 
@@ -209,23 +198,12 @@ def get_queue_display_status(queue: Queue) -> str:
 
 
 def default_assigned_window_number(service_window: Optional[str]) -> int:
-    return SERVICE_WINDOW_DEFAULT_WINDOW_NUMBERS.get(service_window or "", 3)
+    return resolve_default_assigned_window_number(service_window)
 
 
 def get_service_window_label_for_branch(db: Session, branch_id: int, service_window: str) -> str:
-    staff = (
-        db.query(BranchStaff)
-        .filter(
-            BranchStaff.branch_id == branch_id,
-            BranchStaff.role == "branch_staff",
-            BranchStaff.account_scope == "queue_window",
-            BranchStaff.service_window == service_window,
-            BranchStaff.status == "Active",
-        )
-        .order_by(BranchStaff.id.asc())
-        .first()
-    )
-    return (staff.service_window_label if staff and staff.service_window_label else SERVICE_WINDOW_DEFAULT_LABELS.get(service_window, service_window))
+    metadata = get_branch_window_metadata(db, branch_id, service_window)
+    return metadata["window_label"]
 
 
 def serialize_queue(queue: Queue, assigned_window_number: Optional[int] = None, window_label: Optional[str] = None, service_window: Optional[str] = None):
@@ -243,7 +221,7 @@ def serialize_queue(queue: Queue, assigned_window_number: Optional[int] = None, 
         "queue_type": (queue_value(queue, "queue_type") or "immediate").lower(),
         "service_window": service_window,
         "assigned_window_number": assigned_window_number or default_assigned_window_number(service_window),
-        "window_label": window_label or SERVICE_WINDOW_DEFAULT_LABELS.get(service_window, service_window),
+        "window_label": window_label or get_service_window_display_label(service_window),
         "appointment_time": serialize_queue_schedule_datetime(queue.appointment_time, queue_value(queue, "queue_type")),
         "estimated_wait_time": queue.estimated_wait_time,
         "recommended_arrival": serialize_manila_datetime(queue.recommended_arrival),
@@ -316,68 +294,19 @@ def resolve_completed_by_display_name(queue: QueueHistory) -> str | None:
 
 
 def normalize_service_window(service_type: Optional[str]) -> str:
-    normalized = (service_type or "").strip().lower()
-    for service_window, keywords in SERVICE_WINDOW_RULES.items():
-        if any(keyword in normalized for keyword in keywords):
-            return service_window
-    return "MISC"
+    return infer_service_window(service_type)
 
 
 def normalize_service_window_for_branch(db: Session, branch_id: int, service_type: Optional[str]) -> str:
-    service_window = normalize_service_window(service_type)
-    if service_window != "MISC":
-        return service_window
-
-    normalized_service = " ".join((service_type or "").strip().casefold().split())
-    if not normalized_service:
-        return service_window
-
-    custom_window_account = (
-        db.query(BranchStaff)
-        .filter(
-            BranchStaff.branch_id == branch_id,
-            BranchStaff.role == "branch_staff",
-            BranchStaff.account_scope == "queue_window",
-            BranchStaff.service_window.in_(("QW4", "QW5")),
-            BranchStaff.status == "Active",
-        )
-        .all()
-    )
-    for account in custom_window_account:
-        normalized_label = " ".join((account.service_window_label or "").strip().casefold().split())
-        if normalized_label and normalized_label == normalized_service:
-            return account.service_window
-    return service_window
+    return get_branch_window_metadata(db, branch_id, service_type)["service_window"]
 
 
 def get_assigned_window_number_for_service(db: Session, branch_id: int, service_window: str) -> int:
-    staff = (
-        db.query(BranchStaff)
-        .filter(
-            BranchStaff.branch_id == branch_id,
-            BranchStaff.role == "branch_staff",
-            BranchStaff.account_scope == "queue_window",
-            BranchStaff.service_window == service_window,
-            BranchStaff.status == "Active",
-        )
-        .order_by(BranchStaff.id.asc())
-        .first()
-    )
-    return (staff.assigned_window_number if staff and staff.assigned_window_number else default_assigned_window_number(service_window))
+    return get_branch_window_metadata(db, branch_id, service_window)["assigned_window_number"]
 
 
 def get_configured_window_accounts(db: Session, branch_id: int) -> list[BranchStaff]:
-    return (
-        db.query(BranchStaff)
-        .filter(
-            BranchStaff.branch_id == branch_id,
-            BranchStaff.role == "branch_staff",
-            BranchStaff.account_scope == "queue_window",
-            BranchStaff.status == "Active",
-        )
-        .order_by(BranchStaff.assigned_window_number.asc(), BranchStaff.id.asc())
-        .all()
-    )
+    return load_configured_window_accounts(db, branch_id)
 
 
 def get_assigned_window_number_for_staff(staff: BranchStaff, service_window: Optional[str] = None) -> int:
@@ -962,6 +891,30 @@ def resolve_branch_payment_display_name(payment: Payment, db: Session) -> str | 
     return None
 
 
+def resolve_branch_payment_tax_type(payment: Payment, db: Session) -> str | None:
+    payment_tax_type = get_decrypted_or_raw(payment, "tax_type") or payment.tax_type
+    if payment.source_module != "receipt_request" or not payment.related_request_id:
+        return payment_tax_type
+
+    receipt_request = (
+        db.query(ReceiptRequest)
+        .filter(hash_aware_match(ReceiptRequest, "request_id", payment.related_request_id))
+        .first()
+    )
+    if receipt_request:
+        return get_decrypted_or_raw(receipt_request, "tax_type") or receipt_request.tax_type or payment_tax_type
+
+    receipt_request_history = (
+        db.query(ReceiptRequestHistory)
+        .filter(hash_aware_match(ReceiptRequestHistory, "request_id", payment.related_request_id))
+        .first()
+    )
+    if receipt_request_history:
+        return get_decrypted_or_raw(receipt_request_history, "tax_type") or receipt_request_history.tax_type or payment_tax_type
+
+    return payment_tax_type
+
+
 def get_branch_payments(current_staff: BranchStaff, branch: Branch, db: Session) -> list[Payment]:
     candidate_payments = (
         db.query(Payment)
@@ -1422,7 +1375,7 @@ async def get_live_queue_monitor(
             continue
         service_window = account.service_window or "MISC"
         windows_data[service_window] = {
-            "window_label": account.service_window_label or SERVICE_WINDOW_DEFAULT_LABELS.get(service_window, service_window),
+            "window_label": get_service_window_display_label(service_window, account.service_window_label),
             "assigned_window_number": account.assigned_window_number or default_assigned_window_number(service_window),
             "serving": [],
             "waiting": [],
@@ -1717,7 +1670,7 @@ async def list_branch_payments(
             "ref_number": get_decrypted_or_raw(payment, "ref_number"),
             "transaction_id": get_decrypted_or_raw(payment, "txn_id"),
             "taxpayer_name": get_decrypted_or_raw(payment, "taxpayer_name"),
-            "tax_type": get_decrypted_or_raw(payment, "tax_type"),
+            "tax_type": resolve_branch_payment_tax_type(payment, db),
             "amount": float(payment.amount or 0),
             "payment_method": get_decrypted_or_raw(payment, "payment_method"),
             "branch": resolve_branch_payment_display_name(payment, db) or (get_decrypted_or_raw(branch, "name") or branch.name),
@@ -1783,7 +1736,7 @@ async def get_branch_remittance_summary(
                 "id": payment.id,
                 "ref_number": get_decrypted_or_raw(payment, "ref_number"),
                 "taxpayer_name": get_decrypted_or_raw(payment, "taxpayer_name"),
-                "tax_type": get_decrypted_or_raw(payment, "tax_type"),
+                "tax_type": resolve_branch_payment_tax_type(payment, db),
                 "amount": float(payment.amount or 0),
                 "verified_at": to_utc_iso(payment.verified_at),
             }

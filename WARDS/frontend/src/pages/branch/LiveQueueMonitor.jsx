@@ -7,6 +7,9 @@ const queueWindowLabels = {
   RPT: 'RPT',
   BUSINESS: 'BT',
   MISC: 'MISC',
+  CTC: 'CTC',
+  PTR: 'PTR',
+  MARKET: 'MARKET',
   QW4: 'Queue Window 4',
   QW5: 'Queue Window 5',
 };
@@ -276,18 +279,18 @@ const LiveQueueMonitor = () => {
           min-height: 100vh !important;
         }
       `}</style>
-      <div className="min-h-screen bg-gray-100 p-6">
-        <div className="w-full px-4">
+      <div className="h-screen overflow-hidden bg-gray-100 p-2 sm:p-3 lg:p-4">
+        <div className="mx-auto flex h-full w-full max-w-[1920px] flex-col px-1 sm:px-2 lg:px-3">
           {/* Header Card */}
-          <div className="bg-white rounded-2xl shadow-lg p-8 mb-6">
-            <div className="flex items-center justify-between pb-6 border-b-2 border-gray-200">
+          <div className="mb-3 shrink-0 rounded-2xl bg-white p-4 shadow-lg sm:mb-4 sm:p-5 lg:p-6">
+            <div className="flex flex-col gap-3 border-b-2 border-gray-200 pb-4 sm:flex-row sm:items-center sm:justify-between sm:pb-5">
               <div>
-                <h1 className="text-4xl font-bold text-blue-900">Live Queue Monitor</h1>
-                <p className="mt-2 text-lg text-gray-600">
+                <h1 className="text-2xl font-bold text-blue-900 sm:text-3xl lg:text-4xl">Live Queue Monitor</h1>
+                <p className="mt-1 text-sm text-gray-600 sm:mt-2 sm:text-base lg:text-lg">
                   {queueData.branchInfo?.name || (branchSlug ? branchSlug.replace(/-/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase()) + ' Branch' : 'Branch Queue')} - {queueData.branchInfo?.counters || 1} Window{(queueData.branchInfo?.counters || 1) > 1 ? 's' : ''}
                 </p>
               </div>
-              <div className="text-right">
+              <div className="text-left sm:text-right">
                 <div className="flex items-center gap-3">
                   <div className="h-3 w-3 animate-pulse rounded-full bg-green-500"></div>
                   <span className="text-lg font-semibold text-green-600">Live</span>
@@ -303,39 +306,12 @@ const LiveQueueMonitor = () => {
 
         {(() => {
             const windowCount = Object.keys(queueData.windows).length;
-            
-            // Dynamic spacing and sizing based on window count
-            let containerClasses = "flex overflow-x-auto pb-4";
-            let cardClasses = "flex-shrink-0";
-            
-            // Calculate optimal spacing and card width based on window count
-            if (windowCount === 1) {
-              containerClasses += " justify-center";
-              cardClasses += " w-[500px]";
-            } else if (windowCount === 2) {
-              containerClasses += " justify-center gap-8";
-              cardClasses += " w-[450px]";
-            } else if (windowCount === 3) {
-              containerClasses += " justify-center gap-6";
-              cardClasses += " w-[400px]";
-            } else if (windowCount === 4) {
-              containerClasses += " justify-center gap-6";
-              cardClasses += " w-[380px]";
-            } else if (windowCount === 5) {
-              containerClasses += " justify-center gap-4";
-              cardClasses += " w-[360px]";
-            } else if (windowCount === 6) {
-              containerClasses += " justify-center gap-4";
-              cardClasses += " w-[340px]";
-            } else {
-              // For 7+ windows
-              containerClasses += " gap-3";
-              cardClasses += " w-[320px]";
-            }
+            const isDenseLayout = windowCount >= 5;
+            const isUltraDenseLayout = windowCount >= 6;
             
             if (windowCount === 0) {
               return (
-                <div className="bg-white rounded-2xl p-12 shadow-xl text-center">
+                <div className="rounded-2xl bg-white p-12 text-center shadow-xl">
                   <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-gray-100">
                     <svg className="h-10 w-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path>
@@ -348,68 +324,98 @@ const LiveQueueMonitor = () => {
             }
             
             return (
-              <div className={containerClasses}>
+              <div
+                className={`min-h-0 flex-1 grid gap-2 sm:gap-3 ${
+                windowCount === 1
+                  ? 'grid-cols-1'
+                  : windowCount === 2
+                    ? 'grid-cols-1 xl:grid-cols-2'
+                  : windowCount === 3
+                      ? 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3'
+                      : windowCount === 4
+                        ? 'grid-cols-1 md:grid-cols-2 xl:grid-cols-4'
+                      : windowCount === 5
+                          ? 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5'
+                          : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6'
+              }`}
+                style={isDenseLayout ? { gridAutoRows: 'minmax(0, 1fr)' } : undefined}
+              >
                 {Object.entries(queueData.windows).map(([windowKey, windowData]) => {
                   const currentServing = windowData.serving?.[0] || null;
-                  const waitingQueues = windowData.waiting?.slice(0, 8) || [];
-                  const completedQueues = windowData.completed?.slice(-4) || [];
+                  const waitingQueues = windowData.waiting?.slice(0, isUltraDenseLayout ? 1 : (isDenseLayout ? 2 : 8)) || [];
+                  const remainingWaitingCount = Math.max(0, (windowData.waiting?.length || 0) - waitingQueues.length);
                   
                   return (
-                    <div key={windowKey} className={`${cardClasses} bg-white rounded-2xl shadow-lg overflow-hidden`}>
+                    <div key={windowKey} className="flex min-h-0 flex-col overflow-hidden rounded-2xl bg-white shadow-lg">
                       {/* Blue Top Banner */}
-                      <div className="bg-blue-600 p-4 text-white">
-                        <h3 className="text-xl font-bold text-center">
+                      <div className={`bg-blue-600 text-white ${isUltraDenseLayout ? 'px-2 py-2.5' : isDenseLayout ? 'px-3 py-3' : 'px-3 py-4 sm:px-4'}`}>
+                        <h3 className={`text-center font-bold ${isUltraDenseLayout ? 'text-sm sm:text-base' : isDenseLayout ? 'text-base sm:text-lg' : 'text-lg sm:text-xl'}`}>
                           {getWindowLabel(windowKey, windowData)}
                         </h3>
                       </div>
                       
                       {/* NOW SERVING Section */}
-                      <div className="p-6 border-b border-gray-200">
+                      <div className={`flex flex-1 items-center justify-center border-b border-gray-200 ${isUltraDenseLayout ? 'p-2.5 sm:p-3' : isDenseLayout ? 'p-3 sm:p-4' : 'p-4 sm:p-5 lg:p-6'}`}>
                         <div className="text-center">
-                          <p className="text-lg font-semibold text-gray-700 mb-4">NOW SERVING</p>
+                          <p className={`font-semibold text-gray-700 ${isUltraDenseLayout ? 'mb-2 text-xs sm:text-sm' : isDenseLayout ? 'mb-3 text-sm sm:text-base' : 'mb-4 text-base sm:text-lg'}`}>NOW SERVING</p>
                           {currentServing ? (
                             <div>
-                              <p className="text-4xl font-bold text-blue-600">{currentServing.queue_number}</p>
-                              <div className="mt-3 inline-flex rounded-full bg-blue-100 px-4 py-2 text-sm font-bold text-blue-800">
+                              <p className={`break-words font-bold text-blue-600 ${isUltraDenseLayout ? 'text-xl sm:text-2xl' : isDenseLayout ? 'text-2xl sm:text-3xl' : 'text-3xl sm:text-4xl'}`}>{currentServing.queue_number}</p>
+                              <div className={`inline-flex rounded-full bg-blue-100 font-bold text-blue-800 ${isUltraDenseLayout ? 'mt-2 px-2.5 py-1 text-[11px] sm:text-xs' : isDenseLayout ? 'mt-3 px-3 py-1.5 text-xs sm:text-sm' : 'mt-3 px-4 py-2 text-sm'}`}>
                                 {currentServing.status === 'serving' ? 'SERVING' : 'CALLED'}
                               </div>
                             </div>
                           ) : (
-                            <div className="py-6">
-                              <p className="text-3xl font-semibold text-gray-400">NO QUEUE</p>
-                              <p className="text-sm text-gray-500 mt-2">Waiting for next customer</p>
+                            <div className={isUltraDenseLayout ? 'py-1.5' : isDenseLayout ? 'py-2' : 'py-4 sm:py-6'}>
+                              <p className={`font-semibold text-gray-400 ${isUltraDenseLayout ? 'text-lg sm:text-xl' : isDenseLayout ? 'text-xl sm:text-2xl' : 'text-2xl sm:text-3xl'}`}>NO QUEUE</p>
+                              <p className={`mt-1.5 text-gray-500 ${isUltraDenseLayout ? 'text-[11px] sm:text-xs' : isDenseLayout ? 'text-xs sm:text-sm' : 'text-sm'}`}>Waiting for next customer</p>
                             </div>
                           )}
                         </div>
                       </div>
                       
                       {/* WAITING QUEUE Section */}
-                      <div className="p-6 border-b border-gray-200">
-                        <div className="mb-4">
-                          <p className="text-lg font-semibold text-gray-700">Waiting Queue</p>
-                          <p className="text-sm text-gray-500">{waitingQueues.length} in line</p>
+                      <div className={`min-h-0 border-b border-gray-200 ${isUltraDenseLayout ? 'p-2.5 sm:p-3' : isDenseLayout ? 'p-3 sm:p-4' : 'p-4 sm:p-5 lg:p-6'}`}>
+                        <div className={isUltraDenseLayout ? 'mb-2' : isDenseLayout ? 'mb-3' : 'mb-4'}>
+                          <p className={`font-semibold text-gray-700 ${isUltraDenseLayout ? 'text-xs sm:text-sm' : isDenseLayout ? 'text-sm sm:text-base' : 'text-base sm:text-lg'}`}>Waiting Queue</p>
+                          <p className={`text-gray-500 ${isUltraDenseLayout ? 'text-[11px] sm:text-xs' : isDenseLayout ? 'text-xs sm:text-sm' : 'text-sm'}`}>{windowData.waiting?.length || 0} in line</p>
                         </div>
-                        <div className="space-y-3">
+                        <div className={`space-y-2 ${isDenseLayout ? 'max-h-full overflow-hidden' : ''}`}>
                           {waitingQueues.length > 0 ? (
-                            waitingQueues.map((queue, index) => (
-                              <div
-                                key={index}
-                                className="flex items-center justify-between bg-yellow-50 rounded-lg p-5 border border-yellow-200"
-                              >
-                                <div className="flex items-center gap-4">
-                                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-yellow-200 text-sm font-bold text-yellow-800">
-                                    {index + 1}
+                            <>
+                              {waitingQueues.map((queue, index) => (
+                                <div
+                                  key={index}
+                                  className={`flex flex-wrap items-center justify-between gap-3 rounded-lg border border-yellow-200 bg-yellow-50 ${
+                                    isUltraDenseLayout ? 'p-2.5' : isDenseLayout ? 'p-3' : 'p-4 sm:p-5'
+                                  }`}
+                                >
+                                  <div className={`flex min-w-0 items-center ${isUltraDenseLayout ? 'gap-2.5' : isDenseLayout ? 'gap-3' : 'gap-4'}`}>
+                                    <div className={`flex items-center justify-center rounded-full bg-yellow-200 font-bold text-yellow-800 ${
+                                      isUltraDenseLayout ? 'h-7 w-7 text-[11px]' : isDenseLayout ? 'h-8 w-8 text-xs' : 'h-10 w-10 text-sm'
+                                    }`}>
+                                      {index + 1}
+                                    </div>
+                                    <p className={`min-w-0 break-all font-bold text-gray-800 ${isUltraDenseLayout ? 'text-base sm:text-lg' : isDenseLayout ? 'text-lg sm:text-xl' : 'text-xl sm:text-2xl'}`}>
+                                      {queue.queue_number}
+                                    </p>
                                   </div>
-                                  <p className="text-2xl font-bold text-gray-800">{queue.queue_number}</p>
+                                  <div className={`rounded-full bg-yellow-100 font-bold text-yellow-700 ${
+                                    isUltraDenseLayout ? 'px-2.5 py-1 text-[11px] sm:text-xs' : isDenseLayout ? 'px-3 py-1 text-xs sm:text-sm' : 'px-4 py-2 text-sm'
+                                  }`}>
+                                    Waiting
+                                  </div>
                                 </div>
-                                <div className="rounded-full bg-yellow-100 px-4 py-2 text-sm font-bold text-yellow-700">
-                                  Waiting
+                              ))}
+                              {remainingWaitingCount > 0 ? (
+                                <div className="rounded-lg bg-slate-100 px-3 py-2 text-center text-xs font-semibold text-slate-500 sm:text-sm">
+                                  +{remainingWaitingCount} more waiting
                                 </div>
-                              </div>
-                            ))
+                              ) : null}
+                            </>
                           ) : (
-                            <div className="text-center py-6">
-                              <p className="text-sm text-gray-500">No queues waiting</p>
+                            <div className={`text-center ${isDenseLayout ? 'py-3' : 'py-6'}`}>
+                              <p className={`text-gray-500 ${isDenseLayout ? 'text-xs sm:text-sm' : 'text-sm'}`}>No queues waiting</p>
                             </div>
                           )}
                         </div>

@@ -27,10 +27,10 @@ from utils.branch_appointment_settings import (
     get_branch_appointment_availability,
     get_transaction_duration_minutes,
     normalize_appointment_service_key,
-    normalize_service_window,
     get_window_capacity_snapshot,
     validate_branch_appointment_datetime,
 )
+from utils.branch_window_config import get_branch_service_options, get_branch_window_metadata
 from utils.security_validation import normalize_citizen_full_name, normalize_email, normalize_ph_contact_number
 from utils.branch_system_settings import get_branch_setting_value
 from utils.system_settings import SYSTEM_DISABLED_MESSAGE, get_setting_value
@@ -113,79 +113,12 @@ def calculate_immediate_wait_metrics(
     }
 
 
-PUBLIC_SERVICE_WINDOW_DEFAULT_LABELS = {
-    "RPT": "RPT Window",
-    "BUSINESS": "BT Window",
-    "MISC": "MISC Window",
-    "QW4": "Queue Window 4",
-    "QW5": "Queue Window 5",
-}
-
-
 def normalize_public_service_window_for_branch(db: Session, branch_id: int, service_type: Optional[str]) -> str:
-    service_window = normalize_service_window(service_type)
-    if service_window != "MISC":
-        return service_window
-
-    normalized_service = " ".join((service_type or "").strip().casefold().split())
-    if not normalized_service:
-        return service_window
-
-    custom_window_accounts = (
-        db.query(BranchStaff)
-        .filter(
-            BranchStaff.branch_id == branch_id,
-            BranchStaff.role == "branch_staff",
-            BranchStaff.account_scope == "queue_window",
-            BranchStaff.service_window.in_(("QW4", "QW5")),
-            BranchStaff.status == "Active",
-        )
-        .all()
-    )
-    for account in custom_window_accounts:
-        normalized_label = " ".join((account.service_window_label or "").strip().casefold().split())
-        if normalized_label and normalized_label == normalized_service:
-            return account.service_window
-
-    return service_window
+    return get_branch_window_metadata(db, branch_id, service_type)["service_window"]
 
 
 def get_public_window_metadata(db: Session, branch_id: int, service_type: Optional[str]) -> dict:
-    service_window = normalize_public_service_window_for_branch(db, branch_id, service_type)
-    window_account = (
-        db.query(BranchStaff)
-        .filter(
-            BranchStaff.branch_id == branch_id,
-            BranchStaff.role == "branch_staff",
-            BranchStaff.account_scope == "queue_window",
-            BranchStaff.service_window == service_window,
-            BranchStaff.status == "Active",
-        )
-        .order_by(BranchStaff.assigned_window_number.asc(), BranchStaff.id.asc())
-        .first()
-    )
-
-    default_window_number = {
-        "RPT": 1,
-        "BUSINESS": 2,
-        "MISC": 3,
-        "QW4": 4,
-        "QW5": 5,
-    }.get(service_window, 3)
-
-    return {
-        "service_window": service_window,
-        "assigned_window_number": (
-            window_account.assigned_window_number
-            if window_account and window_account.assigned_window_number
-            else default_window_number
-        ),
-        "window_label": (
-            window_account.service_window_label
-            if window_account and window_account.service_window_label
-            else PUBLIC_SERVICE_WINDOW_DEFAULT_LABELS.get(service_window, service_window)
-        ),
-    }
+    return get_branch_window_metadata(db, branch_id, service_type)
 
 
 def get_window_scoped_queue_snapshot(db: Session, branch_id: int, service_type: Optional[str]) -> dict:
@@ -369,6 +302,14 @@ def get_enabled_service_names(db: Session, branch_id: int | None = None) -> set[
     }
 
 
+def get_branch_configured_service_names(db: Session, branch_id: int) -> set[str]:
+    return {
+        option["name"]
+        for option in get_branch_service_options(db, branch_id)
+        if option.get("name")
+    }
+
+
 def build_public_system_status(db: Session, branch_id: int | None = None) -> dict:
     enabled_service_names = sorted(get_enabled_service_names(db, branch_id))
     return {
@@ -484,7 +425,6 @@ async def get_all_public_branches(request: Request, db: Session = Depends(get_db
 async def get_branch_details(branch_id: int, db: Session = Depends(get_db)):
     """Get detailed branch information"""
     queue_time_slot = get_transaction_duration_minutes()
-    enabled_service_names = get_enabled_service_names(db, branch_id)
     branch = db.query(Branch).filter(Branch.id == branch_id).first()
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
@@ -495,27 +435,7 @@ async def get_branch_details(branch_id: int, db: Session = Depends(get_db)):
         ((Announcement.branch_id == None) | (Announcement.branch_id == branch_id))
     ).order_by(Announcement.publish_date.desc()).limit(5).all()
     
-    # Get available services
-    branch_services = db.query(BranchService).filter(
-        and_(
-            BranchService.branch_id == branch_id,
-            BranchService.is_available == True
-        )
-    ).all()
-    
-    services = []
-    for bs in branch_services:
-        service = db.query(Service).filter(Service.id == bs.service_id).first()
-        service_name = service_value(service, "name") if service else None
-        if service and service.is_active and service_name in enabled_service_names:
-            services.append({
-                "id": service.id,
-                "name": service_name,
-                "description": service_value(service, "description"),
-                "category": service_value(service, "category"),
-                "average_time": service.average_processing_time,
-                "requires_appointment": service.requires_appointment
-            })
+    services = get_branch_service_options(db, branch_id)
     
     # Get operating hours
     hours = db.query(BranchOperatingHours).filter(
@@ -700,7 +620,7 @@ async def analyze_queue(branch_id: int, service_type: str, db: Session = Depends
     branch = db.query(Branch).filter(Branch.id == branch_id).first()
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
-    if service_type not in get_enabled_service_names(db, branch.id):
+    if service_type not in get_branch_configured_service_names(db, branch.id):
         raise HTTPException(status_code=400, detail=SYSTEM_DISABLED_MESSAGE)
     window_capacity = get_window_capacity_snapshot(db, branch_id=branch.id, service_type=service_type)
     if window_capacity and window_capacity["is_full"]:
@@ -839,7 +759,7 @@ async def register_queue(
     branch = db.query(Branch).filter(Branch.id == registration.branch_id, Branch.status == "Active").first()
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
-    if registration.service_type not in get_enabled_service_names(db, branch.id):
+    if registration.service_type not in get_branch_configured_service_names(db, branch.id):
         raise HTTPException(status_code=400, detail=SYSTEM_DISABLED_MESSAGE)
     queue_type = normalize_queue_type(registration.queue_type)
     service = db.query(Service).filter(hash_aware_match(Service, "name", registration.service_type), Service.is_active == True).first()
