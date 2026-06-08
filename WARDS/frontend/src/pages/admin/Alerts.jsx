@@ -7,6 +7,8 @@ const Alerts = () => {
   const [alerts, setAlerts] = useState([]);
   const [pageState, setPageState] = useState({ page: 1, page_size: 10, total: 0, total_pages: 1 });
   const [jumpPage, setJumpPage] = useState('');
+  const branchUser = JSON.parse(localStorage.getItem('branchUser') || '{}');
+  const isBranchAlertView = ['branch_admin', 'branch_staff'].includes(branchUser?.internal_role || branchUser?.role);
 
   const fetchAlerts = async (page = pageState.page) => {
       try {
@@ -46,6 +48,18 @@ const Alerts = () => {
     }
   };
 
+  const handleMarkAllAsRead = async () => {
+    try {
+      await alertAPI.markAllAsRead();
+      setAlerts((current) => current.map((alert) => ({ ...alert, read: true })));
+      window.dispatchEvent(new CustomEvent('admin-alert-read', {
+        detail: { unreadCount: 0 },
+      }));
+    } catch (error) {
+      console.error('Error marking alerts as read:', error);
+    }
+  };
+
   const submitJump = (event) => {
     event.preventDefault();
     const totalPages = Math.max(1, Number(pageState.total_pages || 1));
@@ -77,10 +91,21 @@ const Alerts = () => {
   return (
     <div className="space-y-8">
       <WardsPageHero
-        eyebrow="Main Admin Dashboard"
+        eyebrow={isBranchAlertView ? 'Branch Dashboard' : 'Main Admin Dashboard'}
         title="System Alerts"
-        subtitle="Monitor security notices, anomaly flags, and platform warnings that need administrative attention."
+        subtitle={isBranchAlertView ? 'Monitor branch operational alerts and system anomalies that need staff attention.' : 'Monitor security notices, anomaly flags, and platform warnings that need administrative attention.'}
       />
+
+      {alerts.some((alert) => !alert.read) && (
+        <div className="flex justify-end">
+          <button
+            onClick={handleMarkAllAsRead}
+            className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700"
+          >
+            Mark all as Read
+          </button>
+        </div>
+      )}
 
       <div className="space-y-4">
         {alerts.map((alert) => (

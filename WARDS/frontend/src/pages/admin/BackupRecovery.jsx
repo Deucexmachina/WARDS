@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import wardsLogo from '../../assets/branding/wards_logo.png';
@@ -51,6 +51,10 @@ const badgeClass = (value) => {
 const humanize = (value) => String(value || 'n/a').replaceAll('_', ' ');
 const titleize = (value) => humanize(value).replace(/\b\w/g, (letter) => letter.toUpperCase());
 const badgeText = (value) => String(value || '').toLowerCase() === 'false_positive' ? 'False' : titleize(value);
+const detectionClassification = (item) => {
+  if (item?.is_legitimate) return 'legitimate';
+  return String(item?.ai_prediction || '').toLowerCase() === 'malicious' ? 'malicious' : 'suspicious';
+};
 
 const Badge = ({ children }) => (
   <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${badgeClass(children)}`}>
@@ -131,7 +135,7 @@ const MiniChart = ({ data, empty = 'No data yet.' }) => {
 };
 
 const Filters = ({ filters, setFilters, showType, showStatus, showClassification = false }) => (
-  <div className="grid w-full gap-3 md:ml-auto md:max-w-5xl md:grid-cols-6">
+  <div className="grid w-full gap-3 md:ml-auto md:w-[min(100%,64rem)] md:grid-cols-6">
     <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Search keyword" value={filters.keyword} onChange={(e) => setFilters({ ...filters, keyword: e.target.value })} />
     <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" type="date" value={filters.date_from} onChange={(e) => setFilters({ ...filters, date_from: e.target.value })} />
     <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" type="date" value={filters.date_to} onChange={(e) => setFilters({ ...filters, date_to: e.target.value })} />
@@ -316,6 +320,7 @@ const BackupRecovery = () => {
     recoveries: { page: 1, page_size: 10, total: 0, total_pages: 1 },
     incidents: { page: 1, page_size: 10, total: 0, total_pages: 1 },
   });
+  const historyPagesRef = useRef(historyPages);
   const [openRows, setOpenRows] = useState({});
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
@@ -380,6 +385,10 @@ const BackupRecovery = () => {
 
   const refreshFiles = async () => setFiles((await api.get('/security/files')).data || []);
 
+  useEffect(() => {
+    historyPagesRef.current = historyPages;
+  }, [historyPages]);
+
   const refreshUnreadCounts = async () => {
     const response = await api.get('/security/unread-counts');
     const nextCounts = response.data || { detections: 0, recoveries: 0, backups: 0, incidents: 0 };
@@ -399,7 +408,7 @@ const BackupRecovery = () => {
     }));
   };
 
-  const refreshBackups = async (page = historyPages.backups.page) => {
+  const refreshBackups = async (page = historyPagesRef.current.backups.page) => {
     const safePage = Math.max(1, Number(page || 1));
     const params = {
       keyword: backupFilters.keyword || undefined,
@@ -416,7 +425,7 @@ const BackupRecovery = () => {
     updateHistoryPage('backups', response.data || {});
   };
 
-  const refreshDetections = async (page = historyPages.detections.page) => {
+  const refreshDetections = async (page = historyPagesRef.current.detections.page) => {
     const safePage = Math.max(1, Number(page || 1));
     const params = {
       keyword: detectionFilters.keyword || undefined,
@@ -433,7 +442,7 @@ const BackupRecovery = () => {
     updateHistoryPage('detections', response.data || {});
   };
 
-  const refreshRecoveries = async (page = historyPages.recoveries.page) => {
+  const refreshRecoveries = async (page = historyPagesRef.current.recoveries.page) => {
     const safePage = Math.max(1, Number(page || 1));
     const params = {
       keyword: recoveryFilters.keyword || undefined,
@@ -450,7 +459,7 @@ const BackupRecovery = () => {
     updateHistoryPage('recoveries', response.data || {});
   };
 
-  const refreshIncidents = async (page = historyPages.incidents.page) => {
+  const refreshIncidents = async (page = historyPagesRef.current.incidents.page) => {
     const safePage = Math.max(1, Number(page || 1));
     const params = {
       keyword: incidentFilters.keyword || undefined,
@@ -549,25 +558,25 @@ const BackupRecovery = () => {
     }
   };
 
-  const refreshActiveTab = async (tab = activeTab) => {
+  const refreshActiveTab = async (tab = activeTab, page) => {
     if (tab === 'File Status') {
       await refreshFiles();
       return;
     }
     if (tab === 'Detection History') {
-      await refreshDetections();
+      await refreshDetections(page);
       return;
     }
     if (tab === 'Recovery History') {
-      await refreshRecoveries();
+      await refreshRecoveries(page);
       return;
     }
     if (tab === 'Security Incidents') {
-      await refreshIncidents();
+      await refreshIncidents(page);
       return;
     }
     if (tab === 'Backup History') {
-      await refreshBackups();
+      await refreshBackups(page);
       return;
     }
     if (tab === 'Manual Controls') {
@@ -599,7 +608,7 @@ const BackupRecovery = () => {
       if (activeTab === 'Recovery History') refreshRecoveries();
       if (activeTab === 'Security Incidents') refreshIncidents();
       if (activeTab === 'Backup History') refreshBackups();
-    }, 5000);
+    }, 3000);
     return () => clearInterval(timer);
   }, [activeTab, detectionFilters, recoveryFilters, incidentFilters, backupFilters]);
 
@@ -684,7 +693,7 @@ const BackupRecovery = () => {
       markAllSeen('backups');
     }
     setActiveTab(tab);
-    refreshActiveTab(tab).catch((error) => {
+    refreshActiveTab(tab, 1).catch((error) => {
       setNotice(error.response?.data?.detail || `Unable to load ${tab}.`);
     });
     if (tab === 'Detection History') markAllSeen('detections');
@@ -715,6 +724,9 @@ const BackupRecovery = () => {
   }, [activeTab, visibleBackupKey]);
 
   const formatMissingFileConfirmation = (detail) => {
+    if (detail?.suppress_file_list) {
+      return detail?.message || 'Some incident files need confirmation before this action can continue.';
+    }
     const incidentsList = (detail?.incidents || []).map((item) => {
       const missingFiles = (item.missing_files || []).join(', ');
       const missingQuarantine = (item.missing_quarantine_paths || []).join(', ');
@@ -1143,15 +1155,15 @@ const BackupRecovery = () => {
                   return (
                     <div key={item.id} className="relative rounded-xl border border-slate-200 bg-white p-4">
                       {unseen && <span className="absolute right-3 top-3 rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold text-white">New</span>}
-                      <button className="flex w-full flex-col gap-3 pr-12 text-left md:flex-row md:items-center md:justify-between" onClick={() => toggleBackupRow(key, item.id)}>
-                        <div>
+                      <button className="grid w-full gap-3 pr-12 text-left md:grid-cols-[minmax(0,1fr)_auto] md:items-center" onClick={() => toggleBackupRow(key, item.id)}>
+                        <div className="min-w-0">
                           <p className="font-bold text-slate-900">{item.summary || 'Backup completed'}</p>
                           <p className="text-sm text-slate-600">{formatDateTime(item.started_at)}</p>
                         </div>
-                        <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex min-w-0 flex-wrap items-center gap-2 md:justify-end md:text-right">
+                          <span className="max-w-xs truncate text-sm font-semibold text-slate-600">{item.backup_path || 'No path recorded'}</span>
                           <Badge>{item.recovery_type}</Badge>
                           <Badge>{item.status}</Badge>
-                          <span className="text-sm font-semibold text-slate-600">{item.backup_path || 'No path recorded'}</span>
                         </div>
                       </button>
                       {openRows[key] && (
@@ -1175,16 +1187,16 @@ const BackupRecovery = () => {
                   return (
                     <div key={item.id} className="relative rounded-xl border border-slate-200 bg-white p-4">
                       {unseen && <span className="absolute right-3 top-3 rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold text-white">New</span>}
-                      <button className="flex w-full flex-col gap-3 pr-12 text-left md:flex-row md:items-center md:justify-between" onClick={() => toggleDetectionRow(key, item.id)}>
-                        <div>
+                      <button className="grid w-full gap-3 pr-12 text-left md:grid-cols-[minmax(0,1fr)_auto] md:items-center" onClick={() => toggleDetectionRow(key, item.id)}>
+                        <div className="min-w-0">
                           <p className="font-bold text-slate-900">{item.target_name}</p>
                           <p className="text-sm text-slate-600">{item.trigger_summary}</p>
                           <p className="mt-1 text-xs font-semibold text-slate-500">{formatDateTime(item.detected_at)}</p>
                         </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge>{item.severity_level}</Badge>
-                          <Badge>{item.is_legitimate ? 'legitimate' : item.ai_prediction}</Badge>
+                        <div className="flex flex-wrap items-center gap-2 md:justify-end md:text-right">
                           <span className="text-sm font-semibold text-slate-600">{Math.round(Number(item.confidence || 0) * 100)}% confidence</span>
+                          <Badge>{item.severity_level}</Badge>
+                          <Badge>{detectionClassification(item)}</Badge>
                         </div>
                       </button>
                       {openRows[key] && (
@@ -1207,7 +1219,7 @@ const BackupRecovery = () => {
           )}
 
           {activeTab === 'Recovery History' && (
-            <Section title="Recovery Logs" actions={<Filters filters={recoveryFilters} setFilters={setRecoveryFilters} showType={['automatic', 'manual', 'manual_full', 'reverted']} showStatus={['success', 'failed', 'reverted', 'in_progress']} />}>
+            <Section title="Recovery Logs" actions={<Filters filters={recoveryFilters} setFilters={setRecoveryFilters} showType={['automatic', 'manual', 'manual_full']} showStatus={['success', 'failed', 'reverted', 'in_progress']} />}>
               <div className="space-y-3">
                 {recoveries.map((item) => {
                   const key = `r-${item.id}`;
@@ -1215,15 +1227,15 @@ const BackupRecovery = () => {
                   return (
                     <div key={item.id} className="relative rounded-xl border border-slate-200 bg-white p-4">
                       {unseen && <span className="absolute right-3 top-3 rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold text-white">New</span>}
-                      <button className="flex w-full flex-col gap-3 pr-12 text-left md:flex-row md:items-center md:justify-between" onClick={() => toggleRecoveryRow(key, item.id)}>
-                        <div>
+                      <button className="grid w-full gap-3 pr-12 text-left md:grid-cols-[minmax(0,1fr)_auto] md:items-center" onClick={() => toggleRecoveryRow(key, item.id)}>
+                        <div className="min-w-0">
                           <p className="font-bold text-slate-900">{item.summary || item.recovery_type}</p>
                           <p className="text-sm text-slate-600">{formatDateTime(item.started_at)}</p>
                         </div>
-                        <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2 md:justify-end md:text-right">
+                          <span className="text-sm font-semibold text-slate-600">{item.recovery_duration_ms || 0} ms</span>
                           <Badge>{item.recovery_type}</Badge>
                           <Badge>{item.status}</Badge>
-                          <span className="text-sm font-semibold text-slate-600">{item.recovery_duration_ms || 0} ms</span>
                         </div>
                       </button>
                       {openRows[key] && (
@@ -1271,16 +1283,16 @@ const BackupRecovery = () => {
                   return (
                     <div key={item.id} className="relative rounded-xl border border-slate-200 bg-white p-4">
                       {unresolved && <span className="absolute right-3 top-3 rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold text-white">Open</span>}
-                      <button className="flex w-full flex-col gap-3 pr-12 text-left md:flex-row md:items-center md:justify-between" onClick={() => toggleRow(key)}>
-                        <div>
-                  <p className="font-bold text-slate-900">{titleize(item.incident_type)}</p>
+                      <button className="grid w-full gap-3 pr-12 text-left md:grid-cols-[minmax(0,1fr)_auto] md:items-center" onClick={() => toggleRow(key)}>
+                        <div className="min-w-0">
+                          <p className="font-bold text-slate-900">{titleize(item.incident_type)}</p>
                           <p className="text-sm text-slate-600">{item.description}</p>
                           <p className="mt-1 text-xs font-semibold text-slate-500">{formatDateTime(item.created_at)}</p>
                         </div>
-                        <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2 md:justify-end md:text-right">
+                          <span className="text-sm font-bold text-slate-700">CVSS {item.cvss_score}</span>
                           <Badge>{item.severity_level}</Badge>
                           <Badge>{item.status}</Badge>
-                          <span className="text-sm font-bold text-slate-700">CVSS {item.cvss_score}</span>
                         </div>
                       </button>
                       {openRows[key] && (

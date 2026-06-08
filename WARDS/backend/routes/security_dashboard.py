@@ -274,7 +274,10 @@ def incidents(
 ):
     query = db.query(SecurityIncident)
     if status:
-        query = query.filter(SecurityIncident.status == status)
+        if status == "resolved":
+            query = query.filter(SecurityIncident.status.in_(["resolved", "verified_deleted", "verified_renamed"]))
+        else:
+            query = query.filter(SecurityIncident.status == status)
     if severity:
         query = query.filter(SecurityIncident.severity_level == severity)
     if keyword:

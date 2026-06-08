@@ -108,6 +108,7 @@ function App() {
           <Route path="memos" element={<BranchMemos />} />
           <Route path="reports" element={<BranchReports />} />
           <Route path="announcements" element={<BranchAnnouncements />} />
+          <Route path="alerts" element={<Alerts />} />
           <Route path="discrepancies" element={<BranchDiscrepancies />} />
           <Route path="policies" element={<BranchPolicies />} />
           <Route path="settings" element={<BranchSettings />} />

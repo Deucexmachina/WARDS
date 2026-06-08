@@ -56,6 +56,7 @@ PERMISSIONS = {
         "view_memos",
         "report_discrepancies",
         "view_announcements",
+        "view_branch_alerts",
         "process_transactions"
     ]
 }
@@ -163,6 +164,7 @@ def get_sidebar_modules(role: str) -> list:
             {"name": "Branch Reports", "path": "/branch/reports", "icon": "reports"},
             {"name": "Internal Memos", "path": "/branch/memos", "icon": "memos"},
             {"name": "Announcements", "path": "/branch/announcements", "icon": "announcements"},
+            {"name": "System Alerts", "path": "/branch/alerts", "icon": "alerts"},
             {"name": "Discrepancy Reports", "path": "/branch/discrepancies", "icon": "discrepancies"},
             {"name": "Policies & SOPs", "path": "/branch/policies", "icon": "policies"}
         ]
@@ -174,6 +176,7 @@ def get_sidebar_modules(role: str) -> list:
             {"name": "Internal Memos", "path": "/branch/memos", "icon": "memos"},
             {"name": "Discrepancy Reports", "path": "/branch/discrepancies", "icon": "discrepancies"},
             {"name": "Policies & SOPs", "path": "/branch/policies", "icon": "policies"},
+            {"name": "System Alerts", "path": "/branch/alerts", "icon": "alerts"},
             {"name": "Announcements", "path": "/branch/announcements", "icon": "announcements"}
         ]
     

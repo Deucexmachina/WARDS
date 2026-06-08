@@ -22,6 +22,8 @@ api.interceptors.request.use((config) => {
     url.includes('/tax-assessment/user/')
   ) {
     token = localStorage.getItem('userToken');
+  } else if (url.includes('/alerts')) {
+    token = localStorage.getItem('adminToken') || localStorage.getItem('branchToken');
   } else if (url.includes('/accounts')) {
     token = localStorage.getItem('adminToken') || localStorage.getItem('branchToken');
   } else if (url.includes('/branch/auth') || url.includes('/branch/')) {
@@ -32,7 +34,7 @@ api.interceptors.request.use((config) => {
              url.includes('/dashboard') ||
              url.includes('/security') ||
              url.includes('/announcements') || url.includes('/memos') ||
-             url.includes('/alerts') || url.includes('/activity-logs') ||
+             url.includes('/activity-logs') ||
              url.includes('/backup') || url.includes('/policies') ||
              url.includes('/settings') ||
              url.includes('/rbac')) {
@@ -63,7 +65,9 @@ api.interceptors.response.use(
   (error) => {
     const url = error?.config?.url || '';
     const status = error?.response?.status;
-    if (status && !error?.config?.suppressGlobalErrorModal && !shouldSuppressGlobalErrorModal(error)) {
+    const responseDetail = error?.response?.data?.detail;
+    const isConfirmationResponse = status === 409 && responseDetail?.requires_confirmation;
+    if (status && !isConfirmationResponse && !error?.config?.suppressGlobalErrorModal && !shouldSuppressGlobalErrorModal(error)) {
       window.dispatchEvent(new CustomEvent('wards:system-message', {
         detail: {
           tone: getModalToneForError(error),
@@ -91,7 +95,7 @@ api.interceptors.response.use(
       url.includes('/rbac');
 
     // Check if this is a password confirmation error (incorrect password, not session expiration)
-    const errorDetail = error?.response?.data?.detail || '';
+    const errorDetail = typeof responseDetail === 'string' ? responseDetail : (responseDetail?.message || '');
     const requestPayload = error?.config?.data;
     const isProtectedPasswordRequest = typeof requestPayload === 'string' && requestPayload.toLowerCase().includes('current_admin_password');
     const isPasswordConfirmationError = 
@@ -337,6 +341,7 @@ export const alertAPI = {
   getAll: (params) => api.get('/alerts', { params }),
   getUnreadCount: () => api.get('/alerts/unread-count'),
   markAsRead: (id) => api.put(`/alerts/${id}/read`),
+  markAllAsRead: () => api.put('/alerts/read-all'),
 };
 
 export const activityLogAPI = {

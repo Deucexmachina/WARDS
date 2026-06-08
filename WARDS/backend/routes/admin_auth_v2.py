@@ -166,6 +166,28 @@ def log_activity(db: Session, action: str, user: str, details: str, log_type: st
     db.add(log)
     db.commit()
 
+
+def log_admin_security_context(db: Session, *, actor: str, client_ip: str, change_type: str, admin_id: int | None = None):
+    try:
+        from SECURITY.security_engine import record_context_detection
+
+        record_context_detection(
+            db,
+            target_name=f"admin_session:{actor}",
+            actor=actor,
+            change_type=change_type,
+            context={
+                "target_type": "admin_session",
+                "source_ip": client_ip,
+                "admin_id": admin_id,
+                "admin_session_valid": change_type != "invalid_admin_session",
+                "method_legitimate": change_type != "invalid_admin_session",
+            },
+            force_flag="unauthenticated_change" if change_type == "invalid_admin_session" else None,
+        )
+    except Exception:
+        pass
+
 def get_mfa_secret(db: Session, username: str) -> Optional[str]:
     mfa = find_mfa_secret_record(db, MFASecret, "admin", username, enabled_only=True)
     return (get_decrypted_or_raw(mfa, "secret") or mfa.secret) if mfa else None
@@ -223,6 +245,12 @@ def get_current_admin_from_token(request: Request, db: Session) -> Admin:
 
         return admin
     except JWTError:
+        log_admin_security_context(
+            db,
+            actor="unknown_admin_token",
+            client_ip=request.client.host if request.client else "unknown",
+            change_type="invalid_admin_session",
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token"
@@ -430,6 +458,7 @@ async def admin_login(request: Request, credentials: AdminLoginRequest, db: Sess
     db.commit()
     
     log_activity(db, "Successful Admin Login", normalized_email, f"Role: {admin.role}, IP: {client_ip}", "security")
+    log_admin_security_context(db, actor=admin.username, client_ip=client_ip, change_type="suspicious_login", admin_id=admin.id)
     
     
     return {
@@ -508,6 +537,12 @@ async def verify_token(request: Request, db: Session = Depends(get_db)):
             }
         }
     except JWTError:
+        log_admin_security_context(
+            db,
+            actor="unknown_admin_token",
+            client_ip=request.client.host if request.client else "unknown",
+            change_type="invalid_admin_session",
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token"

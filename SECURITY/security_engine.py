@@ -18,7 +18,8 @@ from typing import Iterable
 import requests
 from sqlalchemy import MetaData, Table, inspect, or_, text
 from sqlalchemy.orm import Session
-from database.models import Admin
+from database.models import Admin, Alert
+from services.vpn_detection import detect_vpn
 from services.email_service import send_security_incident_alert_email
 from utils.log_integrity import verify_record_integrity
 
@@ -50,7 +51,10 @@ BACKUP_MANIFEST_NAME = "_backup_hashes.json"
 DATABASE_EXCLUDED_TABLES = {
     "activity_logs",
     "alerts",
+    "alert_views",
+    "announcement_views",
     "ip_reputation_cache",
+    "memo_views",
     "permanent_ip_blocks",
     DATABASE_AUDIT_TABLE,
     DATABASE_AUTH_TABLE,
@@ -383,6 +387,148 @@ def json_dumps(value) -> str:
     return json.dumps(value, ensure_ascii=True, default=str)
 
 
+SYSTEM_ALERT_CATALOG = {
+    "backup_started": "Security Backup Started",
+    "backup_completed": "Security Backup Completed",
+    "backup_failed": "Security Backup Failed",
+    "detection_logged": "Security Detection Logged",
+    "recovery_completed": "Security Recovery Completed",
+    "recovery_failed": "Security Recovery Failed",
+    "incident_created": "Security Incident Logged",
+    "incident_resolved": "Security Incident Resolved",
+    "incident_false_positive": "Security Incident Marked False Positive",
+    "vpn_risk": "VPN/Proxy Risk Detected",
+    "invalid_admin_session": "Invalid Admin Session Detected",
+}
+
+
+def create_system_alert(db: Session, alert_key: str, message: str, severity: str = "low", *, title: str | None = None, dedupe_key: str | None = None) -> Alert | None:
+    resolved_title = title or SYSTEM_ALERT_CATALOG.get(alert_key, alert_key.replace("_", " ").title())
+    if dedupe_key:
+        existing = (
+            db.query(Alert)
+            .filter(Alert.type == alert_key, Alert.title == resolved_title, Alert.message.like(f"%{dedupe_key}%"))
+            .first()
+        )
+        if existing:
+            return existing
+    alert = Alert(type=alert_key, title=resolved_title, message=message, severity=severity, created_at=datetime.utcnow())
+    db.add(alert)
+    db.commit()
+    db.refresh(alert)
+    return alert
+
+
+def create_incident_system_alert(db: Session, incident: SecurityIncident, detection: SecurityDetectionEvent | None, recovery: SecurityRecoveryEvent | None = None) -> Alert | None:
+    dedupe_key = f"SEC-{incident.id}"
+    detection_summary = detection.trigger_summary if detection else "No detection summary recorded."
+    recovery_summary = recovery.summary if recovery else "No recovery action was recorded."
+    message = (
+        f"{dedupe_key}: {incident.description or 'Security incident recorded.'} "
+        f"Detection: {detection_summary} Recovery: {recovery_summary}"
+    )
+    return create_system_alert(
+        db,
+        "incident_created",
+        message,
+        incident.severity_level or "high",
+        title=f"Security Incident {dedupe_key}",
+        dedupe_key=dedupe_key,
+    )
+
+
+def enrich_security_context(db: Session, context: dict | None) -> dict:
+    context = dict(context or {})
+    source_ip = context.get("source_ip") or context.get("client_ip") or context.get("ip_address")
+    if not source_ip or str(source_ip).lower() == "unknown":
+        return context
+    vpn = detect_vpn(str(source_ip))
+    context["vpn_detection"] = vpn
+    context["vpn_detected"] = bool(vpn.get("is_vpn") or vpn.get("is_proxy"))
+    context["vpn_activity"] = context.get("vpn_activity") or context["vpn_detected"]
+    context["vpn_provider"] = vpn.get("provider")
+    context["vpn_risk_score"] = vpn.get("risk_score")
+    if vpn.get("risk_score"):
+        context["ip_reputation_score"] = max(float(context.get("ip_reputation_score") or 0), float(vpn.get("risk_score") or 0))
+    if vpn.get("signals"):
+        context["vpn_signals"] = vpn.get("signals")
+    return context
+
+
+def record_context_detection(
+    db: Session,
+    *,
+    target_name: str,
+    actor: str,
+    change_type: str,
+    context: dict,
+    force_flag: str | None = None,
+) -> SecurityDetectionEvent | None:
+    context = enrich_security_context(db, context)
+    synthetic_content = json_dumps({
+        "target": target_name,
+        "actor": actor,
+        "change_type": change_type,
+        "context": {key: value for key, value in context.items() if key != "ai_rules"},
+    })
+    context.setdefault("admin_session_valid", change_type != "invalid_admin_session")
+    context.setdefault("method_legitimate", change_type not in {"invalid_admin_session", "suspicious_login"})
+    context.setdefault("business_hours", 8 <= now_utc().hour <= 18)
+    context.setdefault("ai_rules", get_ai_rules(db))
+    flags = content_flags(synthetic_content, context)
+    if force_flag:
+        flags.append(force_flag)
+        flags = sorted(set(flags))
+    prediction = ai_predict(Path(target_name), "", synthetic_content, context)
+    if prediction.prediction == "normal" and not flags:
+        return None
+    classification = classify(change_type, prediction, flags, context)
+    trigger_summary = build_trigger_summary(change_type, flags, {"added": [], "removed": [], "changed": []}, False, context.get("source_ip") or "unknown")
+    detection = SecurityDetectionEvent(
+        file_id=None,
+        target_type=context.get("target_type") or "admin_session",
+        target_name=target_name,
+        actor=actor,
+        change_type=change_type,
+        old_hash=None,
+        new_hash=sha256_text(synthetic_content),
+        is_legitimate=False,
+        admin_id=context.get("admin_id"),
+        ai_score=prediction.score,
+        ai_prediction=prediction.prediction,
+        confidence=prediction.confidence,
+        severity_level=classification["severity_level"],
+        cvss_score=classification["cvss_score"],
+        nist_category=classification["nist_category"],
+        enisa_threat_type=classification["enisa_threat_type"],
+        trigger_summary=trigger_summary,
+        accuracy_basis=prediction.basis,
+        behavior_flags_json=json_dumps([BEHAVIOR_LABELS.get(flag, flag) for flag in flags]),
+        changed_lines_json=json_dumps({"added": [], "removed": [], "changed": []}),
+        context_json=json_dumps(context),
+    )
+    db.add(detection)
+    db.commit()
+    db.refresh(detection)
+    if "vpn_activity" in flags:
+        create_system_alert(
+            db,
+            "vpn_risk",
+            f"VPN/proxy risk for {actor} from {context.get('source_ip')}. Provider: {context.get('vpn_provider') or 'unknown'}. Detection #{detection.id}.",
+            "medium",
+            dedupe_key=f"Detection #{detection.id}",
+        )
+    if change_type == "invalid_admin_session":
+        create_system_alert(
+            db,
+            "invalid_admin_session",
+            f"Invalid admin session from {context.get('source_ip')}. Detection #{detection.id}.",
+            "high",
+            dedupe_key=f"Detection #{detection.id}",
+        )
+    return detection
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as file_obj:
@@ -405,6 +551,126 @@ def safe_rel(path: Path) -> str:
         return str(resolved.relative_to(MASTER_ROOT)).replace("\\", "/")
     except ValueError:
         return resolved.name
+
+
+def portable_monitored_path(file_entry: SecurityMonitoredFile) -> Path:
+    original = Path(file_entry.file_path)
+    relative = str(file_entry.relative_path or "").replace("\\", "/")
+    parts = [part for part in relative.split("/") if part]
+    if parts:
+        root_name = parts[0]
+        root = MONITORED_ROOTS.get(root_name)
+        if root:
+            candidate = root.joinpath(*parts[1:]).resolve(strict=False)
+            return candidate
+    return original
+
+
+def portable_root_name(file_entry: SecurityMonitoredFile) -> str | None:
+    relative = str(file_entry.relative_path or "").replace("\\", "/")
+    parts = [part for part in relative.split("/") if part]
+    return parts[0] if parts and parts[0] in MONITORED_ROOTS else None
+
+
+def normalized_path_key(path: Path | str) -> str:
+    try:
+        resolved = str(Path(path).expanduser().resolve(strict=False))
+    except Exception:
+        resolved = str(path)
+    return resolved.lower() if os.name == "nt" else resolved
+
+
+def reassign_monitored_file_references(db: Session, source_id: int, target_id: int) -> None:
+    db.query(SecurityDetectionEvent).filter(SecurityDetectionEvent.file_id == source_id).update(
+        {SecurityDetectionEvent.file_id: target_id},
+        synchronize_session=False,
+    )
+    db.query(SecurityRecoveryEvent).filter(SecurityRecoveryEvent.file_id == source_id).update(
+        {SecurityRecoveryEvent.file_id: target_id},
+        synchronize_session=False,
+    )
+
+
+def merge_monitored_file_entry(db: Session, source: SecurityMonitoredFile, target: SecurityMonitoredFile) -> SecurityMonitoredFile:
+    if source.id == target.id:
+        return target
+    if not target.baseline_hash and source.baseline_hash:
+        target.baseline_hash = source.baseline_hash
+    if not target.current_hash and source.current_hash:
+        target.current_hash = source.current_hash
+    if target.status in {None, "", "missing", "verified_deleted", "verified_renamed"} and source.status:
+        target.status = source.status
+    if not target.file_type and source.file_type:
+        target.file_type = source.file_type
+    if not target.size_bytes and source.size_bytes:
+        target.size_bytes = source.size_bytes
+    reassign_monitored_file_references(db, source.id, target.id)
+    db.add(target)
+    db.delete(source)
+    return target
+
+
+def migrate_portable_monitored_files(db: Session) -> int:
+    changed = 0
+    entries = db.query(SecurityMonitoredFile).order_by(SecurityMonitoredFile.id.asc()).all()
+    by_path: dict[str, SecurityMonitoredFile] = {}
+    by_relative: dict[str, SecurityMonitoredFile] = {}
+    for entry in entries:
+        if is_database_entry(entry):
+            by_path[normalized_path_key(entry.file_path)] = entry
+            continue
+        target_path = portable_monitored_path(entry)
+        path_key = normalized_path_key(target_path)
+        relative_key = str(entry.relative_path or "").replace("\\", "/").lower()
+        root_name = portable_root_name(entry)
+        existing = by_path.get(path_key) or (by_relative.get(relative_key) if relative_key else None)
+        if existing and existing.id != entry.id:
+            merge_monitored_file_entry(db, entry, existing)
+            changed += 1
+            continue
+        conflict = (
+            db.query(SecurityMonitoredFile)
+            .filter(SecurityMonitoredFile.file_path == str(target_path), SecurityMonitoredFile.id != entry.id)
+            .first()
+        )
+        if conflict:
+            by_path[path_key] = merge_monitored_file_entry(db, entry, conflict)
+            changed += 1
+            continue
+        if str(entry.file_path) != str(target_path):
+            entry.file_path = str(target_path)
+            changed += 1
+        if root_name and entry.folder_root != root_name:
+            entry.folder_root = root_name
+            changed += 1
+        db.add(entry)
+        by_path[path_key] = entry
+        if relative_key:
+            by_relative[relative_key] = entry
+    if changed:
+        db.flush()
+    return changed
+
+
+def dedupe_monitored_files_by_relative_path(db: Session) -> int:
+    changed = 0
+    rows = db.query(SecurityMonitoredFile).order_by(SecurityMonitoredFile.id.asc()).all()
+    groups: dict[str, list[SecurityMonitoredFile]] = {}
+    for row in rows:
+        key = str(row.relative_path or "").replace("\\", "/").lower()
+        if key:
+            groups.setdefault(key, []).append(row)
+    for items in groups.values():
+        if len(items) <= 1:
+            continue
+        canonical = next((item for item in items if Path(item.file_path or "").exists()), None) or items[0]
+        for item in items:
+            if item.id != canonical.id:
+                canonical = merge_monitored_file_entry(db, item, canonical)
+                changed += 1
+    if changed:
+        db.flush()
+    return changed
 
 
 def file_type(path: Path) -> str:
@@ -930,6 +1196,36 @@ def set_setting(db: Session, key: str, value: str, updated_by: str | None = None
     return setting
 
 
+def env_value(name: str, default: str) -> str:
+    raw = os.getenv(name)
+    return default if raw is None else str(raw).strip()
+
+
+def sync_runtime_env_settings(db: Session, updated_by: str = "environment") -> dict[str, str]:
+    env_mapped = {
+        "deployment_mode": env_value("SECURITY_DEPLOYMENT_MODE", "development"),
+        "monitoring_enabled": env_value("SECURITY_MONITORING_ENABLED", "false").lower(),
+        "scan_interval_seconds": env_value("SECURITY_SCAN_INTERVAL_SECONDS", "30"),
+        "wazuh_enabled": env_value("WAZUH_ENABLED", "false").lower(),
+    }
+    changed = False
+    for key, value in env_mapped.items():
+        current = db.query(SecuritySetting).filter(SecuritySetting.key == key).first()
+        if current and str(current.value) == value:
+            continue
+        if current:
+            current.value = value
+            current.updated_by = updated_by
+            current.updated_at = datetime.utcnow()
+            db.add(current)
+        else:
+            db.add(SecuritySetting(key=key, value=value, updated_by=updated_by))
+        changed = True
+    if changed:
+        db.commit()
+    return env_mapped
+
+
 def seed_settings(db: Session) -> None:
     defaults = {
         "backup_location": str(DEFAULT_BACKUP_ROOT),
@@ -951,7 +1247,8 @@ def seed_settings(db: Session) -> None:
             changed = True
     if changed:
         db.commit()
-    backup_location = Path(get_setting(db, "backup_location", str(DEFAULT_BACKUP_ROOT)))
+    sync_runtime_env_settings(db)
+    backup_location = writable_backup_location(db, "startup")
     prune_all_backup_types(backup_location, keep=3)
     refresh_backup_integrity_manifests(backup_location)
     try:
@@ -1031,7 +1328,11 @@ def latest_backup_root(db: Session) -> Path | None:
     if not location.exists():
         return None
     backups = sorted([item for item in location.iterdir() if item.is_dir()], reverse=True)
-    return backups[0] if backups else None
+    if backups:
+        set_setting(db, "latest_backup_path", str(backups[0]), "backup_location_fallback")
+        return backups[0]
+    set_setting(db, "latest_backup_path", "", "backup_location_fallback")
+    return None
 
 
 def backup_file_path(backup_root: Path, relative_path: str) -> Path:
@@ -1041,11 +1342,14 @@ def backup_file_path(backup_root: Path, relative_path: str) -> Path:
 def writable_backup_location(db: Session, updated_by: str = "system") -> Path:
     configured = Path(get_setting(db, "backup_location", str(DEFAULT_BACKUP_ROOT))).expanduser()
     fallback = DEFAULT_BACKUP_ROOT.resolve()
-    for candidate in (configured, fallback):
+    configured_resolved = configured.resolve(strict=False)
+    candidates = [configured_resolved] if configured_resolved.exists() or configured_resolved == fallback else []
+    candidates.append(fallback)
+    for candidate in candidates:
         try:
-            target = candidate.resolve()
+            target = candidate.resolve(strict=False)
             target.mkdir(parents=True, exist_ok=True)
-            if target != configured:
+            if target != configured_resolved:
                 set_setting(db, "backup_location", str(target), updated_by)
             return target
         except OSError:
@@ -1144,11 +1448,26 @@ def prune_all_backup_types(backup_location: Path, keep: int = 3) -> None:
 
 def register_initial_files(db: Session, ensure_backup: bool = True, refresh_existing: bool = True) -> int:
     seed_settings(db)
+    migrate_portable_monitored_files(db)
+    dedupe_monitored_files_by_relative_path(db)
     created = 0
     for root_name, path in iter_monitorable_files():
         relative = safe_rel(path)
-        existing = db.query(SecurityMonitoredFile).filter(SecurityMonitoredFile.file_path == str(path)).first()
+        matches = (
+            db.query(SecurityMonitoredFile)
+            .filter(or_(SecurityMonitoredFile.file_path == str(path), SecurityMonitoredFile.relative_path == relative))
+            .order_by(SecurityMonitoredFile.id.asc())
+            .all()
+        )
+        existing = None
+        if matches:
+            path_key = normalized_path_key(path)
+            existing = next((item for item in matches if normalized_path_key(item.file_path) == path_key), None) or matches[0]
+            for duplicate in matches:
+                if duplicate.id != existing.id:
+                    existing = merge_monitored_file_entry(db, duplicate, existing)
         if existing:
+            existing.file_path = str(path)
             existing.relative_path = relative
             existing.folder_root = root_name
             existing.file_type = file_type(path)
@@ -1182,6 +1501,7 @@ def register_initial_files(db: Session, ensure_backup: bool = True, refresh_exis
             created += 1
     except Exception:
         pass
+    dedupe_monitored_files_by_relative_path(db)
     db.commit()
     if ensure_backup and not latest_backup_root(db):
         create_manual_backup(db, initiated_by=None, label="initial")
@@ -1211,6 +1531,43 @@ def generate_initial_training_samples(sample_count: int = 640) -> list[dict]:
             }
         )
     return samples
+
+
+def build_behavioral_profile(admin_changes: list[SecurityAdminFileChange]) -> dict:
+    hours = sorted({change.timestamp.hour for change in admin_changes if change.timestamp})
+    weekdays = sorted({change.timestamp.weekday() for change in admin_changes if change.timestamp})
+    extensions = sorted({
+        Path(change.file_path).suffix.lower()
+        for change in admin_changes
+        if change.file_path and Path(change.file_path).suffix
+    })
+    roots = sorted({
+        safe_rel(Path(change.file_path)).split("/", 1)[0]
+        for change in admin_changes
+        if change.file_path
+    })
+    source_ips = sorted({
+        change.ip_address
+        for change in admin_changes
+        if change.ip_address and change.ip_address not in {"unknown", "127.0.0.1"}
+    })
+    return {
+        "sample_count": len(admin_changes),
+        "normal_hours": hours,
+        "normal_weekdays": weekdays,
+        "common_extensions": extensions,
+        "common_roots": roots,
+        "known_source_ips": source_ips,
+    }
+
+
+def load_ai_model_state() -> dict:
+    if not MODEL_STATE_PATH.exists():
+        return {}
+    try:
+        return json_loads(MODEL_STATE_PATH.read_text(encoding="utf-8"), {})
+    except Exception:
+        return {}
 
 
 def retrain_ai(db: Session, initiated_by: str = "system") -> dict:
@@ -1248,6 +1605,7 @@ def retrain_ai(db: Session, initiated_by: str = "system") -> dict:
         "normal_samples": len(samples),
         "historical_admin_samples": len(admin_changes),
         "features": list(samples[0].keys()),
+        "behavioral_profile": build_behavioral_profile(admin_changes),
         "updated_at": now_utc().isoformat(),
         "updated_by": initiated_by,
         "note": "Uses bootstrap normal data plus all historical validated admin behavior, including the newest verified records since the previous retrain.",
@@ -1370,11 +1728,40 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
         risk += weight("method_legitimate", 0.18)
     if enabled("business_hours") and not context.get("business_hours", True):
         risk += weight("business_hours", 0.08)
+    learned_notes = []
+    learned_warning = False
+    model_state = load_ai_model_state()
+    profile = model_state.get("behavioral_profile") or {}
+    if int(profile.get("sample_count") or 0) >= 3:
+        normal_hours = set(profile.get("normal_hours") or [])
+        current_hour = int(context.get("hour_of_day") if context.get("hour_of_day") is not None else now_utc().hour)
+        if enabled("hour_of_day") and normal_hours and current_hour not in normal_hours:
+            risk += weight("hour_of_day", 0.08)
+            learned_warning = True
+            learned_notes.append(f"hour {current_hour} outside learned hours")
+        normal_weekdays = set(profile.get("normal_weekdays") or [])
+        current_weekday = int(context.get("day_of_week") if context.get("day_of_week") is not None else now_utc().weekday())
+        if enabled("day_of_week") and normal_weekdays and current_weekday not in normal_weekdays:
+            risk += weight("day_of_week", 0.05)
+            learned_warning = True
+            learned_notes.append(f"weekday {current_weekday} outside learned weekdays")
+        common_extensions = set(profile.get("common_extensions") or [])
+        if enabled("file_type_risk") and common_extensions and path.suffix.lower() and path.suffix.lower() not in common_extensions:
+            risk += min(weight("file_type_risk", 0.07), 0.1)
+            learned_warning = True
+            learned_notes.append(f"{path.suffix.lower()} outside learned file types")
+        known_source_ips = set(profile.get("known_source_ips") or [])
+        source_ip = context.get("source_ip") or context.get("client_ip") or context.get("ip_address")
+        if enabled("ip_consistent") and source_ip and known_source_ips and source_ip not in known_source_ips:
+            risk += weight("ip_consistent", 0.08)
+            learned_warning = True
+            learned_notes.append("source IP outside learned admin profile")
     identity_warning = (
         context.get("ip_consistent") is False
         or "source_ip_reputation" in flags
         or "keystroke_dynamics" in flags
         or "vpn_activity" in flags
+        or learned_warning
     )
     if context.get("admin_session_valid") and context.get("method_legitimate") and enabled("admin_session_valid") and enabled("method_legitimate") and not identity_warning:
         risk = min(risk, 0.18)
@@ -1384,6 +1771,8 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
     confidence = risk if prediction != "normal" else 1 - risk
     active_rules = [key for key, value in rules.items() if value.get("enabled", True)]
     basis = f"Based on enabled AI rules: {', '.join(active_rules)}."
+    if learned_notes:
+        basis = f"{basis} Learned behavioral profile: {', '.join(learned_notes)}."
     return AIPrediction(prediction=prediction, score=round(risk, 4), confidence=round(confidence, 4), basis=basis)
 
 
@@ -1495,17 +1884,31 @@ def quarantine_file(file_path: Path, detection_id: int) -> str | None:
     return str(target)
 
 
+def safe_quarantine_path(raw_path: str | Path | None) -> Path | None:
+    if not raw_path:
+        return None
+    try:
+        root = QUARANTINE_ROOT.resolve()
+        path = Path(raw_path).expanduser().resolve(strict=False)
+        path.relative_to(root)
+        return path
+    except Exception:
+        return None
+
+
 def cleanup_quarantine_paths(paths: list[str]) -> None:
     for raw_path in paths:
         try:
-            path = Path(raw_path)
+            path = safe_quarantine_path(raw_path)
+            if not path:
+                continue
             if path.exists():
                 if path.is_dir():
                     shutil.rmtree(path, ignore_errors=True)
                 else:
                     path.unlink()
             marker = next((parent for parent in path.parents if parent.name.startswith("detection_")), None)
-            if marker and marker.exists():
+            if marker and safe_quarantine_path(marker) and marker.exists():
                 shutil.rmtree(marker, ignore_errors=True)
         except Exception:
             pass
@@ -1533,7 +1936,7 @@ def restore_from_backup(db: Session, file_entry: SecurityMonitoredFile, detectio
         if not backup_root:
             raise RuntimeError("No local backup exists. Create a manual backup first.")
         source = backup_file_path(backup_root, file_entry.relative_path)
-        target = Path(file_entry.file_path)
+        target = portable_monitored_path(file_entry)
         if not source.exists():
             raise FileNotFoundError(f"Backup copy not found for {file_entry.relative_path}")
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -1552,6 +1955,8 @@ def restore_from_backup(db: Session, file_entry: SecurityMonitoredFile, detectio
         db.add(file_entry)
         db.add(recovery)
         db.commit()
+        if recovery_type != "automatic":
+            create_system_alert(db, "recovery_completed", f"Recovery #{recovery.id}: {recovery.summary}", "low", dedupe_key=f"Recovery #{recovery.id}")
     except Exception as exc:
         recovery.status = "failed"
         recovery.error_message = str(exc)
@@ -1560,6 +1965,8 @@ def restore_from_backup(db: Session, file_entry: SecurityMonitoredFile, detectio
         recovery.summary = f"Recovery failed for {file_entry.relative_path}."
         db.add(recovery)
         db.commit()
+        if recovery_type != "automatic":
+            create_system_alert(db, "recovery_failed", f"Recovery #{recovery.id}: {recovery.summary} {recovery.error_message or ''}", "high", dedupe_key=f"Recovery #{recovery.id}")
     db.refresh(recovery)
     return recovery
 
@@ -1605,6 +2012,8 @@ def restore_database_from_backup(db: Session, file_entry: SecurityMonitoredFile,
         db.add(recovery)
         set_setting(db, "database_audit_last_id", str(latest_database_audit_id(db)), "database_monitor")
         db.commit()
+        if recovery_type != "automatic":
+            create_system_alert(db, "recovery_completed", f"Recovery #{recovery.id}: {recovery.summary}", "low", dedupe_key=f"Recovery #{recovery.id}")
     except Exception as exc:
         recovery.status = "failed"
         recovery.error_message = str(exc)
@@ -1613,6 +2022,8 @@ def restore_database_from_backup(db: Session, file_entry: SecurityMonitoredFile,
         recovery.summary = "Database recovery failed."
         db.add(recovery)
         db.commit()
+        if recovery_type != "automatic":
+            create_system_alert(db, "recovery_failed", f"Recovery #{recovery.id}: {recovery.summary} {recovery.error_message or ''}", "high", dedupe_key=f"Recovery #{recovery.id}")
     db.refresh(recovery)
     return recovery
 
@@ -1632,8 +2043,10 @@ def restore_from_quarantine(db: Session, file_entry: SecurityMonitoredFile, dete
 
     started = time.time()
     try:
-        source = Path(quarantine_path)
-        target = Path(file_entry.file_path)
+        source = safe_quarantine_path(quarantine_path)
+        target = portable_monitored_path(file_entry)
+        if not source:
+            raise FileNotFoundError(f"Quarantined copy not found for {file_entry.relative_path}")
         if not source.exists() or not source.is_file():
             raise FileNotFoundError(f"Quarantined copy not found for {file_entry.relative_path}")
         if is_database_entry(file_entry):
@@ -1680,22 +2093,23 @@ def revert_recovery_to_quarantine(db: Session, file_entry: SecurityMonitoredFile
 
     started = time.time()
     try:
-        source = Path(quarantine_path)
-        target = Path(file_entry.file_path)
-        if not source.exists() or not source.is_file():
+        source = safe_quarantine_path(quarantine_path)
+        target = portable_monitored_path(file_entry)
+        if not source or not source.exists() or not source.is_file():
             raise FileNotFoundError(f"Quarantined copy not found for {file_entry.relative_path}")
         if is_database_entry(file_entry):
             restore_database_snapshot(db, source)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
         reverted_hash = sha256_file(target)
+        file_entry.baseline_hash = reverted_hash
         file_entry.current_hash = reverted_hash
-        file_entry.status = "quarantined"
+        file_entry.status = "clean"
         file_entry.size_bytes = target.stat().st_size
         file_entry.last_checked = now_utc()
         recovery.completed_at = now_utc()
         recovery.recovery_duration_ms = int((time.time() - started) * 1000)
-        recovery.summary = f"Reverted previous recovery and returned {file_entry.relative_path} to the quarantined incident state."
+        recovery.summary = f"Reverted previous recovery and restored the authorized quarantined copy for {file_entry.relative_path}."
         db.add(file_entry)
         db.add(recovery)
         db.commit()
@@ -1710,11 +2124,49 @@ def revert_recovery_to_quarantine(db: Session, file_entry: SecurityMonitoredFile
     db.refresh(recovery)
     return recovery
 
+def restore_quarantined_copy_to_original(
+    db: Session,
+    file_entry: SecurityMonitoredFile,
+    quarantine_path: str,
+    initiated_by: int,
+    detection_id: int | None = None,
+) -> SecurityRecoveryEvent:
+    source = safe_quarantine_path(quarantine_path)
+    if not source or not source.exists() or not source.is_file():
+        raise FileNotFoundError(f"Quarantined copy not found for {file_entry.relative_path}")
+
+    target = portable_monitored_path(file_entry)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, target)
+
+    restored_hash = sha256_file(target)
+    file_entry.baseline_hash = restored_hash
+    file_entry.current_hash = restored_hash
+    file_entry.status = "clean"
+    file_entry.size_bytes = target.stat().st_size
+    file_entry.last_checked = now_utc()
+    db.add(file_entry)
+
+    recovery = SecurityRecoveryEvent(
+        detection_event_id=detection_id,
+        file_id=file_entry.id,
+        recovery_type="reverted",
+        initiated_by=initiated_by,
+        status="reverted",
+        quarantine_path=str(source),
+        backup_path=str(source),
+        summary=f"Restored the quarantined copy for {file_entry.relative_path} back to its original location.",
+        completed_at=now_utc(),
+    )
+    db.add(recovery)
+    db.commit()
+    db.refresh(recovery)
+    return recovery
 
 def current_hash_index(db: Session) -> dict[str, list[SecurityMonitoredFile]]:
     index: dict[str, list[SecurityMonitoredFile]] = {}
     for entry in db.query(SecurityMonitoredFile).all():
-        path = Path(entry.file_path)
+        path = portable_monitored_path(entry)
         if not path.exists() or not path.is_file():
             continue
         current_hash = entry.current_hash
@@ -1791,8 +2243,8 @@ def mark_verified_removal(db: Session, file_entry: SecurityMonitoredFile, reason
         db.flush()
 
     for incident in db.query(SecurityIncident).filter(SecurityIncident.detection_event_id == detection.id, SecurityIncident.status.in_(["open", "investigating"])).all():
-        incident.status = reason
-        incident.response_action = reason
+        incident.status = "resolved"
+        incident.response_action = "trusted_removal_resolved"
         incident.resolved_at = now_utc()
         cleanup_quarantine_paths(json_loads(incident.quarantine_paths_json, []))
         db.add(incident)
@@ -1827,8 +2279,8 @@ def mark_existing_deletion_incident_verified_rename(db: Session, detection: Secu
     db.add(detection)
 
     for incident in db.query(SecurityIncident).filter(SecurityIncident.detection_event_id == detection.id, SecurityIncident.status.in_(["open", "investigating"])).all():
-        incident.status = "verified_renamed"
-        incident.response_action = "verified_renamed"
+        incident.status = "resolved"
+        incident.response_action = "trusted_removal_resolved"
         incident.resolved_at = now_utc()
         cleanup_quarantine_paths(json_loads(incident.quarantine_paths_json, []))
         db.add(incident)
@@ -1848,7 +2300,7 @@ def reconcile_trusted_file_removals(db: Session, actor: str = "trusted_baseline"
     verified_deleted = 0
     verified_renamed = 0
     for entry in db.query(SecurityMonitoredFile).order_by(SecurityMonitoredFile.relative_path.asc()).all():
-        path = Path(entry.file_path)
+        path = portable_monitored_path(entry)
         if path.exists():
             continue
         replacement_path = replacement_path_for(entry, hash_index)
@@ -1872,6 +2324,29 @@ def reconcile_trusted_file_removals(db: Session, actor: str = "trusted_baseline"
         mark_existing_deletion_incident_verified_rename(db, detection, entry, replacement_path, actor)
         verified_renamed += 1
     return {"verified_deleted": verified_deleted, "verified_renamed": verified_renamed}
+
+
+def should_create_incident(change_type: str, prediction: AIPrediction, flags: list[str], classification: dict) -> bool:
+    concrete_tamper_flags = {
+        "script_injection",
+        "iframe_injection",
+        "defacement_keywords",
+        "credential_access",
+        "sql_injection",
+        "ransom_note_keywords",
+        "malicious_redirect",
+        "destructive_script",
+        "phishing_form",
+        "style_takeover",
+        "external_resource_injection",
+    }
+    if change_type == "file_deleted":
+        return True
+    if prediction.prediction == "malicious":
+        return True
+    if concrete_tamper_flags.intersection(flags):
+        return True
+    return float(classification.get("cvss_score") or 0) >= 7.0
 
 
 def create_incident(db: Session, detection: SecurityDetectionEvent, classification: dict, flags: list[str], changed: dict, quarantine_path: str | None) -> SecurityIncident:
@@ -1988,7 +2463,7 @@ def scan_single_file(db: Session, file_entry: SecurityMonitoredFile, context: di
     context = context or {}
     if is_database_entry(file_entry):
         return scan_database_entry(db, file_entry, context=context, commit_clean=commit_clean)
-    path = Path(file_entry.file_path)
+    path = portable_monitored_path(file_entry)
     old_hash = file_entry.current_hash
     backup_root = latest_backup_root(db)
     backup_source = backup_file_path(backup_root, file_entry.relative_path) if backup_root else None
@@ -2033,7 +2508,7 @@ def scan_single_file(db: Session, file_entry: SecurityMonitoredFile, context: di
 
 
 def record_detection(db: Session, file_entry: SecurityMonitoredFile, change_type: str, old_hash: str | None, new_hash: str | None, old_content: str, new_content: str, context: dict | None = None) -> SecurityDetectionEvent:
-    context = context or {}
+    context = enrich_security_context(db, context or {})
     source_ip = context.get("source_ip") or context.get("client_ip") or context.get("ip_address") or "unknown"
     context.setdefault("source_ip", source_ip)
     admin_change = recent_admin_change(db, file_entry.file_path)
@@ -2045,7 +2520,7 @@ def record_detection(db: Session, file_entry: SecurityMonitoredFile, change_type
         context.setdefault("method_legitimate", False)
     context.setdefault("ai_rules", get_ai_rules(db))
 
-    prediction = ai_predict(Path(file_entry.file_path), old_content, new_content, context)
+    prediction = ai_predict(portable_monitored_path(file_entry), old_content, new_content, context)
     flags = content_flags(new_content, context)
     classification = classify(change_type, prediction, flags, context)
     if is_legitimate:
@@ -2088,14 +2563,24 @@ def record_detection(db: Session, file_entry: SecurityMonitoredFile, change_type
     db.commit()
     db.refresh(detection)
 
-    if not is_legitimate:
-        quarantine_path = quarantine_file(Path(file_entry.file_path), detection.id)
+    if not is_legitimate and should_create_incident(change_type, prediction, flags, classification):
+        quarantine_path = quarantine_file(portable_monitored_path(file_entry), detection.id)
         incident = create_incident(db, detection, classification, flags, changed, quarantine_path)
+        recovery = None
         if change_type in {"content_modified", "file_deleted"}:
             recovery = restore_from_backup(db, file_entry, detection.id, "automatic", None, quarantine_path)
             incident.response_action = "auto_recovered_pending_review" if recovery.status == "success" else "escalated"
             db.add(incident)
             db.commit()
+        create_incident_system_alert(db, incident, detection, recovery)
+    elif not is_legitimate:
+        create_system_alert(
+            db,
+            "detection_logged",
+            f"Detection #{detection.id}: {detection.trigger_summary}",
+            detection.severity_level or "low",
+            dedupe_key=f"Detection #{detection.id}",
+        )
     return detection
 
 
@@ -2115,6 +2600,7 @@ def build_trigger_summary(change_type: str, flags: list[str], changed: dict, is_
 
 def scan_all_files(db: Session, context: dict | None = None) -> list[SecurityDetectionEvent]:
     register_initial_files(db, refresh_existing=False)
+    migrate_portable_monitored_files(db)
     database_entry = normalize_database_monitor_entry(db, reset_baseline=False, ensure_snapshot=True)
     set_setting(db, "last_scan_at", now_utc().isoformat(), "security_scanner")
     detections = []
@@ -2125,7 +2611,7 @@ def scan_all_files(db: Session, context: dict | None = None) -> list[SecurityDet
             file_entry.last_checked = now_utc()
             db.add(file_entry)
             continue
-        if not Path(file_entry.file_path).exists():
+        if not portable_monitored_path(file_entry).exists():
             replacement_path = replacement_path_for(file_entry, hash_index)
             if replacement_path:
                 mark_verified_removal(db, file_entry, "verified_renamed", replacement_path=replacement_path, actor="active_scan")
@@ -2157,8 +2643,11 @@ def mark_stale_backup_events_failed(db: Session, max_age_minutes: int = 10) -> i
 
 def create_manual_backup(db: Session, initiated_by: int | None, label: str = "manual") -> SecurityRecoveryEvent:
     seed_settings(db)
+    migrate_portable_monitored_files(db)
+    dedupe_monitored_files_by_relative_path(db)
     mark_stale_backup_events_failed(db)
     register_count = register_initial_files(db, ensure_backup=False)
+    dedupe_monitored_files_by_relative_path(db)
     removal_summary = reconcile_trusted_file_removals(db, actor=f"{label}_backup")
     backup_location = writable_backup_location(db)
     previous_backup_root = latest_backup_root(db)
@@ -2169,6 +2658,13 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
     db.add(event)
     db.commit()
     db.refresh(event)
+    create_system_alert(
+        db,
+        "backup_started",
+        f"Backup #{event.id}: {label.replace('_', ' ')} backup started.",
+        "low",
+        dedupe_key=f"Backup #{event.id}",
+    )
     try:
         backup_root.mkdir(parents=True, exist_ok=True)
         database_entry = normalize_database_monitor_entry(db, reset_baseline=False, ensure_snapshot=True)
@@ -2178,7 +2674,7 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
                 entry.last_checked = now_utc()
                 db.add(entry)
                 continue
-            path = Path(entry.file_path)
+            path = portable_monitored_path(entry)
             relative = entry.relative_path or safe_rel(path)
             if is_database_entry(entry):
                 checksum_path = create_database_checksum_manifest(db, path)
@@ -2233,6 +2729,13 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
     db.add(event)
     db.commit()
     db.refresh(event)
+    create_system_alert(
+        db,
+        "backup_completed" if event.status == "success" else "backup_failed",
+        f"Backup #{event.id}: {event.summary}",
+        "low" if event.status == "success" else "high",
+        dedupe_key=f"Backup #{event.id}",
+    )
     return event
 
 
@@ -2283,27 +2786,36 @@ def incident_missing_file_details(db: Session, incident: SecurityIncident, actio
     file_entry = db.query(SecurityMonitoredFile).filter(SecurityMonitoredFile.id == detection.file_id).first() if detection else None
     missing_files = []
     missing_quarantine = []
-    if file_entry and not is_database_entry(file_entry):
-        target = Path(file_entry.file_path)
+    if action == "false_positive" and file_entry and not is_database_entry(file_entry):
+        target = portable_monitored_path(file_entry)
         if not target.exists():
             missing_files.append(file_entry.relative_path or file_entry.file_path)
     quarantine_paths = json_loads(incident.quarantine_paths_json, [])
-    if action == "false_positive":
+    if action == "false_positive" and not quarantine_paths:
+        missing_quarantine.append("No quarantined copy is recorded for this incident.")
+    elif action in {"false_positive", "resolve"} and quarantine_paths:
         if not quarantine_paths:
             missing_quarantine.append("No quarantined copy is recorded for this incident.")
         else:
             for raw_path in quarantine_paths:
-                path = Path(raw_path)
-                if not path.exists() or not path.is_file():
+                path = safe_quarantine_path(raw_path)
+                if not path or not path.exists() or not path.is_file():
                     missing_quarantine.append(str(raw_path))
     has_missing = bool(missing_files or missing_quarantine)
     label = "false positive" if action == "false_positive" else "resolved"
     message_parts = []
-    if missing_files:
+    if action == "resolve" and missing_quarantine and not missing_files:
+        message_parts.append("Some quarantine copies are already missing.")
+    elif missing_files:
         message_parts.append(f"The affected file is already deleted: {', '.join(missing_files)}.")
     if missing_quarantine:
-        message_parts.append(f"The quarantined copy is missing: {', '.join(missing_quarantine)}.")
-    if action == "false_positive" and missing_files and not missing_quarantine:
+        if action == "false_positive":
+            message_parts.append(f"The quarantined copy is missing: {', '.join(missing_quarantine)}.")
+    if action == "resolve" and missing_quarantine:
+        message_parts.append(f"Do you still want to mark this incident as {label}? WARDS will proceed because resolving a confirmed threat only needs to remove quarantine remnants.")
+    elif action == "false_positive" and missing_quarantine:
+        message_parts.append(f"Do you still want to mark this incident as {label}? No reversion or backup will take place and the current file state will remain as is.")
+    elif action == "false_positive" and missing_files and not missing_quarantine:
         message_parts.append(f"Do you still want to mark this incident as {label}? WARDS will restore the quarantined copy if you continue.")
     else:
         message_parts.append(f"Do you still want to mark this incident as {label}? No missing file will be restored.")
@@ -2311,6 +2823,7 @@ def incident_missing_file_details(db: Session, incident: SecurityIncident, actio
         "requires_confirmation": has_missing,
         "reason": "missing_incident_files",
         "message": " ".join(message_parts),
+        "suppress_file_list": action == "resolve",
         "missing_files": missing_files,
         "missing_quarantine_paths": missing_quarantine,
     }
@@ -2323,15 +2836,22 @@ def ensure_missing_file_confirmation(db: Session, incidents: list[SecurityIncide
         if details["requires_confirmation"]:
             missing.append({"incident_id": incident.id, **details})
     if missing and not confirmed:
+        if action == "resolve":
+            message = "Some quarantine copies are already missing. Continue resolving the selected incidents?"
+        else:
+            message = "One or more affected files or quarantined copies are already deleted. Do you still want to continue?"
         raise MissingFileConfirmationRequired({
             "requires_confirmation": True,
             "reason": "missing_incident_files",
-            "message": "One or more affected files or quarantined copies are already deleted. Do you still want to continue?",
+            "message": message,
+            "suppress_file_list": action == "resolve",
             "incidents": missing,
         })
 
 
 def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missing_files: bool = False) -> SecurityIncident:
+    migrate_portable_monitored_files(db)
+    dedupe_monitored_files_by_relative_path(db)
     incident = db.query(SecurityIncident).filter(SecurityIncident.id == incident_id).first()
     if not incident:
         raise ValueError("Incident not found")
@@ -2339,14 +2859,38 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
     file_entry = db.query(SecurityMonitoredFile).filter(SecurityMonitoredFile.id == detection.file_id).first() if detection else None
     ensure_missing_file_confirmation(db, [incident], "resolve", confirm_missing_files)
     if file_entry and not is_database_entry(file_entry):
-        target = Path(file_entry.file_path)
+        target = portable_monitored_path(file_entry)
+        restored_from_backup = False
+        if (not target.exists() or not target.is_file()) and file_entry.relative_path:
+            backup_root = latest_backup_root(db)
+            backup_source = backup_file_path(backup_root, file_entry.relative_path) if backup_root else None
+            if backup_source and backup_source.exists() and backup_source.is_file():
+                started = time.time()
+                recovery = SecurityRecoveryEvent(
+                    detection_event_id=incident.detection_event_id,
+                    file_id=file_entry.id,
+                    recovery_type="automatic",
+                    initiated_by=admin_id,
+                    status="success",
+                    backup_path=str(backup_source),
+                    summary=f"Resolved incident restored missing trusted file for {file_entry.relative_path}.",
+                )
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(backup_source, target)
+                recovery.completed_at = now_utc()
+                recovery.recovery_duration_ms = int((time.time() - started) * 1000)
+                db.add(recovery)
+                restored_from_backup = True
         if target.exists() and target.is_file():
             current_hash = sha256_file(target)
             file_entry.current_hash = current_hash
+            if restored_from_backup:
+                file_entry.baseline_hash = current_hash
             file_entry.status = "clean" if current_hash == file_entry.baseline_hash else "modified"
             file_entry.size_bytes = target.stat().st_size
         else:
-            file_entry.status = "missing"
+            file_entry.current_hash = None
+            file_entry.status = "clean" if confirm_missing_files else "missing"
         file_entry.last_checked = now_utc()
         db.add(file_entry)
     incident.status = "resolved"
@@ -2357,25 +2901,40 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
     db.add(incident)
     db.commit()
     db.refresh(incident)
+    create_system_alert(db, "incident_resolved", f"SEC-{incident.id}: Incident resolved. Quarantine was cleared and trusted backup baseline was retained.", "low", dedupe_key=f"SEC-{incident.id}")
     return incident
 
 
 def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_backup: bool = True, confirm_missing_files: bool = False) -> SecurityIncident:
+    migrate_portable_monitored_files(db)
+    dedupe_monitored_files_by_relative_path(db)
     incident = db.query(SecurityIncident).filter(SecurityIncident.id == incident_id).first()
     if not incident:
         raise ValueError("Incident not found")
     detection = db.query(SecurityDetectionEvent).filter(SecurityDetectionEvent.id == incident.detection_event_id).first()
     file_entry = db.query(SecurityMonitoredFile).filter(SecurityMonitoredFile.id == detection.file_id).first() if detection else None
     quarantine_paths = json_loads(incident.quarantine_paths_json, [])
+    if isinstance(quarantine_paths, str):
+        quarantine_paths = [quarantine_paths]
+
     ensure_missing_file_confirmation(db, [incident], "false_positive", confirm_missing_files)
     if not file_entry:
         raise ValueError("Incident has no monitored file to restore")
-    has_quarantine_copy = bool(quarantine_paths) and Path(quarantine_paths[0]).exists() and Path(quarantine_paths[0]).is_file()
+
+    quarantine_source = quarantine_paths[0] if quarantine_paths else None
+    safe_source = safe_quarantine_path(quarantine_source) if quarantine_source else None
+    has_quarantine_copy = bool(safe_source and safe_source.exists() and safe_source.is_file())
     if not has_quarantine_copy and not confirm_missing_files:
         raise ValueError("Incident has no quarantined copy to restore")
     false_positive_recovery = None
     if has_quarantine_copy:
-        false_positive_recovery = revert_recovery_to_quarantine(db, file_entry, incident.detection_event_id, admin_id, quarantine_paths[0])
+        false_positive_recovery = restore_quarantined_copy_to_original(
+            db,
+            file_entry,
+            str(safe_source),
+            admin_id,
+            incident.detection_event_id,
+        )
         if false_positive_recovery.status != "reverted":
             raise RuntimeError(false_positive_recovery.error_message or "Unable to restore the quarantined file")
     if detection:
@@ -2384,7 +2943,7 @@ def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_ba
         detection.ai_score = 0.0
         detection.confidence = 1.0
         detection.severity_level = "info"
-        detection.trigger_summary = f"False positive accepted by admin; {'previous recovery reverted to quarantined state' if has_quarantine_copy else 'missing file acknowledged'} for {detection.target_name}."
+        detection.trigger_summary = f"False positive accepted by admin; {'authorized quarantined copy restored to its original location' if has_quarantine_copy else 'missing file acknowledged'} for {detection.target_name}."
         db.add(detection)
     for recovery in db.query(SecurityRecoveryEvent).filter(SecurityRecoveryEvent.detection_event_id == incident.detection_event_id).all():
         if false_positive_recovery and recovery.id == false_positive_recovery.id:
@@ -2394,16 +2953,38 @@ def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_ba
             recovery.summary = "False positive accepted; previous recovery was reversed to the quarantined incident state." if has_quarantine_copy else "False positive accepted after admin confirmed the affected or quarantined file is missing."
         db.add(recovery)
     incident.status = "false_positive"
-    incident.response_action = "recovery_reverted_to_quarantine" if has_quarantine_copy else "authorized_change_missing_file_acknowledged"
+    incident.response_action = "authorized_quarantined_copy_restored" if has_quarantine_copy else "authorized_change_missing_file_acknowledged"
     incident.resolved_at = now_utc()
     incident.resolved_by = admin_id
     db.add(incident)
     db.commit()
+    if has_quarantine_copy:
+        if refresh_backup:
+            backup_event = create_manual_backup(db, admin_id, label="false_positive")
+            incident.response_action = f"authorized_change_restored_backup_{backup_event.status}"
+            db.add(incident)
+            db.commit()
+        cleanup_quarantine_paths([str(safe_source)])
+    if has_quarantine_copy and refresh_backup:
+        false_positive_summary = "Quarantined copy restored and backup baseline refreshed."
+    elif has_quarantine_copy:
+        false_positive_summary = "Quarantined copy restored; backup baseline will be refreshed by the bulk operation."
+    else:
+        false_positive_summary = "Missing quarantine acknowledged; no reversion or backup was performed."
+    create_system_alert(
+        db,
+        "incident_false_positive",
+        f"SEC-{incident.id}: Incident marked false positive. {false_positive_summary}",
+        "medium",
+        dedupe_key=f"SEC-{incident.id}",
+    )
     db.refresh(incident)
     return incident
 
 
 def bulk_update_incidents(db: Session, action: str, admin_id: int, confirm_missing_files: bool = False) -> dict:
+    migrate_portable_monitored_files(db)
+    dedupe_monitored_files_by_relative_path(db)
     updated = 0
     rows = db.query(SecurityIncident).filter(SecurityIncident.status.in_(["open", "investigating"])).order_by(SecurityIncident.id.asc()).all()
     if action in {"resolve", "false_positive"}:
@@ -2423,10 +3004,13 @@ def bulk_update_incidents(db: Session, action: str, admin_id: int, confirm_missi
             updated += 1
         else:
             raise ValueError("Unsupported bulk incident action")
+    if action == "false_positive" and updated:
+        create_manual_backup(db, admin_id, label="false_positive_bulk")
     return {"updated": updated, "action": action}
 
 
 def dashboard_payload(db: Session) -> dict:
+    runtime_env = sync_runtime_env_settings(db)
     monitored_files_count = db.query(SecurityMonitoredFile).count()
     file_attention_count = db.query(SecurityMonitoredFile).filter(
         SecurityMonitoredFile.status.in_(["modified", "missing", "compromised"])
@@ -2454,7 +3038,7 @@ def dashboard_payload(db: Session) -> dict:
         status = "Compromised"
     elif incidents:
         status = "At Risk"
-    monitoring_enabled = (get_setting(db, "monitoring_enabled", "true") or "true").lower() == "true"
+    monitoring_enabled = (runtime_env.get("monitoring_enabled") or get_setting(db, "monitoring_enabled", "false") or "false").lower() == "true"
     return {
         "system_status": status,
         "monitored_files": monitored_files_count,
@@ -2483,9 +3067,9 @@ def dashboard_payload(db: Session) -> dict:
             "backup_location": backup_location,
             "ai_model": "trained" if MODEL_STATE_PATH.exists() else "bootstrap-ready",
             "ai_rules_enabled": sum(1 for item in get_ai_rules(db).values() if item.get("enabled", True)),
-            "deployment_mode": get_setting(db, "deployment_mode", "development"),
+            "deployment_mode": runtime_env.get("deployment_mode") or get_setting(db, "deployment_mode", "development"),
             "monitoring_enabled": "true" if monitoring_enabled else "false",
-            "scan_interval_seconds": get_setting(db, "scan_interval_seconds", "30"),
+            "scan_interval_seconds": runtime_env.get("scan_interval_seconds") or get_setting(db, "scan_interval_seconds", "30"),
             "time_source": time_source_label(),
         },
     }
@@ -2536,11 +3120,14 @@ def query_recoveries(db: Session, keyword: str | None = None, date_from: str | N
         query = query.filter(or_(SecurityRecoveryEvent.summary.like(like), SecurityRecoveryEvent.backup_path.like(like), SecurityRecoveryEvent.error_message.like(like)))
     if recovery_type:
         if recovery_type == "reverted":
-            query = query.filter(or_(SecurityRecoveryEvent.recovery_type == "reverted", SecurityRecoveryEvent.status == "reverted"))
+            query = query.filter(or_(SecurityRecoveryEvent.recovery_type.in_(["reverted", "false_positive_restore"]), SecurityRecoveryEvent.status == "reverted"))
         else:
             query = query.filter(SecurityRecoveryEvent.recovery_type == recovery_type)
     if status:
-        query = query.filter(SecurityRecoveryEvent.status == status)
+        if status == "reverted":
+            query = query.filter(or_(SecurityRecoveryEvent.status == "reverted", SecurityRecoveryEvent.recovery_type.in_(["reverted", "false_positive_restore"])))
+        else:
+            query = query.filter(SecurityRecoveryEvent.status == status)
     if date_from:
         query = query.filter(SecurityRecoveryEvent.started_at >= datetime.fromisoformat(date_from))
     if date_to:
@@ -2630,7 +3217,7 @@ def monitored_entries_for_folder(db: Session, root: Path) -> list[SecurityMonito
     rows = []
     for entry in db.query(SecurityMonitoredFile).all():
         try:
-            if path_is_inside(Path(entry.file_path), root):
+            if path_is_inside(portable_monitored_path(entry), root):
                 rows.append(entry)
         except Exception:
             continue
@@ -2743,7 +3330,7 @@ def remove_monitored_folder(db: Session, folder_path: str, initiated_by: int | N
     if not entries:
         raise ValueError("Folder is not currently monitored.")
     for entry in entries:
-        entry_path = Path(entry.file_path)
+        entry_path = portable_monitored_path(entry)
         if not path_is_inside(entry_path, root):
             continue
         for backup_root in backup_roots:
@@ -2796,8 +3383,13 @@ def serialize_detection(item: SecurityDetectionEvent) -> dict:
 
 
 def serialize_recovery(item: SecurityRecoveryEvent) -> dict:
+    raw_type = item.recovery_type or ""
     display_status = "success" if item.status == "verified_removal" else item.status
+    if raw_type in {"reverted", "false_positive_restore"} or str(item.summary or "").lower().find("false positive") >= 0:
+        display_status = "reverted"
     display_recovery_type = item.recovery_type
+    if raw_type in {"reverted", "false_positive_restore"}:
+        display_recovery_type = "manual"
     if item.recovery_type == "manual_backup" and (
         item.initiated_by is None
         or any(label in str(item.backup_path or item.summary or "").lower() for label in ("startup", "initial", "scheduled", "automatic"))
@@ -2842,6 +3434,8 @@ def serialize_file(item: SecurityMonitoredFile) -> dict:
 
 
 def serialize_incident(item: SecurityIncident) -> dict:
+    display_status = "resolved" if item.status in {"verified_deleted", "verified_renamed"} else item.status
+    display_action = "trusted_removal_resolved" if item.response_action in {"verified_deleted", "verified_renamed"} else item.response_action
     return {
         "id": item.id,
         "detection_event_id": item.detection_event_id,
@@ -2851,13 +3445,13 @@ def serialize_incident(item: SecurityIncident) -> dict:
         "cvss_vector": item.cvss_vector,
         "nist_category": item.nist_category,
         "enisa_threat_type": item.enisa_threat_type,
-        "status": item.status,
+        "status": display_status,
         "description": item.description,
         "behaviors": json_loads(item.behaviors_json, []),
         "affected_files": json_loads(item.affected_files_json, []),
         "changed_lines": json_loads(item.changed_lines_json, {}),
         "quarantine_paths": json_loads(item.quarantine_paths_json, []),
-        "response_action": item.response_action,
+        "response_action": display_action,
         "resolved_at": item.resolved_at.isoformat() if item.resolved_at else None,
         "created_at": item.created_at.isoformat() if item.created_at else None,
         "integrity_valid": verify_record_integrity(item),

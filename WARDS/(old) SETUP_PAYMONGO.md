@@ -1,8 +1,8 @@
 # PayMongo Integration - Quick Setup Guide
 
-## 🚀 Quick Start (5 Minutes)
+## 🚀 Quick Start (5 )
 
-### Step 1: Get PayMongo API Keys (2 minute
+### Step 1: Get PayMongo API Keys (2 minutes) 
 
 1. Go to https://dashboard.paymongo.com/
 2. Sign up or log in

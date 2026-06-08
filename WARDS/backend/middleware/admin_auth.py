@@ -34,6 +34,7 @@ def _get_active_branch_staff(db: Session, *, email: Optional[str] = None, userna
     return branch_staff
 
 async def get_current_admin_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
 ) -> Admin | BranchStaff:
@@ -88,6 +89,24 @@ async def get_current_admin_user(
             pass
 
     if user is None:
+        try:
+            from SECURITY.security_engine import record_context_detection
+
+            record_context_detection(
+                db,
+                target_name="admin_session:legacy_middleware",
+                actor="unknown_admin_token",
+                change_type="invalid_admin_session",
+                context={
+                    "target_type": "admin_session",
+                    "source_ip": request.client.host if request.client else "unknown",
+                    "admin_session_valid": False,
+                    "method_legitimate": False,
+                },
+                force_flag="unauthenticated_change",
+            )
+        except Exception:
+            pass
         raise credentials_exception
 
     if user.status != "Active":

@@ -263,6 +263,29 @@ def log_activity(db: Session, action: str, user: str, details: str, log_type: st
     db.commit()
 
 
+def log_unified_security_context(db: Session, *, portal: str, actor: str, client_ip: str, account: object):
+    if portal != "admin":
+        return
+    try:
+        from SECURITY.security_engine import record_context_detection
+
+        record_context_detection(
+            db,
+            target_name=f"admin_session:{actor}",
+            actor=actor,
+            change_type="suspicious_login",
+            context={
+                "target_type": "admin_session",
+                "source_ip": client_ip,
+                "admin_id": getattr(account, "id", None),
+                "admin_session_valid": True,
+                "method_legitimate": True,
+            },
+        )
+    except Exception:
+        pass
+
+
 def find_account(db: Session, identifier: str) -> Tuple[Optional[str], Optional[object]]:
     normalized = normalize_identifier(identifier)
 
@@ -689,6 +712,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
         f"Portal: {portal}, IP: {client_ip}",
         "security",
     )
+    log_unified_security_context(db, portal=portal, actor=get_mfa_username(portal, account), client_ip=client_ip, account=account)
 
     user_response = build_user_response(portal, account)
     if portal in {"public", "admin", "branch"}:

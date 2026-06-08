@@ -75,11 +75,12 @@ def check_ip_reputation(ip: str, db: Session) -> Dict:
         
         # Extract threat types
         reports = data.get("data", {}).get("reports", [])
-        threat_types = list(set(
-            report.get("categories", [])
-            for report in reports[:10]  # Limit to first 10 reports
-        ))
-        threat_types = [t for t in threat_types if t]  # Remove empty
+        threat_types = sorted({
+            str(category)
+            for report in reports[:10]
+            for category in (report.get("categories") or [])
+            if category
+        })
         
         # Update or create cache entry
         if cached:

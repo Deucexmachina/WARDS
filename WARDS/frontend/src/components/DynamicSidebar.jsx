@@ -341,12 +341,14 @@ const DynamicSidebar = () => {
           receiptsResult,
           paymentsResult,
           reportsResult,
+          alertsResult,
         ] = await Promise.allSettled([
           branchAnnouncementAPI.getUnreadCount(),
           api.get('/branch/queue'),
           api.get('/receipts/requests'),
           api.get('/branch/payments'),
           fetchAllBranchReports(),
+          api.get('/alerts/unread-count'),
         ]);
 
         const queueItems = queueResult.status === 'fulfilled' ? (queueResult.value.data || []) : [];
@@ -355,7 +357,7 @@ const DynamicSidebar = () => {
 
         setModuleCounts({
           announcements: announcementsResult.status === 'fulfilled' ? Number(announcementsResult.value.data?.unread_count || 0) : 0,
-          alerts: 0,
+          alerts: alertsResult.status === 'fulfilled' ? Number(alertsResult.value.data?.unread_count || 0) : 0,
           receipts: getActiveReceiptBadgeCount(receiptItems),
           payments: paymentItems.filter((item) => normalizePaymentStatus(item.status) === 'pending').length,
           queue: getActiveQueueBadgeCount(queueItems),
@@ -460,6 +462,7 @@ const DynamicSidebar = () => {
         { name: 'Branch Reports', path: '/branch/reports', icon: 'reports' },
         { name: 'Internal Memos', path: '/branch/memos', icon: 'memos' },
         { name: 'Announcements', path: '/branch/announcements', icon: 'announcements' },
+        { name: 'System Alerts', path: '/branch/alerts', icon: 'alerts' },
         { name: 'Discrepancy Reports', path: '/branch/discrepancies', icon: 'discrepancies' },
         { name: 'Policies & SOPs', path: '/branch/policies', icon: 'policies' }
       ];
@@ -470,7 +473,8 @@ const DynamicSidebar = () => {
         { name: 'Internal Memos', path: '/branch/memos', icon: 'memos' },
         { name: 'Discrepancy Reports', path: '/branch/discrepancies', icon: 'discrepancies' },
         { name: 'Policies & SOPs', path: '/branch/policies', icon: 'policies' },
-        { name: 'Announcements', path: '/branch/announcements', icon: 'announcements' }
+        { name: 'Announcements', path: '/branch/announcements', icon: 'announcements' },
+        { name: 'System Alerts', path: '/branch/alerts', icon: 'alerts' }
       ];
     }
     return [];
