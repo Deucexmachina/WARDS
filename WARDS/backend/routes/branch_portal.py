@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 import json
+import logging
 import os
 import re
 from pathlib import Path
@@ -36,10 +37,12 @@ from utils.branch_window_config import (
     get_configured_window_accounts as load_configured_window_accounts,
     get_service_window_display_label,
     infer_service_window,
+    normalize_service_window as normalize_window_service_code,
 )
 from utils.system_settings import SYSTEM_DISABLED_MESSAGE, get_setting_value
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 REMITTANCE_REPORT_DIR = Path(__file__).resolve().parents[1] / "uploads" / "remittance_reports"
 REMITTANCE_REPORT_DIR.mkdir(parents=True, exist_ok=True)
 ALLOWED_REMITTANCE_REPORT_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
@@ -538,9 +541,10 @@ def normalize_requested_service_window(value: Optional[str]) -> Optional[str]:
     normalized = (value or "").strip().upper()
     if not normalized or normalized == "ALL":
         return None
-    if normalized not in SERVICE_WINDOW_DEFAULT_WINDOW_NUMBERS:
+    try:
+        return normalize_window_service_code(normalized)
+    except ValueError:
         raise HTTPException(status_code=400, detail="Invalid queue window selected.")
-    return normalized
 
 
 def to_utc_iso(value: Optional[datetime]) -> Optional[str]:
@@ -1489,6 +1493,13 @@ async def call_next_queue(
             return serialize_branch_queue(db, queue, current_staff.branch_id, assigned_window_number=get_effective_assigned_window_number(db, current_staff, service_window))
         except OperationalError:
             db.rollback()
+            logger.exception(
+                "Queue call-next database operation failed for branch_id=%s staff=%s service_window=%s queue_id=%s",
+                current_staff.branch_id,
+                current_staff.username,
+                requested_service_window,
+                queue_id,
+            )
             if attempt == 1:
                 raise
         except HTTPException:
@@ -1496,6 +1507,13 @@ async def call_next_queue(
             raise
         except Exception:
             db.rollback()
+            logger.exception(
+                "Queue call-next failed unexpectedly for branch_id=%s staff=%s service_window=%s queue_id=%s",
+                current_staff.branch_id,
+                current_staff.username,
+                requested_service_window,
+                queue_id,
+            )
             raise
 
 
