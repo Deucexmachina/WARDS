@@ -14,6 +14,17 @@ const PROCESSING_SUCCESS_DELAY_MS = 1100;
 const OCR_REQUIRED_RECEIPT_CATEGORIES = new Set(['RPT', 'BUSINESS', 'MISC', 'PTR', 'MARKET']);
 const OCR_EXTRACTION_FAILED_MESSAGE = 'Unable to extract all required receipt information. Please verify the uploaded receipt and try again.';
 const RECEIPT_CATEGORY_KEYS = ['RPT', 'BUSINESS', 'MISC', 'CTC', 'PTR', 'MARKET'];
+const MARKET_PURPOSE_OPTIONS = [
+  'Renewal of Business Permit',
+  'New Business Permit Application',
+  'Renewal of Stall Occupancy',
+  'Transfer of Stall Ownership',
+  'Change of Business Name',
+  'Change of Business Activity',
+  'Stall Verification',
+  'Market Clearance Requirement',
+  'Permit Renewal Requirement',
+];
 
 const wait = (ms) => new Promise((resolve) => {
   window.setTimeout(resolve, ms);
@@ -125,6 +136,63 @@ const buildSuggestedReceiptFilename = (filename, taxpayerName) => {
   return `${baseName}${extension}`;
 };
 
+const formatDateInputValue = (value) => {
+  const parsed = parseDateInputValue(value);
+  if (!parsed) {
+    return '';
+  }
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, '0');
+  const day = String(parsed.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getTodayDateInputValue = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const parseDateInputValue = (value) => {
+  const normalized = (value || '').trim();
+  if (!normalized) {
+    return null;
+  }
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+};
+
+const isMarketIssueDateInvalid = (value) => {
+  const parsed = parseDateInputValue(value);
+  if (!parsed) {
+    return false;
+  }
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return parsed > today;
+};
+
+const isMarketValidUntilInvalid = (value) => {
+  const parsed = parseDateInputValue(value);
+  if (!parsed) {
+    return false;
+  }
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return parsed < today;
+};
+
+const getMarketPurposeSelectValue = (value) => {
+  const normalized = (value || '').trim().toLowerCase();
+  const match = MARKET_PURPOSE_OPTIONS.find((option) => option.toLowerCase() === normalized);
+  return match || 'Other';
+};
+
 const getMissingRequiredReceiptFields = (draft, category) => {
   const normalizedCategory = (category || '').trim().toUpperCase();
   if (!OCR_REQUIRED_RECEIPT_CATEGORIES.has(normalizedCategory)) {
@@ -136,13 +204,13 @@ const getMissingRequiredReceiptFields = (draft, category) => {
     if (!(draft?.taxpayer_name || '').trim()) {
       missingFields.push('taxpayer_name');
     }
-    if (!(draft?.transaction_date || '').trim()) {
+    if (!(draft?.transaction_date || '').trim() || isMarketIssueDateInvalid(draft?.transaction_date)) {
       missingFields.push('transaction_date');
     }
     if (!(draft?.market_purpose_of_renewal || '').trim()) {
       missingFields.push('market_purpose_of_renewal');
     }
-    if (!(draft?.market_valid_until || '').trim()) {
+    if (!(draft?.market_valid_until || '').trim() || isMarketValidUntilInvalid(draft?.market_valid_until)) {
       missingFields.push('market_valid_until');
     }
     return missingFields;
@@ -755,6 +823,20 @@ const ReceiptManagement = () => {
       ...current,
       [name]: name === 'amount' ? (value === '' ? '' : Number(value)) : value,
     }));
+  };
+
+  const handleMarketDateChange = (event) => {
+    const { name, value } = event.target;
+    if (name === 'transaction_date' && isMarketIssueDateInvalid(value)) {
+      setError('Date of Issue cannot be in the future.');
+      return;
+    }
+    if (name === 'market_valid_until' && isMarketValidUntilInvalid(value)) {
+      setError('Valid Until cannot be in the past.');
+      return;
+    }
+    setError('');
+    handleDraftChange(event);
   };
 
   const handleSaveRecord = async () => {
@@ -1792,17 +1874,57 @@ const ReceiptManagement = () => {
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">{activeReceiptCategory === 'MARKET' ? 'Date of Issue' : 'Transaction Date'}</label>
-                  <input name="transaction_date" value={ocrDraft.transaction_date || ''} onChange={handleDraftChange} className="w-full px-4 py-2 border rounded-lg" />
+                  <input
+                    name="transaction_date"
+                    type={activeReceiptCategory === 'MARKET' ? 'date' : 'text'}
+                    max={activeReceiptCategory === 'MARKET' ? getTodayDateInputValue() : undefined}
+                    value={activeReceiptCategory === 'MARKET' ? formatDateInputValue(ocrDraft.transaction_date) : (ocrDraft.transaction_date || '')}
+                    onChange={activeReceiptCategory === 'MARKET'
+                      ? handleMarketDateChange
+                      : handleDraftChange}
+                    className="w-full px-4 py-2 border rounded-lg"
+                  />
                 </div>
                 {activeReceiptCategory === 'MARKET' ? (
                   <>
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-1">Purpose of Renewal</label>
-                      <input name="market_purpose_of_renewal" value={ocrDraft.market_purpose_of_renewal || ''} onChange={handleDraftChange} className="w-full px-4 py-2 border rounded-lg" />
+                      <select
+                        value={getMarketPurposeSelectValue(ocrDraft.market_purpose_of_renewal)}
+                        onChange={(event) => {
+                          const nextValue = event.target.value;
+                          setOcrDraft((current) => normalizeReceiptDraftReviewState({
+                            ...current,
+                            market_purpose_of_renewal: nextValue === 'Other' ? '' : nextValue,
+                          }));
+                        }}
+                        className="w-full px-4 py-2 border rounded-lg bg-white"
+                      >
+                        {MARKET_PURPOSE_OPTIONS.map((option) => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                        <option value="Other">Other (please specify)</option>
+                      </select>
+                      {getMarketPurposeSelectValue(ocrDraft.market_purpose_of_renewal) === 'Other' ? (
+                        <input
+                          name="market_purpose_of_renewal"
+                          value={ocrDraft.market_purpose_of_renewal || ''}
+                          onChange={handleDraftChange}
+                          placeholder="Type the purpose of renewal"
+                          className="mt-2 w-full px-4 py-2 border rounded-lg"
+                        />
+                      ) : null}
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-1">Valid Until</label>
-                      <input name="market_valid_until" value={ocrDraft.market_valid_until || ''} onChange={handleDraftChange} className="w-full px-4 py-2 border rounded-lg" />
+                      <input
+                        name="market_valid_until"
+                        type="date"
+                        min={getTodayDateInputValue()}
+                        value={formatDateInputValue(ocrDraft.market_valid_until)}
+                        onChange={handleMarketDateChange}
+                        className="w-full px-4 py-2 border rounded-lg"
+                      />
                     </div>
                   </>
                 ) : (
