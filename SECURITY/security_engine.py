@@ -98,7 +98,19 @@ MONITORED_SUFFIXES = {
     ".yml",
     ".yaml",
     ".sql",
+    ".csv",
 }
+
+MONITORED_SPECIAL_FILENAMES = {
+    "dockerfile",
+    ".gitignore",
+    ".gitkeep",
+}
+
+MONITORED_SPECIAL_NAME_SUFFIXES = (
+    ".env.example",
+    "env.example",
+)
 
 SUSPICIOUS_PATTERNS = {
     "script_injection": ("<script", "javascript:", "eval(", "document.write", "onerror=", "onload="),
@@ -106,11 +118,6 @@ SUSPICIOUS_PATTERNS = {
     "defacement_keywords": ("hacked", "defaced", "owned", "pwned"),
     "credential_access": ("password=", "token=", "secret=", "api_key"),
     "sql_injection": ("' or '1'='1", "union select", "drop table", "--"),
-    "ransom_note_keywords": ("your files have been encrypted", "pay ransom", "bitcoin wallet", "decrypt key"),
-    "malicious_redirect": ("window.location=", "location.href=", "http-equiv=\"refresh\"", "meta refresh"),
-    "destructive_script": ("localstorage.clear", "sessionstorage.clear", "delete all", "removechild(document.body"),
-    "phishing_form": ("verify your password", "enter your password", "account suspended", "login again"),
-    "style_takeover": ("position: fixed", "z-index: 2147483647", "filter: blur", "pointer-events: none"),
 }
 
 BEHAVIOR_LABELS = {
@@ -124,16 +131,21 @@ BEHAVIOR_LABELS = {
     "defacement_keywords": "Defacement wording",
     "credential_access": "Credential-like content",
     "sql_injection": "SQL injection pattern",
-    "ransom_note_keywords": "Ransom note wording",
-    "malicious_redirect": "Malicious redirect pattern",
-    "destructive_script": "Destructive browser script",
-    "phishing_form": "Phishing wording",
-    "style_takeover": "Visual style takeover",
     "source_ip_reputation": "Source IP reputation anomaly",
     "keystroke_dynamics": "Keystroke dynamics anomaly",
     "unauthorized_admin_path": "Sensitive admin path change",
     "sensitive_config_change": "Sensitive configuration change",
-    "external_resource_injection": "External resource injection",
+    "mfa_not_verified": "MFA verification anomaly",
+    "first_time_device": "First-time device anomaly",
+    "first_time_country": "First-time country anomaly",
+    "geo_distance_from_last_login": "Impossible travel anomaly",
+    "backup_restore_activity": "Backup or restore activity anomaly",
+    "mfa_configuration_change": "MFA configuration change",
+    "auth_system_modification": "Authentication system modification",
+    "peer_login_time_deviation": "Peer login time deviation",
+    "peer_path_access_deviation": "Peer path access deviation",
+    "excessive_file_modifications": "Excessive file modification rate",
+    "rapid_admin_actions": "Rapid admin action rate",
 }
 
 DEFAULT_AI_RULES = {
@@ -185,6 +197,13 @@ DEFAULT_AI_RULES = {
         "enabled": True,
         "weight": 0.22,
         "config": {},
+    },
+    "mfa_verified": {
+        "label": "MFA Verified",
+        "description": "Whether Microsoft Authenticator MFA was verified for the admin session.",
+        "enabled": True,
+        "weight": 0.16,
+        "config": {"required_for_admin_changes": True},
     },
     "ip_consistent": {
         "label": "IP Consistency",
@@ -242,63 +261,26 @@ DEFAULT_AI_RULES = {
         "weight": 0.12,
         "config": {"auto_malicious": False},
     },
-}
-
-APPROVED_ADDITIONAL_AI_RULES = {
-    "ransom_note_keywords": {
-        "label": "Ransom Note Wording",
-        "description": "Detects ransom/extortion wording commonly used in defacement pages.",
+    "first_time_device": {
+        "label": "First-Time Device",
+        "description": "Raises risk when an admin action comes from a device not seen in the learned profile.",
         "enabled": True,
-        "weight": 0.28,
-        "config": {"patterns": list(SUSPICIOUS_PATTERNS["ransom_note_keywords"])},
-        "initial_samples": [
-            "Your files have been encrypted. Pay ransom to recover access.",
-            "Send payment to this bitcoin wallet to receive the decrypt key.",
-        ],
+        "weight": 0.14,
+        "config": {},
     },
-    "malicious_redirect": {
-        "label": "Malicious Redirect",
-        "description": "Detects forced redirects away from WARDS pages.",
+    "first_time_country": {
+        "label": "First-Time Country",
+        "description": "Raises risk when an admin action comes from a country not seen in the learned profile.",
         "enabled": True,
-        "weight": 0.24,
-        "config": {"patterns": list(SUSPICIOUS_PATTERNS["malicious_redirect"])},
-        "initial_samples": [
-            "window.location='https://attacker.example/login'",
-            "<meta http-equiv=\"refresh\" content=\"0;url=https://attacker.example\">",
-        ],
+        "weight": 0.16,
+        "config": {},
     },
-    "destructive_script": {
-        "label": "Destructive Browser Script",
-        "description": "Detects browser-side destructive or disruptive script patterns.",
-        "enabled": True,
-        "weight": 0.22,
-        "config": {"patterns": list(SUSPICIOUS_PATTERNS["destructive_script"])},
-        "initial_samples": [
-            "localStorage.clear(); sessionStorage.clear();",
-            "document.body.removeChild(document.body.firstChild);",
-        ],
-    },
-    "phishing_form": {
-        "label": "Phishing Wording",
-        "description": "Detects fake login and account-warning wording.",
-        "enabled": True,
-        "weight": 0.2,
-        "config": {"patterns": list(SUSPICIOUS_PATTERNS["phishing_form"])},
-        "initial_samples": [
-            "Your account is suspended. Enter your password to continue.",
-            "Verify your password to restore access.",
-        ],
-    },
-    "style_takeover": {
-        "label": "Visual Style Takeover",
-        "description": "Detects aggressive CSS overlays that obscure the legitimate WARDS UI.",
+    "geo_distance_from_last_login": {
+        "label": "Geo Distance From Last Login",
+        "description": "Detects impossible-travel style distance jumps between admin sessions.",
         "enabled": True,
         "weight": 0.18,
-        "config": {"patterns": list(SUSPICIOUS_PATTERNS["style_takeover"])},
-        "initial_samples": [
-            "body::before { position: fixed; z-index: 2147483647; }",
-            "* { filter: blur(8px); pointer-events: none; }",
-        ],
+        "config": {"high_risk_km": 500, "impossible_travel_km_per_hour": 900},
     },
     "unauthorized_admin_path": {
         "label": "Unauthorized Admin Path",
@@ -306,10 +288,6 @@ APPROVED_ADDITIONAL_AI_RULES = {
         "enabled": True,
         "weight": 0.22,
         "config": {"path_keywords": ["admin", "security", "auth", "mfa", "backup", "recovery"]},
-        "initial_samples": [
-            "admin authentication module changed without a registered admin workflow.",
-            "security dashboard module changed outside the trusted change path.",
-        ],
     },
     "sensitive_config_change": {
         "label": "Sensitive Config Change",
@@ -317,21 +295,104 @@ APPROVED_ADDITIONAL_AI_RULES = {
         "enabled": True,
         "weight": 0.26,
         "config": {"extensions": [".env", ".xml", ".yml", ".yaml", ".sql"], "filenames": ["requirements.txt", "package.json"]},
-        "initial_samples": [
-            "environment configuration changed outside an approved deployment.",
-            "Wazuh syscheck configuration changed unexpectedly.",
-        ],
     },
-    "external_resource_injection": {
-        "label": "External Resource Injection",
-        "description": "Detects newly added external script, stylesheet, link, or network-fetch references.",
+    "backup_restore_activity": {
+        "label": "Backup Restore Activity",
+        "description": "Detects backup, restore, quarantine, and recovery actions outside approved workflows.",
         "enabled": True,
         "weight": 0.2,
-        "config": {"patterns": ["external script reference", "external stylesheet reference", "unexpected network fetch", "remote form action"]},
-        "initial_samples": [
-            "new remote script reference added to a protected page.",
-            "unexpected external network fetch added to frontend code.",
-        ],
+        "config": {"path_keywords": ["backup", "restore", "recovery", "quarantine"]},
+    },
+    "mfa_configuration_change": {
+        "label": "MFA Configuration Change",
+        "description": "Detects changes to MFA setup, authenticator, and two-factor configuration paths.",
+        "enabled": True,
+        "weight": 0.22,
+        "config": {"path_keywords": ["mfa", "authenticator", "two_factor", "2fa"]},
+    },
+    "auth_system_modification": {
+        "label": "Auth System Modification",
+        "description": "Detects authentication, authorization, token, password, and session module changes.",
+        "enabled": True,
+        "weight": 0.24,
+        "config": {"path_keywords": ["auth", "login", "jwt", "token", "password", "session", "middleware"]},
+    },
+    "admin_action_rarity": {
+        "label": "Admin Action Rarity",
+        "description": "Raises risk when an administrator modifies paths or performs actions outside the learned admin profile.",
+        "enabled": True,
+        "weight": 0.16,
+        "config": {"high_rarity_score": 0.75},
+    },
+    "restore_frequency": {
+        "label": "Restore Frequency",
+        "description": "Raises risk when repeated restore operations suggest a recovery abuse loop.",
+        "enabled": True,
+        "weight": 0.18,
+        "config": {"max_restores_per_window": 3, "window_minutes": 30},
+    },
+    "backup_integrity_validation": {
+        "label": "Backup Integrity Validation",
+        "description": "Blocks recovery risk acceptance when backup hash validation fails before restoration.",
+        "enabled": True,
+        "weight": 0.24,
+        "config": {},
+    },
+    "content_similarity_score": {
+        "label": "Content Similarity Score",
+        "description": "Raises risk when modified content is substantially different from the approved baseline even if length is similar.",
+        "enabled": True,
+        "weight": 0.2,
+        "config": {"low_similarity": 0.45},
+    },
+    "affected_files_count": {
+        "label": "Affected Files Count",
+        "description": "Raises risk when many protected files are modified in a short time window.",
+        "enabled": True,
+        "weight": 0.2,
+        "config": {"medium_risk_count": 3, "high_risk_count": 10},
+    },
+}
+
+AI_SENSITIVITY_THRESHOLDS = {
+    "low": 0.85,
+    "medium": 0.70,
+    "high": 0.55,
+    "very_high": 0.40,
+}
+
+APPROVED_ADDITIONAL_AI_RULES = {
+    "peer_login_time_deviation": {
+        "label": "Peer Login Time Deviation",
+        "description": "Compares admin action timing against peer administrator activity when supplied by context.",
+        "enabled": True,
+        "weight": 0.1,
+        "config": {"minimum_z_score": 2.5},
+        "initial_samples": ["admin login time is outside peer group baseline."],
+    },
+    "peer_path_access_deviation": {
+        "label": "Peer Path Access Deviation",
+        "description": "Detects unusual file path access compared with peer administrators when supplied by context.",
+        "enabled": True,
+        "weight": 0.12,
+        "config": {"minimum_z_score": 2.5},
+        "initial_samples": ["admin edited paths outside peer group baseline."],
+    },
+    "excessive_file_modifications": {
+        "label": "Excessive File Modifications",
+        "description": "Raises risk when too many protected files change in a short window.",
+        "enabled": True,
+        "weight": 0.18,
+        "config": {"max_files_per_window": 10},
+        "initial_samples": ["multiple protected files modified within a short time window."],
+    },
+    "rapid_admin_actions": {
+        "label": "Rapid Admin Actions",
+        "description": "Raises risk for unusually fast repeated privileged actions that may indicate automation or compromise.",
+        "enabled": True,
+        "weight": 0.16,
+        "config": {"max_actions_per_minute": 12},
+        "initial_samples": ["admin executed repeated privileged actions faster than normal."],
     },
 }
 
@@ -553,6 +614,32 @@ def safe_rel(path: Path) -> str:
         return resolved.name
 
 
+def resolve_stored_path(raw_path: Path | str | None, base_root: Path = MASTER_ROOT) -> Path | None:
+    if raw_path in {None, ""}:
+        return None
+    try:
+        candidate = Path(raw_path).expanduser()
+        if not candidate.is_absolute():
+            candidate = (base_root / candidate).resolve(strict=False)
+        else:
+            candidate = candidate.resolve(strict=False)
+        return candidate
+    except Exception:
+        return None
+
+
+def stored_path_value(path: Path | str | None, base_root: Path = MASTER_ROOT) -> str | None:
+    if path in {None, ""}:
+        return None
+    resolved = resolve_stored_path(path, base_root=base_root)
+    if not resolved:
+        return str(path).replace("\\", "/")
+    try:
+        return str(resolved.relative_to(base_root)).replace("\\", "/")
+    except ValueError:
+        return str(resolved)
+
+
 def portable_monitored_path(file_entry: SecurityMonitoredFile) -> Path:
     original = Path(file_entry.file_path)
     relative = str(file_entry.relative_path or "").replace("\\", "/")
@@ -668,6 +755,44 @@ def dedupe_monitored_files_by_relative_path(db: Session) -> int:
             if item.id != canonical.id:
                 canonical = merge_monitored_file_entry(db, item, canonical)
                 changed += 1
+    if changed:
+        db.flush()
+    return changed
+
+
+def migrate_portable_security_paths(db: Session) -> int:
+    changed = 0
+    for key in ("backup_location", "latest_backup_path"):
+        setting = db.query(SecuritySetting).filter(SecuritySetting.key == key).first()
+        if not setting or not setting.value:
+            continue
+        normalized = stored_path_value(setting.value)
+        if normalized and setting.value != normalized:
+            setting.value = normalized
+            setting.updated_at = now_utc()
+            setting.updated_by = "path_migration"
+            db.add(setting)
+            changed += 1
+    for recovery in db.query(SecurityRecoveryEvent).all():
+        normalized_backup = stored_path_value(recovery.backup_path) if recovery.backup_path else None
+        normalized_quarantine = stored_path_value(recovery.quarantine_path) if recovery.quarantine_path else None
+        if normalized_backup and recovery.backup_path != normalized_backup:
+            recovery.backup_path = normalized_backup
+            db.add(recovery)
+            changed += 1
+        if normalized_quarantine and recovery.quarantine_path != normalized_quarantine:
+            recovery.quarantine_path = normalized_quarantine
+            db.add(recovery)
+            changed += 1
+    for incident in db.query(SecurityIncident).all():
+        quarantine_paths = json_loads(incident.quarantine_paths_json, [])
+        if isinstance(quarantine_paths, str):
+            quarantine_paths = [quarantine_paths]
+        normalized_paths = [stored_path_value(item) or str(item).replace("\\", "/") for item in quarantine_paths]
+        if quarantine_paths != normalized_paths:
+            incident.quarantine_paths_json = json_dumps(normalized_paths)
+            db.add(incident)
+            changed += 1
     if changed:
         db.flush()
     return changed
@@ -1149,7 +1274,8 @@ def is_database_entry(file_entry: SecurityMonitoredFile) -> bool:
 def is_monitorable(path: Path) -> bool:
     if not path.is_file():
         return False
-    if path.suffix.lower() not in MONITORED_SUFFIXES:
+    lower_name = path.name.lower()
+    if path.suffix.lower() not in MONITORED_SUFFIXES and lower_name not in MONITORED_SPECIAL_FILENAMES and not any(lower_name.endswith(item) for item in MONITORED_SPECIAL_NAME_SUFFIXES):
         return False
     parts = {part.lower() for part in path.parts}
     if parts.intersection({item.lower() for item in DEFAULT_EXCLUDED_DIRS}):
@@ -1173,7 +1299,7 @@ def iter_monitorable_files(roots: dict[str, Path] | None = None) -> Iterable[tup
                 continue
             for filename in filenames:
                 path = current_path / filename
-                if path.suffix.lower() in MONITORED_SUFFIXES and is_monitorable(path):
+                if is_monitorable(path):
                     yield root_name, path.resolve()
 
 
@@ -1228,7 +1354,7 @@ def sync_runtime_env_settings(db: Session, updated_by: str = "environment") -> d
 
 def seed_settings(db: Session) -> None:
     defaults = {
-        "backup_location": str(DEFAULT_BACKUP_ROOT),
+        "backup_location": stored_path_value(DEFAULT_BACKUP_ROOT) or str(DEFAULT_BACKUP_ROOT),
         "latest_backup_path": "",
         "last_scan_at": "",
         "backup_schedule": json_dumps({"enabled": False, "frequency": "weekly", "next_run": ""}),
@@ -1239,18 +1365,20 @@ def seed_settings(db: Session) -> None:
         "scan_interval_seconds": os.getenv("SECURITY_SCAN_INTERVAL_SECONDS", "30"),
         "wazuh_enabled": os.getenv("WAZUH_ENABLED", "false").lower(),
         "ai_rules": json_dumps(DEFAULT_AI_RULES),
+        "ai_sensitivity": os.getenv("AI_SENSITIVITY", "medium"),
     }
     changed = False
     for key, value in defaults.items():
         if not db.query(SecuritySetting).filter(SecuritySetting.key == key).first():
             db.add(SecuritySetting(key=key, value=value))
             changed = True
+    changed = bool(migrate_portable_security_paths(db)) or changed
     if changed:
         db.commit()
     sync_runtime_env_settings(db)
     backup_location = writable_backup_location(db, "startup")
     prune_all_backup_types(backup_location, keep=3)
-    refresh_backup_integrity_manifests(backup_location)
+    refresh_backup_integrity_manifests(backup_location, force=False)
     try:
         update_wazuh_monitored_folder(DATABASE_MONITOR_ROOT, "add")
     except Exception:
@@ -1306,6 +1434,18 @@ def update_ai_rules(db: Session, rules: dict, updated_by: str) -> dict:
     return merged
 
 
+def get_ai_sensitivity(db: Session) -> str:
+    return get_setting(db, "ai_sensitivity", "medium")
+
+
+def set_ai_sensitivity(db: Session, sensitivity: str, updated_by: str) -> str:
+    valid_levels = ["low", "medium", "high", "very_high"]
+    if sensitivity not in valid_levels:
+        raise ValueError(f"Invalid sensitivity level. Must be one of: {', '.join(valid_levels)}")
+    set_setting(db, "ai_sensitivity", sensitivity, updated_by)
+    return sensitivity
+
+
 def next_weekday(day_name: str, time_value: str) -> str:
     names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     target_day = names.index(day_name)
@@ -1321,7 +1461,7 @@ def next_weekday(day_name: str, time_value: str) -> str:
 def latest_backup_root(db: Session) -> Path | None:
     raw = get_setting(db, "latest_backup_path", "")
     if raw:
-        path = Path(raw)
+        path = resolve_stored_path(raw)
         if path.exists():
             return path
     location = writable_backup_location(db)
@@ -1329,7 +1469,7 @@ def latest_backup_root(db: Session) -> Path | None:
         return None
     backups = sorted([item for item in location.iterdir() if item.is_dir()], reverse=True)
     if backups:
-        set_setting(db, "latest_backup_path", str(backups[0]), "backup_location_fallback")
+        set_setting(db, "latest_backup_path", stored_path_value(backups[0]) or str(backups[0]), "backup_location_fallback")
         return backups[0]
     set_setting(db, "latest_backup_path", "", "backup_location_fallback")
     return None
@@ -1340,7 +1480,7 @@ def backup_file_path(backup_root: Path, relative_path: str) -> Path:
 
 
 def writable_backup_location(db: Session, updated_by: str = "system") -> Path:
-    configured = Path(get_setting(db, "backup_location", str(DEFAULT_BACKUP_ROOT))).expanduser()
+    configured = resolve_stored_path(get_setting(db, "backup_location", stored_path_value(DEFAULT_BACKUP_ROOT) or str(DEFAULT_BACKUP_ROOT))) or DEFAULT_BACKUP_ROOT.resolve()
     fallback = DEFAULT_BACKUP_ROOT.resolve()
     configured_resolved = configured.resolve(strict=False)
     candidates = [configured_resolved] if configured_resolved.exists() or configured_resolved == fallback else []
@@ -1349,13 +1489,15 @@ def writable_backup_location(db: Session, updated_by: str = "system") -> Path:
         try:
             target = candidate.resolve(strict=False)
             target.mkdir(parents=True, exist_ok=True)
-            if target != configured_resolved:
-                set_setting(db, "backup_location", str(target), updated_by)
+            portable_target = stored_path_value(target) or str(target)
+            current_value = get_setting(db, "backup_location", stored_path_value(DEFAULT_BACKUP_ROOT) or str(DEFAULT_BACKUP_ROOT))
+            if portable_target != current_value:
+                set_setting(db, "backup_location", portable_target, updated_by)
             return target
         except OSError:
             continue
     fallback.mkdir(parents=True, exist_ok=True)
-    set_setting(db, "backup_location", str(fallback), updated_by)
+    set_setting(db, "backup_location", stored_path_value(fallback) or str(fallback), updated_by)
     return fallback
 
 
@@ -1378,22 +1520,54 @@ def relative_backup_path(path: Path, backup_root: Path) -> str:
     return str(path.relative_to(backup_root)).replace("\\", "/")
 
 
-def write_backup_manifest(backup_root: Path) -> Path:
-    backup_root.mkdir(parents=True, exist_ok=True)
-    files = []
-    for path in sorted(backup_root.rglob("*")):
-        if not path.is_file() or path.name == BACKUP_MANIFEST_NAME:
+def backup_manifest_index(backup_root: Path | None) -> dict[str, dict[str, object]]:
+    if not backup_root:
+        return {}
+    manifest_path = backup_root / BACKUP_MANIFEST_NAME
+    if not manifest_path.exists() or not manifest_path.is_file():
+        return {}
+    try:
+        payload = json_loads(manifest_path.read_text(encoding="utf-8"), {})
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    files = payload.get("files")
+    if not isinstance(files, list):
+        return {}
+    manifest: dict[str, dict[str, object]] = {}
+    for item in files:
+        if not isinstance(item, dict):
             continue
-        files.append({
-            "path": relative_backup_path(path, backup_root),
-            "size_bytes": path.stat().st_size,
-            "sha256": sha256_file(path),
-        })
+        relative = str(item.get("path") or "").replace("\\", "/")
+        file_hash = str(item.get("sha256") or "")
+        if not relative or not file_hash:
+            continue
+        manifest[relative] = {
+            "sha256": file_hash,
+            "size_bytes": int(item.get("size_bytes") or 0),
+        }
+    return manifest
+
+
+def write_backup_manifest(backup_root: Path, files: list[dict[str, object]] | None = None) -> Path:
+    backup_root.mkdir(parents=True, exist_ok=True)
+    manifest_files = list(files) if files is not None else []
+    if files is None:
+        for path in sorted(backup_root.rglob("*")):
+            if not path.is_file() or path.name == BACKUP_MANIFEST_NAME:
+                continue
+            manifest_files.append({
+                "path": relative_backup_path(path, backup_root),
+                "size_bytes": path.stat().st_size,
+                "sha256": sha256_file(path),
+            })
+    manifest_files.sort(key=lambda item: str(item.get("path") or ""))
     payload = {
         "manifest_type": "wards_backup_integrity_manifest",
-        "backup_root": str(backup_root),
+        "backup_root": stored_path_value(backup_root) or str(backup_root),
         "generated_at": now_utc().isoformat(),
-        "files": files,
+        "files": manifest_files,
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     payload["manifest_hmac_sha256"] = hmac.new(hmac_secret().encode("utf-8"), encoded.encode("utf-8"), hashlib.sha256).hexdigest()
@@ -1402,7 +1576,30 @@ def write_backup_manifest(backup_root: Path) -> Path:
     return manifest_path
 
 
-def refresh_backup_integrity_manifests(backup_location: Path) -> int:
+def refresh_backup_entry(db: Session, file_entry: SecurityMonitoredFile, backup_root: Path | None = None) -> Path:
+    backup_root = backup_root or latest_backup_root(db)
+    if not backup_root:
+        raise RuntimeError("No local backup exists. Create a manual backup first.")
+    path = portable_monitored_path(file_entry)
+    relative = file_entry.relative_path or safe_rel(path)
+    if is_database_entry(file_entry):
+        checksum_path = create_database_checksum_manifest(db, path)
+        snapshot_target = backup_file_path(backup_root, DATABASE_BACKUP_RELATIVE_PATH)
+        create_database_snapshot(db, snapshot_target)
+        checksum_target = backup_file_path(backup_root, DATABASE_CHECKSUM_RELATIVE_PATH)
+        checksum_target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(checksum_path, checksum_target)
+    else:
+        if not path.exists() or not path.is_file():
+            raise FileNotFoundError(f"File not found for backup refresh: {relative}")
+        target = backup_file_path(backup_root, relative)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, target)
+    write_backup_manifest(backup_root)
+    return backup_root
+
+
+def refresh_backup_integrity_manifests(backup_location: Path, force: bool = True) -> int:
     if not backup_location.exists():
         return 0
     updated = 0
@@ -1410,6 +1607,8 @@ def refresh_backup_integrity_manifests(backup_location: Path) -> int:
         if not backup_root.is_dir():
             continue
         try:
+            if not force and (backup_root / BACKUP_MANIFEST_NAME).exists():
+                continue
             write_backup_manifest(backup_root)
             updated += 1
         except Exception:
@@ -1522,12 +1721,28 @@ def generate_initial_training_samples(sample_count: int = 640) -> list[dict]:
                 "content_length": rng.randint(200, 12000),
                 "special_chars_count": rng.randint(4, 200),
                 "admin_session_valid": 1,
+                "mfa_verified": 1,
                 "ip_consistent": 1,
+                "source_ip_reputation": 0,
+                "keystroke_dynamics": 0,
                 "method_legitimate": 1,
                 "business_hours": 1,
                 "file_type_risk": rng.choice([0, 1, 1, 2]),
                 "suspicious_pattern_score": 0,
                 "vpn_activity": 0,
+                "first_time_device": 0,
+                "first_time_country": 0,
+                "geo_distance_from_last_login": 0,
+                "unauthorized_admin_path": 0,
+                "sensitive_config_change": 0,
+                "backup_restore_activity": 0,
+                "mfa_configuration_change": 0,
+                "auth_system_modification": 0,
+                "admin_action_rarity": 0,
+                "restore_frequency": 0,
+                "backup_integrity_validation": 1,
+                "content_similarity_score": 1,
+                "affected_files_count": 0,
             }
         )
     return samples
@@ -1589,12 +1804,28 @@ def retrain_ai(db: Session, initiated_by: str = "system") -> dict:
                 "content_length": length,
                 "special_chars_count": 40,
                 "admin_session_valid": 1,
+                "mfa_verified": 1,
                 "ip_consistent": 1,
+                "source_ip_reputation": 0,
+                "keystroke_dynamics": 0,
                 "method_legitimate": 1,
                 "business_hours": 1 if 8 <= change.timestamp.hour <= 18 and change.timestamp.weekday() < 5 else 0,
                 "file_type_risk": 1,
                 "suspicious_pattern_score": 0,
                 "vpn_activity": 0,
+                "first_time_device": 0,
+                "first_time_country": 0,
+                "geo_distance_from_last_login": 0,
+                "unauthorized_admin_path": 0,
+                "sensitive_config_change": 0,
+                "backup_restore_activity": 0,
+                "mfa_configuration_change": 0,
+                "auth_system_modification": 0,
+                "admin_action_rarity": 0,
+                "restore_frequency": 0,
+                "backup_integrity_validation": 1,
+                "content_similarity_score": 1,
+                "affected_files_count": 0,
             }
         )
 
@@ -1644,6 +1875,44 @@ def content_flags(content: str, context: dict | None = None) -> list[str]:
         flags.append("keystroke_dynamics")
     if not context.get("admin_session_valid"):
         flags.append("unauthenticated_change")
+    if context.get("mfa_verified") is False or context.get("mfa_valid") is False:
+        flags.append("mfa_not_verified")
+    if context.get("first_time_device") or context.get("new_device") or context.get("device_seen_before") is False:
+        flags.append("first_time_device")
+    if context.get("first_time_country") or context.get("new_country") or context.get("country_seen_before") is False:
+        flags.append("first_time_country")
+    try:
+        geo_distance_km = float(context.get("geo_distance_from_last_login_km") or context.get("geo_distance_km") or 0)
+        geo_elapsed_hours = float(context.get("hours_since_last_login") or context.get("geo_elapsed_hours") or 0)
+    except (TypeError, ValueError):
+        geo_distance_km = 0
+        geo_elapsed_hours = 0
+    if context.get("impossible_travel") or geo_distance_km >= 500 or (geo_elapsed_hours > 0 and geo_distance_km / geo_elapsed_hours >= 900):
+        flags.append("geo_distance_from_last_login")
+    try:
+        peer_login_z_score = float(context.get("peer_login_time_z_score") or 0)
+    except (TypeError, ValueError):
+        peer_login_z_score = 0
+    if context.get("peer_login_time_deviation") or peer_login_z_score >= 2.5:
+        flags.append("peer_login_time_deviation")
+    try:
+        peer_path_z_score = float(context.get("peer_path_access_z_score") or 0)
+    except (TypeError, ValueError):
+        peer_path_z_score = 0
+    if context.get("peer_path_access_deviation") or peer_path_z_score >= 2.5:
+        flags.append("peer_path_access_deviation")
+    try:
+        modified_file_count = int(context.get("modified_file_count") or context.get("files_modified_in_window") or 0)
+    except (TypeError, ValueError):
+        modified_file_count = 0
+    if context.get("excessive_file_modifications") or modified_file_count > 10:
+        flags.append("excessive_file_modifications")
+    try:
+        admin_actions_per_minute = float(context.get("admin_actions_per_minute") or context.get("privileged_actions_per_minute") or 0)
+    except (TypeError, ValueError):
+        admin_actions_per_minute = 0
+    if context.get("rapid_admin_actions") or admin_actions_per_minute > 12:
+        flags.append("rapid_admin_actions")
     for key, patterns in SUSPICIOUS_PATTERNS.items():
         if any(pattern in lowered for pattern in patterns):
             flags.append(key)
@@ -1672,6 +1941,8 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
     risk = 0.12
     if enabled("admin_session_valid") and "unauthenticated_change" in flags:
         risk += weight("admin_session_valid", 0.22)
+    if enabled("mfa_verified") and "mfa_not_verified" in flags:
+        risk += weight("mfa_verified", 0.16)
     if enabled("hour_of_day") and "after_hours" in flags:
         risk += weight("hour_of_day", 0.08)
     if enabled("day_of_week") and "weekend_activity" in flags:
@@ -1682,6 +1953,12 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
         risk += weight("source_ip_reputation", 0.1)
     if enabled("keystroke_dynamics") and "keystroke_dynamics" in flags:
         risk += weight("keystroke_dynamics", 0.1)
+    if enabled("first_time_device") and "first_time_device" in flags:
+        risk += weight("first_time_device", 0.14)
+    if enabled("first_time_country") and "first_time_country" in flags:
+        risk += weight("first_time_country", 0.16)
+    if enabled("geo_distance_from_last_login") and "geo_distance_from_last_login" in flags:
+        risk += weight("geo_distance_from_last_login", 0.18)
     if "rapid_change" in flags:
         risk += 0.18
     if enabled("suspicious_pattern_score") and "defacement_keywords" in flags:
@@ -1706,9 +1983,21 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
         if path.suffix.lower() in sensitive_extensions or path.name.lower() in sensitive_filenames:
             flags.append("sensitive_config_change")
             risk += weight("sensitive_config_change", 0.26)
-    if enabled("external_resource_injection") and any(marker in new_content.lower() for marker in ["http://", "https://", "fetch(", "axios.", "form action="]):
-        flags.append("external_resource_injection")
-        risk += weight("external_resource_injection", 0.2)
+    if enabled("backup_restore_activity"):
+        path_keywords = config("backup_restore_activity").get("path_keywords", ["backup", "restore", "recovery", "quarantine"])
+        if any(str(keyword).lower() in path_text for keyword in path_keywords):
+            flags.append("backup_restore_activity")
+            risk += weight("backup_restore_activity", 0.2)
+    if enabled("mfa_configuration_change"):
+        path_keywords = config("mfa_configuration_change").get("path_keywords", ["mfa", "authenticator", "two_factor", "2fa"])
+        if any(str(keyword).lower() in path_text for keyword in path_keywords):
+            flags.append("mfa_configuration_change")
+            risk += weight("mfa_configuration_change", 0.22)
+    if enabled("auth_system_modification"):
+        path_keywords = config("auth_system_modification").get("path_keywords", ["auth", "login", "jwt", "token", "password", "session", "middleware"])
+        if any(str(keyword).lower() in path_text for keyword in path_keywords):
+            flags.append("auth_system_modification")
+            risk += weight("auth_system_modification", 0.24)
     size_delta = abs(len(new_content.encode("utf-8")) - len(old_content.encode("utf-8")))
     if enabled("file_size_change") and size_delta > int(config("file_size_change").get("large_delta_bytes", 2000)):
         risk += weight("file_size_change", 0.12)
@@ -1728,6 +2017,46 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
         risk += weight("method_legitimate", 0.18)
     if enabled("business_hours") and not context.get("business_hours", True):
         risk += weight("business_hours", 0.08)
+    if enabled("admin_action_rarity"):
+        try:
+            rarity_score = float(context.get("admin_action_rarity_score") or context.get("admin_action_rarity") or 0)
+        except (TypeError, ValueError):
+            rarity_score = 0
+        if rarity_score >= float(config("admin_action_rarity").get("high_rarity_score", 0.75)):
+            flags.append("admin_action_rarity")
+            risk += weight("admin_action_rarity", 0.16) * min(rarity_score, 1)
+    if enabled("restore_frequency"):
+        try:
+            restore_count = int(context.get("restore_count") or context.get("restores_in_window") or 0)
+        except (TypeError, ValueError):
+            restore_count = 0
+        if restore_count >= int(config("restore_frequency").get("max_restores_per_window", 3)):
+            flags.append("restore_frequency")
+            risk += weight("restore_frequency", 0.18)
+    if enabled("backup_integrity_validation") and context.get("backup_integrity_valid") is False:
+        flags.append("backup_integrity_validation")
+        risk += weight("backup_integrity_validation", 0.24)
+    if enabled("content_similarity_score"):
+        try:
+            similarity = float(context.get("content_similarity_score") if context.get("content_similarity_score") is not None else difflib.SequenceMatcher(None, old_content or "", new_content or "").ratio())
+        except (TypeError, ValueError):
+            similarity = 1
+        if similarity < float(config("content_similarity_score").get("low_similarity", 0.45)):
+            flags.append("content_similarity_score")
+            risk += weight("content_similarity_score", 0.2) * (1 - max(0, similarity))
+    if enabled("affected_files_count"):
+        try:
+            affected_files_count = int(context.get("affected_files_count") or context.get("modified_file_count") or 0)
+        except (TypeError, ValueError):
+            affected_files_count = 0
+        high_count = int(config("affected_files_count").get("high_risk_count", 10))
+        medium_count = int(config("affected_files_count").get("medium_risk_count", 3))
+        if affected_files_count > high_count:
+            flags.append("affected_files_count")
+            risk += weight("affected_files_count", 0.2)
+        elif affected_files_count >= medium_count:
+            flags.append("affected_files_count")
+            risk += weight("affected_files_count", 0.2) * 0.5
     learned_notes = []
     learned_warning = False
     model_state = load_ai_model_state()
@@ -1767,7 +2096,10 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
         risk = min(risk, 0.18)
 
     risk = max(0.01, min(risk, 0.99))
-    prediction = "normal" if risk < 0.3 else "suspicious" if risk < 0.7 else "malicious"
+    sensitivity = str(context.get("ai_sensitivity") or context.get("global_ai_sensitivity") or "medium").lower().replace(" ", "_")
+    suspicious_threshold = AI_SENSITIVITY_THRESHOLDS.get(sensitivity, AI_SENSITIVITY_THRESHOLDS["medium"])
+    malicious_threshold = max(0.7, suspicious_threshold + 0.15)
+    prediction = "normal" if risk < suspicious_threshold else "suspicious" if risk < malicious_threshold else "malicious"
     confidence = risk if prediction != "normal" else 1 - risk
     active_rules = [key for key, value in rules.items() if value.get("enabled", True)]
     basis = f"Based on enabled AI rules: {', '.join(active_rules)}."
@@ -1881,7 +2213,7 @@ def quarantine_file(file_path: Path, detection_id: int) -> str | None:
     target = QUARANTINE_ROOT / f"detection_{detection_id}" / safe_rel(file_path)
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(file_path, target)
-    return str(target)
+    return stored_path_value(target) or str(target)
 
 
 def safe_quarantine_path(raw_path: str | Path | None) -> Path | None:
@@ -1889,7 +2221,9 @@ def safe_quarantine_path(raw_path: str | Path | None) -> Path | None:
         return None
     try:
         root = QUARANTINE_ROOT.resolve()
-        path = Path(raw_path).expanduser().resolve(strict=False)
+        path = resolve_stored_path(raw_path)
+        if not path:
+            return None
         path.relative_to(root)
         return path
     except Exception:
@@ -1948,7 +2282,7 @@ def restore_from_backup(db: Session, file_entry: SecurityMonitoredFile, detectio
         file_entry.size_bytes = target.stat().st_size
         file_entry.last_checked = now_utc()
         recovery.status = "success"
-        recovery.backup_path = str(source)
+        recovery.backup_path = stored_path_value(source) or str(source)
         recovery.completed_at = now_utc()
         recovery.recovery_duration_ms = int((time.time() - started) * 1000)
         recovery.summary = f"Restored {file_entry.relative_path} from local backup."
@@ -2004,7 +2338,7 @@ def restore_database_from_backup(db: Session, file_entry: SecurityMonitoredFile,
         file_entry.size_bytes = target.stat().st_size
         file_entry.last_checked = now_utc()
         recovery.status = "success"
-        recovery.backup_path = str(source)
+        recovery.backup_path = stored_path_value(source) or str(source)
         recovery.completed_at = now_utc()
         recovery.recovery_duration_ms = int((time.time() - started) * 1000)
         recovery.summary = "Restored wards_db from the latest trusted database snapshot."
@@ -2153,8 +2487,8 @@ def restore_quarantined_copy_to_original(
         recovery_type="reverted",
         initiated_by=initiated_by,
         status="reverted",
-        quarantine_path=str(source),
-        backup_path=str(source),
+        quarantine_path=stored_path_value(source) or str(source),
+        backup_path=stored_path_value(source) or str(source),
         summary=f"Restored the quarantined copy for {file_entry.relative_path} back to its original location.",
         completed_at=now_utc(),
     )
@@ -2333,12 +2667,6 @@ def should_create_incident(change_type: str, prediction: AIPrediction, flags: li
         "defacement_keywords",
         "credential_access",
         "sql_injection",
-        "ransom_note_keywords",
-        "malicious_redirect",
-        "destructive_script",
-        "phishing_form",
-        "style_takeover",
-        "external_resource_injection",
     }
     if change_type == "file_deleted":
         return True
@@ -2646,11 +2974,12 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
     migrate_portable_monitored_files(db)
     dedupe_monitored_files_by_relative_path(db)
     mark_stale_backup_events_failed(db)
-    register_count = register_initial_files(db, ensure_backup=False)
+    register_count = register_initial_files(db, ensure_backup=False, refresh_existing=False)
     dedupe_monitored_files_by_relative_path(db)
     removal_summary = reconcile_trusted_file_removals(db, actor=f"{label}_backup")
     backup_location = writable_backup_location(db)
     previous_backup_root = latest_backup_root(db)
+    previous_manifest = backup_manifest_index(previous_backup_root)
     timestamp = now_utc().strftime("%Y%m%d_%H%M%S")
     backup_root = backup_location / f"{label}_backup_{timestamp}"
     started = time.time()
@@ -2668,6 +2997,7 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
     try:
         backup_root.mkdir(parents=True, exist_ok=True)
         database_entry = normalize_database_monitor_entry(db, reset_baseline=False, ensure_snapshot=True)
+        manifest_files: list[dict[str, object]] = []
         for entry in db.query(SecurityMonitoredFile).order_by(SecurityMonitoredFile.relative_path.asc()).all():
             if is_database_entry(entry) and database_entry and entry.id != database_entry.id:
                 entry.status = "clean"
@@ -2684,6 +3014,16 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
                 checksum_target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(checksum_path, checksum_target)
                 file_hash = sha256_file(checksum_path)
+                manifest_files.append({
+                    "path": DATABASE_BACKUP_RELATIVE_PATH,
+                    "size_bytes": snapshot_target.stat().st_size,
+                    "sha256": sha256_file(snapshot_target),
+                })
+                manifest_files.append({
+                    "path": DATABASE_CHECKSUM_RELATIVE_PATH,
+                    "size_bytes": checksum_target.stat().st_size,
+                    "sha256": file_hash,
+                })
                 path = checksum_path
                 relative = DATABASE_CHECKSUM_RELATIVE_PATH
             else:
@@ -2692,13 +3032,18 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
                 target = backup_file_path(backup_root, relative)
                 file_hash = sha256_file(path)
                 previous_source = backup_file_path(previous_backup_root, relative) if previous_backup_root else None
-                previous_matches = bool(previous_source and previous_source.exists() and sha256_file(previous_source) == file_hash)
+                previous_matches = bool(previous_source and previous_source.exists() and str(previous_manifest.get(relative, {}).get("sha256") or "") == file_hash)
                 copy_into_backup(
                     path,
                     target,
                     previous_source=previous_source,
                     can_reuse_previous=previous_matches,
                 )
+                manifest_files.append({
+                    "path": relative,
+                    "size_bytes": path.stat().st_size,
+                    "sha256": file_hash,
+                })
             entry.baseline_hash = file_hash
             entry.current_hash = file_hash
             entry.status = "clean"
@@ -2706,9 +3051,9 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
             entry.size_bytes = path.stat().st_size
             entry.last_checked = now_utc()
         db.commit()
-        manifest_path = write_backup_manifest(backup_root)
+        manifest_path = write_backup_manifest(backup_root, files=manifest_files)
         event.status = "success"
-        event.backup_path = str(backup_root)
+        event.backup_path = stored_path_value(backup_root) or str(backup_root)
         event.completed_at = now_utc()
         event.recovery_duration_ms = int((time.time() - started) * 1000)
         verified_deleted = removal_summary["verified_deleted"]
@@ -2718,7 +3063,7 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
             f"({register_count} new target(s) registered, {verified_deleted + verified_renamed} trusted removal update(s), "
             f"manifest: {manifest_path.name})."
         )
-        set_setting(db, "latest_backup_path", str(backup_root), str(initiated_by) if initiated_by else "system")
+        set_setting(db, "latest_backup_path", stored_path_value(backup_root) or str(backup_root), str(initiated_by) if initiated_by else "system")
         prune_backup_type(backup_location, label, keep=3)
     except Exception as exc:
         event.status = "failed"
@@ -2958,15 +3303,32 @@ def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_ba
     incident.resolved_by = admin_id
     db.add(incident)
     db.commit()
+    backup_refreshed = False
+    backup_refresh_failed = False
     if has_quarantine_copy:
         if refresh_backup:
-            backup_event = create_manual_backup(db, admin_id, label="false_positive")
-            incident.response_action = f"authorized_change_restored_backup_{backup_event.status}"
+            backup_root = latest_backup_root(db)
+            if backup_root:
+                try:
+                    refresh_backup_entry(db, file_entry, backup_root=backup_root)
+                    backup_refreshed = True
+                except Exception:
+                    backup_refresh_failed = True
+            else:
+                backup_event = create_manual_backup(db, admin_id, label="false_positive")
+                backup_refreshed = backup_event.status == "success"
+                backup_refresh_failed = backup_event.status != "success"
+            if backup_refreshed:
+                incident.response_action = "authorized_change_restored_backup_refreshed"
+            elif backup_refresh_failed:
+                incident.response_action = "authorized_change_restored_backup_failed"
             db.add(incident)
             db.commit()
         cleanup_quarantine_paths([str(safe_source)])
-    if has_quarantine_copy and refresh_backup:
-        false_positive_summary = "Quarantined copy restored and backup baseline refreshed."
+    if has_quarantine_copy and refresh_backup and backup_refreshed:
+        false_positive_summary = "Quarantined copy restored and backup baseline refreshed in place."
+    elif has_quarantine_copy and refresh_backup and backup_refresh_failed:
+        false_positive_summary = "Quarantined copy restored, but backup baseline refresh failed."
     elif has_quarantine_copy:
         false_positive_summary = "Quarantined copy restored; backup baseline will be refreshed by the bulk operation."
     else:
@@ -3021,6 +3383,7 @@ def dashboard_payload(db: Session) -> dict:
     last_detection = db.query(SecurityDetectionEvent).order_by(SecurityDetectionEvent.detected_at.desc()).first()
     last_scan_at = get_setting(db, "last_scan_at", "")
     backup_location = get_setting(db, "backup_location", str(DEFAULT_BACKUP_ROOT))
+    backup_location_path = resolve_stored_path(backup_location)
     latest_backup = latest_backup_root(db)
     severity = {key: 0 for key in ["info", "low", "medium", "high", "critical"]}
     attack_types = {}
@@ -3063,7 +3426,7 @@ def dashboard_payload(db: Session) -> dict:
         "health": {
             "wazuh_agent": "Active" if monitoring_enabled else "Inactive",
             "database": "healthy",
-            "backup_status": "Active" if latest_backup and Path(backup_location).exists() else "Inactive",
+            "backup_status": "Active" if latest_backup and backup_location_path and backup_location_path.exists() else "Inactive",
             "backup_location": backup_location,
             "ai_model": "trained" if MODEL_STATE_PATH.exists() else "bootstrap-ready",
             "ai_rules_enabled": sum(1 for item in get_ai_rules(db).values() if item.get("enabled", True)),
@@ -3184,7 +3547,7 @@ def weekly_ai_behavior_data(db: Session) -> dict:
 
 
 def set_backup_location(db: Session, new_location: str, delete_previous: bool, updated_by: str) -> dict:
-    previous = Path(get_setting(db, "backup_location", str(DEFAULT_BACKUP_ROOT)))
+    previous = resolve_stored_path(get_setting(db, "backup_location", stored_path_value(DEFAULT_BACKUP_ROOT) or str(DEFAULT_BACKUP_ROOT))) or DEFAULT_BACKUP_ROOT.resolve()
     target = Path(new_location).expanduser().resolve()
     if target.exists() and not target.is_dir():
         raise ValueError("Backup location must be a folder, not a file.")
@@ -3192,12 +3555,12 @@ def set_backup_location(db: Session, new_location: str, delete_previous: bool, u
     previous_resolved = previous.expanduser().resolve() if previous.exists() else previous.expanduser()
     if target != previous_resolved and any(target.iterdir()):
         raise ValueError("Backup location must be an empty folder.")
-    set_setting(db, "backup_location", str(target), updated_by)
+    set_setting(db, "backup_location", stored_path_value(target) or str(target), updated_by)
     deleted = False
     if delete_previous and previous.exists() and previous_resolved != target:
         shutil.rmtree(previous, ignore_errors=True)
         deleted = True
-    return {"backup_location": str(target), "previous_deleted": deleted}
+    return {"backup_location": stored_path_value(target) or str(target), "previous_deleted": deleted}
 
 
 def path_is_inside(path: Path, root: Path) -> bool:
@@ -3322,7 +3685,7 @@ def remove_monitored_folder(db: Session, folder_path: str, initiated_by: int | N
     if not root.exists() or not root.is_dir():
         raise ValueError("Folder does not exist")
 
-    backup_location = Path(get_setting(db, "backup_location", str(DEFAULT_BACKUP_ROOT)))
+    backup_location = resolve_stored_path(get_setting(db, "backup_location", stored_path_value(DEFAULT_BACKUP_ROOT) or str(DEFAULT_BACKUP_ROOT))) or DEFAULT_BACKUP_ROOT.resolve()
     backup_roots = [item for item in backup_location.iterdir() if item.is_dir()] if backup_location.exists() else []
     removed = 0
     removed_backups = 0

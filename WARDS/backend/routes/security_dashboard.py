@@ -14,7 +14,7 @@ if str(MASTER_ROOT) not in sys.path:
 
 from database.models import get_db, ActivityLog, PermanentIpBlock, SecurityLogView
 from routes.admin_auth_v2 import get_current_admin_from_token
-from middleware.dos_protection import get_blocked_ips, unblock_ip, block_ip
+from middleware.dos_protection import get_blocked_ips, unblock_ip, block_ip, account_rate_limit_state, record_rate_limit_detection
 from services.ip_reputation import get_permanent_blocks, add_permanent_block, remove_permanent_block, check_ip_reputation
 from SECURITY.security_engine import (
     add_monitored_folder,
@@ -26,6 +26,8 @@ from SECURITY.security_engine import (
     full_system_recovery,
     get_setting,
     get_ai_rules,
+    get_ai_sensitivity,
+    set_ai_sensitivity,
     manual_recover_file,
     mark_stale_backup_events_failed,
     mark_admin_change,
@@ -170,6 +172,10 @@ class ScanIntervalRequest(BaseModel):
 
 class MonitoringToggleRequest(BaseModel):
     enabled: bool
+
+
+class AiSensitivityRequest(BaseModel):
+    sensitivity: str
 
 
 class BulkIncidentRequest(BaseModel):
@@ -514,6 +520,19 @@ def save_rules(payload: AiRulesRequest, db: Session = Depends(get_db), admin=Dep
     return update_ai_rules(db, payload.rules, admin.username)
 
 
+@router.get("/ai/sensitivity")
+def get_sensitivity(db: Session = Depends(get_db), _=Depends(current_admin)):
+    return {"sensitivity": get_ai_sensitivity(db)}
+
+
+@router.put("/ai/sensitivity")
+def set_sensitivity(payload: AiSensitivityRequest, db: Session = Depends(get_db), admin=Depends(current_admin)):
+    try:
+        return {"sensitivity": set_ai_sensitivity(db, payload.sensitivity, admin.username)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 @router.put("/scan-interval")
 def save_scan_interval(payload: ScanIntervalRequest, db: Session = Depends(get_db), admin=Depends(current_admin)):
     if payload.seconds < 5:
@@ -574,6 +593,14 @@ class PermanentBlockRequest(BaseModel):
     reason: str
 
 
+class TemporaryUserRestrictionRequest(BaseModel):
+    account_id: str
+    account_type: str
+    scope: str = "manual"
+    duration: int = 900
+    reason: str = "Manual temporary user restriction"
+
+
 @router.get("/blocked-ips")
 def list_blocked_ips(db: Session = Depends(get_db), admin=Depends(current_admin)):
     """View all currently blocked IPs with remaining block time."""
@@ -614,6 +641,51 @@ def manually_block_ip(payload: BlockIpRequest, request: Request, db: Session = D
     db.commit()
 
     return {"message": f"IP {payload.ip.strip()} blocked for {payload.duration} seconds.", "ip": payload.ip.strip(), "duration": payload.duration}
+
+
+@router.post("/user-restrictions")
+def temporarily_restrict_user(payload: TemporaryUserRestrictionRequest, request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
+    if not payload.account_id.strip():
+        raise HTTPException(status_code=400, detail="Account ID is required.")
+    if payload.account_type not in {"user", "citizen", "branch", "admin", "superadmin"}:
+        raise HTTPException(status_code=400, detail="Account type must be citizen, branch, admin, or superadmin.")
+    if payload.duration < 60 or payload.duration > 7 * 24 * 60 * 60:
+        raise HTTPException(status_code=400, detail="Duration must be between 60 seconds and 7 days.")
+    import time
+    normalized_type = "user" if payload.account_type in {"user", "citizen"} else payload.account_type
+    account_key = f"{normalized_type}:{payload.account_id.strip()}"
+    state = account_rate_limit_state[account_key]
+    state["restricted_until_by_scope"][payload.scope] = time.time() + payload.duration
+    state["last_strike_timestamp"] = time.time()
+    record_rate_limit_detection(account_key, normalized_type, normalized_type, payload.scope, int(state.get("strike_count") or 0), payload.reason, payload.duration)
+    db.add(ActivityLog(
+        action="Manual Temporary User Restriction",
+        user=admin.username,
+        details=f"Restricted {account_key} for {payload.duration}s on {payload.scope}. Reason: {payload.reason} | Admin IP: {request.client.host if request.client else 'unknown'}",
+        type="security",
+    ))
+    db.commit()
+    return {"message": f"{account_key} restricted for {payload.duration} seconds.", "account_id": account_key, "duration": payload.duration, "scope": payload.scope}
+
+
+@router.get("/user-restrictions")
+def list_user_restrictions(_=Depends(current_admin)):
+    import time
+    current_time = time.time()
+    items = []
+    for account_key, state in account_rate_limit_state.items():
+        for scope, restricted_until in list((state.get("restricted_until_by_scope") or {}).items()):
+            if restricted_until <= current_time:
+                state["restricted_until_by_scope"].pop(scope, None)
+                continue
+            items.append({
+                "account_id": account_key,
+                "scope": scope,
+                "remaining_seconds": int(restricted_until - current_time),
+                "violation_count": int(state.get("violation_count") or 0),
+                "strike_count": int(state.get("strike_count") or 0),
+            })
+    return {"user_restrictions": items, "total": len(items)}
 
 
 @router.delete("/blocked-ips/{ip}")

@@ -154,6 +154,12 @@ def add_permanent_block(ip: str, reason: str, blocked_by: str, db: Session) -> P
     
     db.commit()
     db.refresh(existing)
+    try:
+        from middleware import dos_protection
+        dos_protection._permanent_blocks_cache.clear()
+        dos_protection._permanent_blocks_cache_time = 0
+    except Exception:
+        pass
     return existing
 
 
@@ -163,6 +169,12 @@ def remove_permanent_block(ip: str, db: Session) -> bool:
     if block:
         block.is_active = False
         db.commit()
+        try:
+            from middleware import dos_protection
+            dos_protection._permanent_blocks_cache.clear()
+            dos_protection._permanent_blocks_cache_time = 0
+        except Exception:
+            pass
         return True
     return False
 

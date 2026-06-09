@@ -1,101 +1,128 @@
-# WARDS Security AI Documentation
+# WARDS AI Security Documentation
 
-## Scope
+## AI Methodology
 
-The Security Dashboard protects the production `WARDS` and `OCR` folders. The `SECURITY` folder is excluded from monitoring so the system does not try to restore the code that performs restoration. Defaced or suspicious copies are stored in `QUARANTINE`, then the live file is restored from a local backup folder selected by the admin.
+WARDS uses a hybrid security analytics architecture combining UEBA behavioral analytics, Isolation Forest-style anomaly profiling, deterministic rule scoring, threat intelligence enrichment, CVSS-inspired severity scoring, and Wazuh File Integrity Monitoring.
 
-## AI Approach
+Final Risk Score = UEBA Behavioral Anomaly Score + Rule-Based Security Score + Threat Intelligence Score + CVSS-Inspired Severity Weight.
 
-Architecture: Weekly Incremental Retraining with Wazuh-fed data.
+## Isolation Forest and UEBA Feature Set
 
-Model: Isolation Forest style anomaly detection trained on normal administrative behavior. The first deployment uses synthetic normal admin behavior data, then weekly retraining adds rows from the `security_admin_file_changes` table.
+Retraining writes `SECURITY/ml/isolation_forest_state.json`. The state includes bootstrap normal sample count, historical admin sample count, the active feature list, and a learned behavioral profile containing normal hours, weekdays, source IPs, file roots, and file extensions. `ai_predict()` reads this state during scoring. If a new event falls outside the learned profile and the related AI rule is enabled, the risk score increases and the prediction basis explains which learned behavior was unusual.
 
-Training phases:
+Initial sample data is stored in `SECURITY/ml/initial_training_samples.csv`. The backend generates 640 bootstrap normal samples during retraining and appends historical validated admin changes.
 
-| Phase | When | What Happens |
+| Feature | UEBA Area | Meaning |
 |---|---|---|
-| Initial Training | Deployment | Generates 640 normal admin samples and stores training metadata in `SECURITY/ml/isolation_forest_state.json`. |
-| Weekly Retraining | Sunday 11:00 PM by default | Retrains with bootstrap data plus all historical legitimate admin file changes. |
-| On-Demand Retraining | After false positives or admin request | Admin clicks Manual AI Retrain in the Security Dashboard. |
+| hour_of_day | BehaviorAnalytics | Time the change or admin action was detected. |
+| day_of_week | BehaviorAnalytics | Weekday/weekend behavior pattern. |
+| session_duration | IdentityInfo | Estimated authenticated admin session age. |
+| file_size_change | SentinelBehaviorEntities | Byte difference from the clean backup copy. |
+| content_length | SentinelBehaviorEntities | New file length. |
+| special_chars_count | SentinelBehaviorEntities | Count of code-like or injection-friendly characters. |
+| admin_session_valid | IdentityInfo | Whether a WARDS admin JWT/MFA session was present. |
+| mfa_verified | IdentityInfo | Whether Microsoft Authenticator MFA was verified. |
+| ip_consistent | BehaviorAnalytics | Whether the source IP matches normal admin behavior. |
+| source_ip_reputation | Threat Intelligence | AbuseIPDB/blocklist confidence and reputation signals. |
+| keystroke_dynamics | BehaviorAnalytics | Optional typing-pattern anomaly signal supplied by context. |
+| method_legitimate | SentinelBehaviorInfo | Whether change came through an approved admin workflow. |
+| business_hours | BehaviorAnalytics | Whether change happened during expected working hours. |
+| file_type_risk | SentinelBehaviorEntities | Risk weight for web/code files. |
+| suspicious_pattern_score | OWASP/MITRE Rule | Deterministic defacement, injection, credential, or SQL pattern score. |
+| vpn_activity | Threat Intelligence | Raises risk for proxy/VPN/hosting signals without automatic malicious classification. |
+| first_time_device | BehaviorAnalytics | Detects device anomalies when context shows an unseen admin device. |
+| first_time_country | BehaviorAnalytics | Detects country anomalies when context shows an unseen source country. |
+| geo_distance_from_last_login | BehaviorAnalytics | Detects impossible-travel style distance/time anomalies. |
+| unauthorized_admin_path | SentinelBehaviorInfo | Detects sensitive admin/auth/security path changes outside approved workflows. |
+| sensitive_config_change | SentinelBehaviorInfo | Detects environment, Wazuh, dependency, and database configuration changes. |
+| backup_restore_activity | SentinelBehaviorInfo | Detects backup, restore, quarantine, and recovery path activity. |
+| mfa_configuration_change | SentinelBehaviorInfo | Detects MFA/authenticator/two-factor configuration changes. |
+| auth_system_modification | SentinelBehaviorInfo | Detects authentication, authorization, token, password, session, and middleware changes. |
+| admin_action_rarity | UEBA InsiderAdmin | Raises risk when an administrator modifies paths or performs actions outside the learned admin profile. |
+| restore_frequency | UEBA RecoveryLoop | Raises risk when repeated restore operations suggest a recovery abuse loop. |
+| backup_integrity_validation | UEBA BackupIntegrity | Blocks recovery risk acceptance when backup hash validation fails before restoration. |
+| content_similarity_score | UEBA ContentAnomaly | Raises risk when modified content is substantially different from the approved baseline even if length is similar. |
+| affected_files_count | UEBA MassModification | Raises risk when many protected files are modified in a short time window. |
 
-Retraining writes `SECURITY/ml/isolation_forest_state.json`. The state includes the bootstrap sample count, historical admin sample count, feature list, and a learned behavioral profile containing normal hours, weekdays, source IPs, file roots, and file extensions. `ai_predict()` reads that state during scoring. If a new event falls outside the learned profile and the related AI rule is enabled, the risk score increases and the prediction basis explains which learned behavior was unusual.
+## Default AI Rules
 
-Feature vector:
+These rules are enabled by default because they directly protect admin identity, sensitive security files, recovery workflows, and high-confidence web tampering indicators.
 
-| Feature | Meaning |
-|---|---|
-| hour_of_day | Time the change was detected. |
-| day_of_week | Monday to Sunday behavior pattern. |
-| session_duration | Estimated authenticated admin session age. |
-| file_size_change | Byte difference from the clean backup copy. |
-| content_length | New file length. |
-| special_chars_count | Count of code-like or injection-friendly characters. |
-| admin_session_valid | Whether a WARDS admin JWT/MFA session was present. |
-| ip_consistent | Whether source looks consistent with normal admin use. |
-| source_ip_reputation | AbuseIPDB confidence score, report count, and suspicious source metadata when available. |
-| keystroke_dynamics | Optional typing-pattern anomaly signal supplied by the calling context. |
-| method_legitimate | Whether change came through an approved admin workflow. |
-| business_hours | Whether change happened during normal working hours. |
-| file_type_risk | Risk weight for web/code files. |
-| suspicious_pattern_score | Defacement/injection pattern score. |
-| vpn_activity | Raises risk but does not automatically mark malicious. |
-| unauthorized_admin_path | Raises risk when admin/auth/security paths change outside approved workflows. |
-| sensitive_config_change | Raises risk for `.env`, Wazuh, dependency, and database configuration files. |
-| external_resource_injection | Raises risk for newly introduced remote scripts, forms, fetches, or links. |
+| Rule | Status | Primary Validation |
+|---|---|---|
+| admin_session_valid | Default | NIST unauthorized access governance and UEBA identity assurance. |
+| mfa_verified | Default | UEBA IdentityInfo and Microsoft Authenticator assurance. |
+| first_time_device | Default | UEBA device anomaly detection. |
+| first_time_country | Default | UEBA location anomaly detection. |
+| geo_distance_from_last_login | Default | UEBA impossible travel detection. |
+| unauthorized_admin_path | Default | Wazuh FIM plus NIST privileged path protection. |
+| sensitive_config_change | Default | Wazuh FIM plus configuration integrity validation. |
+| backup_restore_activity | Default | NIST recovery control abuse detection. |
+| mfa_configuration_change | Default | Identity protection and MFA tamper detection. |
+| auth_system_modification | Default | MITRE ATT&CK credential/access defense mapping. |
+| admin_action_rarity | Default | UEBA insider admin detection for anomalous actions. |
+| restore_frequency | Default | UEBA recovery loop detection for repeated restore abuse. |
+| backup_integrity_validation | Default | Backup integrity check before recovery acceptance. |
+| content_similarity_score | Default | UEBA semantic content change detection. |
+| affected_files_count | Default | UEBA mass modification detection for rapid file changes. |
+| suspicious_pattern_score | Default | OWASP injection/defacement indicators and MITRE malicious code mapping. |
+| vpn_activity | Default | Threat intelligence and UEBA source anomaly enrichment. |
+| source_ip_reputation | Default | AbuseIPDB reputation and threat intelligence enrichment. |
+| keystroke_dynamics | Default | Optional UEBA behavior signal when supplied by caller context. |
+
+## Manual Add AI Rules
+
+Lower-confidence or context-dependent UEBA peer/rate rules are available from Manual Controls > Manage AI Rules. Admins can add only approved templates so arbitrary incompatible rules cannot be introduced.
+
+| Optional Rule | Validation Basis | Initial Sample Type |
+|---|---|---|
+| peer_login_time_deviation | UEBA UserPeerAnalytics login-time comparison. | Admin login time outside peer baseline. |
+| peer_path_access_deviation | UEBA UserPeerAnalytics path-access comparison. | Admin edited paths outside peer baseline. |
+| excessive_file_modifications | UEBA entity velocity and Wazuh FIM change-rate signal. | Multiple protected files modified in a short window. |
+| rapid_admin_actions | UEBA privileged-action velocity signal. | Repeated privileged actions faster than normal. |
+
+## Removed Temporary Rules
+
+The following temporary Add AI Rules button templates and their sample data were removed from the active engine and training data: `external_resource_injection`, `phishing_form`, `malicious_redirect`, `destructive_script`, `style_takeover`, and `ransom_note_keywords`.
+
+## Global AI Sensitivity
+
+WARDS uses a global AI sensitivity setting that controls the overall detection threshold across all AI rules. This replaces per-rule sensitivity controls to provide consistent behavior and simpler configuration.
+
+| Sensitivity Level | Threshold | Description |
+|---|---|---|
+| Low | 0.85 | Fewer false positives, may miss some anomalies. |
+| Medium | 0.70 | Balanced detection (default). |
+| High | 0.55 | More aggressive detection, may increase false positives. |
+| Very High | 0.40 | Maximum sensitivity, highest false positive rate. |
+
+The global sensitivity is applied in `ai_predict()` when determining whether the final risk score crosses the malicious prediction threshold. Admins can adjust this setting from Manual Controls > Manage AI Rules > Global AI Sensitivity.
 
 ## VPN and Risk-Only Detection
 
-VPN detection is now active instead of only context-dependent. When a source IP is available, WARDS runs `services.vpn_detection.detect_vpn()` and enriches the AI context with:
+VPN detection enriches AI context with `vpn_detected`, `vpn_activity`, `vpn_provider`, `vpn_risk_score`, `vpn_signals`, and full `vpn_detection` metadata. Local/private addresses are ignored. AbuseIPDB is used when configured, and public geolocation/provider data is checked best-effort.
 
-| Field | Meaning |
-|---|---|
-| vpn_detected / vpn_activity | True when proxy/VPN/hosting signals are found. |
-| vpn_provider | ISP, organization, domain, or ASN/provider name when available. |
-| vpn_risk_score | 0-100 score from AbuseIPDB metadata, proxy flags, hosting flags, and provider keywords. |
-| vpn_signals | Concrete signals such as AbuseIPDB score, proxy flag, hosting flag, or provider keyword. |
-| vpn_detection | Full detector result including country/city/provider/source/error fields. |
+Risk-only detections are stored in `security_detection_events` even when no incident is created. Examples include VPN/proxy login, invalid admin session, after-hours activity, keystroke anomaly, suspicious IP reputation, MFA-not-verified activity, first-time device/country, impossible travel, or sensitive path activity that does not include concrete tamper evidence.
 
-Detection sources:
-
-1. Local IP classification skips private, loopback, link-local, reserved, multicast, and unspecified addresses.
-2. AbuseIPDB is used when `ABUSEIPDB_API_KEY` is configured. Abuse confidence and usage/provider metadata raise risk.
-3. A best-effort public IP lookup checks geolocation, proxy, hosting, and provider fields. If this service is unavailable, scanning continues without blocking.
-4. Provider keyword detection flags common VPN/proxy/cloud/datacenter terms.
-
-Risk-only detections are stored in `security_detection_events` even when no incident is created. Examples include VPN/proxy login, invalid admin session, after-hours activity, keystroke anomaly, suspicious IP reputation, or a sensitive admin path signal that does not include concrete defacement/tampering evidence. These records appear in Detection History and use per-admin unread state like other security logs.
-
-Incident creation is intentionally stricter than detection logging. WARDS creates a Security Incident when the file is deleted, the AI prediction is malicious, concrete tamper evidence exists (`script_injection`, `iframe_injection`, `defacement_keywords`, credential/SQL/ransom/redirect/phishing/style takeover/external resource injection), or the CVSS-style score reaches high severity. VPN use by itself raises risk and creates a detection log, but it does not automatically quarantine or restore files.
-
-Admin login paths feed the same risk detector. Successful admin logins can create risk-only detection logs when VPN/proxy, after-hours, reputation, or similar rules trigger. Invalid or expired admin tokens create `invalid_admin_session` detections.
-
-Approved optional rules can be added from Manual Controls > Manage AI Rules. These are selected from a fixed defacement dictionary so admins cannot create arbitrary incompatible rules. Each added rule includes initial sample patterns and can be enabled, disabled, and tuned like the default rules.
-
-| Optional Rule | Validation Dictionary Basis | Initial Sample Type |
-|---|---|---|
-| ransom_note_keywords | Ransom/extortion phrases such as encrypted files, ransom payment, bitcoin wallet, decrypt key. | Ransom note text snippets. |
-| malicious_redirect | Forced redirect patterns such as `window.location`, `location.href`, and meta refresh. | Redirect code snippets. |
-| destructive_script | Browser disruption patterns such as local/session storage clearing and DOM removal. | JavaScript disruption snippets. |
-| phishing_form | Fake login/account warning wording. | Phishing text snippets. |
-| style_takeover | Full-page overlay and CSS takeover patterns. | CSS overlay snippets. |
-
-Initial sample data is in `SECURITY/ml/initial_training_samples.csv`. The backend also generates 640 bootstrap samples during retraining.
+Incident creation is intentionally stricter than detection logging. WARDS creates a Security Incident when the file is deleted, the AI prediction is malicious, concrete tamper evidence exists (`script_injection`, `iframe_injection`, `defacement_keywords`, `credential_access`, `sql_injection`), or the CVSS-style score reaches high severity.
 
 ## Validation Basis
 
-The design is aligned with these references:
-
 | Reference | Use in WARDS |
 |---|---|
-| NIST SP 800-61 Rev. 2, Computer Security Incident Handling Guide: https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-61r2.pdf | Incident categories such as malicious code, denial of service, improper usage, and unauthorized access. |
-| FIRST CVSS v3.1 Specification: https://www.first.org/cvss/v3.1/specification-document | Severity score from 0.0 to 10.0 and vector labels shown in incidents. |
-| ENISA Threat Taxonomy: https://www.enisa.europa.eu/topics/threat-risk-management | Threat labels such as web application attack and information manipulation. |
-| Wazuh File Integrity Monitoring docs: https://documentation.wazuh.com/current/user-manual/capabilities/file-integrity/index.html | FIM monitoring for file creation, modification, and deletion. |
-| scikit-learn IsolationForest docs: https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.IsolationForest.html | Unsupervised anomaly detection model used for implementation planning. |
+| NIST SP 800-61 Rev. 2 | Incident categories, handling, recovery, and unauthorized access governance. |
+| FIRST CVSS v3.1 | Severity score and vector labels shown in incidents. |
+| ENISA Threat Taxonomy | Threat labels such as web application attack and information manipulation. |
+| Wazuh File Integrity Monitoring | FIM monitoring for file creation, modification, and deletion. |
+| scikit-learn IsolationForest | Unsupervised anomaly detection model used for implementation planning. |
 | Liu, Ting, and Zhou, Isolation Forest, ICDM 2008 | Research basis for isolation-based anomaly detection. |
+| UEBA / Microsoft Sentinel behavior concepts | Identity, behavior, peer, behavior entity, and sensitive action features. |
+| OWASP | Web attack validation for injection, credential, and tampering indicators. |
+| MITRE ATT&CK | Mapping for credential access, persistence, malicious code, and defense evasion behavior. |
 
 ## Runtime Frequency
 
-The dashboard runs when an admin opens `/admin/backup`. Manual scans happen when the admin clicks Verify System Integrity or scans an individual file. Wazuh can perform continuous FIM while deployed. Automatic background scanning should be enabled only for deployed environments by setting:
+The dashboard runs when an admin opens `/admin/backup`. Manual scans happen when the admin clicks Manual System Scan or scans an individual file. Wazuh can perform continuous FIM while deployed. Automatic background scanning should be enabled only for deployed environments by setting:
 
 ```env
 SECURITY_DEPLOYMENT_MODE=deployed
@@ -103,63 +130,48 @@ SECURITY_MONITORING_ENABLED=true
 WAZUH_ENABLED=true
 ```
 
-During normal development, leave monitoring disabled and use manual scans. This prevents constant detection logs while files are being edited.
+## Account-Based Rate Limiting and Temporary Restrictions
 
-## Log Notification Semantics
+WARDS has migrated from IP-based to account-based rate limiting and strike enforcement. This provides more precise targeting and avoids penalizing legitimate users sharing an IP address.
 
-Security Dashboard log unread counts are stored per admin in `security_log_views`. Reading logs as one admin does not mark them read for other admins. Detection, backup, and recovery badges count only unread logs. Security incident badges count open or investigating incidents and remain visible after the incident is read; the incident popup count only drops when the incident is resolved or marked false positive.
+### Rate Limiting Mechanics
 
-Main Admin System Alerts are durable rows in `alerts`. Security backups, manual recoveries, risk-only detections, VPN/invalid-session detections, incident resolution, false-positive handling, and security incidents generate summaries. Security incidents generate one alert per incident (`SEC-{id}`) containing both the detection summary and the related automatic recovery summary to avoid duplicate alert spam.
+- **Account Identification**: JWT tokens are decoded to extract `user_id`, `role`, and `type` (citizen, branch, admin, superadmin).
+- **Violation Tracking**: Each rate limit violation is recorded per account with detection type and timestamp.
+- **Strike Conversion**: Every 3 rate limit violations equals 1 strike.
+- **Strike Levels**:
+  - Strike 1: Warning logged
+  - Strike 2: Audit event generated for privileged accounts
+  - Strike 3: Temporary restriction applied (default 900 seconds / 15 minutes)
+  - Strike 4+: Extended restriction duration
 
-Current security alert catalog:
+### Detection Types
 
-| Alert key | Dashboard title | When it is generated |
-| --- | --- | --- |
-| backup_started | Security Backup Started | A manual, scheduled, startup, initial, or false-positive baseline backup begins. |
-| backup_completed | Security Backup Completed | A backup finishes successfully. |
-| backup_failed | Security Backup Failed | A backup fails or times out. |
-| detection_logged | Security Detection Logged | A suspicious risk-only detection is recorded without opening an incident. |
-| recovery_completed | Security Recovery Completed | A manual or automatic recovery completes successfully. |
-| recovery_failed | Security Recovery Failed | A recovery attempt fails. |
-| incident_created | Security Incident Logged | A concrete deletion, malicious prediction, tamper, defacement, injection, or high-CVSS event opens a security incident. |
-| incident_resolved | Security Incident Resolved | An admin marks an incident resolved. |
-| incident_false_positive | Security Incident Marked False Positive | An admin marks an incident false positive. |
-| vpn_risk | VPN/Proxy Risk Detected | VPN/proxy or hosting signals raise an admin-session risk score. |
-| invalid_admin_session | Invalid Admin Session Detected | An expired, invalid, or malformed admin session is detected. |
+Rate limit violations are categorized by detection type:
+- Rate Limit Abuse Detected
+- Repeated Queue Request Abuse
+- Excessive Portal Requests
+- Repeated Administrative Abuse
 
-## Recovery Target
+### Temporary User Restrictions
 
-Recovery target: 5 minutes or less after a security incident or system failure. Local restore avoids GitHub/API dependency and is limited by disk speed and number of affected files.
+Admins can manually apply temporary user restrictions from Manual Controls > Blocked IPs > Temporary User Restriction. This allows immediate account-level enforcement without affecting other users on the same IP.
 
-Validation measurement:
+**Restriction Parameters**:
+- `account_id`: The user identifier (ID, username, or email depending on account type)
+- `account_type`: citizen, branch, main admin, or super admin
+- `scope`: manual, rate_limit, or other restriction source
+- `duration`: Restriction duration in seconds (60-604800, default 900)
+- `reason`: Human-readable explanation for the restriction
 
-1. Create a manual backup.
-2. Modify or delete one monitored file.
-3. Click Verify System Integrity.
-4. Confirm detection, quarantine, restore, and Recovery History duration.
-5. Full system recovery is accepted if all monitored WARDS/OCR files restore within 5 minutes.
+**Restriction Enforcement**:
+- Restricted accounts receive a 429 Too Many Requests response with restriction details
+- The middleware checks for active restrictions before processing requests
+- Restrictions automatically expire after the duration elapses
+- All restrictions are logged to `activity_logs` for audit purposes
 
-## Incident Finalization Workflows
+### Backend Endpoints
 
-Resolved incident:
-
-1. The suspicious file is quarantined and the trusted backup is restored during automatic response.
-2. An admin marks the incident resolved after confirming the change was malicious.
-3. WARDS keeps the restored clean file, removes the incident quarantine folder, updates file status, and does not create a new backup because the live file matches the trusted baseline.
-4. If the quarantined copy was already deleted, WARDS asks for confirmation and then proceeds because resolving a threat was going to remove quarantine anyway.
-
-False positive:
-
-1. The suspicious file is quarantined and the trusted backup is restored during automatic response.
-2. An admin marks the incident false positive after confirming the quarantined change was legitimate.
-3. WARDS copies the quarantined file back to its original location, removes the quarantine folder, marks the detection legitimate, marks related recoveries reverted, and refreshes the backup baseline so the legitimate change is protected going forward.
-4. If the quarantined file is missing, WARDS asks for confirmation. If the admin continues, no reversion or backup occurs and the current file state is left unchanged.
-5. Bulk false-positive actions perform the same per-incident reversion and then create one consolidated backup.
-
-## Current Testing Result Template
-
-| Date | Scenario | Detection Time | Recovery Time | Result | Notes |
-|---|---|---:|---:|---|---|
-| To be filled during local QA | Visual defacement | TBD | TBD | Pending | Use `DEFACEMENT/index.html` instructions. |
-| To be filled during local QA | File deletion | TBD | TBD | Pending | Verify quarantine and restore. |
-| To be filled during local QA | False positive | TBD | TBD | Pending | Recovery should show reverted. |
+- `POST /security/user-restrictions`: Add a manual temporary user restriction
+- `GET /security/user-restrictions`: List currently active user restrictions
+- Rate limit state is managed in-memory in `middleware.dos_protection.account_rate_limit_state`

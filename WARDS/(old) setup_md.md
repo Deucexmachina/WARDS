@@ -2,7 +2,7 @@
 
 This is the short handoff setup file for running WARDS locally.
 
-## Requirements
+## Requirements sigma
 
 - Python 3.10 or 3.11
 - Node.js 18+

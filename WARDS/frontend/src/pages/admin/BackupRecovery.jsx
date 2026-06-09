@@ -355,13 +355,15 @@ const BackupRecovery = () => {
     monitoredFolder: '',
     aiDay: 'Sunday',
     aiTime: '23:00',
-    scanInterval: 30,
+    scanInterval: '30',
+    scanIntervalDirty: false,
     monitoringEnabled: true,
     aiRuleTemplate: '',
+    aiSensitivity: 'medium',
   });
   const [blockedIps, setBlockedIps] = useState([]);
-  const [blockIpInput, setBlockIpInput] = useState('');
-  const [blockDuration, setBlockDuration] = useState(300);
+  const [userRestrictions, setUserRestrictions] = useState([]);
+  const [restrictionInput, setRestrictionInput] = useState({ account_id: '', account_type: 'citizen', scope: 'manual', duration: 900, reason: 'Manual temporary user restriction' });
   const [permanentBlocks, setPermanentBlocks] = useState([]);
   const [permanentBlockInput, setPermanentBlockInput] = useState('');
   const [permanentBlockReason, setPermanentBlockReason] = useState('');
@@ -378,9 +380,14 @@ const BackupRecovery = () => {
     setControls((current) => ({
       ...current,
       backupPath: response.data?.health?.backup_location || current.backupPath,
-      scanInterval: Number(response.data?.health?.scan_interval_seconds || current.scanInterval || 30),
+      scanInterval: current.scanIntervalDirty ? current.scanInterval : String(response.data?.health?.scan_interval_seconds || current.scanInterval || 30),
       monitoringEnabled: String(response.data?.health?.monitoring_enabled || 'false').toLowerCase() === 'true',
     }));
+  };
+
+  const refreshAiSensitivity = async () => {
+    const response = await api.get('/security/ai/sensitivity');
+    setControls((current) => ({ ...current, aiSensitivity: response.data?.sensitivity || 'medium' }));
   };
 
   const refreshFiles = async () => setFiles((await api.get('/security/files')).data || []);
@@ -498,21 +505,6 @@ const BackupRecovery = () => {
     setBlockedIps(response.data?.blocked_ips || []);
   };
 
-  const blockIp = async () => {
-    if (!blockIpInput.trim()) {
-      setNotice('Please enter an IP address.');
-      return;
-    }
-    try {
-      await api.post('/security/blocked-ips', { ip: blockIpInput.trim(), duration: blockDuration });
-      setNotice(`IP ${blockIpInput.trim()} blocked for ${blockDuration} seconds.`);
-      setBlockIpInput('');
-      await refreshBlockedIps();
-    } catch (error) {
-      setNotice(error.response?.data?.detail || 'Failed to block IP.');
-    }
-  };
-
   const unblockIp = async (ip) => {
     try {
       await api.delete(`/security/blocked-ips/${ip}`);
@@ -526,6 +518,22 @@ const BackupRecovery = () => {
   const refreshPermanentBlocks = async () => {
     const response = await api.get('/security/permanent-blocks');
     setPermanentBlocks(response.data?.permanent_blocks || []);
+  };
+
+  const refreshUserRestrictions = async () => {
+    const response = await api.get('/security/user-restrictions');
+    setUserRestrictions(response.data?.user_restrictions || []);
+  };
+
+  const restrictUser = async () => {
+    if (!restrictionInput.account_id.trim()) {
+      setNotice('Please enter an account ID.');
+      return;
+    }
+    await api.post('/security/user-restrictions', { ...restrictionInput, account_id: restrictionInput.account_id.trim(), duration: Number(restrictionInput.duration || 900) });
+    setNotice(`Temporary restriction applied to ${restrictionInput.account_type}:${restrictionInput.account_id.trim()}.`);
+    setRestrictionInput((current) => ({ ...current, account_id: '' }));
+    await refreshUserRestrictions();
   };
 
   const addPermanentBlock = async () => {
@@ -543,6 +551,7 @@ const BackupRecovery = () => {
       setPermanentBlockInput('');
       setPermanentBlockReason('');
       await refreshPermanentBlocks();
+      await refreshBlockedIps();
     } catch (error) {
       setNotice(error.response?.data?.detail || 'Failed to permanently block IP.');
     }
@@ -553,6 +562,7 @@ const BackupRecovery = () => {
       await api.delete(`/security/permanent-blocks/${ip}`);
       setNotice(`IP ${ip} removed from permanent blocklist.`);
       await refreshPermanentBlocks();
+      await refreshBlockedIps();
     } catch (error) {
       setNotice(error.response?.data?.detail || 'Failed to remove permanent block.');
     }
@@ -581,8 +591,10 @@ const BackupRecovery = () => {
     }
     if (tab === 'Manual Controls') {
       await refreshAiRules();
+      await refreshAiSensitivity();
       await refreshBlockedIps();
       await refreshPermanentBlocks();
+      await refreshUserRestrictions();
     }
   };
 
@@ -865,7 +877,7 @@ const BackupRecovery = () => {
     if (!Number.isFinite(seconds) || seconds < 5) {
       throw new Error('Scan interval must be at least 5 seconds.');
     }
-    return api.put('/security/scan-interval', { seconds });
+    return api.put('/security/scan-interval', { seconds }).then((response) => { setControls((current) => ({ ...current, scanInterval: String(seconds), scanIntervalDirty: false })); return response; });
   };
 
   const toggleMonitoring = async () => {
@@ -873,6 +885,10 @@ const BackupRecovery = () => {
     const response = await api.put('/security/monitoring', { enabled: nextEnabled });
     setControls((current) => ({ ...current, monitoringEnabled: nextEnabled }));
     return response;
+  };
+
+  const saveAiSensitivity = () => {
+    return api.put('/security/ai/sensitivity', { sensitivity: controls.aiSensitivity }).then((response) => { setControls((current) => ({ ...current, aiSensitivity: response.data?.sensitivity || 'medium' })); return response; });
   };
 
   const openFolderPicker = async (mode, title, path) => {
@@ -1325,7 +1341,7 @@ const BackupRecovery = () => {
             <div className="grid gap-6 xl:grid-cols-2">
               <Section title="Integrity and Recovery">
                 <div className="grid gap-3 md:grid-cols-2">
-                  <button disabled={busy} className="rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Verify system integrity?', 'WARDS will scan every monitored file and create logs for any changes it finds.', () => api.post('/security/scan'), (result) => result?.data?.summary || 'Full system integrity scan complete.', 'Start scan')}>Verify System Integrity</button>
+                  <button disabled={busy} className="rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Manual system scan?', 'WARDS will scan every monitored file and create logs for any changes it finds.', () => api.post('/security/scan'), (result) => result?.data?.summary || 'Full system integrity scan complete.', 'Start scan')}>Manual System Scan</button>
                   <button
                     disabled={busy}
                     className="rounded-xl bg-red-600 px-4 py-3 font-semibold text-white disabled:opacity-60"
@@ -1419,7 +1435,7 @@ const BackupRecovery = () => {
                           min="5"
                           max="3600"
                           value={controls.scanInterval}
-                          onChange={(e) => setControls({ ...controls, scanInterval: e.target.value })}
+                          onChange={(e) => setControls({ ...controls, scanInterval: e.target.value, scanIntervalDirty: true })}
                         />
                       </label>
                       <button disabled={busy} className={`rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white${disabledButtonClass}`} onClick={() => askConfirm('Save scan interval?', `Automatic scans will run every ${Number(controls.scanInterval || 0)} seconds while monitoring is enabled.`, saveScanInterval, 'Automatic scan interval saved.', 'Save interval')}>Save Scan Interval</button>
@@ -1502,10 +1518,27 @@ const BackupRecovery = () => {
               >
                 <div className="space-y-4">
                   <p className="text-sm leading-6 text-slate-600">
-                    Enable, disable, and tune the rules that feed the anomaly score. VPN activity only raises risk and does not automatically mark a change malicious.
+                    Enable, disable, and configure the rules that feed the anomaly score. Global AI sensitivity controls the overall detection threshold across all rules.
                   </p>
                   {showAiRules ? (
                     <>
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                          <div>
+                            <p className="text-sm font-bold text-slate-900">Global AI Sensitivity</p>
+                            <p className="text-xs text-slate-500">Controls the overall detection threshold for all AI rules.</p>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <select className="rounded-lg border border-slate-200 px-3 py-2 text-sm" value={controls.aiSensitivity} onChange={(e) => setControls({ ...controls, aiSensitivity: e.target.value })}>
+                              <option value="low">Low - 0.85 threshold</option>
+                              <option value="medium">Medium - 0.70 threshold</option>
+                              <option value="high">High - 0.55 threshold</option>
+                              <option value="very_high">Very High - 0.40 threshold</option>
+                            </select>
+                            <button disabled={busy} className={`rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white${disabledButtonClass}`} onClick={() => askConfirm('Save AI sensitivity?', 'WARDS will update the global AI sensitivity threshold used by anomaly scoring.', saveAiSensitivity, 'Global AI sensitivity saved.', 'Save sensitivity')}>Save</button>
+                          </div>
+                        </div>
+                      </div>
                       <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
                         <p className="text-sm font-bold text-blue-950">Add approved defacement rule</p>
                         <p className="mt-1 text-xs leading-5 text-blue-900">Only predefined rules based on the defacement dictionary can be added, so every new rule stays compatible with the AI scoring model and receives initial sample patterns.</p>
@@ -1530,12 +1563,6 @@ const BackupRecovery = () => {
                                   <span className="mt-1 block text-sm text-slate-600">{rule.description || ruleHelp[key]}</span>
                                 </span>
                               </label>
-                              <label className="w-full text-sm font-semibold text-slate-700 md:w-64">
-                                Sensitivity
-                                <select className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" value={Number(rule.weight || 1)} onChange={(e) => updateRule(key, { weight: e.target.value })}>
-                                  {sensitivityOptions.map((item) => <option key={item.value} value={item.value}>{item.label} - {item.hint}</option>)}
-                                </select>
-                              </label>
                             </div>
                             <details className="mt-3">
                               <summary className="cursor-pointer text-sm font-bold text-primary">Advanced configuration</summary>
@@ -1548,7 +1575,7 @@ const BackupRecovery = () => {
                           </div>
                         ))}
                       </div>
-                      <button disabled={busy} className="w-full rounded-xl bg-primary px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Save AI rules?', 'WARDS will update the enabled rules, weights, and advanced rule configuration used by anomaly scoring.', saveAiRules, 'AI behavioral rules saved.', 'Save rules')}>Save AI Rules</button>
+                      <button disabled={busy} className="w-full rounded-xl bg-primary px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Save AI rules?', 'WARDS will update the enabled rules and advanced rule configuration used by anomaly scoring.', saveAiRules, 'AI behavioral rules saved.', 'Save rules')}>Save AI Rules</button>
                     </>
                   ) : (
                     <button disabled={busy} className={`rounded-xl bg-blue-50 px-4 py-3 text-sm font-bold text-primary${disabledButtonClass}`} onClick={() => setShowAiRules(true)}>
@@ -1561,37 +1588,33 @@ const BackupRecovery = () => {
               <Section title="Blocked IPs">
                 <div className="space-y-4">
                   <p className="text-sm leading-6 text-slate-600">
-                    View and manage IP addresses blocked by the DoS protection system. IPs are automatically blocked when they exceed the abuse threshold.
+                    View permanent IP blocks and manage account-based temporary restrictions. Rate-limit enforcement now targets accounts instead of shared IP addresses.
                   </p>
                   
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-end">
-                      <div className="flex-1">
-                        <label className="text-sm font-semibold text-slate-700">Block IP Address (Temporary)</label>
-                        <input
-                          className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                          type="text"
-                          placeholder="e.g., 192.168.1.100"
-                          value={blockIpInput}
-                          onChange={(e) => setBlockIpInput(e.target.value)}
-                        />
-                      </div>
-                      <div className="w-full md:w-32">
-                        <label className="text-sm font-semibold text-slate-700">Duration (sec)</label>
-                        <input
-                          className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                          type="number"
-                          min="10"
-                          max="86400"
-                          value={blockDuration}
-                          onChange={(e) => setBlockDuration(Number(e.target.value))}
-                        />
-                      </div>
-                      <button disabled={busy} className={`rounded-xl bg-red-600 px-4 py-2 font-semibold text-white${disabledButtonClass}`} onClick={() => askConfirm('Temporarily block this IP?', `WARDS will block ${blockIpInput || 'the entered IP'} for ${blockDuration} seconds.`, blockIp, 'Temporary IP block added.', 'Block IP')}>
-                        Block IP
-                      </button>
+                    <p className="mb-3 text-sm font-bold text-slate-900">Temporary User Restriction</p>
+                    <div className="grid gap-3 md:grid-cols-5">
+                      <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Account ID" value={restrictionInput.account_id} onChange={(e) => setRestrictionInput({ ...restrictionInput, account_id: e.target.value })} />
+                      <select className="rounded-xl border border-slate-200 px-3 py-2 text-sm" value={restrictionInput.account_type} onChange={(e) => setRestrictionInput({ ...restrictionInput, account_type: e.target.value })}>
+                        <option value="citizen">Citizen</option>
+                        <option value="branch">Branch Admin</option>
+                        <option value="admin">Main Admin</option>
+                        <option value="superadmin">Super Admin</option>
+                      </select>
+                      <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Scope" value={restrictionInput.scope} onChange={(e) => setRestrictionInput({ ...restrictionInput, scope: e.target.value })} />
+                      <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" type="number" min="60" max="604800" value={restrictionInput.duration} onChange={(e) => setRestrictionInput({ ...restrictionInput, duration: e.target.value })} />
+                      <button disabled={busy} className={`rounded-xl bg-red-600 px-4 py-2 font-semibold text-white${disabledButtonClass}`} onClick={() => askConfirm('Temporarily restrict this account?', `WARDS will restrict ${restrictionInput.account_type}:${restrictionInput.account_id || 'the entered account'} for ${restrictionInput.duration} seconds.`, restrictUser, 'Temporary user restriction added.', 'Restrict user')}>Restrict User</button>
                     </div>
-                    <p className="text-xs text-slate-500">Duration must be between 10 seconds and 24 hours (86400 seconds).</p>
+                    <input className="mt-3 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Reason" value={restrictionInput.reason} onChange={(e) => setRestrictionInput({ ...restrictionInput, reason: e.target.value })} />
+                  </div>
+
+                  <div className="max-h-60 overflow-auto rounded-xl border border-slate-200">
+                    {userRestrictions.length > 0 ? (
+                      <table className="w-full text-sm">
+                        <thead className="bg-slate-50"><tr><th className="px-4 py-3 text-left font-bold text-slate-700">Account</th><th className="px-4 py-3 text-left font-bold text-slate-700">Scope</th><th className="px-4 py-3 text-left font-bold text-slate-700">Remaining</th><th className="px-4 py-3 text-left font-bold text-slate-700">Strikes</th></tr></thead>
+                        <tbody>{userRestrictions.map((item) => <tr key={`${item.account_id}-${item.scope}`} className="border-t border-slate-100"><td className="px-4 py-3 font-mono text-slate-900">{item.account_id}</td><td className="px-4 py-3 text-slate-700">{item.scope}</td><td className="px-4 py-3 text-slate-700">{Math.floor(item.remaining_seconds / 60)}m {item.remaining_seconds % 60}s</td><td className="px-4 py-3 text-slate-700">{item.strike_count}</td></tr>)}</tbody>
+                      </table>
+                    ) : <div className="p-8 text-center text-sm text-slate-500">No account restrictions are active.</div>}
                   </div>
 
                   <div className="max-h-80 overflow-auto rounded-xl border border-slate-200">

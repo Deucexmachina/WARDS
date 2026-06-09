@@ -19,6 +19,7 @@ from typing import Dict, Optional
 import os
 import ipaddress
 import json
+from jose import jwt
 
 MAX_REQUEST_SIZE = int(os.getenv("MAX_REQUEST_SIZE_BYTES", 10 * 1024 * 1024))  # 10MB
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT_SECONDS", 30))
@@ -54,9 +55,16 @@ endpoint_request_history: Dict[str, list] = defaultdict(list)
 failed_auth_history: Dict[str, list] = defaultdict(list)
 block_strikes: Dict[str, list] = defaultdict(list)
 reputation_strikes: Dict[str, list] = defaultdict(list)
-# Track blocked IPs (temporary, in-memory)
+# Track blocked IPs (temporary, in-memory; reserved for explicit infrastructure protection only)
 blocked_ips: Dict[str, float] = {}  # IP -> unblock time
 manual_review_incidents: Dict[str, float] = {}
+account_rate_limit_state: Dict[str, dict] = defaultdict(lambda: {
+    "violation_count": 0,
+    "strike_count": 0,
+    "last_violation_timestamp": None,
+    "last_strike_timestamp": None,
+    "restricted_until_by_scope": {},
+})
 
 # Cache for permanent blocks (in-memory cache to reduce DB calls)
 _permanent_blocks_cache: Dict[str, bool] = {}
@@ -154,6 +162,133 @@ def temporary_block_duration(strikes: int) -> int:
     if strikes == 3:
         return 24 * 60 * 60
     return 7 * 24 * 60 * 60
+
+
+def account_from_request(request: Request, client_ip: str) -> tuple[str, str, str]:
+    auth_header = request.headers.get("Authorization") or ""
+    token = auth_header.split(" ", 1)[1] if auth_header.startswith("Bearer ") else ""
+    secrets = (
+        ("user", os.getenv("USER_SECRET_KEY", "your-user-secret-key-change-in-production")),
+        ("admin", os.getenv("ADMIN_SECRET_KEY", "your-admin-secret-key-change-in-production-immediately")),
+        ("branch", os.getenv("BRANCH_SECRET_KEY", "your-branch-secret-key-change-in-production")),
+    )
+    for fallback_type, secret in secrets:
+        if not token:
+            break
+        try:
+            payload = jwt.decode(token, secret, algorithms=["HS256"])
+            account_type = str(payload.get("type") or fallback_type)
+            account_id = str(payload.get("user_id") or payload.get("sub") or "")
+            role = str(payload.get("role") or account_type)
+            if account_id:
+                return f"{account_type}:{account_id}", account_type, role
+        except Exception:
+            continue
+    return f"anonymous:{client_ip}", "anonymous", "anonymous"
+
+
+def detection_type_for_scope(scope: str) -> str:
+    if scope == "search":
+        return "Excessive Portal Requests"
+    if scope == "registration":
+        return "Excessive Queue Requests"
+    if scope == "admin_general":
+        return "Repeated Administrative Abuse"
+    if scope == "authentication_failed":
+        return "Repeated Authentication Abuse"
+    return "Repeated Rate Limit Abuse"
+
+
+def record_rate_limit_detection(account_key: str, account_type: str, role: str, scope: str, strikes: int, reason: str, duration: int) -> None:
+    try:
+        from database.models import SessionLocal, ActivityLog, authorize_database_session
+        from SECURITY.security_models import SecurityDetectionEvent
+
+        db = SessionLocal()
+        try:
+            authorize_database_session(db, context="account_rate_limit_detection", actor="dos_protection")
+            context = {
+                "account_id": account_key,
+                "account_type": account_type,
+                "role": role,
+                "detection_type": detection_type_for_scope(scope),
+                "strike_level": strikes,
+                "restriction_seconds": duration,
+                "scope": scope,
+                "reason": reason,
+            }
+            detection = SecurityDetectionEvent(
+                file_id=None,
+                target_type="account",
+                target_name=account_key,
+                actor=account_key,
+                change_type="account_rate_limit_restriction",
+                old_hash=None,
+                new_hash=None,
+                is_legitimate=False,
+                admin_id=None,
+                ai_score=None,
+                ai_prediction="suspicious",
+                confidence=1.0,
+                severity_level="medium" if strikes < 4 else "high",
+                cvss_score=5.0 if strikes < 4 else 6.5,
+                nist_category="CAT 6 - Investigation",
+                enisa_threat_type="Abuse of Information Systems",
+                trigger_summary=f"{detection_type_for_scope(scope)} for {account_key}; strike {strikes}; restricted {duration}s.",
+                accuracy_basis="Three rate-limit violations generated one account-based strike.",
+                behavior_flags_json=json.dumps(["Rate-limit abuse", "Account restriction"]),
+                changed_lines_json=json.dumps({}),
+                context_json=json.dumps(context),
+            )
+            db.add(detection)
+            db.add(ActivityLog(
+                action="Account Rate Limit Strike",
+                user=account_key,
+                details=json.dumps(context),
+                type="security",
+            ))
+            if account_type in {"admin", "branch"} and strikes >= 2:
+                db.add(ActivityLog(
+                    action="Privileged Account Rate Limit Safeguard",
+                    user=account_key,
+                    details=f"Privileged account reached strike {strikes} for {scope}.",
+                    type="security",
+                ))
+            db.commit()
+        finally:
+            db.close()
+    except Exception:
+        pass
+
+
+def account_restriction_response(account_key: str, account_type: str, role: str, duration: int, scope: str, strikes: int, reason: str) -> JSONResponse:
+    state = account_rate_limit_state[account_key]
+    state["restricted_until_by_scope"][scope] = time.time() + duration
+    state["last_strike_timestamp"] = time.time()
+    record_rate_limit_detection(account_key, account_type, role, scope, strikes, reason, duration)
+    return JSONResponse(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        content={
+            "detail": f"{reason}. Account functionality temporarily restricted for {duration} seconds.",
+            "scope": scope,
+            "account_id": account_key,
+            "account_type": account_type,
+            "strike_count": strikes,
+            "retry_after": duration,
+            "next_action": "retry_after_restriction_expires",
+        },
+        headers={"Retry-After": str(duration)}
+    )
+
+
+def register_account_violation(account_key: str, current_time: float) -> tuple[int, int]:
+    state = account_rate_limit_state[account_key]
+    state["violation_count"] = int(state.get("violation_count") or 0) + 1
+    state["last_violation_timestamp"] = current_time
+    if state["violation_count"] >= 3:
+        state["strike_count"] = int(state.get("strike_count") or 0) + 1
+        state["violation_count"] = 0
+    return int(state["violation_count"]), int(state["strike_count"])
 
 
 def record_ip_manual_review_incident(ip: str, scope: str, strikes: int, reason: str, duration: int) -> None:
@@ -373,6 +508,7 @@ class AbuseDetectionMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         current_time = time.time()
         path = request.url.path
+        account_key, account_type, role = account_from_request(request, client_ip)
         
         # Check IP reputation if enabled (only for first request from each IP to reduce load)
         if ENABLE_IP_REPUTATION and client_ip not in request_history:
@@ -400,17 +536,45 @@ class AbuseDetectionMiddleware(BaseHTTPMiddleware):
                 pass  # If reputation check fails, continue normally
 
         scope, threshold, window = rate_limit_for_path(path)
-        history_key = f"{client_ip}:{scope}"
+        restricted_until = float(account_rate_limit_state[account_key]["restricted_until_by_scope"].get(scope) or 0)
+        if restricted_until > current_time:
+            remaining = int(restricted_until - current_time)
+            return JSONResponse(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                content={
+                    "detail": "Account functionality is temporarily restricted.",
+                    "scope": scope,
+                    "account_id": account_key,
+                    "account_type": account_type,
+                    "retry_after": remaining,
+                },
+                headers={"Retry-After": str(remaining)}
+            )
+        history_key = f"{account_key}:{scope}"
         endpoint_request_history[history_key] = prune_timestamps(endpoint_request_history[history_key], current_time, window)
         if len(endpoint_request_history[history_key]) >= threshold:
-            strikes = register_block_strike(client_ip, current_time)
-            duration = temporary_block_duration(strikes)
-            return block_response(
-                client_ip,
-                duration,
-                scope,
-                strikes,
-                f"Rate limit exceeded: {threshold} {scope} request(s) in {window} seconds"
+            violations, strikes = register_account_violation(account_key, current_time)
+            if strikes and violations == 0:
+                duration = temporary_block_duration(strikes)
+                return account_restriction_response(
+                    account_key,
+                    account_type,
+                    role,
+                    duration,
+                    scope,
+                    strikes,
+                    f"Rate limit exceeded: {threshold} {scope} request(s) in {window} seconds"
+                )
+            return JSONResponse(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                content={
+                    "detail": "Rate limit exceeded. Three violations create one account strike.",
+                    "scope": scope,
+                    "account_id": account_key,
+                    "account_type": account_type,
+                    "violation_count": violations,
+                    "violations_until_strike": max(0, 3 - violations),
+                },
             )
         endpoint_request_history[history_key].append(current_time)
         request_history[client_ip] = prune_timestamps(request_history[client_ip], current_time, ABUSE_WINDOW)
@@ -418,29 +582,19 @@ class AbuseDetectionMiddleware(BaseHTTPMiddleware):
 
         failed_auth_history[client_ip] = prune_timestamps(failed_auth_history[client_ip], current_time, AUTH_ABUSE_WINDOW)
         if is_login_path(path) and len(failed_auth_history[client_ip]) >= AUTH_ABUSE_THRESHOLD:
-            strikes = register_block_strike(client_ip, current_time)
-            duration = temporary_block_duration(strikes)
-            return block_response(
-                client_ip,
-                duration,
-                "authentication_failed",
-                strikes,
-                f"Failed-login limit exceeded: {AUTH_ABUSE_THRESHOLD} failed attempt(s) in {AUTH_ABUSE_WINDOW} seconds"
-            )
+            violations, strikes = register_account_violation(account_key, current_time)
+            if strikes and violations == 0:
+                duration = temporary_block_duration(strikes)
+                return account_restriction_response(account_key, account_type, role, duration, "authentication_failed", strikes, f"Failed-login limit exceeded: {AUTH_ABUSE_THRESHOLD} failed attempt(s) in {AUTH_ABUSE_WINDOW} seconds")
         
         response = await call_next(request)
         if is_login_path(path) and response.status_code in {400, 401, 403, 422}:
             failed_auth_history[client_ip].append(current_time)
             if len(failed_auth_history[client_ip]) >= AUTH_ABUSE_THRESHOLD:
-                strikes = register_block_strike(client_ip, current_time)
-                duration = temporary_block_duration(strikes)
-                return block_response(
-                    client_ip,
-                    duration,
-                    "authentication_failed",
-                    strikes,
-                    f"Failed-login limit exceeded: {AUTH_ABUSE_THRESHOLD} failed attempt(s) in {AUTH_ABUSE_WINDOW} seconds"
-                )
+                violations, strikes = register_account_violation(account_key, current_time)
+                if strikes and violations == 0:
+                    duration = temporary_block_duration(strikes)
+                    return account_restriction_response(account_key, account_type, role, duration, "authentication_failed", strikes, f"Failed-login limit exceeded: {AUTH_ABUSE_THRESHOLD} failed attempt(s) in {AUTH_ABUSE_WINDOW} seconds")
         return response
 
 

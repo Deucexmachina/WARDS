@@ -1,1 +1,43 @@
-{"algorithm": "Isolation Forest", "strategy": "Continuous incremental retraining with Wazuh-fed admin activity", "normal_samples": 640, "historical_admin_samples": 0, "features": ["hour_of_day", "day_of_week", "session_duration", "file_size_change", "content_length", "special_chars_count", "admin_session_valid", "ip_consistent", "method_legitimate", "business_hours", "file_type_risk", "suspicious_pattern_score", "vpn_activity"], "updated_at": "2026-05-23T00:06:29.473906", "updated_by": "handoff_verification", "note": "Uses bootstrap normal data plus all historical validated admin behavior, including the newest verified records since the previous retrain."}
+﻿{
+  "algorithm": "Isolation Forest",
+  "strategy": "Continuous incremental retraining with Wazuh-fed admin activity and UEBA-aligned behavioral features",
+  "normal_samples": 640,
+  "historical_admin_samples": 0,
+  "features": [
+    "hour_of_day",
+    "day_of_week",
+    "session_duration",
+    "file_size_change",
+    "content_length",
+    "special_chars_count",
+    "admin_session_valid",
+    "mfa_verified",
+    "ip_consistent",
+    "source_ip_reputation",
+    "keystroke_dynamics",
+    "method_legitimate",
+    "business_hours",
+    "file_type_risk",
+    "suspicious_pattern_score",
+    "vpn_activity",
+    "first_time_device",
+    "first_time_country",
+    "geo_distance_from_last_login",
+    "unauthorized_admin_path",
+    "sensitive_config_change",
+    "backup_restore_activity",
+    "mfa_configuration_change",
+    "auth_system_modification"
+  ],
+  "behavioral_profile": {
+    "sample_count": 0,
+    "normal_hours": [],
+    "normal_weekdays": [],
+    "common_extensions": [],
+    "common_roots": [],
+    "known_source_ips": []
+  },
+  "updated_at": "2026-06-09T17:05:00",
+  "updated_by": "ueba_rule_update",
+  "note": "Uses bootstrap normal data plus historical validated admin behavior. UEBA rules emphasize identity assurance, geolocation/device anomalies, sensitive path changes, and recovery/authentication abuse while temporary Add AI rule defacement templates were removed."
+}
