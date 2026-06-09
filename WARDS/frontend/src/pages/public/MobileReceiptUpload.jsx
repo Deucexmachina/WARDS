@@ -64,6 +64,14 @@ const MobileReceiptUpload = () => {
   }, [cameraActive]);
 
   const updateSelectedFile = (nextFile) => {
+    if (nextFile) {
+      const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/jpg'];
+      if (!ALLOWED_TYPES.includes(nextFile.type)) {
+        setError('Only PNG and JPEG files are allowed.');
+        setMessage('');
+        return;
+      }
+    }
     setFile(nextFile);
     setError('');
     setMessage('');
@@ -343,7 +351,7 @@ const MobileReceiptUpload = () => {
                         Choose Different File
                         <input
                           type="file"
-                          accept="image/*"
+                          accept="image/png,image/jpeg"
                           capture="environment"
                           onChange={(event) => updateSelectedFile(event.target.files?.[0] || null)}
                           className="hidden"

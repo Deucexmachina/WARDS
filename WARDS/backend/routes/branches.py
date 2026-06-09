@@ -45,54 +45,19 @@ from utils.security_validation import (
     normalize_username,
     validate_strong_password,
 )
+from utils.branch_window_config import (
+    MAX_QUEUE_WINDOW_ACCOUNTS,
+    STANDARD_SERVICE_LABELS,
+    default_assigned_window_number as resolve_default_assigned_window_number,
+    default_service_window_for_position,
+    get_default_window_label,
+    get_service_window_display_label,
+    normalize_service_window as normalize_window_service_code,
+)
 from utils.rbac import require_permission
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-SERVICE_WINDOW_ALIASES = {
-    "RPT": "RPT",
-    "REAL_PROPERTY_TAX": "RPT",
-    "BT": "BUSINESS",
-    "BUSINESS": "BUSINESS",
-    "BUSINESS_TAX": "BUSINESS",
-    "MISC": "MISC",
-    "MISCELLANEOUS": "MISC",
-    "QW4": "QW4",
-    "QUEUE_WINDOW_4": "QW4",
-    "QW5": "QW5",
-    "QUEUE_WINDOW_5": "QW5",
-}
-SERVICE_WINDOW_SEQUENCE = ["RPT", "BUSINESS", "MISC", "QW4", "QW5"]
-SERVICE_WINDOW_LABELS = {
-    "RPT": "RPT Window",
-    "BUSINESS": "BT Window",
-    "MISC": "MISC Window",
-    "QW4": "Queue Window 4",
-    "QW5": "Queue Window 5",
-}
-SERVICE_ROLE_LABELS = {
-    "RPT": "RPT",
-    "BUSINESS": "BT",
-    "MISC": "MISC",
-}
-RESERVED_CUSTOM_WINDOW_LABELS = {
-    "RPT",
-    "RPT_WINDOW",
-    "REAL_PROPERTY_TAX",
-    "REAL_PROPERTY_TAX_WINDOW",
-    "BT",
-    "BT_WINDOW",
-    "BUSINESS",
-    "BUSINESS_WINDOW",
-    "BUSINESS_TAX",
-    "BUSINESS_TAX_WINDOW",
-    "MISC",
-    "MISC_WINDOW",
-    "MISCELLANEOUS",
-    "MISCELLANEOUS_WINDOW",
-}
-MAX_QUEUE_WINDOW_ACCOUNTS = 5
-
 
 def slugify_branch_name(name: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
@@ -183,33 +148,14 @@ def serialize_branch(branch: Branch, db: Session) -> dict:
 
 
 def normalize_service_window(value: str) -> str:
-    normalized = re.sub(r"[^A-Za-z]+", "_", (value or "").strip().upper()).strip("_")
-    service_window = SERVICE_WINDOW_ALIASES.get(normalized)
-    if not service_window:
+    try:
+        return normalize_window_service_code(value)
+    except ValueError:
         raise HTTPException(status_code=400, detail=f"Unsupported service window: {value}")
-    return service_window
 
 
 def get_window_display_label(account: BranchStaff) -> str:
-    return account.service_window_label or SERVICE_WINDOW_LABELS.get(account.service_window, account.service_window)
-
-
-def normalize_custom_window_label(value: Optional[str], assigned_window_number: int) -> str:
-    label = (value or "").strip()
-    if not label:
-        raise HTTPException(status_code=400, detail=f"Please enter a name for Window {assigned_window_number}.")
-    if len(label) > 80:
-        raise HTTPException(status_code=400, detail="Window name must be 80 characters or less.")
-    normalized_label = re.sub(r"[^A-Za-z0-9]+", "_", label.upper()).strip("_")
-    if normalized_label in RESERVED_CUSTOM_WINDOW_LABELS:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f'Window {assigned_window_number} custom name cannot be "{label}". '
-                "Please use a unique custom transaction name instead of RPT, BT, or MISC."
-            ),
-        )
-    return label
+    return get_service_window_display_label(account.service_window, account.service_window_label)
 
 
 def generate_window_username(db: Session, branch_name: str, assigned_window_number: int) -> str:
@@ -225,7 +171,7 @@ def generate_window_username(db: Session, branch_name: str, assigned_window_numb
 
 
 def generate_window_password(service_window: str) -> str:
-    service_slug = "Bt" if service_window == "BUSINESS" else service_window.title()
+    service_slug = get_service_window_display_label(service_window).replace(" ", "")
     return f"Wards!{service_slug}{secrets.token_hex(4)}9"
 
 
@@ -237,15 +183,36 @@ def generate_window_full_name(branch_name: str, window_label: str) -> str:
     return f"{branch_name} {window_label} Staff"
 
 
+def build_window_account_delivery_payload(
+    *,
+    username: str,
+    email: str,
+    full_name: str,
+    service_window: str,
+    assigned_window_number: int,
+    window_label: str,
+    temporary_password: str | None,
+) -> dict:
+    return {
+        "service_window": service_window,
+        "assigned_window_number": assigned_window_number,
+        "window_label": window_label,
+        "username": username,
+        "email": email,
+        "full_name": full_name,
+        "status": "Active",
+        "account_scope": "queue_window",
+        "temporary_password": temporary_password,
+        "mfa_required": True,
+    }
+
+
 def normalize_counter_count(counters: int) -> int:
     return max(1, min(int(counters or 1), MAX_QUEUE_WINDOW_ACCOUNTS))
 
 
 def default_assigned_window_number(service_window: Optional[str]) -> int:
-    try:
-        return SERVICE_WINDOW_SEQUENCE.index(service_window or "") + 1
-    except ValueError:
-        return 3
+    return resolve_default_assigned_window_number(service_window)
 
 
 def normalize_assigned_window_number(value: Optional[int], fallback_service_window: Optional[str] = None) -> int:
@@ -254,9 +221,9 @@ def normalize_assigned_window_number(value: Optional[int], fallback_service_wind
     try:
         window_number = int(value)
     except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="Assigned window must be a number from 1 to 5.")
+        raise HTTPException(status_code=400, detail=f"Assigned window must be a number from 1 to {MAX_QUEUE_WINDOW_ACCOUNTS}.")
     if window_number < 1 or window_number > MAX_QUEUE_WINDOW_ACCOUNTS:
-        raise HTTPException(status_code=400, detail="Assigned window must be between 1 and 5.")
+        raise HTTPException(status_code=400, detail=f"Assigned window must be between 1 and {MAX_QUEUE_WINDOW_ACCOUNTS}.")
     return window_number
 
 
@@ -267,6 +234,7 @@ def clear_branch_mfa_secret(db: Session, username: str):
 
 
 class BranchWindowAccountCreate(BaseModel):
+    id: Optional[int] = None
     service_window: str
     assigned_window_number: Optional[int] = None
     custom_label: Optional[str] = None
@@ -310,27 +278,25 @@ def normalize_window_accounts_payload(
     used_assigned_window_numbers: set[int] = set()
     for index in range(normalized_counter_count):
         requested = requested_window_accounts[index] if index < len(requested_window_accounts) else None
+        fallback_service_window = default_service_window_for_position(index)
         assigned_window_number = normalize_assigned_window_number(
             requested.assigned_window_number if requested else index + 1,
-            SERVICE_WINDOW_SEQUENCE[index],
+            fallback_service_window,
         )
         if assigned_window_number in used_assigned_window_numbers:
             raise HTTPException(status_code=400, detail=f"Window {assigned_window_number} is already assigned to another queue window staff account.")
         used_assigned_window_numbers.add(assigned_window_number)
-        requested_role = (requested.service_window if requested else SERVICE_WINDOW_SEQUENCE[index] or "").strip().upper()
+        requested_role = (requested.service_window if requested else fallback_service_window or "").strip().upper()
         if requested_role == "OTHER":
-            if assigned_window_number not in (4, 5):
-                raise HTTPException(status_code=400, detail="Other queue windows are only available for Window 4 and Window 5.")
-            service_window = f"QW{assigned_window_number}"
-            window_label = normalize_custom_window_label(requested.custom_label if requested else None, assigned_window_number)
-        else:
-            service_window = normalize_service_window(requested.service_window) if requested else SERVICE_WINDOW_SEQUENCE[index]
-            window_label = SERVICE_WINDOW_LABELS.get(service_window, service_window)
+            raise HTTPException(status_code=400, detail="Custom service windows are no longer supported in branch setup. Please assign one of the standard services.")
+        service_window = normalize_service_window(requested.service_window) if requested else fallback_service_window
+        window_label = get_default_window_label(service_window)
         if service_window in used_service_windows:
-            role_label = SERVICE_ROLE_LABELS.get(service_window, window_label)
+            role_label = STANDARD_SERVICE_LABELS.get(service_window, window_label)
             raise HTTPException(status_code=400, detail=f"{role_label} is already assigned to another window in this branch setup.")
         used_service_windows.add(service_window)
         normalized_window_accounts.append({
+            "id": requested.id if requested else None,
             "service_window": service_window,
             "assigned_window_number": assigned_window_number,
             "window_label": window_label,
@@ -551,18 +517,15 @@ async def create_branch(
         clear_branch_mfa_secret(db, generated_username)
         db.flush()
 
-        window_account_deliveries.append({
-            "service_window": window_account["service_window"],
-            "assigned_window_number": window_account["assigned_window_number"],
-            "window_label": window_account["window_label"],
-            "username": generated_username,
-            "email": generated_email,
-            "full_name": staff_full_name,
-            "status": "Active",
-            "account_scope": "queue_window",
-            "temporary_password": generated_password,
-            "mfa_required": True,
-        })
+        window_account_deliveries.append(build_window_account_delivery_payload(
+            username=generated_username,
+            email=generated_email,
+            full_name=staff_full_name,
+            service_window=window_account["service_window"],
+            assigned_window_number=window_account["assigned_window_number"],
+            window_label=window_account["window_label"],
+            temporary_password=generated_password,
+        ))
         db.add(ActivityLog(
             action="Branch Window Account Generated",
             user=current_user.username,
@@ -657,22 +620,124 @@ async def update_branch(
         .order_by(BranchStaff.assigned_window_number.asc(), BranchStaff.id.asc())
         .all()
     )
-    if len(existing_window_accounts) < normalized_counter_count:
-        raise HTTPException(status_code=400, detail="This branch is missing queue window staff accounts. Please recreate the branch windows before editing assignments.")
+    existing_by_id = {account.id: account for account in existing_window_accounts}
+    unclaimed_accounts = [account for account in existing_window_accounts]
+    reserved_emails = {account.email for account in existing_window_accounts if account.email}
+    window_account_deliveries = []
+    credentials_resent = False
 
-    for index, window_account in enumerate(normalized_window_accounts):
-        staff_account = existing_window_accounts[index]
-        staff_account.service_window = window_account["service_window"]
-        staff_account.service_window_label = window_account["window_label"]
-        staff_account.assigned_window_number = window_account["assigned_window_number"]
-        staff_account.status = "Active"
+    assigned_existing_ids: set[int] = set()
 
-    for index, staff_account in enumerate(existing_window_accounts):
-        if index < normalized_counter_count:
+    for window_account in normalized_window_accounts:
+        staff_account = None
+        requested_id = window_account.get("id")
+        if requested_id:
+            staff_account = existing_by_id.get(requested_id)
+            if not staff_account:
+                raise HTTPException(status_code=400, detail="A selected queue window staff account no longer exists for this branch.")
+        elif unclaimed_accounts:
+            staff_account = unclaimed_accounts[0]
+
+        if staff_account:
+            previous_service_window = staff_account.service_window
+            previous_assigned_window_number = staff_account.assigned_window_number
+            previous_window_label = get_window_display_label(staff_account)
+            staff_account.service_window = window_account["service_window"]
+            staff_account.service_window_label = window_account["window_label"]
+            staff_account.assigned_window_number = window_account["assigned_window_number"]
+            staff_account.full_name = generate_window_full_name(normalized_name, window_account["window_label"])
+            staff_account.status = "Active"
+            if (
+                previous_service_window != staff_account.service_window
+                or previous_assigned_window_number != staff_account.assigned_window_number
+                or previous_window_label != get_window_display_label(staff_account)
+            ):
+                refreshed_password = generate_window_password(window_account["service_window"])
+                staff_account.hashed_password = pwd_context.hash(refreshed_password)
+                clear_branch_mfa_secret(db, staff_account.username)
+                credentials_resent = True
+                window_account_deliveries.append(build_window_account_delivery_payload(
+                    username=staff_account.username,
+                    email=staff_account.email,
+                    full_name=staff_account.full_name,
+                    service_window=staff_account.service_window,
+                    assigned_window_number=staff_account.assigned_window_number,
+                    window_label=get_window_display_label(staff_account),
+                    temporary_password=refreshed_password,
+                ))
+            assigned_existing_ids.add(staff_account.id)
+            if staff_account in unclaimed_accounts:
+                unclaimed_accounts.remove(staff_account)
+            continue
+
+        generated_username = generate_window_username(
+            db,
+            branch_name=normalized_name,
+            assigned_window_number=window_account["assigned_window_number"],
+        )
+        generated_password = generate_window_password(window_account["service_window"])
+        generated_email = generate_window_internal_email(generated_username)
+        if generated_email in reserved_emails:
+            raise HTTPException(status_code=400, detail="Generated branch staff email alias collided with an existing branch account.")
+        ensure_email_is_unique(db, generated_email)
+        reserved_emails.add(generated_email)
+
+        staff_user = BranchStaff(
+            username=generated_username,
+            email=generated_email,
+            full_name=generate_window_full_name(normalized_name, window_account["window_label"]),
+            hashed_password=pwd_context.hash(generated_password),
+            role="branch_staff",
+            branch_id=db_branch.id,
+            account_scope="queue_window",
+            service_window=window_account["service_window"],
+            service_window_label=window_account["window_label"],
+            assigned_window_number=window_account["assigned_window_number"],
+            is_verified=True,
+            status="Active",
+        )
+        db.add(staff_user)
+        clear_branch_mfa_secret(db, generated_username)
+        credentials_resent = True
+        window_account_deliveries.append(build_window_account_delivery_payload(
+            username=generated_username,
+            email=generated_email,
+            full_name=staff_user.full_name,
+            service_window=staff_user.service_window,
+            assigned_window_number=staff_user.assigned_window_number,
+            window_label=get_window_display_label(staff_user),
+            temporary_password=generated_password,
+        ))
+
+    for staff_account in existing_window_accounts:
+        if staff_account.id in assigned_existing_ids:
             continue
         staff_account.status = "Inactive"
 
     apply_branch_security_fields(db_branch)
+    email_delivery = None
+    if credentials_resent:
+        branch_admin = (
+            db.query(BranchStaff)
+            .filter(BranchStaff.branch_id == db_branch.id, BranchStaff.role == "branch_admin")
+            .order_by(BranchStaff.created_at.desc())
+            .first()
+        )
+        if branch_admin:
+            email_delivery = send_branch_access_email(
+                recipient_email=branch_admin.email,
+                branch_name=normalized_name,
+                login_email=branch_admin.email,
+                password=None,
+                dashboard_url=db_branch.dashboard_url,
+                queue_accounts=window_account_deliveries,
+            )
+            db.add(ActivityLog(
+                action="Branch Window Credentials Email",
+                user=current_user.username,
+                details=f"{(email_delivery or {}).get('status', 'sent').upper()} to {branch_admin.email} for updated queue window assignments in {normalized_name}",
+                type="admin",
+            ))
     
     log = ActivityLog(
         action="Branch Updated",
@@ -684,8 +749,13 @@ async def update_branch(
     db.commit()
     db.refresh(db_branch)
     ensure_branch_dashboard_url(db_branch)
-    
-    return serialize_branch(db_branch, db)
+
+    response_payload = serialize_branch(db_branch, db)
+    response_payload.update({
+        "email_delivery": email_delivery,
+        "window_accounts_updated": window_account_deliveries,
+    })
+    return response_payload
 
 @router.delete("/{branch_id}")
 async def delete_branch(

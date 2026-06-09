@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 
 from services.ocr_runtime import run_ocr_in_executor
 from services.ocr_service import OCRProcessingError, ocr_service
+from utils.file_validation import validate_upload_file
 
 router = APIRouter()
 
@@ -19,6 +20,11 @@ async def process_receipt_ocr(
     category: str = Form("RPT"),
 ):
     image_data = await file.read()
+    validate_upload_file(
+        file,
+        image_data,
+        allowed_extensions={".jpg", ".jpeg", ".png"},
+    )
     os.makedirs(UPLOAD_DIR, exist_ok=True)
 
     original_name = os.path.basename(file.filename or "receipt.jpg")

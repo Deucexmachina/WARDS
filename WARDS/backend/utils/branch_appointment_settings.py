@@ -15,6 +15,11 @@ from database.models import (
     Policy,
     Queue,
 )
+from utils.branch_window_config import (
+    get_branch_window_metadata,
+    get_service_window_display_label,
+    infer_service_window,
+)
 from utils.field_crypto import get_decrypted_or_raw, hash_aware_any, hash_aware_match, queue_value
 from utils.branch_system_settings import get_branch_setting_value
 from utils.system_settings import get_setting_value
@@ -26,17 +31,6 @@ OVERRIDE_STATUSES = {"available", "unavailable", "holiday", "special_operations"
 APPOINTMENT_POLICY_CATEGORY = "Branch Appointment Schedule Updates"
 NO_VISIBLE_CHANGES_MESSAGE = "No visible scheduling changes were detected."
 ACTIVE_WINDOW_QUEUE_STATUSES = ("Pending", "Waiting", "Called", "Serving")
-SERVICE_WINDOW_RULES = {
-    "RPT": ("rpt", "real property", "amilyar", "property tax", "assessment"),
-    "BUSINESS": ("business", "mayor", "permit", "bt", "city tax", "garbage fee", "sanitary", "zoning", "occupancy"),
-}
-SERVICE_WINDOW_LABELS = {
-    "RPT": "RPT Window",
-    "BUSINESS": "BT Window",
-    "MISC": "MISC Window",
-    "QW4": "Queue Window 4",
-    "QW5": "Queue Window 5",
-}
 WINDOW_MAX_ACTIVE_CLIENTS = 5
 TRANSACTION_DURATION_MINUTES = 30
 
@@ -84,43 +78,15 @@ def _build_unavailable_message(service_name: str, reasons: list[dict], next_step
 
 
 def normalize_service_window(service_type: Optional[str]) -> str:
-    normalized = (service_type or "").strip().lower()
-    for service_window, keywords in SERVICE_WINDOW_RULES.items():
-        if any(keyword in normalized for keyword in keywords):
-            return service_window
-    return "MISC"
+    return infer_service_window(service_type)
 
 
 def normalize_service_window_for_branch(db: Session, branch_id: int, service_type: Optional[str]) -> str:
-    service_window = normalize_service_window(service_type)
-    if service_window != "MISC":
-        return service_window
-
-    normalized_service = " ".join((service_type or "").strip().casefold().split())
-    if not normalized_service:
-        return service_window
-
-    custom_window_accounts = (
-        db.query(BranchStaff)
-        .filter(
-            BranchStaff.branch_id == branch_id,
-            BranchStaff.role == "branch_staff",
-            BranchStaff.account_scope == "queue_window",
-            BranchStaff.service_window.in_(("QW4", "QW5")),
-            BranchStaff.status == "Active",
-        )
-        .all()
-    )
-    for account in custom_window_accounts:
-        normalized_label = " ".join((account.service_window_label or "").strip().casefold().split())
-        if normalized_label and normalized_label == normalized_service:
-            return account.service_window
-
-    return service_window
+    return get_branch_window_metadata(db, branch_id, service_type)["service_window"]
 
 
 def get_service_window_label(service_window: str) -> str:
-    return SERVICE_WINDOW_LABELS.get(service_window, f"{service_window} Window")
+    return get_service_window_display_label(service_window)
 
 
 def get_window_capacity_limit(db: Session, branch_id: int | None = None) -> int:

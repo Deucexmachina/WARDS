@@ -639,7 +639,10 @@ async def download_announcement_attachment(
         return Response(
             content=content,
             media_type=attachment.mime_type or "application/octet-stream",
-            headers={"Content-Disposition": f'attachment; filename="{attachment.original_filename}"'},
+            headers={
+                "Content-Disposition": f'attachment; filename="{attachment.original_filename}"',
+                "X-Content-Type-Options": "nosniff",
+            },
         )
     import os as _os
     if not _os.path.exists(attachment.file_path):
@@ -648,6 +651,7 @@ async def download_announcement_attachment(
         attachment.file_path,
         media_type=attachment.mime_type or "application/octet-stream",
         filename=attachment.original_filename,
+        headers={"X-Content-Type-Options": "nosniff"},
     )
 
 
@@ -657,7 +661,14 @@ async def preview_announcement_attachment(
     attachment_id: int,
     db: Session = Depends(get_db),
 ):
-    """Inline preview for browser-renderable types (images, PDFs)."""
+    """Inline preview for browser-renderable types (images, PDFs).
+    
+    Only serves inline preview for verified safe types (PDF, PNG, JPEG).
+    All other types are forced to download as attachment.
+    Sends X-Content-Type-Options: nosniff to prevent MIME sniffing.
+    """
+    from utils.file_validation import SafeFileType
+    
     attachment = (
         db.query(AnnouncementAttachment)
         .filter(
@@ -668,15 +679,35 @@ async def preview_announcement_attachment(
     )
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
+    
+    mime_type = attachment.mime_type or "application/octet-stream"
+    is_safe_preview = SafeFileType.is_safe_for_preview(mime_type)
+    
+    # For non-previewable types, force download as attachment
+    disposition = "inline" if is_safe_preview else "attachment"
+    
     content = attachment_bytes(attachment)
     if content is not None:
-        return Response(content=content, media_type=attachment.mime_type or "application/octet-stream")
+        headers = {
+            "Content-Disposition": f'{disposition}; filename="{attachment.original_filename}"',
+            "X-Content-Type-Options": "nosniff",
+        }
+        if not is_safe_preview:
+            headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
+        return Response(content=content, media_type=mime_type, headers=headers)
+    
     import os as _os
     if not _os.path.exists(attachment.file_path):
         raise HTTPException(status_code=404, detail="Attachment file is missing")
+    
     return FileResponse(
         attachment.file_path,
-        media_type=attachment.mime_type or "application/octet-stream",
+        media_type=mime_type,
+        filename=attachment.original_filename,
+        headers={
+            "Content-Disposition": f'{disposition}; filename="{attachment.original_filename}"',
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 

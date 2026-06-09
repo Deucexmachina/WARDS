@@ -352,13 +352,12 @@ const GetQueue = () => {
 
   const fetchData = async () => {
     try {
-      const [branchesRes, servicesRes] = await Promise.all([
+      const [branchesRes, statusRes] = await Promise.all([
         api.get('/public/branches'),
-        api.get('/public/services')
+        api.get('/public/system-status'),
       ]);
-      const statusRes = await api.get('/public/system-status');
       setBranches(branchesRes.data);
-      setServices(servicesRes.data);
+      setServices([]);
       setSystemStatus(statusRes.data);
       setLoading(false);
     } catch (error) {
@@ -431,17 +430,24 @@ const GetQueue = () => {
     }
   };
 
-  const handleBranchSelect = (branch) => {
-    setSelectedBranch(branch);
-    setQueueAnalysis(null);
-    setFormError('');
-    setAppointmentAvailability(null);
-    setAppointmentError('');
-    setFormData((current) => ({
-      ...current,
-      appointment_date: '',
-      appointment_slot: '',
-    }));
+  const handleBranchSelect = async (branch) => {
+    try {
+      const response = await api.get(`/public/branches/${branch.id}`);
+      setSelectedBranch(response.data);
+      setServices(response.data.services || []);
+      setQueueAnalysis(null);
+      setFormError('');
+      setAppointmentAvailability(null);
+      setAppointmentError('');
+      setFormData((current) => ({
+        ...current,
+        service_type: (response.data.services || []).some((service) => service.name === current.service_type) ? current.service_type : '',
+        appointment_date: '',
+        appointment_slot: '',
+      }));
+    } catch (error) {
+      setLoadError(error.response?.data?.detail || 'Failed to load branch services.');
+    }
   };
 
   const buildAppointmentDateTime = () => {
@@ -634,23 +640,9 @@ const GetQueue = () => {
     if (!queueResult) {
       return;
     }
-
-    const opened = printQueueTicket({
-      title: 'Queue Registration Receipt',
-      queueNumber: queueResult.queue_number,
-      branchName: queueResult.branch_name,
-      queueType: queueResult.queue_type,
-      serviceType: queueResult.service_type,
-      appointmentTime: queueResult.appointment_time,
-      recommendedArrival: queueResult.recommended_arrival,
-      estimatedWaitTime: queueResult.estimated_wait_time,
-      createdAt: queueResult.created_at,
-      taxpayerName: normalizeCitizenFullName(formData.taxpayer_name),
-      contactNumber: toCanonicalPhilippineContactNumber(formData.contact_number),
-      message: queueResult.message,
-    });
+    const opened = printQueueTicket();
     if (!opened) {
-      setFormError('Unable to open the print preview. Please allow pop-ups and try again.');
+      setFormError('Unable to print. Please try again.');
     }
   };
 
@@ -682,7 +674,7 @@ const GetQueue = () => {
     return (
       <div className="min-h-screen bg-gray-50 py-12">
         <div className="container mx-auto px-4 max-w-2xl">
-          <div className="bg-white rounded-xl shadow-lg p-8 text-center">
+          <div className="bg-white rounded-xl shadow-lg p-8 text-center" data-print-ticket>
             <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
               <svg className="w-12 h-12 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
@@ -828,7 +820,10 @@ const GetQueue = () => {
                   <p className="text-sm text-blue-600">{selectedBranch.location}</p>
                 </div>
                 <button
-                  onClick={() => setSelectedBranch(null)}
+                  onClick={() => {
+                    setSelectedBranch(null);
+                    setServices([]);
+                  }}
                   className="text-blue-600 hover:text-blue-800 font-semibold"
                 >
                   {language === 'en' ? 'Change' : 'Palitan'}
@@ -1092,7 +1087,10 @@ const GetQueue = () => {
 
               <div className="flex gap-4 mt-6">
                 <button
-                  onClick={() => setSelectedBranch(null)}
+                  onClick={() => {
+                    setSelectedBranch(null);
+                    setServices([]);
+                  }}
                   className="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-700 py-3 rounded-lg font-semibold"
                 >
                   {language === 'en' ? 'Back' : 'Bumalik'}

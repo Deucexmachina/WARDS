@@ -17,6 +17,7 @@ from typing import Iterable, List, Optional
 from fastapi import HTTPException, UploadFile
 
 from database.models import AnnouncementAttachment
+from utils.file_validation import SafeFileType, validate_upload_file
 
 # Legacy disk storage root. New attachments are stored in the database, but this
 # remains for old records created before DB-backed storage existed.
@@ -26,19 +27,12 @@ ATTACHMENT_ROOT = Path("uploads/announcements")
 MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024
 MAX_FILES_PER_ANNOUNCEMENT = 10
 
-# Allowed extensions and their associated mime prefixes.
-ALLOWED_EXTENSIONS = {
-    # Images
-    ".jpg", ".jpeg", ".png", ".gif", ".webp",
-    # Documents
-    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".csv",
-    # Optional video
-    ".mp4", ".mov", ".webm",
-    # Optional archives
-    ".zip",
-}
+# Allowed extensions: only browser-previewable safe types.
+# File signatures (magic bytes) are inspected server-side to verify actual content.
+ALLOWED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
 
-PREVIEW_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".pdf"}
+# Only PDF and images are safe for inline browser preview.
+PREVIEW_EXTENSIONS = {".jpg", ".jpeg", ".png", ".pdf"}
 
 
 def _safe_stem(filename: str) -> str:
@@ -83,15 +77,24 @@ def store_announcement_attachment(
 
     Caller is responsible for adding the returned instance to the DB session
     and committing the transaction.
+    
+    Uses file signature (magic bytes) inspection to verify the actual file type.
+    Rejects files whose content does not match the claimed extension or Content-Type.
     """
-    extension = _validate_upload(upload, file_bytes)
+    extension, verified_mime = validate_upload_file(
+        upload,
+        file_bytes,
+        allowed_extensions=ALLOWED_EXTENSIONS,
+        max_size_bytes=MAX_FILE_SIZE_BYTES,
+    )
 
     unique_id = uuid.uuid4().hex[:10]
     timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
     safe_stem = _safe_stem(upload.filename or "file")
     stored_name = f"{timestamp}_{unique_id}_{safe_stem}{extension}"
 
-    mime = upload.content_type or mimetypes.guess_type(upload.filename or "")[0]
+    # Use the verified MIME type from file signature inspection, not the client-supplied one.
+    mime = verified_mime
 
     return AnnouncementAttachment(
         announcement_id=announcement_id,

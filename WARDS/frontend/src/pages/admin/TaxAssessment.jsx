@@ -47,8 +47,8 @@ const statusTone = {
 const formatCurrency = (value) =>
   `PHP ${Number(value || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-const SUPPORTED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif', 'image/svg+xml']);
-const SUPPORTED_TEXT_TYPES = new Set(['text/plain', 'text/csv', 'application/json']);
+// Only preview types that the backend has verified as safe via file signature inspection.
+const BACKEND_SAFE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/jpg']);
 
 const getHeaderValue = (headers, headerName) => {
   if (!headers) {
@@ -78,22 +78,26 @@ const parseContentDispositionFilename = (contentDisposition) => {
   return plainMatch?.[1] || '';
 };
 
-const resolvePreviewType = (mimeType, fileName) => {
+/**
+ * Resolve preview type based ONLY on backend-verified MIME type.
+ * Never trust the filename extension alone for security.
+ * The backend inspects file signatures (magic bytes) to verify actual content.
+ * 
+ * Safe for preview: PDF, PNG, JPEG (images rendered via <img>, PDF via sandboxed iframe)
+ * Download-only: DOC, DOCX, TXT, CSV, JSON, SVG, HTML, XML, unknown types
+ */
+const resolvePreviewType = (mimeType, _fileName) => {
   const normalizedMime = String(mimeType || '').split(';')[0].trim().toLowerCase();
-  const normalizedName = String(fileName || '').toLowerCase();
 
-  if (normalizedMime === 'application/pdf' || normalizedName.endsWith('.pdf')) {
+  if (normalizedMime === 'application/pdf') {
     return 'pdf';
   }
 
-  if (SUPPORTED_IMAGE_TYPES.has(normalizedMime) || /\.(png|jpe?g|webp|gif|svg)$/i.test(normalizedName)) {
+  if (BACKEND_SAFE_IMAGE_TYPES.has(normalizedMime)) {
     return 'image';
   }
 
-  if (SUPPORTED_TEXT_TYPES.has(normalizedMime) || /\.(txt|csv|json)$/i.test(normalizedName)) {
-    return 'text';
-  }
-
+  // All other types: download-only, no inline preview
   return 'unsupported';
 };
 

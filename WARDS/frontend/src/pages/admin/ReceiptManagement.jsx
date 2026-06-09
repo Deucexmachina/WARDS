@@ -15,11 +15,21 @@ const ReceiptManagement = () => {
 
   const handleFileSelect = (e) => {
     const file = e.target.files[0];
-    if (file) {
-      setSelectedFile(file);
-      setPreviewUrl(URL.createObjectURL(file));
-      setUploadResult(null);
+    if (!file) return;
+
+    const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/jpg'];
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      setMessageModal({
+        tone: 'warning',
+        title: 'Invalid File Type',
+        message: 'Only PNG and JPEG files are allowed.',
+      });
+      return;
     }
+
+    setSelectedFile(file);
+    setPreviewUrl(URL.createObjectURL(file));
+    setUploadResult(null);
   };
 
   const handleUpload = async () => {
@@ -82,7 +92,7 @@ const ReceiptManagement = () => {
             <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
               <input
                 type="file"
-                accept="image/*"
+                accept="image/png,image/jpeg"
                 onChange={handleFileSelect}
                 disabled={uploading}
                 className="hidden"

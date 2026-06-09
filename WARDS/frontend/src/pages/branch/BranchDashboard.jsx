@@ -324,11 +324,11 @@ const BranchDashboard = () => {
               <label className="mb-2 block text-sm font-semibold text-gray-700">Attachment File</label>
               <input
                 type="file"
-                accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx"
+                accept=".pdf,.png,.jpg,.jpeg"
                 onChange={(event) => setAttachmentFile(event.target.files?.[0] || null)}
                 className="w-full rounded-lg border border-gray-300 px-4 py-3 file:mr-4 file:rounded-md file:border-0 file:bg-purple-100 file:px-4 file:py-2 file:font-semibold file:text-purple-700"
               />
-              <p className="mt-2 text-xs text-gray-500">Accepted files: PDF, image, DOC, or DOCX.</p>
+              <p className="mt-2 text-xs text-gray-500">Accepted files: PDF, PNG, or JPEG only.</p>
             </div>
 
             <label className="mt-4 flex items-center gap-3 text-sm text-gray-700">

@@ -1,4 +1,7 @@
-const isInlineFramePreview = (previewType) => previewType === 'pdf' || previewType === 'text';
+// Only PDF is safe for inline iframe preview.
+// Images are rendered via <img>, not iframe.
+// Text/HTML/SVG and all other types are download-only.
+const isInlineFramePreview = (previewType) => previewType === 'pdf';
 
 const FileViewerModal = ({
   open,
@@ -58,7 +61,13 @@ const FileViewerModal = ({
             </div>
           ) : isInlineFramePreview(previewType) && fileUrl ? (
             <div className="overflow-hidden rounded-[26px] border border-slate-200 bg-white">
-              <iframe src={fileUrl} title={title} className="h-[68vh] w-full" />
+              {/* Sandbox iframe to prevent any embedded scripts from executing */}
+              <iframe
+                src={fileUrl}
+                title={title}
+                className="h-[68vh] w-full"
+                sandbox=""
+              />
             </div>
           ) : (
             <div className="flex h-full min-h-[360px] flex-col items-center justify-center rounded-[26px] border border-slate-200 bg-white px-6 text-center">

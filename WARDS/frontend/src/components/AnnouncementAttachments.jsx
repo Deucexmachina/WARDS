@@ -192,7 +192,7 @@ export const AnnouncementAttachmentsField = ({
           </span>
         </div>
         <p className="mt-1 text-[11px] text-slate-500">
-          Images, PDF, DOCX, XLSX, PPTX, MP4, ZIP &middot; up to 25 MB each
+          PDF, PNG, JPEG &middot; up to 25 MB each
         </p>
       </div>
 

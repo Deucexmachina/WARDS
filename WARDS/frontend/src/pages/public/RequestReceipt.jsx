@@ -57,6 +57,9 @@ const TAX_TYPE_TRANSLATIONS = {
   RPT: { en: 'RPT', tl: 'RPT' },
   BUSINESS: { en: 'BT', tl: 'BT' },
   MISC: { en: 'MISC', tl: 'MISC' },
+  CTC: { en: 'CTC', tl: 'CTC' },
+  PTR: { en: 'PTR', tl: 'PTR' },
+  MARKET: { en: 'MARKET', tl: 'MARKET' },
 };
 
 const buildReceiptRequestStorageKey = (email) => {
@@ -73,6 +76,7 @@ const RequestReceipt = () => {
   const [language] = usePublicLanguage();
   const authenticatedProfileName = (storedUser?.full_name || '').trim();
   const [branches, setBranches] = useState([]);
+  const [branchServices, setBranchServices] = useState([]);
   const [requestStatus, setRequestStatus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [paying, setPaying] = useState(false);
@@ -366,6 +370,30 @@ const RequestReceipt = () => {
       });
   }, [activeReceiptRequestStorageKey, language, navigate, searchParams]);
 
+  useEffect(() => {
+    const selectedBranchId = Number(formData.branchId);
+    if (!selectedBranchId) {
+      setBranchServices([]);
+      return;
+    }
+
+    axios.get(`http://localhost:8000/api/public/branches/${selectedBranchId}`)
+      .then((response) => {
+        const nextServices = response.data?.services || [];
+        setBranchServices(nextServices);
+        setFormData((current) => ({
+          ...current,
+          taxType: nextServices.some((service) => service.name === current.taxType)
+            ? current.taxType
+            : (nextServices[0]?.name || current.taxType),
+        }));
+      })
+      .catch((err) => {
+        setBranchServices([]);
+        setError(err.response?.data?.detail || text.failedToLoadBranches);
+      });
+  }, [formData.branchId, text.failedToLoadBranches]);
+
   const handleInputChange = (event) => {
     const { name, value } = event.target;
 
@@ -454,18 +482,28 @@ const RequestReceipt = () => {
       checkoutWindow = window.open('', 'wardsReceiptCheckout');
 
       if (checkoutWindow) {
-        checkoutWindow.document.write(`
-          <html>
-            <head><title>${text.requestFeeCheckout}</title></head>
-            <body style="font-family: Arial, sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; background:#f8fafc; color:#1f2937;">
-              <div style="text-align:center; max-width:420px; padding:24px;">
-                <h2 style="margin-bottom:12px;">${text.openingPaymentWindow}</h2>
-                <p style="line-height:1.5;">${text.openingPaymentWindowDescription}</p>
-              </div>
-            </body>
-          </html>
-        `);
-        checkoutWindow.document.close();
+        // Build loading page with safe DOM APIs — no blob URL, no document.write
+        const doc = checkoutWindow.document;
+        doc.title = text.requestFeeCheckout;
+
+        const style = doc.createElement('style');
+        style.textContent = 'body{font-family:Arial,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f8fafc;color:#1f2937;}';
+        doc.head.appendChild(style);
+
+        const container = doc.createElement('div');
+        container.style.cssText = 'text-align:center;max-width:420px;padding:24px;';
+
+        const heading = doc.createElement('h2');
+        heading.style.marginBottom = '12px';
+        heading.textContent = text.openingPaymentWindow;
+
+        const paragraph = doc.createElement('p');
+        paragraph.style.lineHeight = '1.5';
+        paragraph.textContent = text.openingPaymentWindowDescription;
+
+        container.appendChild(heading);
+        container.appendChild(paragraph);
+        doc.body.appendChild(container);
       }
 
       const paymentContext = requestStatus || {};
@@ -608,9 +646,17 @@ const RequestReceipt = () => {
                         disabled={Boolean(systemStatus && (!systemStatus.receiptRequestEnabled || systemStatus.maintenanceMode))}
                         className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-blue-100"
                       >
-                        <option value="RPT">{localizeTaxType('RPT')}</option>
-                        <option value="BUSINESS">{localizeTaxType('BUSINESS')}</option>
-                        <option value="MISC">{localizeTaxType('MISC')}</option>
+                        {branchServices.length ? branchServices.map((service) => (
+                          <option key={service.code || service.name} value={service.name}>
+                            {localizeTaxType(service.name)}
+                          </option>
+                        )) : (
+                          <>
+                            <option value="RPT">{localizeTaxType('RPT')}</option>
+                            <option value="BUSINESS">{localizeTaxType('BUSINESS')}</option>
+                            <option value="MISC">{localizeTaxType('MISC')}</option>
+                          </>
+                        )}
                       </select>
                     </div>
 

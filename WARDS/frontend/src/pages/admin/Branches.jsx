@@ -58,43 +58,25 @@ const BRANCH_PRESETS = [
 
 const DEFAULT_PRESET_ID = BRANCH_PRESETS[0]?.id || 'custom';
 
-const WINDOW_ACCOUNT_OPTIONS = [
-  { key: 'W1', number: 1, label: 'Window 1', description: 'Queue-only staff account assigned to physical Window 1.' },
-  { key: 'W2', number: 2, label: 'Window 2', description: 'Queue-only staff account assigned to physical Window 2.' },
-  { key: 'W3', number: 3, label: 'Window 3', description: 'Queue-only staff account assigned to physical Window 3.' },
-  { key: 'W4', number: 4, label: 'Window 4', description: 'Queue-only staff account assigned to physical Window 4.' },
-  { key: 'W5', number: 5, label: 'Window 5', description: 'Queue-only staff account assigned to physical Window 5.' },
-];
+const WINDOW_ACCOUNT_OPTIONS = Array.from({ length: 6 }, (_, index) => {
+  const number = index + 1;
+  return {
+    key: `W${number}`,
+    number,
+    label: `Window ${number}`,
+    description: `Queue-only staff account assigned to physical Window ${number}.`,
+  };
+});
 
 const MAX_QUEUE_WINDOWS = WINDOW_ACCOUNT_OPTIONS.length;
 const SERVICE_WINDOW_CHOICES = [
   { key: 'RPT', label: 'RPT' },
   { key: 'BUSINESS', label: 'BT' },
   { key: 'MISC', label: 'MISC' },
+  { key: 'CTC', label: 'CTC' },
+  { key: 'PTR', label: 'PTR' },
+  { key: 'MARKET', label: 'MARKET' },
 ];
-const RESERVED_CUSTOM_WINDOW_LABELS = new Set([
-  'RPT',
-  'RPT_WINDOW',
-  'REAL_PROPERTY_TAX',
-  'REAL_PROPERTY_TAX_WINDOW',
-  'BT',
-  'BT_WINDOW',
-  'BUSINESS',
-  'BUSINESS_WINDOW',
-  'BUSINESS_TAX',
-  'BUSINESS_TAX_WINDOW',
-  'MISC',
-  'MISC_WINDOW',
-  'MISCELLANEOUS',
-  'MISCELLANEOUS_WINDOW',
-]);
-const DEFAULT_SERVICE_BY_WINDOW = {
-  W1: 'RPT',
-  W2: 'BUSINESS',
-  W3: 'MISC',
-  W4: 'OTHER',
-  W5: 'OTHER',
-};
 const MAPTILER_API_KEY = 'qLnRCrJMrms1Y3hUUiPv';
 const MAPTILER_STYLE_URL = `https://api.maptiler.com/maps/streets/style.json?key=${MAPTILER_API_KEY}`;
 const DEFAULT_MAP_CENTER = { lng: 121.0437, lat: 14.6760 };
@@ -137,59 +119,44 @@ const fetchMapTilerJson = async (url) => {
   return response.json();
 };
 
-const EMPTY_WINDOW_ACCOUNTS = {
-  W1: { assigned_window_number: 1, service_window: 'RPT' },
-  W2: { assigned_window_number: 2, service_window: 'BUSINESS' },
-  W3: { assigned_window_number: 3, service_window: 'MISC' },
-  W4: { assigned_window_number: 4, service_window: 'OTHER', custom_label: '' },
-  W5: { assigned_window_number: 5, service_window: 'OTHER', custom_label: '' },
-};
+const EMPTY_WINDOW_ACCOUNTS = WINDOW_ACCOUNT_OPTIONS.reduce((accumulator, option, index) => ({
+  ...accumulator,
+  [option.key]: {
+    id: null,
+    assigned_window_number: option.number,
+    service_window: SERVICE_WINDOW_CHOICES[index]?.key || 'RPT',
+  },
+}), {});
 
 const buildWindowAccountsState = (windowAccounts = []) => {
-  const nextState = {
-    ...EMPTY_WINDOW_ACCOUNTS,
-    W1: { ...EMPTY_WINDOW_ACCOUNTS.W1 },
-    W2: { ...EMPTY_WINDOW_ACCOUNTS.W2 },
-    W3: { ...EMPTY_WINDOW_ACCOUNTS.W3 },
-    W4: { ...EMPTY_WINDOW_ACCOUNTS.W4 },
-    W5: { ...EMPTY_WINDOW_ACCOUNTS.W5 },
-  };
+  const nextState = WINDOW_ACCOUNT_OPTIONS.reduce((accumulator, option) => ({
+    ...accumulator,
+    [option.key]: { ...EMPTY_WINDOW_ACCOUNTS[option.key] },
+  }), {});
 
-  windowAccounts.forEach((account) => {
-    const windowKey = `W${account.assigned_window_number}`;
-    if (!nextState[windowKey]) {
+  windowAccounts.forEach((account, index) => {
+    const rowKey = WINDOW_ACCOUNT_OPTIONS[index]?.key;
+    if (!rowKey || !nextState[rowKey]) {
       return;
     }
 
-    const serviceWindow = account.service_window === 'QW4' || account.service_window === 'QW5'
-      ? 'OTHER'
-      : account.service_window;
-
-    nextState[windowKey] = {
-      ...nextState[windowKey],
-      assigned_window_number: account.assigned_window_number || nextState[windowKey].assigned_window_number,
-      service_window: serviceWindow,
-      custom_label: serviceWindow === 'OTHER' ? (account.service_window_label || '') : '',
+    nextState[rowKey] = {
+      ...nextState[rowKey],
+      id: account.id || null,
+      assigned_window_number: account.assigned_window_number || nextState[rowKey].assigned_window_number,
+      service_window: (account.service_window || '').toUpperCase() || nextState[rowKey].service_window,
     };
   });
 
   return nextState;
 };
 
-const normalizeCustomWindowLabelKey = (value) => (
-  (value || '')
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-);
-
 const EMPTY_BRANCH_FORM = {
   name: BRANCH_PRESETS[0]?.name || '',
   location: BRANCH_PRESETS[0]?.location || '',
   contact: BRANCH_PRESETS[0]?.contact || '',
   dashboard_url: buildBranchDashboardUrl(BRANCH_PRESETS[0]?.name || 'branch'),
-  counters: 1,
+  counters: MAX_QUEUE_WINDOWS,
   status: 'Active',
   admin_username: '',
   admin_email: '',
@@ -235,42 +202,24 @@ const Branches = () => {
   const mapMarkerRef = useRef(null);
 
   const getNormalizedCounterCount = (value) => {
-    const parsed = Number.parseInt(value, 10);
-    if (Number.isNaN(parsed)) {
-      return 1;
-    }
-    return Math.min(Math.max(parsed, 1), MAX_QUEUE_WINDOWS);
+    return MAX_QUEUE_WINDOWS;
   };
 
-  const getActiveWindowOptions = () => WINDOW_ACCOUNT_OPTIONS.slice(0, getNormalizedCounterCount(formData.counters));
+  const getActiveWindowOptions = () => WINDOW_ACCOUNT_OPTIONS.slice(0, MAX_QUEUE_WINDOWS);
 
-  const getSelectedServiceWindow = (windowKey) => (
-    windowAccounts[windowKey]?.service_window || DEFAULT_SERVICE_BY_WINDOW[windowKey] || 'MISC'
-  );
-
-  const getSelectedAssignedWindowNumber = (windowKey, fallbackNumber) => {
-    const parsed = Number(windowAccounts[windowKey]?.assigned_window_number);
+  const getSelectedAssignedWindowNumber = (rowKey, fallbackNumber) => {
+    const parsed = Number(windowAccounts[rowKey]?.assigned_window_number);
     return Number.isInteger(parsed) && parsed > 0 ? parsed : fallbackNumber;
   };
 
-  const getUsedServiceWindows = (currentWindowKey) => {
-    const used = new Set();
-    getActiveWindowOptions().forEach((option) => {
-      if (option.key === currentWindowKey) {
-        return;
-      }
-      const selectedServiceWindow = getSelectedServiceWindow(option.key);
-      if (selectedServiceWindow && selectedServiceWindow !== 'OTHER') {
-        used.add(selectedServiceWindow);
-      }
-    });
-    return used;
-  };
+  const getSelectedServiceWindow = (rowKey) => (
+    windowAccounts[rowKey]?.service_window || EMPTY_WINDOW_ACCOUNTS[rowKey]?.service_window || 'RPT'
+  );
 
-  const getUsedAssignedWindowNumbers = (currentWindowKey) => {
+  const getUsedAssignedWindowNumbers = (currentRowKey) => {
     const used = new Set();
-    getActiveWindowOptions().forEach((option) => {
-      if (option.key === currentWindowKey) {
+    WINDOW_ACCOUNT_OPTIONS.forEach((option) => {
+      if (option.key === currentRowKey) {
         return;
       }
       used.add(getSelectedAssignedWindowNumber(option.key, option.number));
@@ -278,21 +227,54 @@ const Branches = () => {
     return used;
   };
 
-  const isServiceChoiceUnavailable = (windowKey, choiceKey) => (
-    choiceKey !== 'OTHER' && getUsedServiceWindows(windowKey).has(choiceKey)
+  const getUsedServiceWindows = (currentRowKey) => {
+    const used = new Set();
+    WINDOW_ACCOUNT_OPTIONS.forEach((option) => {
+      if (option.key === currentRowKey) {
+        return;
+      }
+      used.add(getSelectedServiceWindow(option.key));
+    });
+    return used;
+  };
+
+  const isAssignedWindowNumberUnavailable = (rowKey, windowNumber) => (
+    getUsedAssignedWindowNumbers(rowKey).has(windowNumber)
   );
 
-  const isAssignedWindowNumberUnavailable = (windowKey, windowNumber) => (
-    getUsedAssignedWindowNumbers(windowKey).has(windowNumber)
+  const isServiceWindowUnavailable = (rowKey, serviceWindow) => (
+    getUsedServiceWindows(rowKey).has(serviceWindow)
   );
 
-  const handleWindowAccountChange = (windowKey, field, value) => {
+  const getAssignmentConflicts = (rowKey) => {
+    const selectedWindow = getSelectedAssignedWindowNumber(
+      rowKey,
+      EMPTY_WINDOW_ACCOUNTS[rowKey]?.assigned_window_number || 1,
+    );
+    const selectedService = getSelectedServiceWindow(rowKey);
+
+    const conflictingWindowRow = WINDOW_ACCOUNT_OPTIONS.find((option) => (
+      option.key !== rowKey
+      && getSelectedAssignedWindowNumber(option.key, option.number) === selectedWindow
+    ));
+    const conflictingServiceRow = WINDOW_ACCOUNT_OPTIONS.find((option) => (
+      option.key !== rowKey
+      && getSelectedServiceWindow(option.key) === selectedService
+    ));
+
+    return {
+      conflictingWindowRow,
+      conflictingServiceRow,
+      hasConflict: Boolean(conflictingWindowRow || conflictingServiceRow),
+    };
+  };
+
+  const handleWindowAccountChange = (rowKey, field, value) => {
     setWindowAccounts((previous) => ({
       ...previous,
-      [windowKey]: {
-        ...(previous[windowKey] || {}),
+      [rowKey]: {
+        ...(previous[rowKey] || {}),
         [field]: value,
-        ...(field === 'service_window' && value !== 'OTHER' ? { custom_label: '' } : {}),
       },
     }));
     if (modalError) {
@@ -305,37 +287,23 @@ const Branches = () => {
       .slice(0, counterCount)
       .map((option) => {
         const account = windowAccounts[option.key] || {};
-        const serviceWindow = account.service_window || DEFAULT_SERVICE_BY_WINDOW[option.key] || 'MISC';
+        const serviceWindow = account.service_window || EMPTY_WINDOW_ACCOUNTS[option.key]?.service_window || 'RPT';
         return {
+          id: account.id || undefined,
           service_window: serviceWindow,
           assigned_window_number: getSelectedAssignedWindowNumber(option.key, option.number),
-          custom_label: serviceWindow === 'OTHER' ? (account.custom_label || '').trim() : undefined,
         };
       })
   );
 
   const validateWindowAccountPayload = (windowAccountPayload) => {
-    const usedServiceWindows = new Set();
     const usedAssignedWindowNumbers = new Set();
+    const usedServiceWindows = new Set();
     for (const account of windowAccountPayload) {
       if (usedAssignedWindowNumbers.has(account.assigned_window_number)) {
         return `Window ${account.assigned_window_number} is already assigned to another queue window staff account.`;
       }
       usedAssignedWindowNumbers.add(account.assigned_window_number);
-
-      if (account.service_window === 'OTHER') {
-        if (![4, 5].includes(account.assigned_window_number)) {
-          return 'Other queue windows are only available for Window 4 and Window 5.';
-        }
-        if (!account.custom_label) {
-          return `Please enter a name for Window ${account.assigned_window_number}.`;
-        }
-        if (RESERVED_CUSTOM_WINDOW_LABELS.has(normalizeCustomWindowLabelKey(account.custom_label))) {
-          return `Window ${account.assigned_window_number} custom name cannot be "${account.custom_label}". Please use a unique custom transaction name instead of RPT, BT, or MISC.`;
-        }
-        continue;
-      }
-
       if (usedServiceWindows.has(account.service_window)) {
         const label = SERVICE_WINDOW_CHOICES.find((choice) => choice.key === account.service_window)?.label || account.service_window;
         return `${label} is already assigned to another window.`;
@@ -435,6 +403,7 @@ const Branches = () => {
     setFormData({
       ...EMPTY_BRANCH_FORM,
       ...branch,
+      counters: MAX_QUEUE_WINDOWS,
       dashboard_url: branch.dashboard_url || buildBranchDashboardUrl(branch.name || 'branch'),
       admin_password: '',
     });
@@ -536,7 +505,7 @@ const Branches = () => {
             name: formData.name,
             location: formData.location,
             contact: formData.contact,
-            counters: formData.counters,
+            counters: getNormalizedCounterCount(formData.counters),
             status: formData.status,
             window_accounts: editWindowAccounts,
           },
@@ -759,7 +728,7 @@ const Branches = () => {
       setAuthModalError('');
 
       if (authModal.mode === 'edit' && pendingBranchSave) {
-        await api.put(`/branches/${pendingBranchSave.branchId}`, {
+        const response = await api.put(`/branches/${pendingBranchSave.branchId}`, {
           ...pendingBranchSave.payload,
           current_admin_password: authModal.password,
         });
@@ -769,7 +738,11 @@ const Branches = () => {
         setSelectedPreset('custom');
         setFormData(EMPTY_BRANCH_FORM);
         setWindowAccounts(EMPTY_WINDOW_ACCOUNTS);
-        setSuccessMessage('Branch updated successfully.');
+        if (response.data?.email_delivery?.message) {
+          setSuccessMessage(`Branch updated successfully. ${response.data.email_delivery.message}`);
+        } else {
+          setSuccessMessage('Branch updated successfully.');
+        }
       }
 
       if (authModal.mode === 'delete' && authModal.branchId) {
@@ -1052,13 +1025,14 @@ const Branches = () => {
                   name="counters"
                   value={formData.counters}
                   onChange={handleInputChange}
-                  min="1"
+                  min={MAX_QUEUE_WINDOWS}
                   max={MAX_QUEUE_WINDOWS}
+                  readOnly
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
                 />
                 {!editingBranch && (
                   <p className="mt-2 text-sm text-gray-500">
-                    This count automatically defines the same number of queue-only branch staff accounts.
+                    This setup uses the fixed six standard branch services and preserves their assigned window mapping.
                   </p>
                 )}
               </div>
@@ -1138,22 +1112,24 @@ const Branches = () => {
                         : `Service counters and queue window staff accounts are the same setup here. If you set ${getNormalizedCounterCount(formData.counters)} service counter${getNormalizedCounterCount(formData.counters) > 1 ? 's' : ''}, the system will generate ${getNormalizedCounterCount(formData.counters)} queue-only branch staff account${getNormalizedCounterCount(formData.counters) > 1 ? 's' : ''}. The system automatically generates the login email addresses, passwords, and staff names, then includes those credentials in the same branch admin email verification message. Every generated queue account uses Microsoft Authenticator MFA on first login.`}
                     </div>
                   </div>
-                  {getActiveWindowOptions().map((option, index) => {
+                  {WINDOW_ACCOUNT_OPTIONS.map((option, index) => {
                     const selectedServiceWindow = getSelectedServiceWindow(option.key);
                     const selectedAssignedWindowNumber = getSelectedAssignedWindowNumber(option.key, option.number);
-                    const serviceChoices = selectedAssignedWindowNumber >= 4
-                      ? [...SERVICE_WINDOW_CHOICES, { key: 'OTHER', label: 'Other' }]
-                      : SERVICE_WINDOW_CHOICES;
+                    const serviceChoices = SERVICE_WINDOW_CHOICES;
+                    const selectedServiceLabel = SERVICE_WINDOW_CHOICES.find((choice) => choice.key === selectedServiceWindow)?.label || selectedServiceWindow;
+                    const assignmentConflicts = getAssignmentConflicts(option.key);
+                    const hasWindowConflict = Boolean(assignmentConflicts.conflictingWindowRow);
+                    const hasServiceConflict = Boolean(assignmentConflicts.conflictingServiceRow);
                     return (
                       <div key={option.key} className="md:col-span-2 rounded-xl border border-slate-200 p-4">
                         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                           <div className="flex items-start gap-3">
                             <div className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-sm font-bold text-white">
-                              {option.number}
+                              {index + 1}
                             </div>
                             <span>
-                              <span className="block text-base font-semibold text-slate-800">{option.label}</span>
-                              <span className="mt-1 block text-sm text-slate-500">{option.description}</span>
+                              <span className="block text-base font-semibold text-slate-800">Assignment {index + 1}</span>
+                              <span className="mt-1 block text-sm text-slate-500">Queue-only staff account that can be assigned to any available physical window and standard service.</span>
                             </span>
                           </div>
                           <div className="grid w-full gap-4 lg:w-[32rem] lg:grid-cols-2">
@@ -1162,54 +1138,62 @@ const Branches = () => {
                               <select
                                 value={selectedAssignedWindowNumber}
                                 onChange={(event) => handleWindowAccountChange(option.key, 'assigned_window_number', Number(event.target.value))}
-                                className="w-full rounded-lg border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-800 focus:border-transparent focus:ring-2 focus:ring-accent"
+                                className={`w-full rounded-lg border px-4 py-3 text-sm font-semibold text-slate-800 focus:border-transparent focus:ring-2 focus:ring-accent ${
+                                  hasWindowConflict ? 'border-red-500 bg-red-50' : 'border-slate-300'
+                                }`}
                               >
                                 {getActiveWindowOptions().map((windowOption) => (
                                   <option
                                     key={windowOption.number}
                                     value={windowOption.number}
-                                    disabled={isAssignedWindowNumberUnavailable(option.key, windowOption.number)}
                                   >
                                     Window {windowOption.number}
                                   </option>
                                 ))}
                               </select>
+                              {hasWindowConflict ? (
+                                <p className="mt-2 text-sm font-semibold text-red-600">
+                                  Window {selectedAssignedWindowNumber} is already assigned to another assignment.
+                                </p>
+                              ) : null}
                             </div>
                             <div>
                               <label className="mb-2 block text-sm font-semibold text-slate-700">Assigned Service</label>
                               <select
                                 value={selectedServiceWindow}
                                 onChange={(event) => handleWindowAccountChange(option.key, 'service_window', event.target.value)}
-                                className="w-full rounded-lg border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-800 focus:border-transparent focus:ring-2 focus:ring-accent"
+                                className={`w-full rounded-lg border px-4 py-3 text-sm font-semibold text-slate-800 focus:border-transparent focus:ring-2 focus:ring-accent ${
+                                  hasServiceConflict ? 'border-red-500 bg-red-50' : 'border-slate-300'
+                                }`}
                               >
                                 {serviceChoices.map((choice) => (
                                   <option
                                     key={choice.key}
                                     value={choice.key}
-                                    disabled={isServiceChoiceUnavailable(option.key, choice.key)}
                                   >
                                     {choice.label}
                                   </option>
                                 ))}
                               </select>
+                              {hasServiceConflict ? (
+                                <p className="mt-2 text-sm font-semibold text-red-600">
+                                  {selectedServiceLabel} is already assigned to another assignment.
+                                </p>
+                              ) : null}
                             </div>
-                            {selectedServiceWindow === 'OTHER' ? (
-                              <input
-                                type="text"
-                                value={windowAccounts[option.key]?.custom_label || ''}
-                                onChange={(event) => handleWindowAccountChange(option.key, 'custom_label', event.target.value)}
-                                placeholder={`Window ${selectedAssignedWindowNumber} service name`}
-                                maxLength={80}
-                                className="lg:col-span-2 w-full rounded-lg border border-slate-300 px-4 py-3 text-sm text-slate-800 focus:border-transparent focus:ring-2 focus:ring-accent"
-                              />
-                            ) : null}
                           </div>
                         </div>
 
-                        <div className="mt-4 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                          {editingBranch
-                            ? `Saving will update this staff account to Window ${selectedAssignedWindowNumber} with ${selectedServiceWindow === 'OTHER' ? (windowAccounts[option.key]?.custom_label || 'custom service') : (SERVICE_WINDOW_CHOICES.find((choice) => choice.key === selectedServiceWindow)?.label || selectedServiceWindow)} routing while keeping connected branch logic in sync.`
-                            : `Login email address, temporary password, staff full name, queue-only access scope, Microsoft Authenticator MFA setup, and the voice announcement route to ${option.label} will be generated automatically.`}
+                        <div className={`mt-4 rounded-lg border px-4 py-3 text-sm ${
+                          assignmentConflicts.hasConflict
+                            ? 'border-red-200 bg-red-50 text-red-700'
+                            : 'border-dashed border-slate-300 bg-slate-50 text-slate-600'
+                        }`}>
+                          {assignmentConflicts.hasConflict ? (
+                            `Resolve the duplicate window or service selection before saving this branch setup.`
+                          ) : editingBranch
+                            ? `Saving will update this staff account to Window ${selectedAssignedWindowNumber} with ${selectedServiceLabel} routing while keeping connected branch logic in sync.`
+                            : `Login email address, temporary password, staff full name, queue-only access scope, Microsoft Authenticator MFA setup, and the configured voice announcement route for ${selectedServiceLabel} will be generated automatically.`}
                         </div>
                       </div>
                     );

@@ -34,6 +34,8 @@ from services.email_service import send_payment_receipt_email
 from services.paymongo import paymongo_service
 from utils.branch_system_settings import get_branch_setting_value
 from utils.field_crypto import apply_citizen_user_security, apply_payment_security, apply_receipt_request_security, build_redacted_text, find_payment_by_field, find_payment_by_ref_number, get_decrypted_or_raw, hash_aware_match, hash_optional_value, receipt_request_value, set_encrypted_hash_companions, tax_assessment_value
+from utils.file_delivery import deliver_file_response
+from utils.file_validation import validate_upload_file
 from utils.security_validation import format_tin, normalize_email, normalize_identity_name, normalize_tin, ensure_tin_is_unique
 from utils.system_settings import SYSTEM_DISABLED_MESSAGE, get_setting_value
 
@@ -75,7 +77,7 @@ BT_BLOCKING_PAYMENT_STATUSES = {
     "DOCUMENTS_UPLOADED",
 }
 BT_FINAL_APPLICATION_STATUSES = {"PAYMENT_VERIFIED", "OR_GENERATED", "COMPLETED", "VERIFIED"}
-BT_ALLOWED_UPLOAD_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".docx"}
+BT_ALLOWED_UPLOAD_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
 
 SIMULATED_RPT_PROPERTIES = {
     "Galas Branch": {
@@ -919,11 +921,23 @@ def store_business_tax_upload(
     tracking_number: str,
     suffix_label: str,
 ) -> Path:
+    from fastapi import UploadFile
+    from io import BytesIO
+
     extension = Path(filename or "").suffix.lower()
     if extension not in BT_ALLOWED_UPLOAD_EXTENSIONS:
-        raise HTTPException(status_code=400, detail="Allowed file types are PDF, JPG, PNG, and DOCX only.")
+        raise HTTPException(status_code=400, detail="Allowed file types are PDF, JPG, and PNG only.")
     if len(file_bytes) > MAX_BUSINESS_DOC_FILE_SIZE_BYTES:
         raise HTTPException(status_code=400, detail="Maximum file size is 10MB.")
+
+    # Validate file signature (magic bytes) before storing
+    dummy_upload = UploadFile(file=BytesIO(file_bytes), filename=filename)
+    validate_upload_file(
+        dummy_upload,
+        file_bytes,
+        allowed_extensions=BT_ALLOWED_UPLOAD_EXTENSIONS,
+    )
+
     business_output_dir = OUTPUT_DIR / "business-tax"
     business_output_dir.mkdir(parents=True, exist_ok=True)
     safe_tracking = re.sub(r"[^A-Z0-9-]+", "-", tracking_number.upper())
@@ -2870,10 +2884,10 @@ async def download_remittance_report(
     report_path = Path(remittance.report_file_path)
     if not report_path.exists():
         raise HTTPException(status_code=404, detail="Remittance report file is missing.")
-    return FileResponse(
+    return deliver_file_response(
         report_path,
         filename=remittance.report_file_name or report_path.name,
-        media_type=remittance.report_file_mime or "application/octet-stream",
+        allow_inline_preview=False,
     )
 
 
@@ -3085,13 +3099,16 @@ async def upload_public_payment_proof(
     if payment_email and current_user_email and payment_email.lower() != current_user_email.lower():
         raise HTTPException(status_code=403, detail="You are not authorized to upload proof for this transaction.")
 
-    extension = Path(file.filename or "").suffix.lower()
-    if extension not in {".pdf", ".doc", ".docx"}:
-        raise HTTPException(status_code=400, detail="Allowed file types are PDF, DOC, and DOCX only.")
-
     file_bytes = await file.read()
     if len(file_bytes) > MAX_PROOF_FILE_SIZE_BYTES:
         raise HTTPException(status_code=400, detail="Maximum file size is 5MB.")
+
+    extension, detected_mime = validate_upload_file(
+        file,
+        file_bytes,
+        allowed_extensions={".pdf", ".png", ".jpg", ".jpeg"},
+        max_size_bytes=MAX_PROOF_FILE_SIZE_BYTES,
+    )
 
     proof_path = OUTPUT_DIR / f"{payment.ref_number}-proof{extension}"
     proof_path.write_bytes(file_bytes)
@@ -3144,7 +3161,11 @@ async def download_business_tax_application_file(
     file_path, file_name = path_map[file_type]
     if not file_path:
         raise HTTPException(status_code=404, detail="Business Tax file not found.")
-    return FileResponse(file_path, filename=file_name or Path(file_path).name)
+    return deliver_file_response(
+        file_path,
+        filename=file_name or Path(file_path).name,
+        allow_inline_preview=False,
+    )
 
 
 @router.get("/bt/applications/{tracking_number}/official-receipt")
@@ -3156,9 +3177,10 @@ async def download_business_tax_official_receipt(
     application = get_business_tax_application_for_user(db, tracking_number, current_user)
     if not application.official_receipt_path:
         raise HTTPException(status_code=404, detail="Official receipt not available yet.")
-    return FileResponse(
+    return deliver_file_response(
         application.official_receipt_path,
         filename=Path(application.official_receipt_path).name,
+        allow_inline_preview=False,
     )
 
 
@@ -3169,7 +3191,11 @@ async def download_payment_proof(payment_id: int, db: Session = Depends(get_db))
     proof_name = payment_value(payment, "proof_file_name") if payment else None
     if not payment or not proof_path:
         raise HTTPException(status_code=404, detail="Payment proof not found")
-    return FileResponse(proof_path, filename=proof_name or Path(proof_path).name)
+    return deliver_file_response(
+        proof_path,
+        filename=proof_name or Path(proof_path).name,
+        allow_inline_preview=False,
+    )
 
 
 @router.get("/{payment_id}/official-receipt")
@@ -3178,7 +3204,11 @@ async def download_official_receipt(payment_id: int, db: Session = Depends(get_d
     official_receipt_path = payment_value(payment, "official_receipt_path") if payment else None
     if not payment or not official_receipt_path:
         raise HTTPException(status_code=404, detail="Official receipt not found")
-    return FileResponse(official_receipt_path, filename=Path(official_receipt_path).name)
+    return deliver_file_response(
+        official_receipt_path,
+        filename=Path(official_receipt_path).name,
+        allow_inline_preview=False,
+    )
 
 
 @router.get("/{payment_id}/payment-confirmation")
@@ -3191,7 +3221,10 @@ async def download_payment_confirmation(payment_id: int, db: Session = Depends(g
     return StreamingResponse(
         BytesIO(pdf_bytes),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 

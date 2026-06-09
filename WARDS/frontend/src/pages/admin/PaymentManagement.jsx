@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect } from 'react';
 import axios from 'axios';
 import WardsPageHero from '../../components/WardsPageHero';
 import SystemMessageModal from '../../components/SystemMessageModal';
+import CollectionReportView from '../../components/admin/CollectionReportView';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 const PAYMENT_TIME_ZONE = 'Asia/Manila';
@@ -561,7 +562,7 @@ const PaymentManagement = () => {
       <!doctype html>
       <html>
         <head>
-          <title>WARDS ${collectionReportTitle}</title>
+          <title>WARDS ${escapeHtml(collectionReportTitle)}</title>
           <style>
             * { box-sizing: border-box; }
             body { font-family: Arial, sans-serif; color: #0f172a; margin: 0; background: #edf3f8; }
@@ -628,7 +629,7 @@ const PaymentManagement = () => {
             <div class="preview-toolbar">
               <div class="toolbar-copy">
                 <span>WARDS Main Admin</span>
-                <strong>${collectionReportTitle} Preview</strong>
+                <strong>${escapeHtml(collectionReportTitle)} Preview</strong>
                 <p class="toolbar-note">Review branch rankings, collection analytics, and remittance totals before printing.</p>
               </div>
               <div class="toolbar-actions">
@@ -639,8 +640,8 @@ const PaymentManagement = () => {
             <main class="report-page">
               <div class="header">
                 <div class="eyebrow">WARDS Main Admin</div>
-                <h1>${collectionReportTitle}</h1>
-                <div class="meta">Generated ${generatedAt}</div>
+                <h1>${escapeHtml(collectionReportTitle)}</h1>
+                <div class="meta">Generated ${escapeHtml(generatedAt)}</div>
               </div>
               <div class="kpis">
                 <div class="kpi"><span>Main Collection Account</span><strong>${formatCurrency(mainCollectionAmount)}</strong></div>
@@ -710,8 +711,15 @@ const PaymentManagement = () => {
       setPageError('Allow pop-ups to print the Tax Collection Report.');
       return;
     }
-    reportWindow.document.write(buildCollectionReportHtml({ includeToolbar: true }));
-    reportWindow.document.close();
+    // Use safe DOM API instead of document.write to prevent XSS
+    const reportHtml = buildCollectionReportHtml({ includeToolbar: true });
+    const blob = new Blob([reportHtml], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    reportWindow.location.href = url;
+    // Clean up blob URL after window loads
+    reportWindow.onload = () => {
+      URL.revokeObjectURL(url);
+    };
   };
 
   const downloadCollectionSpreadsheet = () => {
@@ -1209,11 +1217,16 @@ const PaymentManagement = () => {
                 </button>
               </div>
             </div>
-            <div className="min-h-0 flex-1 overflow-hidden bg-slate-100">
-              <iframe
-                title="Tax Collection Report Preview"
-                srcDoc={buildCollectionReportHtml({ includeToolbar: false })}
-                className="h-full w-full border-0"
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <CollectionReportView
+                title={collectionReportTitle}
+                generatedAt={new Date().toLocaleString('en-PH', { timeZone: PAYMENT_TIME_ZONE })}
+                mainCollectionAmount={mainCollectionAmount}
+                verifiedAmount={paymentStats.verifiedAmount}
+                pendingRemittanceAmount={pendingRemittanceAmount}
+                branchAnalytics={branchAnalytics}
+                rankedBranches={rankedBranches}
+                branchSummaries={branchSummaries}
               />
             </div>
           </div>

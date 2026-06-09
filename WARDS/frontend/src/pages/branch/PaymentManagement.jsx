@@ -92,7 +92,11 @@ const getPaymentBucket = (payment) => {
   const normalizedStatus = normalizeStatus(payment?.status);
   const normalizedPaymongoStatus = normalizeStatus(payment?.paymongo_status);
   const normalizedWorkflowStatus = normalizeStatus(payment?.workflow_status);
-  const workflowStatus = (payment?.workflow_status || '').toString().trim().toUpperCase();
+  const workflowStatus = (payment?.workflow_status || '')
+    .toString()
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, '_');
   const isReceiptRequestPayment = payment?.source_module === 'receipt_request';
 
   if ([
@@ -103,6 +107,16 @@ const getPaymentBucket = (payment) => {
     'CLARIFICATION_REQUESTED',
     'VALIDATED',
   ].includes(workflowStatus)) {
+    return 'pending';
+  }
+
+  if (isReceiptRequestPayment) {
+    if (workflowStatus === 'VERIFIED' || workflowStatus === 'PAYMENT_VERIFIED' || payment?.verified_at || normalizedStatus === 'confirmed') {
+      return 'confirmed';
+    }
+    if (normalizedStatus === 'failed' || normalizedWorkflowStatus === 'failed') {
+      return 'failed';
+    }
     return 'pending';
   }
 
@@ -124,13 +138,6 @@ const getPaymentBucket = (payment) => {
     normalizedWorkflowStatus === 'expired'
   ) {
     return 'failed';
-  }
-
-  if (isReceiptRequestPayment) {
-    if (payment?.verified_at || normalizedStatus === 'confirmed' || normalizedWorkflowStatus === 'confirmed') {
-      return 'confirmed';
-    }
-    return 'pending';
   }
 
   return 'pending';
@@ -1247,12 +1254,12 @@ const PaymentManagement = () => {
               <input
                 key={remittanceReportFile ? 'selected-remittance-report' : 'empty-remittance-report'}
                 type="file"
-                accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx"
+                accept=".pdf,.jpg,.jpeg,.png"
                 onChange={(event) => setRemittanceReportFile(event.target.files?.[0] || null)}
                 className="w-full rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm shadow-sm file:mr-4 file:rounded-xl file:border-0 file:bg-[#0f2f5f] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-slate-200"
               />
               <span className="mt-2 block text-xs text-slate-500">
-                Accepted formats: PDF, JPG, PNG, DOC, DOCX, XLS, XLSX. Maximum 10MB.
+                Accepted formats: PDF, PNG, JPEG only. Maximum 10MB.
               </span>
             </label>
             <button

@@ -16,6 +16,8 @@ from sqlalchemy.exc import OperationalError
 
 from database.models import ActivityLog, Announcement, AnnouncementAttachment, AnnouncementView, Branch, BranchStaff, BusinessTaxApplication, CollectionAccount, Memo, MemoView, Payment, Policy, PolicyView, Queue, QueueHistory, ReceiptRequest, ReceiptRequestHistory, Remittance, RemittanceItem, get_db
 from middleware.branch_auth import get_current_branch_staff, require_any_branch_staff
+from utils.file_delivery import deliver_file_response
+from utils.file_validation import validate_upload_file
 from utils.announcement_attachments import (
     enforce_attachment_limit,
     remove_attachment_file,
@@ -28,34 +30,23 @@ from routes.payments import apply_business_tax_application_security_fields, reve
 from utils.field_crypto import apply_announcement_view_security, apply_memo_security, apply_memo_view_security, apply_payment_security, apply_queue_security, apply_receipt_request_security, decrypt_optional_value, find_announcement_view, find_memo_view, get_announcement_viewed_ids, get_decrypted_or_raw, get_memo_viewed_ids, hash_aware_any, hash_aware_match, hash_optional_value, queue_value
 from utils.security_validation import format_tin
 from utils.branch_system_settings import get_branch_setting_value
+from utils.branch_window_config import (
+    default_assigned_window_number as resolve_default_assigned_window_number,
+    get_branch_window_metadata,
+    get_configured_window_accounts as load_configured_window_accounts,
+    get_service_window_display_label,
+    infer_service_window,
+)
 from utils.system_settings import SYSTEM_DISABLED_MESSAGE, get_setting_value
 
 router = APIRouter()
 REMITTANCE_REPORT_DIR = Path(__file__).resolve().parents[1] / "uploads" / "remittance_reports"
 REMITTANCE_REPORT_DIR.mkdir(parents=True, exist_ok=True)
-ALLOWED_REMITTANCE_REPORT_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".doc", ".docx", ".xls", ".xlsx"}
+ALLOWED_REMITTANCE_REPORT_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
 MAX_REMITTANCE_REPORT_SIZE_BYTES = 10 * 1024 * 1024
 OUTPUT_DIR = Path(__file__).resolve().parents[1] / "output" / "payments" / "business-tax"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 MANILA_TIMEZONE = timezone(timedelta(hours=8))
-SERVICE_WINDOW_RULES = {
-    "RPT": ("rpt", "real property", "amilyar", "property tax", "assessment"),
-    "BUSINESS": ("business", "mayor", "permit", "bt", "city tax", "garbage fee", "sanitary", "zoning", "occupancy"),
-}
-SERVICE_WINDOW_DEFAULT_WINDOW_NUMBERS = {
-    "RPT": 1,
-    "BUSINESS": 2,
-    "MISC": 3,
-    "QW4": 4,
-    "QW5": 5,
-}
-SERVICE_WINDOW_DEFAULT_LABELS = {
-    "RPT": "RPT Window",
-    "BUSINESS": "BT Window",
-    "MISC": "MISC Window",
-    "QW4": "Queue Window 4",
-    "QW5": "Queue Window 5",
-}
 STALE_CALLED_QUEUE_MINUTES = max(1, int(os.getenv("STALE_CALLED_QUEUE_MINUTES", "15")))
 
 
@@ -207,23 +198,12 @@ def get_queue_display_status(queue: Queue) -> str:
 
 
 def default_assigned_window_number(service_window: Optional[str]) -> int:
-    return SERVICE_WINDOW_DEFAULT_WINDOW_NUMBERS.get(service_window or "", 3)
+    return resolve_default_assigned_window_number(service_window)
 
 
 def get_service_window_label_for_branch(db: Session, branch_id: int, service_window: str) -> str:
-    staff = (
-        db.query(BranchStaff)
-        .filter(
-            BranchStaff.branch_id == branch_id,
-            BranchStaff.role == "branch_staff",
-            BranchStaff.account_scope == "queue_window",
-            BranchStaff.service_window == service_window,
-            BranchStaff.status == "Active",
-        )
-        .order_by(BranchStaff.id.asc())
-        .first()
-    )
-    return (staff.service_window_label if staff and staff.service_window_label else SERVICE_WINDOW_DEFAULT_LABELS.get(service_window, service_window))
+    metadata = get_branch_window_metadata(db, branch_id, service_window)
+    return metadata["window_label"]
 
 
 def serialize_queue(queue: Queue, assigned_window_number: Optional[int] = None, window_label: Optional[str] = None, service_window: Optional[str] = None):
@@ -241,7 +221,7 @@ def serialize_queue(queue: Queue, assigned_window_number: Optional[int] = None, 
         "queue_type": (queue_value(queue, "queue_type") or "immediate").lower(),
         "service_window": service_window,
         "assigned_window_number": assigned_window_number or default_assigned_window_number(service_window),
-        "window_label": window_label or SERVICE_WINDOW_DEFAULT_LABELS.get(service_window, service_window),
+        "window_label": window_label or get_service_window_display_label(service_window),
         "appointment_time": serialize_queue_schedule_datetime(queue.appointment_time, queue_value(queue, "queue_type")),
         "estimated_wait_time": queue.estimated_wait_time,
         "recommended_arrival": serialize_manila_datetime(queue.recommended_arrival),
@@ -314,68 +294,19 @@ def resolve_completed_by_display_name(queue: QueueHistory) -> str | None:
 
 
 def normalize_service_window(service_type: Optional[str]) -> str:
-    normalized = (service_type or "").strip().lower()
-    for service_window, keywords in SERVICE_WINDOW_RULES.items():
-        if any(keyword in normalized for keyword in keywords):
-            return service_window
-    return "MISC"
+    return infer_service_window(service_type)
 
 
 def normalize_service_window_for_branch(db: Session, branch_id: int, service_type: Optional[str]) -> str:
-    service_window = normalize_service_window(service_type)
-    if service_window != "MISC":
-        return service_window
-
-    normalized_service = " ".join((service_type or "").strip().casefold().split())
-    if not normalized_service:
-        return service_window
-
-    custom_window_account = (
-        db.query(BranchStaff)
-        .filter(
-            BranchStaff.branch_id == branch_id,
-            BranchStaff.role == "branch_staff",
-            BranchStaff.account_scope == "queue_window",
-            BranchStaff.service_window.in_(("QW4", "QW5")),
-            BranchStaff.status == "Active",
-        )
-        .all()
-    )
-    for account in custom_window_account:
-        normalized_label = " ".join((account.service_window_label or "").strip().casefold().split())
-        if normalized_label and normalized_label == normalized_service:
-            return account.service_window
-    return service_window
+    return get_branch_window_metadata(db, branch_id, service_type)["service_window"]
 
 
 def get_assigned_window_number_for_service(db: Session, branch_id: int, service_window: str) -> int:
-    staff = (
-        db.query(BranchStaff)
-        .filter(
-            BranchStaff.branch_id == branch_id,
-            BranchStaff.role == "branch_staff",
-            BranchStaff.account_scope == "queue_window",
-            BranchStaff.service_window == service_window,
-            BranchStaff.status == "Active",
-        )
-        .order_by(BranchStaff.id.asc())
-        .first()
-    )
-    return (staff.assigned_window_number if staff and staff.assigned_window_number else default_assigned_window_number(service_window))
+    return get_branch_window_metadata(db, branch_id, service_window)["assigned_window_number"]
 
 
 def get_configured_window_accounts(db: Session, branch_id: int) -> list[BranchStaff]:
-    return (
-        db.query(BranchStaff)
-        .filter(
-            BranchStaff.branch_id == branch_id,
-            BranchStaff.role == "branch_staff",
-            BranchStaff.account_scope == "queue_window",
-            BranchStaff.status == "Active",
-        )
-        .order_by(BranchStaff.assigned_window_number.asc(), BranchStaff.id.asc())
-        .all()
-    )
+    return load_configured_window_accounts(db, branch_id)
 
 
 def get_assigned_window_number_for_staff(staff: BranchStaff, service_window: Optional[str] = None) -> int:
@@ -960,6 +891,30 @@ def resolve_branch_payment_display_name(payment: Payment, db: Session) -> str | 
     return None
 
 
+def resolve_branch_payment_tax_type(payment: Payment, db: Session) -> str | None:
+    payment_tax_type = get_decrypted_or_raw(payment, "tax_type") or payment.tax_type
+    if payment.source_module != "receipt_request" or not payment.related_request_id:
+        return payment_tax_type
+
+    receipt_request = (
+        db.query(ReceiptRequest)
+        .filter(hash_aware_match(ReceiptRequest, "request_id", payment.related_request_id))
+        .first()
+    )
+    if receipt_request:
+        return get_decrypted_or_raw(receipt_request, "tax_type") or receipt_request.tax_type or payment_tax_type
+
+    receipt_request_history = (
+        db.query(ReceiptRequestHistory)
+        .filter(hash_aware_match(ReceiptRequestHistory, "request_id", payment.related_request_id))
+        .first()
+    )
+    if receipt_request_history:
+        return get_decrypted_or_raw(receipt_request_history, "tax_type") or receipt_request_history.tax_type or payment_tax_type
+
+    return payment_tax_type
+
+
 def get_branch_payments(current_staff: BranchStaff, branch: Branch, db: Session) -> list[Payment]:
     candidate_payments = (
         db.query(Payment)
@@ -1062,25 +1017,23 @@ def serialize_remittance(db: Session, remittance: Remittance) -> dict:
 
 async def store_remittance_report_file(file: UploadFile, remittance_number: str) -> tuple[str, str, str | None]:
     original_name = (file.filename or "").strip()
-    extension = Path(original_name).suffix.lower()
-    if extension not in ALLOWED_REMITTANCE_REPORT_EXTENSIONS:
-        raise HTTPException(
-            status_code=400,
-            detail="Upload a valid remittance report file: PDF, JPG, PNG, DOC, DOCX, XLS, or XLSX.",
-        )
-
     file_bytes = await file.read()
     if not file_bytes:
         raise HTTPException(status_code=400, detail="Remittance report file is required.")
-    if len(file_bytes) > MAX_REMITTANCE_REPORT_SIZE_BYTES:
-        raise HTTPException(status_code=400, detail="Maximum remittance report file size is 10MB.")
+
+    extension, detected_mime = validate_upload_file(
+        file,
+        file_bytes,
+        allowed_extensions=ALLOWED_REMITTANCE_REPORT_EXTENSIONS,
+        max_size_bytes=MAX_REMITTANCE_REPORT_SIZE_BYTES,
+    )
 
     safe_original = re.sub(r"[^A-Za-z0-9._-]+", "_", original_name).strip("._") or f"remittance-report{extension}"
     safe_remittance = re.sub(r"[^A-Za-z0-9-]+", "-", remittance_number).strip("-") or "remittance"
     stored_name = f"{safe_remittance}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{safe_original}"
     destination = REMITTANCE_REPORT_DIR / stored_name
     destination.write_bytes(file_bytes)
-    return str(destination), original_name or safe_original, file.content_type
+    return str(destination), original_name or safe_original, detected_mime
 
 
 def create_branch_remittance_record(
@@ -1422,7 +1375,7 @@ async def get_live_queue_monitor(
             continue
         service_window = account.service_window or "MISC"
         windows_data[service_window] = {
-            "window_label": account.service_window_label or SERVICE_WINDOW_DEFAULT_LABELS.get(service_window, service_window),
+            "window_label": get_service_window_display_label(service_window, account.service_window_label),
             "assigned_window_number": account.assigned_window_number or default_assigned_window_number(service_window),
             "serving": [],
             "waiting": [],
@@ -1717,7 +1670,7 @@ async def list_branch_payments(
             "ref_number": get_decrypted_or_raw(payment, "ref_number"),
             "transaction_id": get_decrypted_or_raw(payment, "txn_id"),
             "taxpayer_name": get_decrypted_or_raw(payment, "taxpayer_name"),
-            "tax_type": get_decrypted_or_raw(payment, "tax_type"),
+            "tax_type": resolve_branch_payment_tax_type(payment, db),
             "amount": float(payment.amount or 0),
             "payment_method": get_decrypted_or_raw(payment, "payment_method"),
             "branch": resolve_branch_payment_display_name(payment, db) or (get_decrypted_or_raw(branch, "name") or branch.name),
@@ -1783,7 +1736,7 @@ async def get_branch_remittance_summary(
                 "id": payment.id,
                 "ref_number": get_decrypted_or_raw(payment, "ref_number"),
                 "taxpayer_name": get_decrypted_or_raw(payment, "taxpayer_name"),
-                "tax_type": get_decrypted_or_raw(payment, "tax_type"),
+                "tax_type": resolve_branch_payment_tax_type(payment, db),
                 "amount": float(payment.amount or 0),
                 "verified_at": to_utc_iso(payment.verified_at),
             }
@@ -2051,13 +2004,20 @@ def _require_branch_admin_memo_access(current_staff: BranchStaff):
 def _store_memo_attachment(attachment: Optional[UploadFile]) -> tuple[str | None, str | None]:
     if not attachment or not attachment.filename:
         return None, None
+
+    file_bytes = attachment.file.read()
+    validate_upload_file(
+        attachment,
+        file_bytes,
+        allowed_extensions={".pdf", ".png", ".jpg", ".jpeg"},
+    )
+
     upload_dir = Path("uploads/memos")
     upload_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", attachment.filename)
     file_path = upload_dir / f"{timestamp}_{safe_name}"
-    with file_path.open("wb") as buffer:
-        shutil.copyfileobj(attachment.file, buffer)
+    file_path.write_bytes(file_bytes)
     return str(file_path), attachment.filename
 
 
@@ -2441,12 +2401,16 @@ async def download_branch_announcement_attachment(
         return Response(
             content=content,
             media_type=attachment.mime_type or "application/octet-stream",
-            headers={"Content-Disposition": f'attachment; filename="{attachment.original_filename}"'},
+            headers={
+                "Content-Disposition": f'attachment; filename="{attachment.original_filename}"',
+                "X-Content-Type-Options": "nosniff",
+            },
         )
     return FileResponse(
         attachment.file_path,
         media_type=attachment.mime_type or "application/octet-stream",
         filename=attachment.original_filename,
+        headers={"X-Content-Type-Options": "nosniff"},
     )
 
 
@@ -2456,13 +2420,39 @@ async def preview_branch_announcement_attachment(
     attachment_id: int,
     db: Session = Depends(get_db),
 ):
+    """Inline preview for browser-renderable types (images, PDFs).
+    
+    Only serves inline preview for verified safe types (PDF, PNG, JPEG).
+    All other types are forced to download as attachment.
+    Sends X-Content-Type-Options: nosniff to prevent MIME sniffing.
+    """
+    from utils.file_validation import SafeFileType
+    
     attachment = _get_branch_attachment_for_download(db, announcement_id, attachment_id)
+    
+    mime_type = attachment.mime_type or "application/octet-stream"
+    is_safe_preview = SafeFileType.is_safe_for_preview(mime_type)
+    
+    # For non-previewable types, force download as attachment
+    disposition = "inline" if is_safe_preview else "attachment"
+    
     content = attachment_bytes(attachment)
     if content is not None:
-        return Response(content=content, media_type=attachment.mime_type or "application/octet-stream")
+        headers = {
+            "Content-Disposition": f'{disposition}; filename="{attachment.original_filename}"',
+            "X-Content-Type-Options": "nosniff",
+        }
+        if not is_safe_preview:
+            headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
+        return Response(content=content, media_type=mime_type, headers=headers)
     return FileResponse(
         attachment.file_path,
-        media_type=attachment.mime_type or "application/octet-stream",
+        media_type=mime_type,
+        filename=attachment.original_filename,
+        headers={
+            "Content-Disposition": f'{disposition}; filename="{attachment.original_filename}"',
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 
@@ -2609,7 +2599,8 @@ async def download_branch_memo_attachment(
     return FileResponse(
         path=attachment_path,
         filename=attachment_filename or "attachment",
-        media_type="application/octet-stream"
+        media_type="application/octet-stream",
+        headers={"X-Content-Type-Options": "nosniff"},
     )
 
 @router.get("/memos/unread-count")

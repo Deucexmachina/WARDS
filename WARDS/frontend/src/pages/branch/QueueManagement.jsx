@@ -27,6 +27,9 @@ const queueWindowLabels = {
   RPT: 'RPT',
   BUSINESS: 'BT',
   MISC: 'MISC',
+  CTC: 'CTC',
+  PTR: 'PTR',
+  MARKET: 'MARKET',
   QW4: 'Queue Window 4',
   QW5: 'Queue Window 5',
 };
@@ -39,6 +42,8 @@ const getQueueWindowLabel = (queueOrKey) => {
 };
 
 const BRANCH_QUEUE_UPDATED_EVENT = 'branch-queue-updated';
+const OCR_REQUIRED_RECEIPT_CATEGORIES = new Set(['RPT', 'BUSINESS', 'MISC']);
+const OCR_EXTRACTION_FAILED_MESSAGE = 'Unable to extract all required receipt information. Please verify the uploaded receipt and try again.';
 
 const resolveReceiptCategory = (queue) => {
   const serviceWindow = (queue?.service_window || '').toUpperCase();
@@ -49,7 +54,16 @@ const resolveReceiptCategory = (queue) => {
   if (serviceWindow === 'BUSINESS' || serviceType.includes('business') || serviceType.includes('permit') || serviceType.includes('bt')) {
     return 'BUSINESS';
   }
-  return 'MISC';
+  if (serviceWindow === 'CTC' || serviceType.includes('ctc') || serviceType.includes('cedula') || serviceType.includes('community tax')) {
+    return 'CTC';
+  }
+  if (serviceWindow === 'PTR' || serviceType.includes('ptr') || serviceType.includes('professional tax')) {
+    return 'PTR';
+  }
+  if (serviceWindow === 'MARKET' || serviceType.includes('market')) {
+    return 'MARKET';
+  }
+  return serviceWindow || 'MISC';
 };
 
 const defaultReceiptDraft = (queue) => ({
@@ -66,6 +80,61 @@ const defaultReceiptDraft = (queue) => ({
   raw_text: '',
   auto_rename_source_image: false,
 });
+
+const normalizeReceiptFilenameForCompare = (value) => (value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+const buildSuggestedReceiptFilename = (filename, taxpayerName) => {
+  const extensionMatch = (filename || '').match(/(\.[^.]+)$/);
+  const extension = extensionMatch?.[1]?.toLowerCase() || '.jpg';
+  const baseName = (taxpayerName || '').trim() || 'receipt';
+  return `${baseName}${extension}`;
+};
+
+const getReceiptDraftMissingFields = (draft, category) => {
+  if (!OCR_REQUIRED_RECEIPT_CATEGORIES.has((category || '').trim().toUpperCase())) {
+    return [];
+  }
+
+  const missingFields = [];
+  if (!(draft?.ref_number || '').trim()) {
+    missingFields.push('ref_number');
+  }
+  if (!(draft?.taxpayer_name || '').trim()) {
+    missingFields.push('taxpayer_name');
+  }
+  if (draft?.amount === '' || draft?.amount === null || draft?.amount === undefined || Number.isNaN(Number(draft?.amount))) {
+    missingFields.push('amount');
+  }
+  return missingFields;
+};
+
+const normalizeReceiptDraftReviewState = (draft) => {
+  if (!draft) {
+    return draft;
+  }
+
+  const taxpayerName = (draft.taxpayer_name || '').trim();
+  const originalFilename = draft.source_image_original_filename || draft.source_image_suggested_filename || '';
+  const suggestedFilename = taxpayerName
+    ? buildSuggestedReceiptFilename(originalFilename, taxpayerName)
+    : (draft.source_image_suggested_filename || '');
+  const filenameStem = (originalFilename || '').replace(/\.[^.]+$/, '');
+  const suggestedStem = suggestedFilename.replace(/\.[^.]+$/, '');
+  const filenameMatchesTaxpayer = taxpayerName
+    ? normalizeReceiptFilenameForCompare(filenameStem) === normalizeReceiptFilenameForCompare(suggestedStem)
+    : draft.filename_matches_taxpayer;
+  const shouldAutoRename = Boolean(taxpayerName && !filenameMatchesTaxpayer);
+
+  return {
+    ...draft,
+    source_image_suggested_filename: suggestedFilename,
+    filename_matches_taxpayer: taxpayerName ? filenameMatchesTaxpayer : draft.filename_matches_taxpayer,
+    file_name_validation_message: shouldAutoRename
+      ? `The uploaded file name must match the taxpayer name. Rename it to ${suggestedFilename} or use auto rename.`
+      : '',
+    auto_rename_source_image: shouldAutoRename ? true : Boolean(draft.auto_rename_source_image),
+  };
+};
 
 const parseDate = (value) => {
   if (!value) {
@@ -529,6 +598,20 @@ const QueueManagement = () => {
   const [skippedPage, setSkippedPage] = useState(1);
   const [lastCalledQueue, setLastCalledQueue] = useState(null);
   const lastCalledQueueRef = useRef(null);
+  const receiptDraftCategory = (receiptDraft?.selected_category || receiptDraft?.tax_type || resolveReceiptCategory(completionQueue)).trim().toUpperCase();
+  const receiptDraftMissingFields = getReceiptDraftMissingFields(receiptDraft, receiptDraftCategory);
+  const receiptDraftExtractionWarning = receiptDraftMissingFields.length ? OCR_EXTRACTION_FAILED_MESSAGE : '';
+  const receiptDraftFilenameMismatchBlocked = Boolean(
+    receiptDraft?.taxpayer_name &&
+    receiptDraft?.filename_matches_taxpayer === false &&
+    !receiptDraft?.auto_rename_source_image
+  );
+  const receiptDraftSaveBlocked = Boolean(
+    receiptDraft?.duplicate_detected ||
+    receiptDraft?.category_warning ||
+    receiptDraftMissingFields.length ||
+    receiptDraftFilenameMismatchBlocked
+  );
 
   const dispatchQueueStateUpdate = (nextQueues) => {
     window.dispatchEvent(new CustomEvent(BRANCH_QUEUE_UPDATED_EVENT, {
@@ -716,12 +799,12 @@ const QueueManagement = () => {
       setCompletionError('');
       setCompletionNotice('');
       const response = await receiptAPI.uploadForOCR(formData);
-      setReceiptDraft({
+      setReceiptDraft(normalizeReceiptDraftReviewState({
         ...defaultReceiptDraft(completionQueue),
         ...response.data,
         tax_type: response.data?.tax_type || category,
         selected_category: response.data?.selected_category || category,
-      });
+      }));
       setCompletionMode('review');
     } catch (err) {
       setCompletionError(err.response?.data?.detail || 'Failed to parse receipt image.');
@@ -766,10 +849,10 @@ const QueueManagement = () => {
         setReceiptDraft(null);
         setCompletionMode('options');
       } else if (response.data?.status === 'processed' && response.data?.result) {
-        setReceiptDraft({
+        setReceiptDraft(normalizeReceiptDraftReviewState({
           ...defaultReceiptDraft(completionQueue),
           ...response.data.result,
-        });
+        }));
         setCompletionMode('review');
       } else if (response.data?.status === 'error') {
         setCompletionError(response.data?.error || 'Mobile receipt upload failed.');
@@ -783,7 +866,7 @@ const QueueManagement = () => {
 
   const handleReceiptDraftChange = (event) => {
     const { name, value } = event.target;
-    setReceiptDraft((current) => ({
+    setReceiptDraft((current) => normalizeReceiptDraftReviewState({
       ...current,
       [name]: name === 'amount' ? (value === '' ? '' : Number(value)) : value,
     }));
@@ -793,19 +876,32 @@ const QueueManagement = () => {
     if (!completionQueue || !receiptDraft) {
       return;
     }
+    const reviewedDraft = normalizeReceiptDraftReviewState(receiptDraft);
+    if (
+      reviewedDraft?.duplicate_detected ||
+      reviewedDraft?.category_warning ||
+      getReceiptDraftMissingFields(reviewedDraft, receiptDraftCategory).length ||
+      (
+        reviewedDraft?.taxpayer_name &&
+        reviewedDraft?.filename_matches_taxpayer === false &&
+        !reviewedDraft?.auto_rename_source_image
+      )
+    ) {
+      return;
+    }
     try {
       setSavingReceipt(true);
       setCompletionError('');
       setCompletionNotice('');
       const category = resolveReceiptCategory(completionQueue);
       await receiptAPI.saveRecord({
-        ...receiptDraft,
-        amount: receiptDraft.amount === '' ? null : receiptDraft.amount,
-        tax_type: receiptDraft.tax_type || category,
-        selected_category: receiptDraft.selected_category || category,
-        detected_category: receiptDraft.detected_category || category,
-        category_match: receiptDraft.category_match !== false,
-        auto_rename_source_image: receiptDraft.auto_rename_source_image === true,
+        ...reviewedDraft,
+        amount: reviewedDraft.amount === '' ? null : reviewedDraft.amount,
+        tax_type: reviewedDraft.tax_type || category,
+        selected_category: reviewedDraft.selected_category || category,
+        detected_category: reviewedDraft.detected_category || category,
+        category_match: reviewedDraft.category_match !== false,
+        auto_rename_source_image: reviewedDraft.auto_rename_source_image === true,
       });
       setReceiptSavedForCompletion(true);
       setCompletionNotice('Receipt uploaded and saved to Receipt Management. You can now complete this queue.');
@@ -1480,7 +1576,7 @@ const QueueManagement = () => {
                   <span className="mb-2 block text-sm font-semibold text-slate-700">Receipt Image</span>
                   <input
                     type="file"
-                    accept="image/*"
+                    accept="image/png,image/jpeg"
                     onChange={(event) => {
                       setCompletionError('');
                       setReceiptUploadFile(event.target.files?.[0] || null);
@@ -1538,10 +1634,10 @@ const QueueManagement = () => {
 
             {completionMode === 'review' && receiptDraft ? (
               <div className="mt-6 space-y-5">
-                {receiptDraft.extraction_warning ? (
+                {receiptDraftExtractionWarning ? (
                   <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
                     <p className="font-semibold">OCR Extraction Failed</p>
-                    <p className="mt-1">{receiptDraft.extraction_warning}</p>
+                    <p className="mt-1">{receiptDraftExtractionWarning}</p>
                   </div>
                 ) : null}
                 {receiptDraft.duplicate_warning || receiptDraft.category_warning ? (
@@ -1549,7 +1645,7 @@ const QueueManagement = () => {
                     {receiptDraft.duplicate_warning || receiptDraft.category_warning}
                   </div>
                 ) : null}
-                {receiptDraft.filename_matches_taxpayer === false && !receiptDraft.auto_rename_source_image ? (
+                {receiptDraftFilenameMismatchBlocked ? (
                   <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
                     <p className="font-semibold">File name needs correction</p>
                     <p className="mt-1">{receiptDraft.file_name_validation_message || 'The uploaded file name must match the extracted taxpayer name.'}</p>
@@ -1558,11 +1654,10 @@ const QueueManagement = () => {
                     ) : null}
                     <button
                       type="button"
-                      onClick={() => setReceiptDraft((current) => ({
+                      onClick={() => setReceiptDraft((current) => normalizeReceiptDraftReviewState({
                         ...current,
                         auto_rename_source_image: true,
                         filename_matches_taxpayer: true,
-                        save_blocked: Boolean(current?.duplicate_detected || current?.extraction_warning),
                       }))}
                       className="mt-3 rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white transition hover:bg-blue-700"
                     >
@@ -1599,8 +1694,8 @@ const QueueManagement = () => {
                   }} disabled={savingReceipt} className="rounded-xl bg-slate-200 px-5 py-3 font-semibold text-slate-700 transition hover:bg-slate-300 disabled:opacity-60">
                     Back
                   </button>
-                  <button type="button" onClick={saveReceiptAndCompleteQueue} disabled={savingReceipt || receiptDraft.save_blocked || (receiptDraft.filename_matches_taxpayer === false && !receiptDraft.auto_rename_source_image)} className="rounded-xl bg-emerald-600 px-5 py-3 font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60">
-                    {savingReceipt ? 'Saving...' : (receiptDraft.save_blocked || (receiptDraft.filename_matches_taxpayer === false && !receiptDraft.auto_rename_source_image)) ? 'Review Blocked' : 'Save Receipt'}
+                  <button type="button" onClick={saveReceiptAndCompleteQueue} disabled={savingReceipt || receiptDraftSaveBlocked} className="rounded-xl bg-emerald-600 px-5 py-3 font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60">
+                    {savingReceipt ? 'Saving...' : receiptDraftSaveBlocked ? 'Review Blocked' : 'Save Receipt'}
                   </button>
                 </div>
               </div>

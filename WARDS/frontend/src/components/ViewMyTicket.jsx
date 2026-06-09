@@ -55,20 +55,7 @@ const ViewMyTicket = ({ onClose }) => {
   };
 
   const handlePrint = () => {
-    printQueueTicket({
-      title: 'Queue Ticket',
-      queueNumber: ticket.queue_number,
-      branchName: ticket.branch_name,
-      queueType: ticket.queue_type,
-      serviceType: ticket.service_type,
-      appointmentTime: ticket.appointment_time,
-      recommendedArrival: ticket.recommended_arrival,
-      estimatedWaitTime: ticket.estimated_wait_time,
-      createdAt: ticket.created_at,
-      taxpayerName: ticket.taxpayer_name,
-      contactNumber: ticket.contact_number,
-      message: `Status: ${ticket.status}${ticket.position > 0 ? ` | Position in queue: #${ticket.position}` : ''}`,
-    });
+    printQueueTicket();
   };
 
   const formatDate = (dateString) => {
@@ -202,7 +189,7 @@ const ViewMyTicket = ({ onClose }) => {
         </div>
 
         {/* Ticket Content */}
-        <div className="px-6 py-6">
+        <div className="px-6 py-6" data-print-ticket>
           {/* Queue Number - Large Display */}
           <div className="mb-6 rounded-2xl border-2 border-primary bg-gradient-to-br from-primary/5 to-secondary/5 p-6 text-center">
             <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">Queue Number</p>

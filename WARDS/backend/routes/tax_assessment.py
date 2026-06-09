@@ -36,6 +36,7 @@ from services.email_service import (
     send_taxpayer_verification_status_email,
 )
 from utils.field_crypto import apply_citizen_user_security, apply_tax_assessment_record_security, apply_taxpayer_identifier_submission_security, build_redacted_text, get_decrypted_or_raw, hash_aware_match, hash_optional_value, set_encrypted_hash_companions, tax_assessment_value, taxpayer_submission_value
+from utils.file_validation import SafeFileType, validate_upload_file
 from utils.security_validation import (
     ensure_email_is_unique,
     ensure_tin_is_unique,
@@ -64,7 +65,9 @@ limiter = Limiter(key_func=get_rate_limit_key)
 UPLOAD_DIR = Path(__file__).resolve().parents[1] / "uploads" / "taxpayer_identifiers"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-ALLOWED_UPLOAD_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".doc", ".docx"}
+# Only PDF, PNG, and JPEG are allowed for upload.
+# File signatures (magic bytes) are inspected server-side to verify actual content.
+ALLOWED_UPLOAD_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 TAXPAYER_TYPES = {"Individual", "Business Owner"}
 SUBMISSION_TYPES = {"RPT", "BT"}
@@ -547,18 +550,19 @@ def ensure_identifier_not_owned_by_another_user(
 
 
 def store_supporting_file(upload: UploadFile, file_bytes: bytes, submission_type: str, identifier_value: str) -> tuple[str, str, str]:
-    extension = Path(upload.filename or "document").suffix.lower()
-    if extension not in ALLOWED_UPLOAD_EXTENSIONS:
-        raise HTTPException(status_code=400, detail="Unsupported file type. Use PDF, PNG, JPG, JPEG, DOC, or DOCX.")
-    if len(file_bytes) > MAX_UPLOAD_SIZE_BYTES:
-        raise HTTPException(status_code=400, detail="Uploaded file exceeds the 10MB limit.")
+    extension, verified_mime = validate_upload_file(
+        upload,
+        file_bytes,
+        allowed_extensions=ALLOWED_UPLOAD_EXTENSIONS,
+        max_size_bytes=MAX_UPLOAD_SIZE_BYTES,
+    )
 
     safe_identifier = re.sub(r"[^A-Z0-9-]", "", identifier_value.upper())[:40]
     filename = f"{submission_type.lower()}-{safe_identifier}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}{extension}"
     destination = UPLOAD_DIR / filename
     destination.write_bytes(file_bytes)
-    mime_type = upload.content_type or mimetypes.guess_type(filename)[0] or "application/octet-stream"
-    return str(destination), upload.filename or filename, mime_type
+    # Use verified MIME type from file signature inspection, not client-supplied one
+    return str(destination), upload.filename or filename, verified_mime
 
 
 def sync_business_registry_from_assessment(db: Session, assessment: TaxAssessmentRecord):
@@ -894,10 +898,18 @@ async def download_submission_file(
     if not is_public_owner:
         raise HTTPException(status_code=403, detail="You do not have access to this file.")
 
+    mime_type = taxpayer_submission_value(submission, "supporting_file_mime") or "application/octet-stream"
+    is_safe_preview = SafeFileType.is_safe_for_preview(mime_type)
+    disposition = "inline" if is_safe_preview else "attachment"
+    
     return FileResponse(
         path,
         filename=taxpayer_submission_value(submission, "supporting_file_name") or path.name,
-        media_type=taxpayer_submission_value(submission, "supporting_file_mime"),
+        media_type=mime_type,
+        headers={
+            "Content-Disposition": f'{disposition}; filename="{taxpayer_submission_value(submission, "supporting_file_name") or path.name}"',
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 
@@ -940,10 +952,19 @@ async def download_submission_file_admin(
     path = Path(file_path_value)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Supporting file is no longer available.")
+    
+    mime_type = taxpayer_submission_value(submission, "supporting_file_mime") or "application/octet-stream"
+    is_safe_preview = SafeFileType.is_safe_for_preview(mime_type)
+    disposition = "inline" if is_safe_preview else "attachment"
+    
     return FileResponse(
         path,
         filename=taxpayer_submission_value(submission, "supporting_file_name") or path.name,
-        media_type=taxpayer_submission_value(submission, "supporting_file_mime"),
+        media_type=mime_type,
+        headers={
+            "Content-Disposition": f'{disposition}; filename="{taxpayer_submission_value(submission, "supporting_file_name") or path.name}"',
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 
