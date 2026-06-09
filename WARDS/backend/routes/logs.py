@@ -13,6 +13,21 @@ from utils.rbac import require_permission
 
 router = APIRouter()
 
+
+@router.get("/unread-count")
+async def get_activity_logs_unread_count(
+    since: Optional[str] = None,
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    require_permission("view_activity_logs")(current_user)
+    query = db.query(ActivityLog)
+
+    if since:
+        query = query.filter(ActivityLog.created_at > datetime.fromisoformat(since))
+
+    return {"unread_count": query.count()}
+
 @router.get("/")
 async def get_activity_logs(
     type: Optional[str] = None,

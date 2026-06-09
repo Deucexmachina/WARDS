@@ -1,7 +1,7 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import api from '../services/api';
-import { announcementAPI, branchAnnouncementAPI, discrepancyAPI } from '../services/api';
+import { activityLogAPI, announcementAPI, branchAnnouncementAPI, discrepancyAPI } from '../services/api';
 import {
   getUnreadAdminReportCount,
   BRANCH_REPORT_VIEWED_EVENT,
@@ -9,6 +9,11 @@ import {
   getUnreadBranchReportCount,
 } from '../utils/branchReportViews';
 import { formatUnreadCount, UNREAD_COUNT_BADGE_CLASS } from '../utils/notificationUI';
+import {
+  ACTIVITY_LOGS_UPDATED_EVENT,
+  ACTIVITY_LOGS_VIEWED_EVENT,
+  getActivityLogsLastViewedAt,
+} from '../utils/activityLogNotifications';
 
 const BRANCH_QUEUE_UPDATED_EVENT = 'branch-queue-updated';
 const BRANCH_RECEIPT_UPDATED_EVENT = 'branch-receipt-updated';
@@ -207,6 +212,14 @@ const DynamicSidebar = () => {
       }));
     };
     const handleAdminAlertRead = () => fetchSidebarModuleCounts();
+    const handleActivityLogsViewed = (event) => {
+      const unreadCount = Number(event?.detail?.unreadCount || 0);
+      setModuleCounts((current) => ({
+        ...current,
+        logs: Math.max(0, unreadCount),
+      }));
+    };
+    const handleActivityLogsUpdated = () => fetchSidebarModuleCounts();
     window.addEventListener('admin-memo-read', handleAdminMemoRead);
     window.addEventListener('admin-policy-read', handleAdminPolicyRead);
     window.addEventListener('admin-policy-updated', handleAdminPolicyUpdated);
@@ -222,6 +235,8 @@ const DynamicSidebar = () => {
     window.addEventListener(BRANCH_QUEUE_UPDATED_EVENT, handleBranchQueueUpdated);
     window.addEventListener('security-notifications-updated', handleSecurityNotificationsUpdated);
     window.addEventListener('admin-alert-read', handleAdminAlertRead);
+    window.addEventListener(ACTIVITY_LOGS_VIEWED_EVENT, handleActivityLogsViewed);
+    window.addEventListener(ACTIVITY_LOGS_UPDATED_EVENT, handleActivityLogsUpdated);
     return () => {
       clearInterval(interval);
       window.removeEventListener('admin-memo-read', handleAdminMemoRead);
@@ -239,6 +254,8 @@ const DynamicSidebar = () => {
       window.removeEventListener(BRANCH_QUEUE_UPDATED_EVENT, handleBranchQueueUpdated);
       window.removeEventListener('security-notifications-updated', handleSecurityNotificationsUpdated);
       window.removeEventListener('admin-alert-read', handleAdminAlertRead);
+      window.removeEventListener(ACTIVITY_LOGS_VIEWED_EVENT, handleActivityLogsViewed);
+      window.removeEventListener(ACTIVITY_LOGS_UPDATED_EVENT, handleActivityLogsUpdated);
     };
   }, []);
 
@@ -306,12 +323,14 @@ const DynamicSidebar = () => {
           reportsResult,
           accountsResult,
           backupResult,
+          activityLogsResult,
         ] = await Promise.allSettled([
           announcementAPI.getUnreadCount(),
           api.get('/alerts/unread-count'),
           fetchAllAdminReports(),
           api.get('/accounts', { params: { page: 1, page_size: 1 } }),
           api.get('/security/unread-counts'),
+          activityLogAPI.getUnreadCount({ since: getActivityLogsLastViewedAt() || undefined }),
         ]);
 
         const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}');
@@ -329,7 +348,7 @@ const DynamicSidebar = () => {
             + Number(securityCounts.recoveries || 0)
             + Number(securityCounts.backups || 0)
             + Number(securityCounts.incidents || 0),
-          logs: 0,
+          logs: activityLogsResult.status === 'fulfilled' ? Number(activityLogsResult.value.data?.unread_count || 0) : 0,
         });
         return;
       }
@@ -437,7 +456,7 @@ const DynamicSidebar = () => {
 
   const getDefaultModules = (role) => {
     if (role === 'main_admin' || role === 'superadmin') {
-      return [
+      const modules = [
         { name: 'Dashboard', path: '/admin', icon: 'dashboard' },
         { name: 'Manage Branches', path: '/admin/branches', icon: 'branches' },
         { name: 'Tax Assessment', path: '/admin/tax-assessment', icon: 'assessment' },
@@ -453,6 +472,10 @@ const DynamicSidebar = () => {
         { name: 'System Settings', path: '/admin/settings', icon: 'settings' },
         { name: 'Account Management', path: '/admin/accounts', icon: 'accounts' }
       ];
+      if (role === 'main_admin' || role === 'superadmin') {
+        modules.splice(4, 0, { name: 'Public Content', path: '/admin/public-content', icon: 'content' });
+      }
+      return modules;
     } else if (role === 'branch_admin') {
       return [
         { name: 'Branch Dashboard', path: '/branch', icon: 'dashboard' },
@@ -498,6 +521,7 @@ const DynamicSidebar = () => {
       queue: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z',
       receipts: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',
       payments: 'M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z',
+      content: 'M7 4h10a2 2 0 012 2v12a2 2 0 01-2 2H7a2 2 0 01-2-2V6a2 2 0 012-2zm2 4h6m-6 4h6m-6 4h4',
       discrepancies: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z'
     };
     return icons[iconName] || icons.dashboard;
@@ -559,7 +583,7 @@ const DynamicSidebar = () => {
                           : isLogsModule
                             ? moduleCounts.logs
                             : 0;
-          const disableGenericBadge = isAccountsModule || isLogsModule;
+          const disableGenericBadge = isAccountsModule;
           const showGenericBadge =
             !disableGenericBadge &&
             !showMemoBadge &&

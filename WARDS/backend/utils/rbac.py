@@ -23,7 +23,8 @@ PERMISSIONS = {
         "manage_settings",
         "manage_users",
         "manage_backup",
-        "manage_policies"
+        "manage_policies",
+        "manage_public_content",
     ],
     ROLE_SUPERADMIN: [
         "view_all_branches",
@@ -37,7 +38,8 @@ PERMISSIONS = {
         "manage_settings",
         "manage_users",
         "manage_backup",
-        "manage_policies"
+        "manage_policies",
+        "manage_public_content",
     ],
     ROLE_BRANCH_ADMIN: [
         "view_branch_dashboard",
@@ -48,7 +50,7 @@ PERMISSIONS = {
         "report_discrepancies",
         "view_announcements",
         "generate_branch_reports",
-        "view_branch_alerts"
+        "view_branch_alerts",
     ],
     ROLE_BRANCH_STAFF: [
         "view_branch_operations",
@@ -138,7 +140,7 @@ def get_accessible_branches(user: User, db: Session):
 def get_sidebar_modules(role: str) -> list:
     """Get sidebar modules based on user role"""
     if role in {ROLE_MAIN_ADMIN, ROLE_SUPERADMIN}:
-        return [
+        modules = [
             {"name": "Dashboard", "path": "/admin", "icon": "dashboard"},
             {"name": "Manage Branches", "path": "/admin/branches", "icon": "branches"},
             {"name": "Tax Assessment", "path": "/admin/tax-assessment", "icon": "assessment"},
@@ -153,6 +155,9 @@ def get_sidebar_modules(role: str) -> list:
             {"name": "System Settings", "path": "/admin/settings", "icon": "settings"},
             {"name": "Account Management", "path": "/admin/accounts", "icon": "accounts"}
         ]
+        if role in {ROLE_MAIN_ADMIN, ROLE_SUPERADMIN}:
+            modules.insert(4, {"name": "Public Content", "path": "/admin/public-content", "icon": "content"})
+        return modules
     
     elif role == ROLE_BRANCH_ADMIN:
         return [

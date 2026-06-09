@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { activityLogAPI } from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
+import { markActivityLogsViewed } from '../../utils/activityLogNotifications';
 
 const typeColors = {
   admin: 'bg-purple-100 text-purple-800',
@@ -11,6 +12,7 @@ const typeColors = {
   branch_auth: 'bg-orange-100 text-orange-800',
   admin_auth: 'bg-indigo-100 text-indigo-800',
   branch_portal: 'bg-cyan-100 text-cyan-800',
+  public_content: 'bg-amber-100 text-amber-800',
   error: 'bg-rose-100 text-rose-800',
 };
 
@@ -55,6 +57,7 @@ const ActivityLogs = () => {
   };
 
   useEffect(() => {
+    markActivityLogsViewed();
     fetchLogs();
   }, []);
 

@@ -57,6 +57,7 @@ import ReceiptManagement from './pages/admin/ReceiptManagement'
 import PaymentManagement from './pages/admin/PaymentManagement'
 import DiscrepancyReports from './pages/admin/DiscrepancyReports'
 import TaxAssessment from './pages/admin/TaxAssessment'
+import PublicContentManagement from './pages/shared/PublicContentManagement'
 
 const BackupRecovery = lazy(() => import('./pages/admin/BackupRecovery'))
 
@@ -138,6 +139,7 @@ function App() {
           <Route path="receipts" element={<ReceiptManagement />} />
           <Route path="payments" element={<PaymentManagement />} />
           <Route path="tax-assessment" element={<TaxAssessment />} />
+          <Route path="public-content" element={<PublicContentManagement portal="admin" />} />
           <Route path="discrepancies" element={<DiscrepancyReports />} />
         </Route>
       </Routes>

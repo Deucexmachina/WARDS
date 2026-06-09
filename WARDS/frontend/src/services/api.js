@@ -12,6 +12,10 @@ const api = axios.create({
 });
 
 api.interceptors.request.use((config) => {
+  if (config.headers?.Authorization) {
+    return config;
+  }
+
   // Determine which token to use based on the route
   let token = null;
   const url = config.url || '';
@@ -22,6 +26,8 @@ api.interceptors.request.use((config) => {
     url.includes('/tax-assessment/user/')
   ) {
     token = localStorage.getItem('userToken');
+  } else if (url.includes('/public-content')) {
+    token = localStorage.getItem('adminToken') || localStorage.getItem('branchToken');
   } else if (url.includes('/alerts')) {
     token = localStorage.getItem('adminToken') || localStorage.getItem('branchToken');
   } else if (url.includes('/accounts')) {
@@ -88,6 +94,7 @@ api.interceptors.response.use(
       url.includes('/memos') ||
       url.includes('/alerts') ||
       url.includes('/activity-logs') ||
+      url.includes('/public-content') ||
       url.includes('/backup') ||
       url.includes('/policies') ||
       url.includes('/settings') ||
@@ -345,7 +352,26 @@ export const alertAPI = {
 };
 
 export const activityLogAPI = {
+  getUnreadCount: (params) => api.get('/activity-logs/unread-count', { params }),
   getAll: (params) => api.get('/activity-logs', { params }),
+};
+
+const buildPortalAuthHeaders = (portal = 'admin') => {
+  const token = portal === 'branch'
+    ? localStorage.getItem('branchToken')
+    : localStorage.getItem('adminToken');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
+export const publicContentAPI = {
+  getPublicTaxpayerGuide: () => api.get('/public-content/public/taxpayer-guide'),
+  getPublicContact: () => api.get('/public-content/public/contact'),
+  getTaxpayerGuideEditor: (portal = 'admin') => api.get('/public-content/taxpayer-guide', { headers: buildPortalAuthHeaders(portal) }),
+  saveTaxpayerGuideDraft: (content, portal = 'admin') => api.put('/public-content/taxpayer-guide/draft', { content }, { headers: buildPortalAuthHeaders(portal) }),
+  publishTaxpayerGuide: (content, portal = 'admin') => api.post('/public-content/taxpayer-guide/publish', { content }, { headers: buildPortalAuthHeaders(portal) }),
+  getContactEditor: (portal = 'admin') => api.get('/public-content/contact', { headers: buildPortalAuthHeaders(portal) }),
+  saveContactDraft: (content, portal = 'admin') => api.put('/public-content/contact/draft', { content }, { headers: buildPortalAuthHeaders(portal) }),
+  publishContact: (content, portal = 'admin') => api.post('/public-content/contact/publish', { content }, { headers: buildPortalAuthHeaders(portal) }),
 };
 
 export const backupAPI = {

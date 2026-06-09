@@ -1373,6 +1373,22 @@ class TaxpayerGuide(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+
+class PublicPageContent(Base):
+    __tablename__ = "public_page_contents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    page_key = Column(String, unique=True, nullable=False, index=True)
+    draft_content_json = Column(Text, nullable=True)
+    published_content_json = Column(Text, nullable=True)
+    last_saved_at = Column(DateTime, nullable=True)
+    last_saved_by = Column(String, nullable=True)
+    published_at = Column(DateTime, nullable=True)
+    published_by = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class BranchOperatingHours(Base):
     __tablename__ = "branch_operating_hours"
     
