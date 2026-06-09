@@ -42,7 +42,7 @@ const getQueueWindowLabel = (queueOrKey) => {
 };
 
 const BRANCH_QUEUE_UPDATED_EVENT = 'branch-queue-updated';
-const OCR_REQUIRED_RECEIPT_CATEGORIES = new Set(['RPT', 'BUSINESS', 'MISC']);
+const OCR_REQUIRED_RECEIPT_CATEGORIES = new Set(['RPT', 'BUSINESS', 'MISC', 'PTR', 'MARKET']);
 const OCR_EXTRACTION_FAILED_MESSAGE = 'Unable to extract all required receipt information. Please verify the uploaded receipt and try again.';
 
 const resolveReceiptCategory = (queue) => {
@@ -72,6 +72,8 @@ const defaultReceiptDraft = (queue) => ({
   taxpayer_name: queue?.taxpayer_name || '',
   transaction_date: '',
   amount: '',
+  market_purpose_of_renewal: '',
+  market_valid_until: '',
   tax_type: resolveReceiptCategory(queue),
   selected_category: resolveReceiptCategory(queue),
   detected_category: resolveReceiptCategory(queue),
@@ -91,8 +93,26 @@ const buildSuggestedReceiptFilename = (filename, taxpayerName) => {
 };
 
 const getReceiptDraftMissingFields = (draft, category) => {
-  if (!OCR_REQUIRED_RECEIPT_CATEGORIES.has((category || '').trim().toUpperCase())) {
+  const normalizedCategory = (category || '').trim().toUpperCase();
+  if (!OCR_REQUIRED_RECEIPT_CATEGORIES.has(normalizedCategory)) {
     return [];
+  }
+
+  if (normalizedCategory === 'MARKET') {
+    const missingFields = [];
+    if (!(draft?.taxpayer_name || '').trim()) {
+      missingFields.push('taxpayer_name');
+    }
+    if (!(draft?.transaction_date || '').trim()) {
+      missingFields.push('transaction_date');
+    }
+    if (!(draft?.market_purpose_of_renewal || '').trim()) {
+      missingFields.push('market_purpose_of_renewal');
+    }
+    if (!(draft?.market_valid_until || '').trim()) {
+      missingFields.push('market_valid_until');
+    }
+    return missingFields;
   }
 
   const missingFields = [];
@@ -824,6 +844,8 @@ const QueueManagement = () => {
   const [lastCalledQueue, setLastCalledQueue] = useState(null);
   const lastCalledQueueRef = useRef(null);
   const receiptDraftCategory = (receiptDraft?.selected_category || receiptDraft?.tax_type || resolveReceiptCategory(completionQueue)).trim().toUpperCase();
+  const completionReceiptCategory = resolveReceiptCategory(completionQueue);
+  const isCtcFileOnlyCompletion = completionReceiptCategory === 'CTC';
   const receiptDraftMissingFields = getReceiptDraftMissingFields(receiptDraft, receiptDraftCategory);
   const receiptDraftExtractionWarning = receiptDraftMissingFields.length ? OCR_EXTRACTION_FAILED_MESSAGE : '';
   const receiptDraftFilenameMismatchBlocked = Boolean(
@@ -1011,7 +1033,7 @@ const QueueManagement = () => {
   const handleFileReceiptUpload = async (event) => {
     event.preventDefault();
     if (!receiptUploadFile || !completionQueue) {
-      setCompletionError('Choose a receipt image before running OCR.');
+      setCompletionError('Choose a receipt image before continuing.');
       return;
     }
 
@@ -1879,7 +1901,7 @@ const QueueManagement = () => {
                     type="button"
                     onClick={() => completeQueueDirectly(completionQueue)}
                     disabled={completingQueueId !== null}
-                    className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-6 text-left transition hover:border-emerald-400 hover:bg-emerald-100 disabled:opacity-60"
+                    className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-6 text-left transition hover:border-emerald-400 hover:bg-emerald-100 disabled:opacity-60 md:col-span-2"
                   >
                     <p className="text-lg font-bold text-emerald-900">Complete Queue</p>
                     <p className="mt-2 text-sm leading-6 text-emerald-700">
@@ -1899,17 +1921,23 @@ const QueueManagement = () => {
                       className="rounded-2xl border border-blue-200 bg-blue-50 px-5 py-6 text-left transition hover:border-blue-400 hover:bg-blue-100"
                     >
                       <p className="text-lg font-bold text-blue-900">File Upload</p>
-                      <p className="mt-2 text-sm leading-6 text-blue-700">Upload a receipt image from this computer and run OCR.</p>
+                      <p className="mt-2 text-sm leading-6 text-blue-700">
+                        {isCtcFileOnlyCompletion
+                          ? 'Upload a receipt copy image from this computer. CTC is saved without OCR.'
+                          : 'Upload a receipt image from this computer and run OCR.'}
+                      </p>
                     </button>
-                    <button
-                      type="button"
-                      onClick={startMobileReceiptUpload}
-                      disabled={processingReceipt}
-                      className="rounded-2xl border border-purple-200 bg-purple-50 px-5 py-6 text-left transition hover:border-purple-400 hover:bg-purple-100 disabled:opacity-60"
-                    >
-                      <p className="text-lg font-bold text-purple-900">Via Mobile QR</p>
-                      <p className="mt-2 text-sm leading-6 text-purple-700">Scan a QR code and take the receipt photo from a phone.</p>
-                    </button>
+                    {!isCtcFileOnlyCompletion ? (
+                      <button
+                        type="button"
+                        onClick={startMobileReceiptUpload}
+                        disabled={processingReceipt}
+                        className="rounded-2xl border border-purple-200 bg-purple-50 px-5 py-6 text-left transition hover:border-purple-400 hover:bg-purple-100 disabled:opacity-60"
+                      >
+                        <p className="text-lg font-bold text-purple-900">Via Mobile QR</p>
+                        <p className="mt-2 text-sm leading-6 text-purple-700">Scan a QR code and take the receipt photo from a phone.</p>
+                      </button>
+                    ) : null}
                   </>
                 ) : null}
               </div>
@@ -1919,6 +1947,7 @@ const QueueManagement = () => {
               <form onSubmit={handleFileReceiptUpload} className="mt-6 space-y-5">
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-sm text-slate-600">
                   Default receipt category: <span className="font-bold text-slate-900">{resolveReceiptCategory(completionQueue)}</span>
+                  {isCtcFileOnlyCompletion ? <span className="ml-2 text-slate-500">File upload only, no OCR.</span> : null}
                 </div>
                 <label className="block">
                   <span className="mb-2 block text-sm font-semibold text-slate-700">Receipt Image</span>
@@ -1942,7 +1971,7 @@ const QueueManagement = () => {
                     Back
                   </button>
                   <button type="submit" disabled={processingReceipt} className="rounded-xl bg-primary px-5 py-3 font-semibold text-white transition hover:bg-secondary disabled:opacity-60">
-                    {processingReceipt ? 'Parsing...' : 'Run OCR'}
+                    {processingReceipt ? (isCtcFileOnlyCompletion ? 'Uploading...' : 'Parsing...') : (isCtcFileOnlyCompletion ? 'Upload File' : 'Run OCR')}
                   </button>
                 </div>
               </form>
@@ -2014,22 +2043,37 @@ const QueueManagement = () => {
                   </div>
                 ) : null}
                 <div className="grid gap-4 md:grid-cols-2">
+                  {completionReceiptCategory !== 'MARKET' ? (
+                    <label className="block">
+                      <span className="mb-2 block text-sm font-semibold text-slate-700">Reference Number</span>
+                      <input name="ref_number" value={receiptDraft.ref_number || ''} onChange={handleReceiptDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none" />
+                    </label>
+                  ) : null}
                   <label className="block">
-                    <span className="mb-2 block text-sm font-semibold text-slate-700">Reference Number</span>
-                    <input name="ref_number" value={receiptDraft.ref_number || ''} onChange={handleReceiptDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none" />
-                  </label>
-                  <label className="block">
-                    <span className="mb-2 block text-sm font-semibold text-slate-700">Taxpayer Name</span>
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">{completionReceiptCategory === 'MARKET' ? 'Name' : 'Taxpayer Name'}</span>
                     <input name="taxpayer_name" value={receiptDraft.taxpayer_name || ''} onChange={handleReceiptDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none" />
                   </label>
                   <label className="block">
-                    <span className="mb-2 block text-sm font-semibold text-slate-700">Transaction Date</span>
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">{completionReceiptCategory === 'MARKET' ? 'Date of Issue' : 'Transaction Date'}</span>
                     <input name="transaction_date" value={receiptDraft.transaction_date || ''} onChange={handleReceiptDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none" />
                   </label>
-                  <label className="block">
-                    <span className="mb-2 block text-sm font-semibold text-slate-700">Amount</span>
-                    <input name="amount" type="number" step="0.01" value={receiptDraft.amount ?? ''} onChange={handleReceiptDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none" />
-                  </label>
+                  {completionReceiptCategory === 'MARKET' ? (
+                    <>
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-semibold text-slate-700">Purpose of Renewal</span>
+                        <input name="market_purpose_of_renewal" value={receiptDraft.market_purpose_of_renewal || ''} onChange={handleReceiptDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none" />
+                      </label>
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-semibold text-slate-700">Valid Until</span>
+                        <input name="market_valid_until" value={receiptDraft.market_valid_until || ''} onChange={handleReceiptDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none" />
+                      </label>
+                    </>
+                  ) : (
+                    <label className="block">
+                      <span className="mb-2 block text-sm font-semibold text-slate-700">Amount</span>
+                      <input name="amount" type="number" step="0.01" value={receiptDraft.amount ?? ''} onChange={handleReceiptDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none" />
+                    </label>
+                  )}
                 </div>
                 <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
                   Category: {receiptDraft.selected_category || resolveReceiptCategory(completionQueue)} | Confidence: {receiptDraft.confidence || 0} | Engine: {receiptDraft.engine || 'ocr'}

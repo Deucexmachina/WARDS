@@ -1,4 +1,5 @@
 from datetime import datetime, date, timedelta, timezone
+import json
 from io import BytesIO
 import asyncio
 import hashlib
@@ -74,7 +75,8 @@ RECEIPT_REQUEST_REASON_OPTIONS = {
 }
 OCR_EXTRACTION_FAILED_MESSAGE = "Unable to extract all required receipt information. Please verify the uploaded receipt and try again."
 UNSUPPORTED_RECEIPT_FORMAT_MESSAGE = "The uploaded receipt format is not recognized by the OCR engine."
-OCR_REQUIRED_RECEIPT_CATEGORIES = {"RPT", "BUSINESS", "MISC"}
+OCR_REQUIRED_RECEIPT_CATEGORIES = {"RPT", "BUSINESS", "MISC", "PTR", "MARKET"}
+MARKET_OCR_METADATA_PREFIX = "__MARKET_OCR_METADATA__"
 
 
 def unique_receipt_request_id() -> str:
@@ -133,6 +135,8 @@ class ReceiptRecordPayload(BaseModel):
     amount: float | None = None
     tax_type: str | None = None
     raw_text: str | None = None
+    market_purpose_of_renewal: str | None = None
+    market_valid_until: str | None = None
     confidence: float | None = None
     source_image_path: str | None = None
     source_image_sha256: str | None = None
@@ -178,6 +182,10 @@ def derive_tax_type_from_queue_service(service_type: str | None) -> str:
 
 
 def serialize_receipt_record(record: ReceiptRecord):
+    raw_ocr_text = receipt_record_value(record, "raw_ocr_text")
+    market_metadata = extract_market_ocr_metadata(raw_ocr_text) if receipt_record_value(record, "tax_type") == "MARKET" else {}
+    if market_metadata.get("raw_text") is not None:
+        raw_ocr_text = market_metadata["raw_text"]
     return {
         "id": record.id,
         "branch_id": record.branch_id,
@@ -193,11 +201,13 @@ def serialize_receipt_record(record: ReceiptRecord):
         "selected_category": record.selected_category,
         "detected_category": record.detected_category,
         "source_image_path": receipt_record_value(record, "source_image_path"),
-        "raw_ocr_text": receipt_record_value(record, "raw_ocr_text"),
+        "raw_ocr_text": raw_ocr_text,
         "verification_status": receipt_record_value(record, "verification_status"),
         "confidence": record.confidence,
         "uploaded_by": record.uploaded_by,
         "created_at": record.created_at.isoformat() if record.created_at else None,
+        "market_purpose_of_renewal": market_metadata.get("market_purpose_of_renewal"),
+        "market_valid_until": market_metadata.get("market_valid_until"),
     }
 
 
@@ -603,6 +613,129 @@ def receipt_category_requires_ocr(category: str | None) -> bool:
     return normalize_receipt_category(category) in OCR_REQUIRED_RECEIPT_CATEGORIES
 
 
+def extract_market_ocr_metadata(raw_ocr_text: str | None) -> dict:
+    text = (raw_ocr_text or "").strip()
+    metadata: dict[str, str] = {}
+    raw_text = text
+
+    marker = f"\n{MARKET_OCR_METADATA_PREFIX}"
+    if marker in text:
+        raw_text, metadata_blob = text.rsplit(marker, 1)
+        raw_text = raw_text.strip()
+        try:
+            loaded = json.loads(metadata_blob.strip())
+            if isinstance(loaded, dict):
+                metadata.update({
+                    "market_purpose_of_renewal": (loaded.get("market_purpose_of_renewal") or "").strip() or None,
+                    "market_valid_until": (loaded.get("market_valid_until") or "").strip() or None,
+                })
+        except Exception:
+            pass
+
+    if not metadata.get("market_purpose_of_renewal") or not metadata.get("market_valid_until"):
+        fallback = extract_market_certificate_fields(raw_text or text)
+        metadata.setdefault("market_purpose_of_renewal", fallback.get("market_purpose_of_renewal"))
+        metadata.setdefault("market_valid_until", fallback.get("market_valid_until"))
+
+    metadata["raw_text"] = raw_text or text
+    return metadata
+
+
+def extract_market_certificate_fields(text: str | None) -> dict:
+    normalized_text = (text or "").strip()
+    if not normalized_text:
+        return {
+            "market_purpose_of_renewal": None,
+            "market_valid_until": None,
+        }
+
+    lines = [line.strip() for line in normalized_text.splitlines() if line.strip()]
+    joined = " ".join(lines)
+
+    purpose_match = re.search(
+        r"(?:purpose\s+of\s+renewal|purpose|for\s+the\s+purpose\s+of)\s*[:\-]?\s*([A-Za-z0-9 ,.'&/\-]+?)(?:\s*,?\s*valid\s+until\b|$)",
+        joined,
+        re.IGNORECASE,
+    )
+    valid_until_match = re.search(
+        r"(?:valid\s+until)\s*[:\-]?\s*([A-Za-z0-9 ,.'&/\-]+?)(?:[.\n]|$)",
+        joined,
+        re.IGNORECASE,
+    )
+
+    if not purpose_match:
+        for line in lines:
+            if re.search(r"purpose", line, re.IGNORECASE):
+                candidate = re.sub(r"(?i).*purpose(?:\s+of\s+renewal)?\s*[:\-]?\s*", "", line).strip(" .,:-")
+                if candidate:
+                    purpose_match = candidate
+                    break
+
+    if not valid_until_match:
+        for line in lines:
+            if re.search(r"valid\s+until", line, re.IGNORECASE):
+                candidate = re.sub(r"(?i).*valid\s+until\s*[:\-]?\s*", "", line).strip(" .,:-")
+                if candidate:
+                    valid_until_match = candidate
+                    break
+
+    purpose = purpose_match.group(1).strip(" .,:-") if hasattr(purpose_match, "group") else (purpose_match.strip(" .,:-") if purpose_match else "")
+    valid_until = valid_until_match.group(1).strip(" .,:-") if hasattr(valid_until_match, "group") else (valid_until_match.strip(" .,:-") if valid_until_match else "")
+
+    return {
+        "market_purpose_of_renewal": purpose or None,
+        "market_valid_until": valid_until or None,
+    }
+
+
+def validate_market_document_analysis(
+    *,
+    raw_text: str | None,
+    taxpayer_name: str | None,
+    transaction_date: str | None,
+    market_purpose_of_renewal: str | None,
+    market_valid_until: str | None,
+):
+    normalized_text = (raw_text or "").upper()
+    market_keywords = [
+        "CERTIFICATE OF STALL OCCUPANCY",
+        "STALL AWARDEE",
+        "PUBLIC MARKET",
+        "MARKET CERTIFICATE",
+        "PURPOSE OF RENEWAL",
+        "VALID UNTIL",
+    ]
+    matched_keywords = [keyword for keyword in market_keywords if keyword in normalized_text]
+    populated_fields = sum(
+        1 for value in [taxpayer_name, transaction_date, market_purpose_of_renewal, market_valid_until] if value not in ("", None)
+    )
+    if len(matched_keywords) >= 2 or populated_fields >= 3:
+        return
+    raise HTTPException(
+        status_code=400,
+        detail=UNSUPPORTED_RECEIPT_FORMAT_MESSAGE,
+    )
+
+
+def get_missing_market_required_receipt_fields(
+    *,
+    taxpayer_name: str | None,
+    transaction_date: str | None,
+    market_purpose_of_renewal: str | None,
+    market_valid_until: str | None,
+) -> list[str]:
+    missing_fields = []
+    if not (taxpayer_name or "").strip():
+        missing_fields.append("taxpayer_name")
+    if not (transaction_date or "").strip():
+        missing_fields.append("transaction_date")
+    if not (market_purpose_of_renewal or "").strip():
+        missing_fields.append("market_purpose_of_renewal")
+    if not (market_valid_until or "").strip():
+        missing_fields.append("market_valid_until")
+    return missing_fields
+
+
 def compute_image_sha256(image_bytes: bytes) -> str:
     return hashlib.sha256(image_bytes).hexdigest()
 
@@ -884,8 +1017,6 @@ def find_duplicate_receipt_record(
     exact_match_query = db.query(ReceiptRecord).filter(ReceiptRecord.source_image_sha256 == image_sha256)
     if branch_id:
         exact_match_query = exact_match_query.filter(ReceiptRecord.branch_id == branch_id)
-    if tax_type:
-        exact_match_query = exact_match_query.filter(hash_aware_match(ReceiptRecord, "tax_type", tax_type))
 
     exact_match = exact_match_query.order_by(ReceiptRecord.created_at.desc()).first()
     if exact_match:
@@ -951,6 +1082,15 @@ def save_receipt_record_payload(
     if selected_category != normalized_tax_type:
         raise HTTPException(status_code=400, detail="The verified tax type must match the selected receipt category.")
 
+    if normalized_tax_type == "CTC" and detected_category not in {"CTC", "UNKNOWN"}:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Receipt category validation failed. This looks like a {detected_category} receipt, "
+                f"but the saved receipt type is CTC. Please upload the correct receipt type."
+            ),
+        )
+
     if requires_ocr and (detected_category != selected_category or payload.category_match is False):
         raise HTTPException(
             status_code=400,
@@ -979,7 +1119,22 @@ def save_receipt_record_payload(
         )
 
     normalized_ref_number = normalize_reference_number(payload.ref_number)
-    if requires_ocr:
+    market_metadata = {}
+    if normalized_tax_type == "MARKET":
+        validate_market_document_analysis(
+            raw_text=payload.raw_text,
+            taxpayer_name=payload.taxpayer_name,
+            transaction_date=payload.transaction_date,
+            market_purpose_of_renewal=payload.market_purpose_of_renewal,
+            market_valid_until=payload.market_valid_until,
+        )
+        if not (payload.taxpayer_name or "").strip() or not (payload.transaction_date or "").strip():
+            raise HTTPException(status_code=400, detail=OCR_EXTRACTION_FAILED_MESSAGE)
+        market_metadata = {
+            "market_purpose_of_renewal": (payload.market_purpose_of_renewal or "").strip() or None,
+            "market_valid_until": (payload.market_valid_until or "").strip() or None,
+        }
+    elif requires_ocr:
         validate_required_receipt_fields(
             ref_number=normalized_ref_number,
             taxpayer_name=payload.taxpayer_name,
@@ -1004,7 +1159,7 @@ def save_receipt_record_payload(
                 ),
             )
 
-    if requires_ocr:
+    if normalized_tax_type != "MARKET" and requires_ocr:
         validate_receipt_document_analysis(
             raw_text=payload.raw_text,
             ref_number=normalized_ref_number,
@@ -1034,6 +1189,13 @@ def save_receipt_record_payload(
         filename_validation["suggested_filename"],
     )
 
+    raw_ocr_text = payload.raw_text
+    if normalized_tax_type == "MARKET" and (market_metadata.get("market_purpose_of_renewal") or market_metadata.get("market_valid_until")):
+        raw_ocr_text = (
+            f"{(payload.raw_text or '').rstrip()}\n{MARKET_OCR_METADATA_PREFIX}"
+            f"{json.dumps(market_metadata, ensure_ascii=False)}"
+        ).strip()
+
     record = ReceiptRecord(
         branch_id=branch_id,
         receipt_number=payload.receipt_number,
@@ -1048,7 +1210,7 @@ def save_receipt_record_payload(
         selected_category=selected_category,
         detected_category=detected_category,
         source_image_path=renamed_source_image_path,
-        raw_ocr_text=payload.raw_text,
+        raw_ocr_text=raw_ocr_text,
         verification_status="Verified",
         confidence=payload.confidence or (0.0 if requires_ocr else 1.0),
         uploaded_by=uploaded_by,
@@ -1104,6 +1266,24 @@ def build_receipt_ocr_result(
         )
 
     if not receipt_category_requires_ocr(normalized_category):
+        category_analysis = None
+        if normalized_category == "CTC":
+            category_analysis = ocr_service.analyze_receipt_category_only(file_path)
+            raw_detected_category = (category_analysis.get("detected_category") or "UNKNOWN").strip().upper()
+            detected_category = normalize_receipt_category(raw_detected_category)
+            if raw_detected_category != "UNKNOWN" and detected_category != normalized_category:
+                if os.path.exists(file_path):
+                    try:
+                        os.remove(file_path)
+                    except OSError:
+                        pass
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Receipt category validation failed. This looks like a {detected_category} receipt, "
+                        f"but the queue requires {normalized_category}. Please upload the correct receipt type."
+                    ),
+                )
         filename_validation = build_receipt_filename_validation(
             filename=file.filename or os.path.basename(file_path),
             taxpayer_name=None,
@@ -1118,6 +1298,7 @@ def build_receipt_ocr_result(
             "tax_type": normalized_category,
             "raw_text": "",
             "confidence": 1.0,
+            "category_evidence": category_analysis.get("evidence", []) if category_analysis else [],
             "source_image_path": file_path,
             "source_image_sha256": image_sha256,
             "source_image_ahash": image_ahash,
@@ -1125,8 +1306,8 @@ def build_receipt_ocr_result(
             "uploaded_by": uploaded_by,
             "category": normalized_category,
             "selected_category": normalized_category,
-            "detected_category": normalized_category,
-            "category_match": True,
+            "detected_category": (category_analysis.get("detected_category", normalized_category) if category_analysis else normalized_category),
+            "category_match": (category_analysis.get("detected_category", normalized_category) in {"UNKNOWN", normalized_category} if category_analysis else True),
             "duplicate_detected": duplicate_record is not None,
             "duplicate_type": duplicate_type,
             "duplicate_record": serialize_duplicate_record(duplicate_record),
@@ -1156,14 +1337,11 @@ def build_receipt_ocr_result(
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    raw_detected_category = (result.get("detected_category") or normalized_category).strip().upper()
-    if raw_detected_category == "UNKNOWN":
-        result["detected_category"] = normalized_category
-        result["category_match"] = True
-        result["category_warning"] = ""
-        raw_detected_category = normalized_category
+    raw_detected_category = (result.get("detected_category") or "UNKNOWN").strip().upper()
     detected_category = normalize_receipt_category(raw_detected_category)
     category_match = result.get("category_match", True)
+    if raw_detected_category == "UNKNOWN" and normalized_tax_type != "PTR":
+        category_match = False
     if detected_category != normalized_category or category_match is False:
         raise HTTPException(
             status_code=400,
@@ -1196,18 +1374,33 @@ def build_receipt_ocr_result(
             "Please review the extracted information before saving."
         )
 
-    validate_receipt_document_analysis(
-        raw_text=result.get("raw_text"),
-        ref_number=result.get("ref_number"),
-        taxpayer_name=result.get("taxpayer_name"),
-        transaction_date=result.get("transaction_date"),
-        amount=result.get("amount"),
-    )
-    missing_required_fields = get_missing_required_receipt_fields(
-        ref_number=result.get("ref_number"),
-        taxpayer_name=result.get("taxpayer_name"),
-        amount=result.get("amount"),
-    )
+    if normalized_category == "MARKET":
+        validate_market_document_analysis(
+            raw_text=result.get("raw_text"),
+            taxpayer_name=result.get("taxpayer_name"),
+            transaction_date=result.get("transaction_date"),
+            market_purpose_of_renewal=result.get("market_purpose_of_renewal"),
+            market_valid_until=result.get("market_valid_until"),
+        )
+        missing_required_fields = get_missing_market_required_receipt_fields(
+            taxpayer_name=result.get("taxpayer_name"),
+            transaction_date=result.get("transaction_date"),
+            market_purpose_of_renewal=result.get("market_purpose_of_renewal"),
+            market_valid_until=result.get("market_valid_until"),
+        )
+    else:
+        validate_receipt_document_analysis(
+            raw_text=result.get("raw_text"),
+            ref_number=result.get("ref_number"),
+            taxpayer_name=result.get("taxpayer_name"),
+            transaction_date=result.get("transaction_date"),
+            amount=result.get("amount"),
+        )
+        missing_required_fields = get_missing_required_receipt_fields(
+            ref_number=result.get("ref_number"),
+            taxpayer_name=result.get("taxpayer_name"),
+            amount=result.get("amount"),
+        )
     extraction_warning = OCR_EXTRACTION_FAILED_MESSAGE if missing_required_fields else ""
     if missing_required_fields:
         save_blocked = True
@@ -1970,6 +2163,8 @@ async def upload_release_copy(
         output_file.write(file_bytes)
 
     expected_tax_type = normalize_receipt_category(receipt_request_value(receipt_request, "tax_type") or "RPT")
+    expected_taxpayer_name = receipt_request_value(receipt_request, "taxpayer_name")
+    release_copy_filename_name = expected_taxpayer_name
     try:
         analysis = await build_receipt_ocr_result_async(
             db=db,
@@ -1989,8 +2184,9 @@ async def upload_release_copy(
                 pass
         raise
 
-    expected_taxpayer_name = receipt_request_value(receipt_request, "taxpayer_name")
     extracted_taxpayer_name = (analysis.get("taxpayer_name") or "").strip() or expected_taxpayer_name
+    if expected_tax_type not in {"RPT", "BUSINESS", "MISC"}:
+        release_copy_filename_name = extracted_taxpayer_name or expected_taxpayer_name
     if (
         receipt_category_requires_ocr(expected_tax_type)
         and analysis.get("taxpayer_name")
@@ -2012,9 +2208,9 @@ async def upload_release_copy(
 
     filename_validation = build_receipt_filename_validation(
         filename=file.filename or safe_name,
-        taxpayer_name=extracted_taxpayer_name,
+        taxpayer_name=release_copy_filename_name,
     )
-    if extracted_taxpayer_name and not filename_validation["filename_matches_taxpayer"] and not auto_rename:
+    if release_copy_filename_name and not filename_validation["filename_matches_taxpayer"] and not auto_rename:
         if os.path.exists(file_path):
             try:
                 os.remove(file_path)
@@ -2025,7 +2221,7 @@ async def upload_release_copy(
             detail={
                 "code": "receipt_filename_mismatch",
                 "message": filename_validation["message"],
-                "extracted_taxpayer_name": extracted_taxpayer_name,
+                "extracted_taxpayer_name": release_copy_filename_name,
                 "suggested_filename": filename_validation["suggested_filename"],
                 "original_filename": filename_validation["original_filename"],
             },

@@ -43,12 +43,39 @@ class OCRService:
         category: str = "RPT",
     ) -> Dict[str, Any]:
         category = self._normalize_category(category)
-        if category not in {"RPT", "BUSINESS", "MISC"}:
-            raise RuntimeError("Unsupported receipt category. Use RPT, BUSINESS, or MISC.")
+        if category not in {"RPT", "BUSINESS", "MISC", "PTR", "MARKET"}:
+            raise RuntimeError("Unsupported receipt category. Use RPT, BUSINESS, MISC, PTR, or MARKET.")
 
         raw_text = self._extract_text_with_llmwhisperer(image_path)
         parsed = self._parse_receipt_text(raw_text, filename, category)
         category_analysis = self._detect_category_from_text(raw_text)
+        color_hint = self._detect_category_from_image(image_path)
+        if color_hint.get("detected_category") == "MISC":
+            category_analysis = color_hint
+        if category == "MARKET" and category_analysis.get("detected_category") == "UNKNOWN":
+            if any(parsed.get(key) for key in ("taxpayer_name", "transaction_date", "market_purpose_of_renewal", "market_valid_until")):
+                category_analysis = {
+                    "detected_category": "MARKET",
+                    "confidence": 0.82,
+                    "evidence": ["Market certificate field matches"],
+                }
+        elif category == "PTR" and category_analysis.get("detected_category") == "UNKNOWN":
+            receipt_number = (parsed.get("receipt_number") or parsed.get("ref_number") or parsed.get("txn_id") or "").strip()
+            fallback_text = f"{raw_text}\n{filename}".upper()
+            if (
+                receipt_number
+                and re.search(r"\bOFFICIAL\s+RECEIPT\b", fallback_text)
+                and (
+                    re.search(r"\bPAYOR\b", fallback_text)
+                    or re.search(r"\bOFFICE\s+OF\s+THE\s+TREASURER\b", fallback_text)
+                    or re.search(r"\bDATE\b", fallback_text)
+                )
+            ):
+                category_analysis = {
+                    "detected_category": "PTR",
+                    "confidence": 0.82,
+                    "evidence": ["Official receipt layout with receipt number"],
+                }
         parsed["success"] = True
         parsed["engine"] = self.engine_name
         parsed["message"] = "Receipt processed with LLMWhisperer. Please review before saving."
@@ -67,6 +94,60 @@ class OCRService:
             )
         )
         return parsed
+
+    def analyze_receipt_category_only(self, image_path: str) -> Dict[str, Any]:
+        try:
+            raw_text = self._extract_text_with_llmwhisperer(image_path)
+        except Exception:
+            raw_text = ""
+
+        category_analysis = self._detect_category_from_text(raw_text)
+        image_hint = self._detect_category_from_image(image_path)
+
+        if category_analysis.get("detected_category") == "UNKNOWN" and image_hint.get("detected_category") != "UNKNOWN":
+            category_analysis = image_hint
+        elif category_hint := image_hint.get("detected_category"):
+            if category_analysis.get("detected_category") == "MISC" and category_hint == "MISC":
+                category_analysis = image_hint
+
+        return {
+            "detected_category": category_analysis.get("detected_category", "UNKNOWN"),
+            "confidence": category_analysis.get("confidence", 0.0),
+            "evidence": category_analysis.get("evidence", []),
+            "raw_text": raw_text,
+        }
+
+    def _detect_category_from_image(self, image_path: str) -> Dict[str, Any]:
+        try:
+            with Image.open(image_path) as image:
+                rgb = image.convert("RGB")
+                rgb.thumbnail((96, 96))
+                pixels = list(rgb.getdata())
+        except Exception:
+            return {"detected_category": "UNKNOWN", "confidence": 0.0, "evidence": []}
+
+        if not pixels:
+            return {"detected_category": "UNKNOWN", "confidence": 0.0, "evidence": []}
+
+        red = sum(pixel[0] for pixel in pixels) / len(pixels)
+        green = sum(pixel[1] for pixel in pixels) / len(pixels)
+        blue = sum(pixel[2] for pixel in pixels) / len(pixels)
+        green_dominant_pixels = sum(1 for r, g, b in pixels if g > r + 6 and g > b + 2)
+        green_ratio = green_dominant_pixels / len(pixels)
+        green_dominant = (
+            green_ratio >= 0.12
+            and green > red + 4
+            and green > blue + 2
+        )
+
+        if green_dominant:
+            return {
+                "detected_category": "MISC",
+                "confidence": 0.9,
+                "evidence": ["Green-tinted receipt layout"],
+            }
+
+        return {"detected_category": "UNKNOWN", "confidence": 0.0, "evidence": []}
 
     def _normalize_category(self, category: str | None) -> str:
         normalized = (category or "RPT").strip().upper()
@@ -288,6 +369,8 @@ class OCRService:
         return pdf_path
 
     def _parse_receipt_text(self, text: str, filename: str, category: str) -> Dict[str, Any]:
+        if category == "MARKET":
+            return self._parse_market_certificate_text(text, filename)
         fallback_source = f"{filename}\n{text}".strip()
 
         receipt_number = self._clean_reference_value(self._extract_receipt_number(fallback_source))
@@ -318,6 +401,42 @@ class OCRService:
             "raw_text": text,
             "confidence": round(confidence, 2),
         }
+
+    def _parse_market_certificate_text(self, text: str, filename: str) -> Dict[str, Any]:
+        fallback_source = f"{filename}\n{text}".strip()
+        market_lookup_text = self._normalize_market_ocr_text(fallback_source)
+        market_name = self._extract_market_name(market_lookup_text)
+        certificate_number = self._extract_market_certificate_number(market_lookup_text)
+        transaction_date = self._extract_market_issue_date(market_lookup_text) or self._normalize_transaction_date(self._extract_transaction_date(market_lookup_text))
+        market_purpose_of_renewal = self._extract_market_purpose_of_renewal(market_lookup_text)
+        market_valid_until = self._extract_market_valid_until(market_lookup_text)
+        if not market_name:
+            market_name = self._extract_taxpayer_name(fallback_source, "MISC")
+
+        confidence = 0.45 if text else 0.0
+        populated_fields = sum(
+            1 for value in [market_name, certificate_number, transaction_date, market_purpose_of_renewal, market_valid_until] if value not in ("", None)
+        )
+        if text:
+            confidence = min(0.97, 0.56 + (populated_fields * 0.08))
+
+        return {
+            "receipt_number": certificate_number or "",
+            "ref_number": certificate_number or "",
+            "txn_id": certificate_number or "",
+            "taxpayer_name": market_name,
+            "transaction_date": transaction_date,
+            "amount": None,
+            "market_purpose_of_renewal": market_purpose_of_renewal,
+            "market_valid_until": market_valid_until,
+            "raw_text": text,
+            "confidence": round(confidence, 2),
+        }
+
+    def _normalize_market_ocr_text(self, text: str) -> str:
+        normalized = re.sub(r"\s+", " ", text or "").strip()
+        normalized = re.sub(r"(?<=\d)\s+(?=\d)", "", normalized)
+        return normalized
 
     def _detect_category_from_text(self, text: str) -> Dict[str, Any]:
         normalized = text.upper()
@@ -352,7 +471,25 @@ class OCRService:
                 "DOCUMENTARY",
                 "SERVICE FEE",
                 "REGISTRATION FEE",
+            ],
+            "PTR": [
+                "PROFESSIONAL TAX RECEIPT",
+                "PROFESSIONAL TAX",
+                "PROFESSIONAL REGULATORY",
+            ],
+            "MARKET": [
+                "CERTIFICATE OF STALL OCCUPANCY",
+                "STALL AWARDEE",
+                "PUBLIC MARKET",
+                "MARKET CERTIFICATE",
+                "VALID UNTIL",
+                "PURPOSE OF RENEWAL",
+            ],
+            "CTC": [
+                "COMMUNITY TAX CERTIFICATE",
                 "COMMUNITY TAX",
+                "CEDULA",
+                "COMMUNITY TAX RECEIPT",
             ],
         }
 
@@ -383,6 +520,32 @@ class OCRService:
         if "MISC" in normalized and "BUSINESS" not in normalized and "PROPERTY" not in normalized:
             scores["MISC"] += 1
             evidence["MISC"].append("MISC keyword")
+
+        if re.search(r"\bPROFESSIONAL\s+TAX\b", normalized):
+            scores["PTR"] += 2
+            evidence.setdefault("PTR", []).append("Professional tax keyword")
+
+        if re.search(r"\bN[º°№O0]\.?\s*\d{5,}\b", normalized) or re.search(r"\bNO\.?\s*\d{5,}\b", normalized):
+            scores["PTR"] += 2
+            evidence.setdefault("PTR", []).append("Official receipt number format")
+
+        if "OFFICIAL RECEIPT" in normalized and "PAYOR" in normalized:
+            scores["PTR"] += 1
+            evidence.setdefault("PTR", []).append("Official receipt / payor layout")
+
+        if any(signal in normalized for signal in ("CERTIFICATE OF STALL OCCUPANCY", "STALL AWARDEE", "PUBLIC MARKET")):
+            scores["MARKET"] += 3
+            evidence.setdefault("MARKET", []).append("Market certificate keyword")
+        if re.search(r"\bVALID UNTIL\b", normalized):
+            scores["MARKET"] += 1
+            evidence.setdefault("MARKET", []).append("Valid until label")
+
+        if any(signal in normalized for signal in ("COMMUNITY TAX CERTIFICATE", "COMMUNITY TAX RECEIPT", "CEDULA")):
+            scores["CTC"] += 3
+            evidence.setdefault("CTC", []).append("Community tax certificate keyword")
+        elif "COMMUNITY TAX" in normalized:
+            scores["CTC"] += 2
+            evidence.setdefault("CTC", []).append("Community tax keyword")
 
         detected_category = max(scores, key=scores.get)
         max_score = scores[detected_category]
@@ -429,6 +592,25 @@ class OCRService:
                 text,
             )
 
+        if category == "MARKET":
+            return self._match(
+                [
+                    r"\b(\d{2}-\d{4,})\b",
+                    r"(?:certificate(?:\s*no\.?)?|stall\s*number|award\s*no\.?)[:#\s-]*([A-Z0-9-]{4,})",
+                ],
+                text,
+            )
+
+        if category == "PTR":
+            return self._match(
+                [
+                    r"(?:official\s*receipt\s*)?(?:no\.?|number|n[oº°№]\.?)\s*[:#\s-]*([0-9]{5,}\s*[A-Z]?)\b",
+                    r"\b(?:n[oº°№]\.?)\s*([0-9]{5,}\s*[A-Z]?)\b",
+                    r"\b([0-9]{6,}\s*[A-Z]?)\b",
+                ],
+                text,
+            ) or self._extract_receipt_number(text)
+
         return self._match(
             [
                 r"\b(\d{2}-\d{6})\b",
@@ -465,6 +647,10 @@ class OCRService:
 
     def _extract_taxpayer_name(self, text: str, category: str) -> str:
         lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if category == "MARKET":
+            market_name = self._extract_market_name(text)
+            if market_name:
+                return market_name
         stop_words = (
             "NATURE OF COLLECTION",
             "FUND",
@@ -532,6 +718,116 @@ class OCRService:
         )
         fallback = self._clean_name_candidate(fallback)
         return fallback.title() if fallback else ""
+
+    def _extract_market_name(self, text: str) -> str:
+        normalized_text = self._normalize_market_ocr_text(text)
+        lines = [line.strip() for line in normalized_text.splitlines() if line.strip()]
+        text_upper = normalized_text.upper()
+
+        match = re.search(
+            r"(?:this\s+is\s+to\s+certify\s+that|name\s*[:\-])\s*(.*?)\s*(?:is\s+the\s+stall\s+awardee|,|\.|$)",
+            normalized_text,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if match:
+            candidate = re.sub(r"\s{2,}", " ", match.group(1)).strip(" ,.-:")
+            candidate = self._clean_name_candidate(candidate)
+            if candidate:
+                return candidate.title()
+
+        match = re.search(
+            r"(?:this\s+is\s+to\s+certify\s+that)\s*(.*?)\s*(?:is\s+the\s+stall\s+awardee\s+at|is\s+the\s+stall\s+awardee)",
+            normalized_text,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if match:
+            candidate = re.sub(r"\s{2,}", " ", match.group(1)).strip(" ,.-:")
+            candidate = self._clean_name_candidate(candidate)
+            if candidate:
+                return candidate.title()
+
+        for line in lines:
+            if re.search(r"\b(STALL AWARDEE|CERTIFY THAT)\b", line, re.IGNORECASE):
+                candidate = re.sub(r"(?i).*\b(?:certify\s+that|name|stall\s+awardee)\b\s*[:\-]?\s*", "", line).strip(" ,.-:")
+                candidate = re.sub(r"\s+is\s+the\s+stall\s+awardee.*$", "", candidate, flags=re.IGNORECASE).strip(" ,.-:")
+                candidate = self._clean_name_candidate(candidate)
+                if candidate:
+                    return candidate.title()
+
+        after_certify = re.search(r"this\s+is\s+to\s+certify\s+that\s*(.+?)\s+is\s+the\s+stall\s+awardee", normalized_text, re.IGNORECASE | re.DOTALL)
+        if after_certify:
+            candidate = re.sub(r"\s{2,}", " ", after_certify.group(1)).strip(" ,.-:")
+            candidate = self._clean_name_candidate(candidate)
+            if candidate:
+                return candidate.title()
+
+        fallback = self._match(
+            [
+                r"\b([A-Z][A-Z ,.'-]{6,})\b",
+            ],
+            text_upper,
+        )
+        fallback = self._clean_name_candidate(fallback)
+        return fallback.title() if fallback else ""
+
+    def _extract_market_certificate_number(self, text: str) -> str:
+        return self._match(
+            [
+                r"\b(\d{2}-\d{4,})\b",
+                r"(?:certificate(?:\s*no\.?)?|stall\s*number|award\s*no\.?)[:#\s-]*([A-Z0-9-]{4,})",
+            ],
+            text,
+        )
+
+    def _extract_market_purpose_of_renewal(self, text: str) -> str:
+        normalized_text = self._normalize_market_ocr_text(text)
+        compact_text = re.sub(r"\s+", " ", normalized_text).strip()
+        return self._match(
+            [
+                r"(?:purpose\s+of\s+renewal|for\s+the\s+purpose\s+of)\s*[:#\s-]*([A-Za-z0-9 ,.'&/\-]+?)(?:\s*,?\s*valid\s+until\b|$)",
+                r"for\s+the\s+purpose\s+of\s+([A-Za-z0-9 ,.'&/\-]+?)(?:\s*,?\s*valid\s+until\b|$)",
+            ],
+            compact_text,
+        )
+
+    def _extract_market_valid_until(self, text: str) -> str:
+        normalized_text = self._normalize_market_ocr_text(text)
+        compact_text = re.sub(r"\s+", " ", normalized_text).strip()
+        return self._match(
+            [
+                r"(?:valid\s+until)\s*[:#\s-]*([A-Za-z0-9 ,.'&/\-]+?)(?:[.\n]|$)",
+                r"valid\s+until\s+([A-Za-z0-9 ,.'&/\-]+?)(?:[.\n]|$)",
+            ],
+            compact_text,
+        )
+
+    def _extract_market_issue_date(self, text: str) -> str:
+        normalized_text = self._normalize_market_ocr_text(text)
+        compact_text = re.sub(r"\s+", " ", normalized_text).strip()
+        match = re.search(
+            r"(?:date\s+of\s+issue|issued\s+(?:this|on))\s*[:#\s-]*(?:(\d{1,2})(?:st|nd|rd|th)?\s+day\s+of\s+([A-Za-z]+)\s*,?\s*(\d{4})|([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4}))",
+            compact_text,
+            re.IGNORECASE,
+        )
+        if match:
+            if match.group(1) and match.group(2) and match.group(3):
+                month = match.group(2).title()
+                day = int(match.group(1))
+                year = match.group(3)
+                return self._normalize_transaction_date(f"{month} {day}, {year}")
+            if match.group(4) and match.group(5) and match.group(6):
+                month = match.group(4).title()
+                day = int(match.group(5))
+                year = match.group(6)
+                return self._normalize_transaction_date(f"{month} {day}, {year}")
+
+        return self._match(
+            [
+                r"(?:date\s+of\s+issue|issued\s+(?:this|on))\s*[:#\s-]*([A-Za-z]+\s+\d{1,2},\s*\d{4})",
+                r"(?:date\s+of\s+issue|issued\s+(?:this|on))\s*[:#\s-]*(\d{1,2}/\d{1,2}/\d{4})",
+            ],
+            compact_text,
+        )
 
     def _extract_transaction_date(self, text: str) -> str:
         return self._match(

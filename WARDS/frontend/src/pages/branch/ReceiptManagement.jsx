@@ -11,7 +11,7 @@ const MAX_RELEASE_IMAGE_SIZE = 5 * 1024 * 1024;
 const ALLOWED_RELEASE_IMAGE_TYPES = ['image/jpeg', 'image/png'];
 const BRANCH_RECEIPT_UPDATED_EVENT = 'branch-receipt-updated';
 const PROCESSING_SUCCESS_DELAY_MS = 1100;
-const OCR_REQUIRED_RECEIPT_CATEGORIES = new Set(['RPT', 'BUSINESS', 'MISC']);
+const OCR_REQUIRED_RECEIPT_CATEGORIES = new Set(['RPT', 'BUSINESS', 'MISC', 'PTR', 'MARKET']);
 const OCR_EXTRACTION_FAILED_MESSAGE = 'Unable to extract all required receipt information. Please verify the uploaded receipt and try again.';
 const RECEIPT_CATEGORY_KEYS = ['RPT', 'BUSINESS', 'MISC', 'CTC', 'PTR', 'MARKET'];
 
@@ -84,12 +84,30 @@ const detectReceiptCategoryFromDraft = (draft, fallbackCategory) => {
   const businessScore = businessSignals.filter((signal) => rawText.includes(signal)).length + (reference.startsWith('B-') ? 3 : 0);
   const rptScore = rptSignals.filter((signal) => rawText.includes(signal)).length + (reference.startsWith('R-') ? 3 : 0);
   const miscScore = miscSignals.filter((signal) => rawText.includes(signal)).length + (!reference ? 1 : 0);
+  const ptrScore = [
+    /\bPROFESSIONAL\s+TAX\s+RECEIPT\b/,
+    /\bPROFESSIONAL\s+TAX\b/,
+  ].filter((signal) => signal.test(rawText)).length;
+  const marketScore = [
+    'CERTIFICATE OF STALL OCCUPANCY',
+    'STALL AWARDEE',
+    'PUBLIC MARKET',
+    'MARKET CERTIFICATE',
+    'VALID UNTIL',
+    'PURPOSE OF RENEWAL',
+  ].filter((signal) => rawText.includes(signal)).length;
 
   if (businessScore > rptScore && businessScore > miscScore) {
     return 'BUSINESS';
   }
   if (rptScore > businessScore && rptScore > miscScore) {
     return 'RPT';
+  }
+  if (ptrScore > 0) {
+    return 'PTR';
+  }
+  if (marketScore > 0) {
+    return 'MARKET';
   }
   if (miscScore > 0) {
     return 'MISC';
@@ -108,8 +126,26 @@ const buildSuggestedReceiptFilename = (filename, taxpayerName) => {
 };
 
 const getMissingRequiredReceiptFields = (draft, category) => {
-  if (!OCR_REQUIRED_RECEIPT_CATEGORIES.has((category || '').trim().toUpperCase())) {
+  const normalizedCategory = (category || '').trim().toUpperCase();
+  if (!OCR_REQUIRED_RECEIPT_CATEGORIES.has(normalizedCategory)) {
     return [];
+  }
+
+  if (normalizedCategory === 'MARKET') {
+    const missingFields = [];
+    if (!(draft?.taxpayer_name || '').trim()) {
+      missingFields.push('taxpayer_name');
+    }
+    if (!(draft?.transaction_date || '').trim()) {
+      missingFields.push('transaction_date');
+    }
+    if (!(draft?.market_purpose_of_renewal || '').trim()) {
+      missingFields.push('market_purpose_of_renewal');
+    }
+    if (!(draft?.market_valid_until || '').trim()) {
+      missingFields.push('market_valid_until');
+    }
+    return missingFields;
   }
 
   const missingFields = [];
@@ -347,8 +383,17 @@ const ReceiptManagement = () => {
     if ((ocrDraft?.category || selectedCategory) === 'BUSINESS') {
       return "Mayor's Permit";
     }
+    if ((ocrDraft?.category || selectedCategory) === 'MARKET') {
+      return 'Certificate Number';
+    }
     return 'Reference Number';
   }, [ocrDraft?.category, selectedCategory]);
+
+  const activeReceiptCategory = useMemo(
+    () => normalizeReceiptCategory(ocrDraft?.category || selectedCategory),
+    [ocrDraft?.category, selectedCategory]
+  );
+  const showMarketCertificateNumber = activeReceiptCategory !== 'MARKET';
 
   const effectiveSelectedCategory = useMemo(
     () => normalizeReceiptCategory(ocrDraft?.selected_category || ocrDraft?.category || selectedCategory),
@@ -903,7 +948,8 @@ const ReceiptManagement = () => {
     });
   };
 
-  const handleSelectReleaseCopy = (requestId, event) => {
+  const handleSelectReleaseCopy = (request, event) => {
+    const requestId = request.requestId;
     const file = event.target.files?.[0];
     event.target.value = '';
 
@@ -932,6 +978,16 @@ const ReceiptManagement = () => {
         URL.revokeObjectURL(existingDraft.previewUrl);
       }
 
+      const expectedTaxType = normalizeReceiptCategory(request.taxType);
+      const expectedTaxpayerName = (request.taxpayerName || '').trim();
+      const shouldValidateFileName = ['RPT', 'BUSINESS', 'MISC'].includes(expectedTaxType) && expectedTaxpayerName;
+      const suggestedFilename = shouldValidateFileName ? buildSuggestedReceiptFilename(file.name, expectedTaxpayerName) : '';
+      const filenameStem = (file.name || '').replace(/\.[^.]+$/, '');
+      const suggestedStem = suggestedFilename.replace(/\.[^.]+$/, '');
+      const filenameMatchesTaxpayer = shouldValidateFileName
+        ? normalizeReceiptFilenameForCompare(filenameStem) === normalizeReceiptFilenameForCompare(suggestedStem)
+        : true;
+
       return {
         ...current,
         [requestId]: {
@@ -939,9 +995,11 @@ const ReceiptManagement = () => {
           fileName: file.name,
           previewUrl: URL.createObjectURL(file),
           autoRename: false,
-          validationMessage: '',
-          suggestedFilename: '',
-          extractedTaxpayerName: '',
+          validationMessage: shouldValidateFileName && !filenameMatchesTaxpayer
+            ? `The uploaded file name must match the taxpayer name. Rename it to ${suggestedFilename} or use auto rename.`
+            : '',
+          suggestedFilename: shouldValidateFileName ? suggestedFilename : '',
+          extractedTaxpayerName: shouldValidateFileName ? expectedTaxpayerName : '',
         },
       };
     });
@@ -959,6 +1017,7 @@ const ReceiptManagement = () => {
         [requestId]: {
           ...draft,
           autoRename: true,
+          fileName: draft.suggestedFilename || draft.fileName,
           validationMessage: '',
         },
       };
@@ -1094,7 +1153,7 @@ const ReceiptManagement = () => {
                 key={releaseDraft?.fileName ? `release-selected-${request.requestId}` : `release-empty-${request.requestId}`}
                 type="file"
                 accept=".jpg,.jpeg,.png,.webp"
-                onChange={(event) => handleSelectReleaseCopy(request.requestId, event)}
+                onChange={(event) => handleSelectReleaseCopy(request, event)}
                 className="mt-2 w-full cursor-pointer rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm shadow-sm file:mr-4 file:rounded-xl file:border-0 file:bg-[#0f2f5f] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:border-blue-400 hover:bg-slate-50 focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-slate-200 transition"
               />
             </div>
@@ -1326,6 +1385,114 @@ const ReceiptManagement = () => {
     </div>
   );
 
+  const renderMarketVerifiedRecordSection = (rows) => (
+    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div className="space-y-1">
+          <h2 className="text-xl font-bold text-slate-900">Verified Market Records</h2>
+          <p className="text-sm text-slate-500">{rows.length} saved record{rows.length === 1 ? '' : 's'}</p>
+        </div>
+        <div className="w-full md:w-80">
+          <input
+            type="text"
+            value={recordSearch.MARKET}
+            onChange={(event) =>
+              setRecordSearch((current) => ({
+                ...current,
+                MARKET: event.target.value,
+              }))
+            }
+            placeholder="Search taxpayer name"
+            className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-700 placeholder:text-slate-400 focus:border-purple-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-purple-100"
+          />
+        </div>
+      </div>
+      {(() => {
+        const pageKey = 'recordsMARKET';
+        const totalPages = Math.max(1, Math.ceil(rows.length / SECTION_PAGE_SIZE));
+        const visibleRows = paginateRows(rows, sectionPages[pageKey]);
+        return (
+          <>
+            <div className="overflow-hidden rounded-2xl border border-slate-200">
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm text-slate-700">
+                  <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3.5 text-left">Certificate No.</th>
+                      <th className="px-4 py-3.5 text-left">Name</th>
+                      <th className="px-4 py-3.5 text-left">Date of Issue</th>
+                      <th className="px-4 py-3.5 text-left">Purpose of Renewal</th>
+                      <th className="px-4 py-3.5 text-left">Valid Until</th>
+                      <th className="px-4 py-3.5 text-left">Saved By</th>
+                      <th className="px-4 py-3.5 text-left">Created</th>
+                      <th className="px-4 py-3.5 text-left">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {visibleRows.map((record) => (
+                      <tr key={record.id} className="transition hover:bg-slate-50">
+                        <td className="px-4 py-4 font-mono text-xs text-slate-600">{record.ref_number || record.receipt_number || 'N/A'}</td>
+                        <td className="px-4 py-4 font-medium text-slate-900">{record.taxpayer_name || 'N/A'}</td>
+                        <td className="px-4 py-4">{record.transaction_date || 'N/A'}</td>
+                        <td className="px-4 py-4">{record.market_purpose_of_renewal || 'N/A'}</td>
+                        <td className="px-4 py-4">{record.market_valid_until || 'N/A'}</td>
+                        <td className="px-4 py-4">{record.uploaded_by || 'N/A'}</td>
+                        <td className="px-4 py-4 text-slate-500">{record.created_at ? formatUtc8DateTime(record.created_at) : 'N/A'}</td>
+                        <td className="px-4 py-4">
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              onClick={() => handleDownloadRecordImage(record.id, record.taxpayer_name)}
+                              className="rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white transition hover:bg-blue-700"
+                            >
+                              Download
+                            </button>
+                            <button
+                              onClick={() => handlePrintRecordImage(record.id)}
+                              className="rounded-lg bg-purple-600 px-3 py-1.5 font-semibold text-white transition hover:bg-purple-700"
+                            >
+                              Print
+                            </button>
+                            <button
+                              onClick={() => requestDeleteConfirmation({
+                                type: 'record',
+                                id: record.id,
+                                title: 'Delete this market receipt record?',
+                                message: 'This will permanently remove the verified market record from the branch receipt list.',
+                                details: [
+                                  { label: 'Name', value: record.taxpayer_name || 'N/A' },
+                                  { label: 'Certificate No.', value: record.ref_number || record.receipt_number || 'N/A' },
+                                ],
+                              })}
+                              disabled={deletingRecordId === record.id}
+                              className="rounded-lg bg-red-600 px-3 py-1.5 font-semibold text-white transition hover:bg-red-700 disabled:opacity-40"
+                            >
+                              {deletingRecordId === record.id ? 'Deleting...' : 'Delete'}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {rows.length === 0 && (
+                <div className="border-t border-slate-100 bg-slate-50 px-6 py-8 text-center text-sm text-slate-500">
+                  No verified records found for this category.
+                </div>
+              )}
+            </div>
+            <PaginationControls
+              page={sectionPages[pageKey]}
+              totalPages={totalPages}
+              totalItems={rows.length}
+              onPageChange={(nextPage) => setSectionPages((current) => ({ ...current, [pageKey]: nextPage }))}
+            />
+          </>
+        );
+      })()}
+    </div>
+  );
+
   const handleDeleteRequest = async (requestId) => {
     setDeletingRequestId(requestId);
     setError('');
@@ -1541,7 +1708,7 @@ const ReceiptManagement = () => {
             disabled={!selectedFile || uploading || saving}
             className="w-full bg-purple-600 hover:bg-purple-700 text-white py-3 rounded-lg font-semibold transition disabled:opacity-50"
           >
-            {uploading ? 'Running OCR...' : 'Run OCR'}
+            {uploading ? (selectedCategory === 'CTC' ? 'Uploading...' : 'Running OCR...') : (selectedCategory === 'CTC' ? 'Upload File' : 'Run OCR')}
           </button>
         </div>
 
@@ -1613,22 +1780,37 @@ const ReceiptManagement = () => {
                 </div>
               )}
               <div className="grid md:grid-cols-2 gap-4">
+                {showMarketCertificateNumber ? (
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">{referenceLabel}</label>
+                    <input name="ref_number" value={ocrDraft.ref_number || ''} onChange={handleDraftChange} className="w-full px-4 py-2 border rounded-lg" />
+                  </div>
+                ) : null}
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">{referenceLabel}</label>
-                  <input name="ref_number" value={ocrDraft.ref_number || ''} onChange={handleDraftChange} className="w-full px-4 py-2 border rounded-lg" />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">Taxpayer Name</label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">{activeReceiptCategory === 'MARKET' ? 'Name' : 'Taxpayer Name'}</label>
                   <input name="taxpayer_name" value={ocrDraft.taxpayer_name || ''} onChange={handleDraftChange} className="w-full px-4 py-2 border rounded-lg" />
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">Transaction Date</label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">{activeReceiptCategory === 'MARKET' ? 'Date of Issue' : 'Transaction Date'}</label>
                   <input name="transaction_date" value={ocrDraft.transaction_date || ''} onChange={handleDraftChange} className="w-full px-4 py-2 border rounded-lg" />
                 </div>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">Amount</label>
-                  <input name="amount" type="number" step="0.01" value={ocrDraft.amount || ''} onChange={handleDraftChange} className="w-full px-4 py-2 border rounded-lg" />
-                </div>
+                {activeReceiptCategory === 'MARKET' ? (
+                  <>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">Purpose of Renewal</label>
+                      <input name="market_purpose_of_renewal" value={ocrDraft.market_purpose_of_renewal || ''} onChange={handleDraftChange} className="w-full px-4 py-2 border rounded-lg" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">Valid Until</label>
+                      <input name="market_valid_until" value={ocrDraft.market_valid_until || ''} onChange={handleDraftChange} className="w-full px-4 py-2 border rounded-lg" />
+                    </div>
+                  </>
+                ) : (
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Amount</label>
+                    <input name="amount" type="number" step="0.01" value={ocrDraft.amount || ''} onChange={handleDraftChange} className="w-full px-4 py-2 border rounded-lg" />
+                  </div>
+                )}
               </div>
 
               <div className="bg-gray-50 rounded-lg p-4 text-sm text-gray-600">
@@ -1804,13 +1986,7 @@ const ReceiptManagement = () => {
         showReferenceColumn: true,
       })}
 
-      {renderVerifiedRecordSection({
-        title: 'Verified Market Records',
-        categoryKey: 'MARKET',
-        referenceLabelText: 'Reference Number',
-        rows: marketRecords,
-        showReferenceColumn: true,
-      })}
+      {renderMarketVerifiedRecordSection(marketRecords)}
 
       <DeleteConfirmationModal
         open={Boolean(deleteTarget)}
