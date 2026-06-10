@@ -50,8 +50,16 @@ class OCRService:
         parsed = self._parse_receipt_text(raw_text, filename, category)
         category_analysis = self._detect_category_from_text(raw_text)
         color_hint = self._detect_category_from_image(image_path)
-        if color_hint.get("detected_category") == "MISC":
+        if category == "MISC" and color_hint.get("detected_category") == "MISC":
             category_analysis = color_hint
+        elif color_hint.get("detected_category") == "MISC" and category_analysis.get("detected_category") == "UNKNOWN":
+            category_analysis = color_hint
+        elif category == "MISC" and category_analysis.get("detected_category") == "MISC" and color_hint.get("detected_category") != "MISC":
+            category_analysis = {
+                "detected_category": "PTR",
+                "confidence": max(category_analysis.get("confidence", 0.0), 0.82),
+                "evidence": ["Receipt lacks the MISC color signature"],
+            }
         if category == "MARKET" and category_analysis.get("detected_category") == "UNKNOWN":
             if any(parsed.get(key) for key in ("taxpayer_name", "transaction_date", "market_purpose_of_renewal", "market_valid_until")):
                 category_analysis = {
@@ -76,6 +84,20 @@ class OCRService:
                     "confidence": 0.82,
                     "evidence": ["Official receipt layout with receipt number"],
                 }
+        if category == "RPT" and category_analysis.get("detected_category") in {"UNKNOWN", "PTR", "MISC"}:
+            if self._looks_like_rpt_receipt(raw_text, filename, parsed):
+                category_analysis = {
+                    "detected_category": "RPT",
+                    "confidence": max(category_analysis.get("confidence", 0.0), 0.88),
+                    "evidence": ["RPT bill and machine-validation receipt layout"],
+                }
+        elif category == "PTR" and category_analysis.get("detected_category") in {"UNKNOWN", "MISC", "RPT"}:
+            if self._looks_like_ptr_receipt(raw_text, filename, parsed):
+                category_analysis = {
+                    "detected_category": "PTR",
+                    "confidence": max(category_analysis.get("confidence", 0.0), 0.88),
+                    "evidence": ["Official receipt PTR layout"],
+                }
         parsed["success"] = True
         parsed["engine"] = self.engine_name
         parsed["message"] = "Receipt processed with LLMWhisperer. Please review before saving."
@@ -89,8 +111,7 @@ class OCRService:
             ""
             if parsed["category_match"]
             else (
-                f"The uploaded receipt looks like a {category_analysis['detected_category']} receipt, "
-                f"but {category} was selected."
+                "This looks like a Different recipt"
             )
         )
         return parsed
@@ -104,11 +125,16 @@ class OCRService:
         category_analysis = self._detect_category_from_text(raw_text)
         image_hint = self._detect_category_from_image(image_path)
 
-        if category_analysis.get("detected_category") == "UNKNOWN" and image_hint.get("detected_category") != "UNKNOWN":
+        if image_hint.get("detected_category") == "MISC":
             category_analysis = image_hint
-        elif category_hint := image_hint.get("detected_category"):
-            if category_analysis.get("detected_category") == "MISC" and category_hint == "MISC":
-                category_analysis = image_hint
+        elif category_analysis.get("detected_category") == "MISC":
+            category_analysis = {
+                "detected_category": "PTR",
+                "confidence": max(category_analysis.get("confidence", 0.0), 0.82),
+                "evidence": ["Receipt lacks the MISC color signature"],
+            }
+        elif category_analysis.get("detected_category") == "UNKNOWN" and image_hint.get("detected_category") != "UNKNOWN":
+            category_analysis = image_hint
 
         return {
             "detected_category": category_analysis.get("detected_category", "UNKNOWN"),
@@ -116,6 +142,57 @@ class OCRService:
             "evidence": category_analysis.get("evidence", []),
             "raw_text": raw_text,
         }
+
+    def _looks_like_rpt_receipt(self, raw_text: str, filename: str, parsed: Dict[str, Any]) -> bool:
+        lookup = f"{filename}\n{raw_text}".upper()
+        reference_values = [
+            (parsed.get("receipt_number") or "").strip().upper(),
+            (parsed.get("ref_number") or "").strip().upper(),
+            (parsed.get("txn_id") or "").strip().upper(),
+        ]
+        rpt_markers = sum(
+            1
+            for marker in (
+                "REAL PROPERTY TAX",
+                "PROPERTY TAX",
+                "MACHINE VALIDATION NO",
+                "BILL NUMBER",
+                "COMPUTERIZED OFFICIAL RECEIPT",
+                "SOCIALIZED HOUSING TAX",
+                "IDLE LAND TAX",
+            )
+            if marker in lookup
+        )
+        r_prefixed_reference = any(value.startswith("R-") for value in reference_values if value)
+        has_machine_validation_and_bill = "MACHINE VALIDATION NO" in lookup and "BILL NUMBER" in lookup
+        has_rpt_amount_line = any(marker in lookup for marker in ("BASIC TAX", "LAND TAX", "SH GARBAGE FEE"))
+
+        return (
+            has_machine_validation_and_bill
+            or (r_prefixed_reference and rpt_markers >= 1)
+            or (rpt_markers >= 2 and has_rpt_amount_line)
+        )
+
+    def _looks_like_ptr_receipt(self, raw_text: str, filename: str, parsed: Dict[str, Any]) -> bool:
+        lookup = f"{filename}\n{raw_text}".upper()
+        receipt_identifier = (
+            (parsed.get("receipt_number") or parsed.get("ref_number") or parsed.get("txn_id") or "")
+            .strip()
+            .upper()
+        )
+        ptr_signals = sum(
+            1
+            for marker in (
+                "OFFICIAL RECEIPT",
+                "ACCOUNTABLE FORM NO. 51",
+                "PAYOR",
+                "OFFICE OF THE TREASURER",
+                "CITY TREASURER",
+            )
+            if marker in lookup
+        )
+        has_ptr_number = bool(receipt_identifier and re.search(r"\d{5,}", receipt_identifier))
+        return ptr_signals >= 3 and has_ptr_number
 
     def _detect_category_from_image(self, image_path: str) -> Dict[str, Any]:
         try:
@@ -133,18 +210,25 @@ class OCRService:
         green = sum(pixel[1] for pixel in pixels) / len(pixels)
         blue = sum(pixel[2] for pixel in pixels) / len(pixels)
         green_dominant_pixels = sum(1 for r, g, b in pixels if g > r + 6 and g > b + 2)
+        cool_tinted_pixels = sum(1 for r, g, b in pixels if r + 8 < g and r + 8 < b)
         green_ratio = green_dominant_pixels / len(pixels)
+        cool_tint_ratio = cool_tinted_pixels / len(pixels)
         green_dominant = (
             green_ratio >= 0.12
             and green > red + 4
             and green > blue + 2
         )
+        cool_tinted = (
+            cool_tint_ratio >= 0.12
+            and green > red + 8
+            and blue > red + 8
+        )
 
-        if green_dominant:
+        if green_dominant or cool_tinted:
             return {
                 "detected_category": "MISC",
-                "confidence": 0.9,
-                "evidence": ["Green-tinted receipt layout"],
+                "confidence": 0.96,
+                "evidence": ["Green/cool-tinted receipt layout"],
             }
 
         return {"detected_category": "UNKNOWN", "confidence": 0.0, "evidence": []}
@@ -379,6 +463,15 @@ class OCRService:
         taxpayer_name = self._extract_taxpayer_name(fallback_source, category)
         transaction_date = self._normalize_transaction_date(self._extract_transaction_date(fallback_source))
         amount = self._extract_amount(fallback_source, category)
+
+        if category == "MISC":
+            if receipt_number and self._looks_like_person_name(receipt_number) and not re.search(r"\d", receipt_number):
+                receipt_number = ""
+            if ref_number and self._looks_like_person_name(ref_number) and not re.search(r"\d", ref_number):
+                ref_number = ""
+            if txn_id and self._looks_like_person_name(txn_id) and not re.search(r"\d", txn_id):
+                txn_id = ""
+
         if not ref_number:
             ref_number = receipt_number or txn_id
         if not txn_id:
@@ -465,6 +558,7 @@ class OCRService:
             ],
             "MISC": [
                 "MISCELLANEOUS",
+                "MISC.",
                 "OTHER FEES",
                 "CLEARANCE",
                 "CERTIFICATION",
@@ -521,17 +615,42 @@ class OCRService:
             scores["MISC"] += 1
             evidence["MISC"].append("MISC keyword")
 
+        misc_layout_signals = {
+            "NATURE OF COLLECTION": 1,
+            "AMOUNT IN WORDS": 1,
+            "ACCOUNTABLE FORM NO. 51": 1,
+            "RECEIVED THE AMOUNT STATED": 1,
+        }
+        misc_layout_hits = []
+        for signal, weight in misc_layout_signals.items():
+            if signal in normalized:
+                scores["MISC"] += weight
+                misc_layout_hits.append(signal)
+        if misc_layout_hits:
+            evidence.setdefault("MISC", []).extend(misc_layout_hits[:5])
+        if len(misc_layout_hits) >= 2 and "OFFICIAL RECEIPT" in normalized:
+            scores["MISC"] += 2
+            evidence.setdefault("MISC", []).append("Official receipt MISC layout")
+
         if re.search(r"\bPROFESSIONAL\s+TAX\b", normalized):
             scores["PTR"] += 2
             evidence.setdefault("PTR", []).append("Professional tax keyword")
 
-        if re.search(r"\bN[º°№O0]\.?\s*\d{5,}\b", normalized) or re.search(r"\bNO\.?\s*\d{5,}\b", normalized):
+        if "OFFICIAL RECEIPT" in normalized:
+            scores["PTR"] += 1
+            evidence.setdefault("PTR", []).append("Official receipt title")
+
+        if "PAYOR" in normalized:
+            scores["PTR"] += 1
+            evidence.setdefault("PTR", []).append("Payor label")
+
+        if any(signal in normalized for signal in ("CITY TREASURER", "TREASURY WARRANT", "CHECK, MONEY ORDER", "COLLECTING OFFICER")):
+            scores["PTR"] += 1
+            evidence.setdefault("PTR", []).append("Treasurer receipt layout")
+
+        if re.search(r"\bN[???O0]\.?\s*\d{5,}\b", normalized) or re.search(r"\bNO\.?\s*\d{5,}\b", normalized):
             scores["PTR"] += 2
             evidence.setdefault("PTR", []).append("Official receipt number format")
-
-        if "OFFICIAL RECEIPT" in normalized and "PAYOR" in normalized:
-            scores["PTR"] += 1
-            evidence.setdefault("PTR", []).append("Official receipt / payor layout")
 
         if any(signal in normalized for signal in ("CERTIFICATE OF STALL OCCUPANCY", "STALL AWARDEE", "PUBLIC MARKET")):
             scores["MARKET"] += 3
@@ -546,6 +665,24 @@ class OCRService:
         elif "COMMUNITY TAX" in normalized:
             scores["CTC"] += 2
             evidence.setdefault("CTC", []).append("Community tax keyword")
+
+        strong_misc_markers = ("MISCELLANEOUS", "MISC.")
+        has_strong_misc_marker = any(marker in normalized for marker in strong_misc_markers)
+        ptr_supporting_markers = (
+            "OFFICIAL RECEIPT",
+            "PAYOR",
+            "CITY TREASURER",
+            "TREASURY WARRANT",
+            "CHECK, MONEY ORDER",
+            "COLLECTING OFFICER",
+        )
+        ptr_support_count = sum(1 for marker in ptr_supporting_markers if marker in normalized)
+        if scores.get("MISC", 0) >= scores.get("PTR", 0) and ptr_support_count >= 3 and not has_strong_misc_marker:
+            scores["PTR"] += 2
+            evidence.setdefault("PTR", []).append("Generic official receipt layout without strong MISC marker")
+        elif has_strong_misc_marker:
+            scores["MISC"] += 2
+            evidence.setdefault("MISC", []).append("Strong MISC marker")
 
         detected_category = max(scores, key=scores.get)
         max_score = scores[detected_category]
@@ -573,7 +710,7 @@ class OCRService:
             return self._match(
                 [
                     r"\b([A-Z]-\d{3}-\d{5,})\b",
-                    r"(?:or\s*(?:no\.?|number)?)[:#\s-]*([A-Z0-9-]{6,})",
+                    r"\b(?:OR|O\.?R\.?)\b\s*(?:NO\.?|NUMBER)?[:#\s-]*([A-Z0-9-]{6,})",
                     r"(?:bil(?:l)?\s*number)[:#\s-]*([A-Z0-9-]{8,})",
                     r"\b(R-\d{4}-\d{2,4}-\d{2,8}-[A-Z0-9]+)\b",
                     r"\b(R-\d{4}-\d{2,4}-\d{2,8})\b",
@@ -616,7 +753,8 @@ class OCRService:
                 r"\b(\d{2}-\d{6})\b",
                 r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\s+([0-9]{5,}\s*[A-Z]?)\b",
                 r"(?:official\s*receipt\s*)?(?:no\.?|number|n[o0]\.?)\s*[:#\s-]*([0-9]{5,}\s*[A-Z]?)\b",
-                r"(?:or\s*(?:no\.?|number)?)[:#\s-]*([A-Z0-9-]{6,})",
+                r"\bN[º°O0]\.?\s*([0-9]{5,}\s*[A-Z]?)\b",
+                r"\b(?:OR|O\.?R\.?)\b\s*(?:NO\.?|NUMBER)?[:#\s-]*([A-Z0-9-]{6,})",
                 r"(?:machine\s*validation\s*no\.?)[:#\s-]*([A-Z0-9-]{10,})",
                 r"(?:reference\s*(?:no\.?|number)?)[:#\s-]*([A-Z0-9-]{6,})",
                 r"\b([A-Z]-\d{3}-\d{5})\b",
@@ -627,7 +765,8 @@ class OCRService:
     def _extract_receipt_number(self, text: str) -> str:
         return self._match(
             [
-                r"(?:or\s*(?:no\.?|number)?)[:#\s-]*([A-Z0-9-]{6,})",
+                r"\bN[º°O0]\.?\s*([0-9]{5,}\s*[A-Z]?)\b",
+                r"\b(?:OR|O\.?R\.?)\b\s*(?:NO\.?|NUMBER)?[:#\s-]*([A-Z0-9-]{6,})",
                 r"(?:official\s*receipt\s*)?(?:no\.?|number|n[o0]\.?)\s*[:#\s-]*([A-Z0-9-]{6,})",
                 r"\b([A-Z]-\d{3}-\d{5,})\b",
             ],
@@ -836,6 +975,7 @@ class OCRService:
                 r"\b((?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|SEPT|OCT|NOV|DEC)\.?\s+\d{1,2},\s+\d{4})\b",
                 r"\b(\d{1,2}/\d{1,2}/\d{4})\b",
                 r"\b(\d{1,2}/\d{1,2}/\d{2})\b",
+                r"\b(\d{1,2}\.\d{1,2}\.\d{2,4})\b",
                 r"\b(\d{1,2}-\d{1,2}-\d{4})\b",
                 r"\b(\d{1,2}-\d{1,2}-\d{2})\b",
                 r"\b(\d{4}/\d{1,2}/\d{1,2})\b",
@@ -996,7 +1136,9 @@ class OCRService:
             except ValueError:
                 continue
 
-        separator = "/" if "/" in value else "-"
+        separator = "/" if "/" in value else "-" if "-" in value else "." if "." in value else None
+        if separator is None:
+            return value
         parts = value.split(separator)
         if len(parts) != 3:
             return value

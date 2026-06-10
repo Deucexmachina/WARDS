@@ -174,7 +174,7 @@ const isMarketIssueDateInvalid = (value) => {
   }
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  return parsed > today;
+  return parsed.getTime() !== today.getTime();
 };
 
 const isMarketValidUntilInvalid = (value) => {
@@ -212,6 +212,14 @@ const getMissingRequiredReceiptFields = (draft, category) => {
     }
     if (!(draft?.market_valid_until || '').trim() || isMarketValidUntilInvalid(draft?.market_valid_until)) {
       missingFields.push('market_valid_until');
+    }
+    return missingFields;
+  }
+
+  if (normalizedCategory === 'CTC') {
+    const missingFields = [];
+    if (!(draft?.transaction_date || '').trim()) {
+      missingFields.push('transaction_date');
     }
     return missingFields;
   }
@@ -461,6 +469,7 @@ const ReceiptManagement = () => {
     () => normalizeReceiptCategory(ocrDraft?.category || selectedCategory),
     [ocrDraft?.category, selectedCategory]
   );
+  const isCtcReceiptCategory = activeReceiptCategory === 'CTC';
   const showMarketCertificateNumber = activeReceiptCategory !== 'MARKET';
 
   const effectiveSelectedCategory = useMemo(
@@ -801,7 +810,17 @@ const ReceiptManagement = () => {
       formData.append('file', selectedFile);
       formData.append('category', selectedCategory);
       const response = await receiptAPI.uploadForOCR(formData);
-      setOcrDraft(normalizeReceiptDraftReviewState(response.data));
+      const resolvedCategory = normalizeReceiptCategory(response.data?.selected_category || response.data?.tax_type || response.data?.category || selectedCategory);
+      const todayDate = getTodayDateInputValue();
+      setOcrDraft(normalizeReceiptDraftReviewState({
+        ...response.data,
+        transaction_date: resolvedCategory === 'MARKET'
+          ? todayDate
+          : response.data?.transaction_date,
+        ref_number: resolvedCategory === 'CTC' ? '' : response.data?.ref_number,
+        taxpayer_name: resolvedCategory === 'CTC' ? '' : response.data?.taxpayer_name,
+        amount: resolvedCategory === 'CTC' ? null : response.data?.amount,
+      }));
       setProcessingFeedback({
         status: 'success',
         title: 'OCR Complete',
@@ -828,7 +847,7 @@ const ReceiptManagement = () => {
   const handleMarketDateChange = (event) => {
     const { name, value } = event.target;
     if (name === 'transaction_date' && isMarketIssueDateInvalid(value)) {
-      setError('Date of Issue cannot be in the future.');
+      setError('Date of Issue must be today.');
       return;
     }
     if (name === 'market_valid_until' && isMarketValidUntilInvalid(value)) {
@@ -1359,6 +1378,9 @@ const ReceiptManagement = () => {
     referenceLabelText,
     rows,
     showReferenceColumn = true,
+    showTaxpayerColumn = true,
+    showAmountColumn = true,
+    showActionColumn = true,
   }) => (
     <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
       <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -1395,11 +1417,11 @@ const ReceiptManagement = () => {
                 {showReferenceColumn ? (
                   <th className="px-4 py-3.5 text-left">{referenceLabelText}</th>
                 ) : null}
-                <th className="px-4 py-3.5 text-left">Taxpayer</th>
-                <th className="px-4 py-3.5 text-left">Amount</th>
+                {showTaxpayerColumn ? <th className="px-4 py-3.5 text-left">Taxpayer</th> : null}
+                {showAmountColumn ? <th className="px-4 py-3.5 text-left">Amount</th> : null}
                 <th className="px-4 py-3.5 text-left">Saved By</th>
                 <th className="px-4 py-3.5 text-left">Created</th>
-                <th className="px-4 py-3.5 text-left">Action</th>
+                {showActionColumn ? <th className="px-4 py-3.5 text-left">Action</th> : null}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 bg-white">
@@ -1408,42 +1430,44 @@ const ReceiptManagement = () => {
                   {showReferenceColumn ? (
                     <td className="px-4 py-4 font-mono text-xs text-slate-600">{record.ref_number || 'N/A'}</td>
                   ) : null}
-                  <td className="px-4 py-4 font-medium text-slate-900">{record.taxpayer_name || 'N/A'}</td>
-                  <td className="px-4 py-4">{record.amount != null ? `P${Number(record.amount).toFixed(2)}` : 'N/A'}</td>
+                  {showTaxpayerColumn ? <td className="px-4 py-4 font-medium text-slate-900">{record.taxpayer_name || 'N/A'}</td> : null}
+                  {showAmountColumn ? <td className="px-4 py-4">{record.amount != null ? `P${Number(record.amount).toFixed(2)}` : 'N/A'}</td> : null}
                   <td className="px-4 py-4">{record.uploaded_by || 'N/A'}</td>
                   <td className="px-4 py-4 text-slate-500">{record.created_at ? formatUtc8DateTime(record.created_at) : 'N/A'}</td>
-                  <td className="px-4 py-4">
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => handleDownloadRecordImage(record.id, record.taxpayer_name)}
-                        className="rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white transition hover:bg-blue-700"
-                      >
-                        Download
-                      </button>
-                      <button
-                        onClick={() => handlePrintRecordImage(record.id)}
-                        className="rounded-lg bg-purple-600 px-3 py-1.5 font-semibold text-white transition hover:bg-purple-700"
-                      >
-                        Print
-                      </button>
-                      <button
-                        onClick={() => requestDeleteConfirmation({
-                          type: 'record',
-                          id: record.id,
-                          title: 'Delete this receipt record?',
-                          message: 'This will permanently remove the verified receipt record from the branch receipt list.',
-                          details: [
-                            { label: 'Taxpayer', value: record.taxpayer_name || 'N/A' },
-                            { label: referenceLabelText || 'Reference', value: record.ref_number || 'N/A' },
-                          ],
-                        })}
-                        disabled={deletingRecordId === record.id}
-                        className="rounded-lg bg-red-600 px-3 py-1.5 font-semibold text-white transition hover:bg-red-700 disabled:opacity-40"
-                      >
-                        {deletingRecordId === record.id ? 'Deleting...' : 'Delete'}
-                      </button>
-                    </div>
-                  </td>
+                  {showActionColumn ? (
+                    <td className="px-4 py-4">
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => handleDownloadRecordImage(record.id, record.taxpayer_name)}
+                          className="rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white transition hover:bg-blue-700"
+                        >
+                          Download
+                        </button>
+                        <button
+                          onClick={() => handlePrintRecordImage(record.id)}
+                          className="rounded-lg bg-purple-600 px-3 py-1.5 font-semibold text-white transition hover:bg-purple-700"
+                        >
+                          Print
+                        </button>
+                        <button
+                          onClick={() => requestDeleteConfirmation({
+                            type: 'record',
+                            id: record.id,
+                            title: 'Delete this receipt record?',
+                            message: 'This will permanently remove the verified receipt record from the branch receipt list.',
+                            details: [
+                              { label: 'Taxpayer', value: record.taxpayer_name || 'N/A' },
+                              { label: referenceLabelText || 'Reference', value: record.ref_number || 'N/A' },
+                            ],
+                          })}
+                          disabled={deletingRecordId === record.id}
+                          className="rounded-lg bg-red-600 px-3 py-1.5 font-semibold text-white transition hover:bg-red-700 disabled:opacity-40"
+                        >
+                          {deletingRecordId === record.id ? 'Deleting...' : 'Delete'}
+                        </button>
+                      </div>
+                    </td>
+                  ) : null}
                 </tr>
               ))}
             </tbody>
@@ -1818,7 +1842,7 @@ const ReceiptManagement = () => {
                   <p className="font-semibold">Category mismatch detected</p>
                   <p>
                     {ocrDraft.category_warning ||
-                      `The uploaded receipt looks like a ${effectiveDetectedCategory} receipt, but ${effectiveSelectedCategory} was selected.`}
+                      'This looks like a Different recipt'}
                   </p>
                 </div>
               )}
@@ -1862,76 +1886,94 @@ const ReceiptManagement = () => {
                 </div>
               )}
               <div className="grid md:grid-cols-2 gap-4">
-                {showMarketCertificateNumber ? (
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">{referenceLabel}</label>
-                    <input name="ref_number" value={ocrDraft.ref_number || ''} onChange={handleDraftChange} className="w-full px-4 py-2 border rounded-lg" />
+                {isCtcReceiptCategory ? (
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Date</label>
+                    <input
+                      name="transaction_date"
+                      type="date"
+                      min={getTodayDateInputValue()}
+                      max={getTodayDateInputValue()}
+                      value={formatDateInputValue(ocrDraft.transaction_date || getTodayDateInputValue())}
+                      readOnly
+                      className="w-full px-4 py-2 border rounded-lg bg-gray-50 text-gray-800"
+                    />
                   </div>
-                ) : null}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">{activeReceiptCategory === 'MARKET' ? 'Name' : 'Taxpayer Name'}</label>
-                  <input name="taxpayer_name" value={ocrDraft.taxpayer_name || ''} onChange={handleDraftChange} className="w-full px-4 py-2 border rounded-lg" />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">{activeReceiptCategory === 'MARKET' ? 'Date of Issue' : 'Transaction Date'}</label>
-                  <input
-                    name="transaction_date"
-                    type={activeReceiptCategory === 'MARKET' ? 'date' : 'text'}
-                    max={activeReceiptCategory === 'MARKET' ? getTodayDateInputValue() : undefined}
-                    value={activeReceiptCategory === 'MARKET' ? formatDateInputValue(ocrDraft.transaction_date) : (ocrDraft.transaction_date || '')}
-                    onChange={activeReceiptCategory === 'MARKET'
-                      ? handleMarketDateChange
-                      : handleDraftChange}
-                    className="w-full px-4 py-2 border rounded-lg"
-                  />
-                </div>
-                {activeReceiptCategory === 'MARKET' ? (
+                ) : (
                   <>
+                    {showMarketCertificateNumber ? (
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-1">{referenceLabel}</label>
+                        <input name="ref_number" value={ocrDraft.ref_number || ''} onChange={handleDraftChange} className="w-full px-4 py-2 border rounded-lg" />
+                      </div>
+                    ) : null}
                     <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-1">Purpose of Renewal</label>
-                      <select
-                        value={getMarketPurposeSelectValue(ocrDraft.market_purpose_of_renewal)}
-                        onChange={(event) => {
-                          const nextValue = event.target.value;
-                          setOcrDraft((current) => normalizeReceiptDraftReviewState({
-                            ...current,
-                            market_purpose_of_renewal: nextValue === 'Other' ? '' : nextValue,
-                          }));
-                        }}
-                        className="w-full px-4 py-2 border rounded-lg bg-white"
-                      >
-                        {MARKET_PURPOSE_OPTIONS.map((option) => (
-                          <option key={option} value={option}>{option}</option>
-                        ))}
-                        <option value="Other">Other (please specify)</option>
-                      </select>
-                      {getMarketPurposeSelectValue(ocrDraft.market_purpose_of_renewal) === 'Other' ? (
-                        <input
-                          name="market_purpose_of_renewal"
-                          value={ocrDraft.market_purpose_of_renewal || ''}
-                          onChange={handleDraftChange}
-                          placeholder="Type the purpose of renewal"
-                          className="mt-2 w-full px-4 py-2 border rounded-lg"
-                        />
-                      ) : null}
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">{activeReceiptCategory === 'MARKET' ? 'Name' : 'Taxpayer Name'}</label>
+                      <input name="taxpayer_name" value={ocrDraft.taxpayer_name || ''} onChange={handleDraftChange} className="w-full px-4 py-2 border rounded-lg" />
                     </div>
                     <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-1">Valid Until</label>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">{activeReceiptCategory === 'MARKET' ? 'Date of Issue' : 'Transaction Date'}</label>
                       <input
-                        name="market_valid_until"
-                        type="date"
-                        min={getTodayDateInputValue()}
-                        value={formatDateInputValue(ocrDraft.market_valid_until)}
-                        onChange={handleMarketDateChange}
+                        name="transaction_date"
+                        type={activeReceiptCategory === 'MARKET' ? 'date' : 'text'}
+                        min={activeReceiptCategory === 'MARKET' ? getTodayDateInputValue() : undefined}
+                        max={activeReceiptCategory === 'MARKET' ? getTodayDateInputValue() : undefined}
+                        value={activeReceiptCategory === 'MARKET' ? formatDateInputValue(ocrDraft.transaction_date) : (ocrDraft.transaction_date || '')}
+                        onChange={activeReceiptCategory === 'MARKET'
+                          ? handleMarketDateChange
+                          : handleDraftChange}
                         className="w-full px-4 py-2 border rounded-lg"
                       />
                     </div>
+                    {activeReceiptCategory === 'MARKET' ? (
+                      <>
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-700 mb-1">Purpose of Renewal</label>
+                          <select
+                            value={getMarketPurposeSelectValue(ocrDraft.market_purpose_of_renewal)}
+                            onChange={(event) => {
+                              const nextValue = event.target.value;
+                              setOcrDraft((current) => normalizeReceiptDraftReviewState({
+                                ...current,
+                                market_purpose_of_renewal: nextValue === 'Other' ? '' : nextValue,
+                              }));
+                            }}
+                            className="w-full px-4 py-2 border rounded-lg bg-white"
+                          >
+                            {MARKET_PURPOSE_OPTIONS.map((option) => (
+                              <option key={option} value={option}>{option}</option>
+                            ))}
+                            <option value="Other">Other (please specify)</option>
+                          </select>
+                          {getMarketPurposeSelectValue(ocrDraft.market_purpose_of_renewal) === 'Other' ? (
+                            <input
+                              name="market_purpose_of_renewal"
+                              value={ocrDraft.market_purpose_of_renewal || ''}
+                              onChange={handleDraftChange}
+                              placeholder="Type the purpose of renewal"
+                              className="mt-2 w-full px-4 py-2 border rounded-lg"
+                            />
+                          ) : null}
+                        </div>
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-700 mb-1">Valid Until</label>
+                          <input
+                            name="market_valid_until"
+                            type="date"
+                            min={getTodayDateInputValue()}
+                            value={formatDateInputValue(ocrDraft.market_valid_until)}
+                            onChange={handleMarketDateChange}
+                            className="w-full px-4 py-2 border rounded-lg"
+                          />
+                        </div>
+                      </>
+                    ) : (
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-1">Amount</label>
+                        <input name="amount" type="number" step="0.01" value={ocrDraft.amount || ''} onChange={handleDraftChange} className="w-full px-4 py-2 border rounded-lg" />
+                      </div>
+                    )}
                   </>
-                ) : (
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">Amount</label>
-                    <input name="amount" type="number" step="0.01" value={ocrDraft.amount || ''} onChange={handleDraftChange} className="w-full px-4 py-2 border rounded-lg" />
-                  </div>
                 )}
               </div>
 
@@ -2097,7 +2139,10 @@ const ReceiptManagement = () => {
         categoryKey: 'CTC',
         referenceLabelText: 'Reference Number',
         rows: ctcRecords,
-        showReferenceColumn: true,
+        showReferenceColumn: false,
+        showTaxpayerColumn: false,
+        showAmountColumn: false,
+        showActionColumn: true,
       })}
 
       {renderVerifiedRecordSection({

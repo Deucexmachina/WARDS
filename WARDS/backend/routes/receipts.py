@@ -9,7 +9,7 @@ import re
 import secrets
 import time
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from fastapi.responses import FileResponse, StreamingResponse
@@ -613,6 +613,231 @@ def receipt_category_requires_ocr(category: str | None) -> bool:
     return normalize_receipt_category(category) in OCR_REQUIRED_RECEIPT_CATEGORIES
 
 
+def _count_receipt_keyword_hits(text: str, keywords: tuple[str, ...]) -> int:
+    return sum(1 for keyword in keywords if keyword in text)
+
+
+def should_allow_queue_rpt_category_fallback(
+    *,
+    detected_category: str,
+    raw_detected_category: str,
+    confidence: float,
+    raw_text: str | None,
+    ref_number: str | None,
+) -> bool:
+    if raw_detected_category == "UNKNOWN" or detected_category == "RPT":
+        return True
+
+    normalized_text = normalize_receipt_text_for_compare(raw_text)
+    normalized_ref = normalize_receipt_identifier_for_compare(ref_number)
+
+    rpt_score = _count_receipt_keyword_hits(
+        normalized_text,
+        (
+            "REAL PROPERTY TAX",
+            "BASIC TAX",
+            "IDLE LAND TAX",
+            "SOCIALIZED HOUSING TAX",
+            "LAND TAX",
+            "SH GARBAGE FEE",
+        ),
+    )
+    if normalized_ref.startswith("R"):
+        rpt_score += 2
+
+    business_score = _count_receipt_keyword_hits(
+        normalized_text,
+        (
+            "MAYOR S PERMIT",
+            "BUSINESS TAX",
+            "CITY TAX",
+            "GARBAGE FEE",
+            "SANITARY FEE",
+            "BUILDING INSP FEE",
+            "ELECTRICAL INSP FEE",
+            "PLUMBING INSP FEE",
+            "SIGNBOARD",
+            "SPECIAL PERMIT",
+        ),
+    )
+    if re.search(r"\b\d{2}\s\d{6}\b", normalized_text):
+        business_score += 2
+
+    market_score = _count_receipt_keyword_hits(
+        normalized_text,
+        (
+            "CERTIFICATE OF STALL OCCUPANCY",
+            "STALL AWARDEE",
+            "PUBLIC MARKET",
+            "MARKET CERTIFICATE",
+            "VALID UNTIL",
+            "PURPOSE OF RENEWAL",
+        ),
+    )
+    ctc_score = _count_receipt_keyword_hits(
+        normalized_text,
+        (
+            "COMMUNITY TAX CERTIFICATE",
+            "COMMUNITY TAX RECEIPT",
+            "COMMUNITY TAX",
+            "CEDULA",
+        ),
+    )
+    ptr_score = _count_receipt_keyword_hits(
+        normalized_text,
+        (
+            "PROFESSIONAL TAX RECEIPT",
+            "PROFESSIONAL TAX",
+            "PAYOR",
+        ),
+    )
+    misc_score = _count_receipt_keyword_hits(
+        normalized_text,
+        (
+            "MISCELLANEOUS",
+            "MISC",
+            "CERTIFICATION",
+            "CLEARANCE",
+            "SERVICE FEE",
+        ),
+    )
+
+    strong_conflicting_score = max(business_score, market_score, ctc_score)
+    if strong_conflicting_score >= max(rpt_score + 1, 2):
+        return False
+
+    if rpt_score >= max(strong_conflicting_score, ptr_score, misc_score) + 1:
+        return True
+
+    if detected_category in {"PTR", "MISC"} and confidence <= 0.86 and strong_conflicting_score == 0:
+        return True
+
+    return False
+
+
+def should_allow_queue_ptr_category_fallback(
+    *,
+    detected_category: str,
+    raw_detected_category: str,
+    confidence: float,
+    raw_text: str | None,
+    ref_number: str | None,
+) -> bool:
+    if raw_detected_category == "UNKNOWN" or detected_category == "PTR":
+        return True
+
+    normalized_text = normalize_receipt_text_for_compare(raw_text)
+    normalized_ref = normalize_receipt_identifier_for_compare(ref_number)
+
+    ptr_score = _count_receipt_keyword_hits(
+        normalized_text,
+        (
+            "OFFICIAL RECEIPT",
+            "ACCOUNTABLE FORM NO 51",
+            "PAYOR",
+            "OFFICE OF THE TREASURER",
+            "CITY TREASURER",
+            "PROFESSIONAL TAX",
+        ),
+    )
+    if normalized_ref and re.search(r"\d{5,}", normalized_ref):
+        ptr_score += 1
+
+    misc_score = _count_receipt_keyword_hits(
+        normalized_text,
+        (
+            "MISCELLANEOUS",
+            "CERTIFICATION",
+            "CLEARANCE",
+            "SERVICE FEE",
+        ),
+    )
+    rpt_score = _count_receipt_keyword_hits(
+        normalized_text,
+        (
+            "REAL PROPERTY TAX",
+            "MACHINE VALIDATION NO",
+            "BILL NUMBER",
+        ),
+    )
+    business_score = _count_receipt_keyword_hits(
+        normalized_text,
+        (
+            "BUSINESS TAX",
+            "MAYOR S PERMIT",
+            "BUSINESS PERMIT",
+            "LINE OF BUSINESS",
+        ),
+    )
+    market_score = _count_receipt_keyword_hits(
+        normalized_text,
+        (
+            "PUBLIC MARKET",
+            "STALL AWARDEE",
+            "VALID UNTIL",
+            "PURPOSE OF RENEWAL",
+        ),
+    )
+    ctc_score = _count_receipt_keyword_hits(
+        normalized_text,
+        (
+            "COMMUNITY TAX CERTIFICATE",
+            "COMMUNITY TAX RECEIPT",
+            "CEDULA",
+        ),
+    )
+
+    strong_conflicting_score = max(rpt_score, business_score, market_score, ctc_score)
+    if strong_conflicting_score >= max(ptr_score + 1, 2):
+        return False
+
+    if ptr_score >= max(misc_score, strong_conflicting_score) + 1:
+        return True
+
+    if detected_category == "MISC" and confidence <= 0.86 and ptr_score >= 3 and strong_conflicting_score == 0:
+        return True
+
+    return False
+
+
+def resolve_queue_ocr_category_decision(
+    *,
+    normalized_category: str,
+    raw_detected_category: str,
+    detected_category: str,
+    category_match: bool,
+    result: dict,
+) -> tuple[bool, bool]:
+    if normalized_category == "PTR":
+        allow_ptr_fallback = should_allow_queue_ptr_category_fallback(
+            detected_category=detected_category,
+            raw_detected_category=raw_detected_category,
+            confidence=float(result.get("category_confidence") or 0.0),
+            raw_text=result.get("raw_text"),
+            ref_number=result.get("ref_number"),
+        )
+        if allow_ptr_fallback:
+            return True, detected_category != normalized_category or raw_detected_category == "UNKNOWN" or category_match is False
+        return False, False
+
+    if normalized_category != "RPT":
+        if raw_detected_category == "UNKNOWN" and normalized_category != "PTR":
+            category_match = False
+        return detected_category == normalized_category and category_match is not False, False
+
+    allow_rpt_fallback = should_allow_queue_rpt_category_fallback(
+        detected_category=detected_category,
+        raw_detected_category=raw_detected_category,
+        confidence=float(result.get("category_confidence") or 0.0),
+        raw_text=result.get("raw_text"),
+        ref_number=result.get("ref_number"),
+    )
+    if allow_rpt_fallback:
+        return True, detected_category != normalized_category or raw_detected_category == "UNKNOWN" or category_match is False
+
+    return False, False
+
+
 def extract_market_ocr_metadata(raw_ocr_text: str | None) -> dict:
     text = (raw_ocr_text or "").strip()
     metadata: dict[str, str] = {}
@@ -1078,6 +1303,9 @@ def save_receipt_record_payload(
     selected_category = normalize_receipt_category(payload.selected_category or normalized_tax_type)
     detected_category = normalize_receipt_category(payload.detected_category or normalized_tax_type)
     requires_ocr = receipt_category_requires_ocr(normalized_tax_type)
+    effective_transaction_date = (payload.transaction_date or "").strip()
+    if normalized_tax_type == "CTC" and not effective_transaction_date:
+        effective_transaction_date = get_current_manila_date_value()
 
     if selected_category != normalized_tax_type:
         raise HTTPException(status_code=400, detail="The verified tax type must match the selected receipt category.")
@@ -1085,10 +1313,7 @@ def save_receipt_record_payload(
     if normalized_tax_type == "CTC" and detected_category not in {"CTC", "UNKNOWN"}:
         raise HTTPException(
             status_code=400,
-            detail=(
-                f"Receipt category validation failed. This looks like a {detected_category} receipt, "
-                f"but the saved receipt type is CTC. Please upload the correct receipt type."
-            ),
+            detail="This looks like a Different recipt",
         )
 
     if requires_ocr and (detected_category != selected_category or payload.category_match is False):
@@ -1107,7 +1332,7 @@ def save_receipt_record_payload(
         ref_number=payload.ref_number,
         txn_id=payload.txn_id,
         taxpayer_name=payload.taxpayer_name,
-        transaction_date=payload.transaction_date,
+        transaction_date=effective_transaction_date,
         amount=payload.amount,
     )
     if duplicate_record:
@@ -1124,11 +1349,11 @@ def save_receipt_record_payload(
         validate_market_document_analysis(
             raw_text=payload.raw_text,
             taxpayer_name=payload.taxpayer_name,
-            transaction_date=payload.transaction_date,
+            transaction_date=effective_transaction_date,
             market_purpose_of_renewal=payload.market_purpose_of_renewal,
             market_valid_until=payload.market_valid_until,
         )
-        if not (payload.taxpayer_name or "").strip() or not (payload.transaction_date or "").strip():
+        if not (payload.taxpayer_name or "").strip() or not effective_transaction_date:
             raise HTTPException(status_code=400, detail=OCR_EXTRACTION_FAILED_MESSAGE)
         market_metadata = {
             "market_purpose_of_renewal": (payload.market_purpose_of_renewal or "").strip() or None,
@@ -1164,7 +1389,7 @@ def save_receipt_record_payload(
             raw_text=payload.raw_text,
             ref_number=normalized_ref_number,
             taxpayer_name=payload.taxpayer_name,
-            transaction_date=payload.transaction_date,
+            transaction_date=effective_transaction_date,
             amount=payload.amount,
         )
 
@@ -1202,7 +1427,7 @@ def save_receipt_record_payload(
         ref_number=normalized_ref_number,
         txn_id=payload.txn_id or normalized_ref_number,
         taxpayer_name=payload.taxpayer_name,
-        transaction_date=payload.transaction_date,
+        transaction_date=effective_transaction_date,
         amount=payload.amount,
         tax_type=normalized_tax_type,
         source_image_sha256=payload.source_image_sha256,
@@ -1244,6 +1469,7 @@ def build_receipt_ocr_result(
     branch_id: int,
     uploaded_by: str,
     allow_exact_duplicate_match: bool = False,
+    is_queue_upload: bool = False,
 ) -> dict:
     normalized_category = normalize_receipt_category(category)
     image_sha256 = compute_image_sha256(image_data)
@@ -1279,10 +1505,7 @@ def build_receipt_ocr_result(
                         pass
                 raise HTTPException(
                     status_code=400,
-                    detail=(
-                        f"Receipt category validation failed. This looks like a {detected_category} receipt, "
-                        f"but the queue requires {normalized_category}. Please upload the correct receipt type."
-                    ),
+                    detail="This looks like a Different recipt",
                 )
         filename_validation = build_receipt_filename_validation(
             filename=file.filename or os.path.basename(file_path),
@@ -1293,7 +1516,7 @@ def build_receipt_ocr_result(
             "ref_number": "",
             "txn_id": "",
             "taxpayer_name": "",
-            "transaction_date": "",
+            "transaction_date": get_current_manila_date_value() if normalized_category == "CTC" else "",
             "amount": None,
             "tax_type": normalized_category,
             "raw_text": "",
@@ -1340,16 +1563,36 @@ def build_receipt_ocr_result(
     raw_detected_category = (result.get("detected_category") or "UNKNOWN").strip().upper()
     detected_category = normalize_receipt_category(raw_detected_category)
     category_match = result.get("category_match", True)
-    if raw_detected_category == "UNKNOWN" and normalized_tax_type != "PTR":
-        category_match = False
-    if detected_category != normalized_category or category_match is False:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Receipt category validation failed. This looks like a {detected_category} receipt, "
-                f"but the queue requires {normalized_category}. Please upload the correct receipt type."
-            ),
+    if is_queue_upload:
+        category_allowed, rpt_fallback_applied = resolve_queue_ocr_category_decision(
+            normalized_category=normalized_category,
+            raw_detected_category=raw_detected_category,
+            detected_category=detected_category,
+            category_match=category_match,
+            result=result,
         )
+        if not category_allowed:
+            raise HTTPException(
+                status_code=400,
+                detail="This looks like a Different recipt",
+            )
+        if rpt_fallback_applied:
+            result["detected_category"] = normalized_category
+            result["category_match"] = True
+            result["category_warning"] = ""
+            evidence = list(result.get("category_evidence") or [])
+            evidence.append(f"Queue {normalized_category} fallback applied after uncertain OCR category classification")
+            result["category_evidence"] = evidence
+            detected_category = normalized_category
+            category_match = True
+    else:
+        if raw_detected_category == "UNKNOWN" and normalized_category != "PTR":
+            category_match = False
+        if detected_category != normalized_category or category_match is False:
+            raise HTTPException(
+                status_code=400,
+                detail="This looks like a Different recipt",
+            )
 
     duplicate_record, duplicate_type = find_duplicate_receipt_record(
         db,
@@ -1437,16 +1680,89 @@ def build_receipt_ocr_result(
     return result
 
 
+def _build_queue_ocr_fallback_result(
+    *,
+    image_data: bytes,
+    file: UploadFile,
+    file_path: str,
+    category: str,
+    branch_id: int,
+    uploaded_by: str,
+    **_,
+) -> dict:
+    """
+    Returns a blank OCR result for queue uploads when OCR fails or times out.
+    Staff can fill in the required fields manually in the review step.
+    """
+    normalized_category = normalize_receipt_category(category)
+    image_sha256 = compute_image_sha256(image_data)
+    image_ahash = compute_image_ahash(image_data)
+    original_filename = os.path.basename(file.filename or os.path.basename(file_path))
+    filename_validation = build_receipt_filename_validation(
+        filename=original_filename,
+        taxpayer_name=None,
+    )
+    return {
+        "receipt_number": "",
+        "ref_number": "",
+        "txn_id": "",
+        "taxpayer_name": "",
+        "transaction_date": "",
+        "amount": None,
+        "tax_type": normalized_category,
+        "raw_text": "",
+        "success": True,
+        "engine": "manual",
+        "message": "OCR could not read this receipt. Please fill in the receipt details manually.",
+        "confidence": 0.0,
+        "category_evidence": [],
+        "category_warning": "",
+        "source_image_path": file_path,
+        "source_image_sha256": image_sha256,
+        "source_image_ahash": image_ahash,
+        "branch_id": branch_id,
+        "uploaded_by": uploaded_by,
+        "category": normalized_category,
+        "selected_category": normalized_category,
+        "detected_category": normalized_category,
+        "category_match": True,
+        "duplicate_detected": False,
+        "duplicate_type": None,
+        "duplicate_record": None,
+        "duplicate_warning": "",
+        "save_blocked": False,
+        "required_fields_complete": False,
+        "missing_fields": [],
+        "extraction_warning": "",
+        "save_blocked_message": "",
+        "source_image_original_filename": original_filename,
+        "source_image_suggested_filename": filename_validation["suggested_filename"],
+        "filename_matches_taxpayer": True,
+        "file_name_validation_message": "",
+        "auto_rename_source_image": False,
+        "processing_mode": "queue_manual_fallback",
+    }
+
+
 async def build_receipt_ocr_result_async(**kwargs) -> dict:
+    is_queue_upload = kwargs.get("is_queue_upload", False)
     try:
         return await run_ocr_in_executor(build_receipt_ocr_result, **kwargs)
     except asyncio.TimeoutError as exc:
+        if is_queue_upload:
+            return _build_queue_ocr_fallback_result(**kwargs)
         raise HTTPException(
             status_code=504,
             detail="Receipt OCR timed out. Please try again with a clearer or smaller image.",
         ) from exc
     except OCRProcessingError as exc:
+        if is_queue_upload:
+            return _build_queue_ocr_fallback_result(**kwargs)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except HTTPException as exc:
+        if is_queue_upload and exc.status_code in {500, 504}:
+            return _build_queue_ocr_fallback_result(**kwargs)
+        raise
 
 
 def is_appointment_request(request: ReceiptRequest) -> bool:
@@ -1606,10 +1922,12 @@ async def upload_receipt_for_ocr(
     request: Request,
     file: UploadFile = File(...),
     category: str = Form("RPT"),
+    queue_context: str | None = Query(default=None),
     current_staff=Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
     normalized_category = normalize_receipt_category(category)
+    is_queue = (queue_context or "").strip().lower() in {"true", "1"}
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     image_data = await file.read()
     validate_upload_file(
@@ -1626,6 +1944,80 @@ async def upload_receipt_for_ocr(
     with open(file_path, "wb") as output_file:
         output_file.write(image_data)
 
+    if is_queue:
+        ocr_result = None
+        try:
+            ocr_result = await asyncio.wait_for(
+                build_receipt_ocr_result_async(
+                    db=db,
+                    image_data=image_data,
+                    file=file,
+                    file_path=file_path,
+                    category=normalized_category,
+                    branch_id=current_staff.branch_id,
+                    uploaded_by=current_staff.username,
+                    is_queue_upload=True,
+                ),
+                timeout=30,
+            )
+        except HTTPException as exc:
+            if exc.status_code in {400, 409}:
+                raise
+        except Exception:
+            pass
+        if ocr_result is not None:
+            return ocr_result
+        # OCR failed or timed out — return a blank result for manual entry.
+        original_fn = os.path.basename(file.filename or os.path.basename(file_path))
+        try:
+            sha256 = compute_image_sha256(image_data)
+        except Exception:
+            sha256 = ""
+        try:
+            ahash = compute_image_ahash(image_data)
+        except Exception:
+            ahash = ""
+        return {
+            "receipt_number": "",
+            "ref_number": "",
+            "txn_id": "",
+            "taxpayer_name": "",
+            "transaction_date": "",
+            "amount": None,
+            "tax_type": normalized_category,
+            "raw_text": "",
+            "success": True,
+            "engine": "manual",
+            "confidence": 0.0,
+            "message": "OCR could not read this receipt. Please fill in the receipt details manually.",
+            "category_evidence": [],
+            "category_warning": "",
+            "source_image_path": file_path,
+            "source_image_sha256": sha256,
+            "source_image_ahash": ahash,
+            "branch_id": current_staff.branch_id,
+            "uploaded_by": current_staff.username,
+            "category": normalized_category,
+            "selected_category": normalized_category,
+            "detected_category": normalized_category,
+            "category_match": True,
+            "duplicate_detected": False,
+            "duplicate_type": None,
+            "duplicate_record": None,
+            "duplicate_warning": "",
+            "save_blocked": False,
+            "required_fields_complete": False,
+            "missing_fields": [],
+            "extraction_warning": "",
+            "save_blocked_message": "",
+            "source_image_original_filename": original_fn,
+            "source_image_suggested_filename": original_fn,
+            "filename_matches_taxpayer": True,
+            "file_name_validation_message": "",
+            "auto_rename_source_image": False,
+            "processing_mode": "queue_manual_fallback",
+        }
+
     try:
         return await build_receipt_ocr_result_async(
             db=db,
@@ -1635,6 +2027,7 @@ async def upload_receipt_for_ocr(
             category=normalized_category,
             branch_id=current_staff.branch_id,
             uploaded_by=current_staff.username,
+            is_queue_upload=False,
         )
     except Exception:
         if os.path.exists(file_path):
@@ -1768,6 +2161,7 @@ async def upload_mobile_receipt_for_ocr(
             category=session["category"],
             branch_id=session["branch_id"],
             uploaded_by=f"mobile:{session['created_by']}",
+            is_queue_upload=True,
         )
     except HTTPException as exc:
         session["status"] = "error"

@@ -210,9 +210,15 @@ export const receiptAPI = {
     headers: { 'Content-Type': 'multipart/form-data' }
   }),
   listRecords: () => api.get('/receipts/records'),
-  uploadForOCR: (formData) => api.post('/receipts/records/ocr-upload', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' }
-  }),
+  uploadForOCR: (formData, params = {}) => {
+    const query = new URLSearchParams(
+      Object.entries(params || {}).filter(([, value]) => value !== undefined && value !== null)
+    ).toString();
+    const url = query ? `/receipts/records/ocr-upload?${query}` : '/receipts/records/ocr-upload';
+    return api.post(url, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
   createMobileUploadSession: (data) => api.post('/receipts/records/mobile-upload-sessions', data),
   getMobileUploadSession: (token) => api.get(`/receipts/records/mobile-upload-sessions/${token}`),
   getMobileUploadPublicSession: (token) => api.get(`/receipts/records/mobile-upload-sessions/${token}/public`),

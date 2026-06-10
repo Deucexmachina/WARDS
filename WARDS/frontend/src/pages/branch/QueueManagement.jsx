@@ -83,7 +83,7 @@ const isMarketIssueDateInvalid = (value) => {
   }
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  return parsed > today;
+  return parsed.getTime() !== today.getTime();
 };
 
 const isMarketValidUntilInvalid = (value) => {
@@ -126,8 +126,8 @@ const resolveReceiptCategory = (queue) => {
 const defaultReceiptDraft = (queue) => ({
   ref_number: '',
   txn_id: '',
-  taxpayer_name: queue?.taxpayer_name || '',
-  transaction_date: '',
+  taxpayer_name: resolveReceiptCategory(queue) === 'CTC' ? '' : (queue?.taxpayer_name || ''),
+  transaction_date: resolveReceiptCategory(queue) === 'CTC' ? getTodayDateInputValue() : '',
   amount: '',
   market_purpose_of_renewal: '',
   market_valid_until: '',
@@ -168,6 +168,14 @@ const getReceiptDraftMissingFields = (draft, category) => {
     }
     if (!(draft?.market_valid_until || '').trim() || isMarketValidUntilInvalid(draft?.market_valid_until)) {
       missingFields.push('market_valid_until');
+    }
+    return missingFields;
+  }
+
+  if (normalizedCategory === 'CTC') {
+    const missingFields = [];
+    if (!(draft?.transaction_date || '').trim()) {
+      missingFields.push('transaction_date');
     }
     return missingFields;
   }
@@ -1103,10 +1111,18 @@ const QueueManagement = () => {
       setProcessingReceipt(true);
       setCompletionError('');
       setCompletionNotice('');
-      const response = await receiptAPI.uploadForOCR(formData);
+      const response = await receiptAPI.uploadForOCR(formData, { queue_context: 'true' });
+      const resolvedCategory = normalizeReceiptCategory(response.data?.selected_category || response.data?.tax_type || response.data?.category || category);
+      const todayDate = getTodayDateInputValue();
       setReceiptDraft(normalizeReceiptDraftReviewState({
         ...defaultReceiptDraft(completionQueue),
         ...response.data,
+        transaction_date: resolvedCategory === 'MARKET'
+          ? todayDate
+          : response.data?.transaction_date,
+        ref_number: resolvedCategory === 'CTC' ? '' : response.data?.ref_number,
+        taxpayer_name: resolvedCategory === 'CTC' ? '' : response.data?.taxpayer_name,
+        amount: resolvedCategory === 'CTC' ? null : response.data?.amount,
         tax_type: response.data?.tax_type || category,
         selected_category: response.data?.selected_category || category,
       }));
@@ -1154,9 +1170,17 @@ const QueueManagement = () => {
         setReceiptDraft(null);
         setCompletionMode('options');
       } else if (response.data?.status === 'processed' && response.data?.result) {
+        const resolvedCategory = normalizeReceiptCategory(response.data?.result?.selected_category || response.data?.result?.tax_type || response.data?.result?.category || resolveReceiptCategory(completionQueue));
+        const todayDate = getTodayDateInputValue();
         setReceiptDraft(normalizeReceiptDraftReviewState({
           ...defaultReceiptDraft(completionQueue),
           ...response.data.result,
+          transaction_date: resolvedCategory === 'MARKET'
+            ? todayDate
+            : response.data?.result?.transaction_date,
+          ref_number: resolvedCategory === 'CTC' ? '' : response.data?.result?.ref_number,
+          taxpayer_name: resolvedCategory === 'CTC' ? '' : response.data?.result?.taxpayer_name,
+          amount: resolvedCategory === 'CTC' ? null : response.data?.result?.amount,
         }));
         setCompletionMode('review');
       } else if (response.data?.status === 'error') {
@@ -1180,7 +1204,7 @@ const QueueManagement = () => {
   const handleMarketDateChange = (event) => {
     const { name, value } = event.target;
     if (name === 'transaction_date' && isMarketIssueDateInvalid(value)) {
-      setCompletionError('Date of Issue cannot be in the future.');
+      setCompletionError('Date of Issue must be today.');
       return;
     }
     if (name === 'market_valid_until' && isMarketValidUntilInvalid(value)) {
@@ -2090,7 +2114,7 @@ const QueueManagement = () => {
                 ) : null}
                 {receiptDraft.duplicate_warning || receiptDraft.category_warning ? (
                   <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                    {receiptDraft.duplicate_warning || receiptDraft.category_warning}
+                    {receiptDraft.duplicate_warning || receiptDraft.category_warning || 'This looks like a Different recipt'}
                   </div>
                 ) : null}
                 {receiptDraftFilenameMismatchBlocked ? (
@@ -2114,74 +2138,92 @@ const QueueManagement = () => {
                   </div>
                 ) : null}
                 <div className="grid gap-4 md:grid-cols-2">
-                  {completionReceiptCategory !== 'MARKET' ? (
-                    <label className="block">
-                      <span className="mb-2 block text-sm font-semibold text-slate-700">Reference Number</span>
-                      <input name="ref_number" value={receiptDraft.ref_number || ''} onChange={handleReceiptDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none" />
-                    </label>
-                  ) : null}
-                  <label className="block">
-                    <span className="mb-2 block text-sm font-semibold text-slate-700">{completionReceiptCategory === 'MARKET' ? 'Name' : 'Taxpayer Name'}</span>
-                    <input name="taxpayer_name" value={receiptDraft.taxpayer_name || ''} onChange={handleReceiptDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none" />
-                  </label>
-                  <label className="block">
-                    <span className="mb-2 block text-sm font-semibold text-slate-700">{completionReceiptCategory === 'MARKET' ? 'Date of Issue' : 'Transaction Date'}</span>
-                    <input
-                      name="transaction_date"
-                      type={completionReceiptCategory === 'MARKET' ? 'date' : 'text'}
-                      max={completionReceiptCategory === 'MARKET' ? getTodayDateInputValue() : undefined}
-                      value={completionReceiptCategory === 'MARKET' ? formatDateInputValue(receiptDraft.transaction_date) : (receiptDraft.transaction_date || '')}
-                      onChange={completionReceiptCategory === 'MARKET' ? handleMarketDateChange : handleReceiptDraftChange}
-                      className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none"
-                    />
-                  </label>
-                  {completionReceiptCategory === 'MARKET' ? (
-                    <>
-                      <label className="block">
-                        <span className="mb-2 block text-sm font-semibold text-slate-700">Purpose of Renewal</span>
-                        <select
-                          value={getMarketPurposeSelectValue(receiptDraft.market_purpose_of_renewal)}
-                          onChange={(event) => {
-                            const nextValue = event.target.value;
-                            setReceiptDraft((current) => normalizeReceiptDraftReviewState({
-                              ...current,
-                              market_purpose_of_renewal: nextValue === 'Other' ? '' : nextValue,
-                            }));
-                          }}
-                          className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none"
-                        >
-                          {MARKET_PURPOSE_OPTIONS.map((option) => (
-                            <option key={option} value={option}>{option}</option>
-                          ))}
-                          <option value="Other">Other (please specify)</option>
-                        </select>
-                        {getMarketPurposeSelectValue(receiptDraft.market_purpose_of_renewal) === 'Other' ? (
-                          <input
-                            name="market_purpose_of_renewal"
-                            value={receiptDraft.market_purpose_of_renewal || ''}
-                            onChange={handleReceiptDraftChange}
-                            placeholder="Type the purpose of renewal"
-                            className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none"
-                          />
-                        ) : null}
-                      </label>
-                      <label className="block">
-                        <span className="mb-2 block text-sm font-semibold text-slate-700">Valid Until</span>
+                  {completionReceiptCategory === 'CTC' ? (
+                    <label className="block md:col-span-2">
+                      <span className="mb-2 block text-sm font-semibold text-slate-700">Date</span>
                       <input
-                        name="market_valid_until"
+                        name="transaction_date"
                         type="date"
                         min={getTodayDateInputValue()}
-                        value={formatDateInputValue(receiptDraft.market_valid_until)}
-                        onChange={handleMarketDateChange}
-                        className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none"
+                        max={getTodayDateInputValue()}
+                        value={formatDateInputValue(receiptDraft.transaction_date || getTodayDateInputValue())}
+                        readOnly
+                        className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none"
                       />
-                      </label>
-                    </>
-                  ) : (
-                    <label className="block">
-                      <span className="mb-2 block text-sm font-semibold text-slate-700">Amount</span>
-                      <input name="amount" type="number" step="0.01" value={receiptDraft.amount ?? ''} onChange={handleReceiptDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none" />
                     </label>
+                  ) : (
+                    <>
+                      {completionReceiptCategory !== 'MARKET' ? (
+                        <label className="block">
+                          <span className="mb-2 block text-sm font-semibold text-slate-700">Reference Number</span>
+                          <input name="ref_number" value={receiptDraft.ref_number || ''} onChange={handleReceiptDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none" />
+                        </label>
+                      ) : null}
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-semibold text-slate-700">{completionReceiptCategory === 'MARKET' ? 'Name' : 'Taxpayer Name'}</span>
+                        <input name="taxpayer_name" value={receiptDraft.taxpayer_name || ''} onChange={handleReceiptDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none" />
+                      </label>
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-semibold text-slate-700">{completionReceiptCategory === 'MARKET' ? 'Date of Issue' : 'Transaction Date'}</span>
+                        <input
+                          name="transaction_date"
+                          type={completionReceiptCategory === 'MARKET' ? 'date' : 'text'}
+                          min={completionReceiptCategory === 'MARKET' ? getTodayDateInputValue() : undefined}
+                          max={completionReceiptCategory === 'MARKET' ? getTodayDateInputValue() : undefined}
+                          value={completionReceiptCategory === 'MARKET' ? formatDateInputValue(receiptDraft.transaction_date) : (receiptDraft.transaction_date || '')}
+                          onChange={completionReceiptCategory === 'MARKET' ? handleMarketDateChange : handleReceiptDraftChange}
+                          className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none"
+                        />
+                      </label>
+                      {completionReceiptCategory === 'MARKET' ? (
+                        <>
+                          <label className="block">
+                            <span className="mb-2 block text-sm font-semibold text-slate-700">Purpose of Renewal</span>
+                            <select
+                              value={getMarketPurposeSelectValue(receiptDraft.market_purpose_of_renewal)}
+                              onChange={(event) => {
+                                const nextValue = event.target.value;
+                                setReceiptDraft((current) => normalizeReceiptDraftReviewState({
+                                  ...current,
+                                  market_purpose_of_renewal: nextValue === 'Other' ? '' : nextValue,
+                                }));
+                              }}
+                              className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none"
+                            >
+                              {MARKET_PURPOSE_OPTIONS.map((option) => (
+                                <option key={option} value={option}>{option}</option>
+                              ))}
+                              <option value="Other">Other (please specify)</option>
+                            </select>
+                            {getMarketPurposeSelectValue(receiptDraft.market_purpose_of_renewal) === 'Other' ? (
+                              <input
+                                name="market_purpose_of_renewal"
+                                value={receiptDraft.market_purpose_of_renewal || ''}
+                                onChange={handleReceiptDraftChange}
+                                placeholder="Type the purpose of renewal"
+                                className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none"
+                              />
+                            ) : null}
+                          </label>
+                          <label className="block">
+                            <span className="mb-2 block text-sm font-semibold text-slate-700">Valid Until</span>
+                            <input
+                              name="market_valid_until"
+                              type="date"
+                              min={getTodayDateInputValue()}
+                              value={formatDateInputValue(receiptDraft.market_valid_until)}
+                              onChange={handleMarketDateChange}
+                              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none"
+                            />
+                          </label>
+                        </>
+                      ) : (
+                        <label className="block">
+                          <span className="mb-2 block text-sm font-semibold text-slate-700">Amount</span>
+                          <input name="amount" type="number" step="0.01" value={receiptDraft.amount ?? ''} onChange={handleReceiptDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none" />
+                        </label>
+                      )}
+                    </>
                   )}
                 </div>
                 <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
