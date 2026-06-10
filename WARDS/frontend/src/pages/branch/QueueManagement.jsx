@@ -123,6 +123,22 @@ const resolveReceiptCategory = (queue) => {
   return serviceWindow || 'MISC';
 };
 
+const normalizeReceiptCategory = (value) => {
+  const normalized = (value || '').trim().toUpperCase();
+  const aliases = {
+    BT: 'BUSINESS',
+    'BUSINESS TAX': 'BUSINESS',
+    "MAYOR'S PERMIT": 'BUSINESS',
+    'MAYORS PERMIT': 'BUSINESS',
+    MISCELLANEOUS: 'MISC',
+  };
+  const resolved = aliases[normalized] || normalized || 'RPT';
+  if (/^QW\d+$/.test(resolved)) {
+    return 'MISC';
+  }
+  return resolved;
+};
+
 const defaultReceiptDraft = (queue) => ({
   ref_number: '',
   txn_id: '',
@@ -1111,7 +1127,9 @@ const QueueManagement = () => {
       setProcessingReceipt(true);
       setCompletionError('');
       setCompletionNotice('');
+      console.log('[FRONTEND] Starting uploadForOCR...');
       const response = await receiptAPI.uploadForOCR(formData, { queue_context: 'true' });
+      console.log('[FRONTEND] uploadForOCR success:', response.status, response.data);
       const resolvedCategory = normalizeReceiptCategory(response.data?.selected_category || response.data?.tax_type || response.data?.category || category);
       const todayDate = getTodayDateInputValue();
       setReceiptDraft(normalizeReceiptDraftReviewState({
@@ -1127,7 +1145,11 @@ const QueueManagement = () => {
         selected_category: response.data?.selected_category || category,
       }));
       setCompletionMode('review');
+      console.log('[FRONTEND] Switched to review mode');
     } catch (err) {
+      console.error('[FRONTEND] uploadForOCR error:', err);
+      console.error('[FRONTEND] error.response:', err.response);
+      console.error('[FRONTEND] error.message:', err.message);
       setCompletionError(err.response?.data?.detail || 'Failed to parse receipt image.');
     } finally {
       setProcessingReceipt(false);

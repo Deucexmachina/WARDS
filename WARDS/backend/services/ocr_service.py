@@ -114,6 +114,7 @@ class OCRService:
                 "This looks like a Different recipt"
             )
         )
+        print(f"[OCR] Parsed result: receipt_number={parsed.get('receipt_number')!r}, ref_number={parsed.get('ref_number')!r}, txn_id={parsed.get('txn_id')!r}, taxpayer_name={parsed.get('taxpayer_name')!r}, amount={parsed.get('amount')!r}, detected_category={parsed.get('detected_category')!r}, category_match={parsed.get('category_match')}")
         return parsed
 
     def analyze_receipt_category_only(self, image_path: str) -> Dict[str, Any]:
@@ -345,9 +346,12 @@ class OCRService:
     def _extract_text_with_llmwhisperer(self, image_path: str) -> str:
         self._load_llmwhisperer_config()
         if not self._api_key:
+            print(f"[OCR] No API key configured. Source: {self._api_key_source}")
             raise RuntimeError(self._api_error or "LLMWhisperer configuration is unavailable.")
 
+        print(f"[OCR] Using API key from {self._api_key_source}, base_url={self._base_url}")
         pdf_path = self._image_to_pdf(image_path)
+        print(f"[OCR] Converted image to PDF: {pdf_path} (exists={pdf_path.exists()}, size={pdf_path.stat().st_size if pdf_path.exists() else 0})")
         whisper = {}
         try:
             started_at = time.monotonic()
@@ -361,6 +365,7 @@ class OCRService:
                 "output_mode": "layout_preserving",
                 "file_name": pdf_path.name,
             }
+            print(f"[OCR] Sending to LLMWhisperer: {base_url}/whisper")
             with open(pdf_path, "rb") as pdf_file:
                 whisper_start = requests.post(
                     f"{base_url}/whisper",
@@ -368,19 +373,24 @@ class OCRService:
                     headers=headers,
                     data=pdf_file.read(),
                     timeout=self._request_timeout(self._start_timeout),
-            )
+                )
+            print(f"[OCR] Whisper start response: {whisper_start.status_code}")
             if whisper_start.status_code == 401:
                 raise RuntimeError(self._unauthorized_message("starting OCR"))
             whisper_start.raise_for_status()
             whisper_job = whisper_start.json()
+            print(f"[OCR] Whisper job status: {whisper_job.get('status')}")
 
             if whisper_job.get("status") == "processed":
                 extraction = whisper_job.get("extraction") or {}
-                return (extraction.get("result_text") or "").strip()
+                result_text = (extraction.get("result_text") or "").strip()
+                print(f"[OCR] Immediate result text length: {len(result_text)}")
+                return result_text
 
             whisper_hash = whisper_job.get("whisper_hash")
             if not whisper_hash:
                 raise RuntimeError("LLMWhisperer did not return a whisper_hash.")
+            print(f"[OCR] Whisper hash: {whisper_hash}")
 
             deadline = time.monotonic() + self._poll_timeout
             status_payload = {}
@@ -397,6 +407,7 @@ class OCRService:
                     status_response.raise_for_status()
                     status_payload = status_response.json()
                     status = (status_payload.get("status") or "").lower()
+                    print(f"[OCR] Poll status: {status}")
 
                     if status == "processed":
                         break
@@ -419,11 +430,14 @@ class OCRService:
                     raise RuntimeError(self._unauthorized_message("retrieving OCR output"))
                 retrieve_response.raise_for_status()
                 whisper = retrieve_response.json()
+                print(f"[OCR] Retrieve response keys: {list(whisper.keys())}")
         except requests.Timeout as exc:
+            print(f"[OCR] Request timeout: {exc}")
             raise OCRProcessingError("LLMWhisperer OCR request timed out. Please try again with a clearer or smaller image.") from exc
         except OCRProcessingError:
             raise
         except Exception as exc:
+            print(f"[OCR] Exception during LLMWhisperer call: {exc}")
             raise OCRProcessingError(f"LLMWhisperer OCR failed: {exc}") from exc
         finally:
             if pdf_path.exists():
@@ -439,7 +453,9 @@ class OCRService:
             pass
 
         extraction = whisper.get("extraction") or whisper
-        return (extraction.get("result_text") or "").strip()
+        result_text = (extraction.get("result_text") or "").strip()
+        print(f"[OCR] Final result_text length: {len(result_text)}")
+        return result_text
 
     def _image_to_pdf(self, image_path: str) -> Path:
         base_name = Path(image_path).stem
