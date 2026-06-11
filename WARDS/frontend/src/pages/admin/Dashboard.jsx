@@ -12,7 +12,7 @@ const getPaymentStatusClasses = (status) => {
     return 'bg-green-100 text-green-800';
   }
 
-  if (['pending', 'processing'].includes(normalizedStatus)) {
+  if (normalizedStatus.includes('pending') || normalizedStatus === 'processing') {
     return 'bg-yellow-100 text-yellow-800';
   }
 
@@ -224,7 +224,7 @@ const Dashboard = () => {
       groups[branchName].totalAmount += Number(payment.amount || 0);
       if (['confirmed', 'verified', 'paid', 'successful', 'success'].includes(normalizedStatus)) {
         groups[branchName].verifiedCount += 1;
-      } else if (['pending', 'processing'].includes(normalizedStatus)) {
+      } else if (normalizedStatus.includes('pending') || normalizedStatus === 'processing') {
         groups[branchName].pendingCount += 1;
       } else {
         groups[branchName].failedCount += 1;
@@ -614,7 +614,7 @@ const Dashboard = () => {
                     <span className="rounded-full bg-white px-3 py-2 ring-1 ring-slate-200">{branchGroup.payments.length} records</span>
                     <span className="rounded-full bg-white px-3 py-2 ring-1 ring-slate-200">{formatCurrency(branchGroup.totalAmount)}</span>
                     <span className="rounded-full bg-emerald-50 px-3 py-2 text-emerald-700 ring-1 ring-emerald-100">{branchGroup.verifiedCount} verified</span>
-                    <span className="rounded-full bg-rose-50 px-3 py-2 text-rose-700 ring-1 ring-rose-100">{branchGroup.failedCount} failed</span>
+                    <span className="rounded-full bg-amber-50 px-3 py-2 text-amber-700 ring-1 ring-amber-100">{branchGroup.pendingCount} pending</span>
                   </div>
                 </div>
                 <div className="overflow-x-auto">
