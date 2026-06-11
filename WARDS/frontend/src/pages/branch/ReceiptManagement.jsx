@@ -340,6 +340,40 @@ const PaginationControls = ({ page, totalPages, totalItems, onPageChange }) => {
   );
 };
 
+const BRANCH_TAX_DISPLAY_NAMES = {
+  'Real Property Tax': 'REAL PROPERTY TAX',
+  'Business Tax': 'BUSINESS TAX',
+  'Miscellaneous Tax': 'MISCELLANEOUS',
+  'Community Tax Certificate': 'COMMUNITY TAX CERTIFICATE',
+  'Professional Tax Receipt': 'PROFESSIONAL TAX RECEIPT',
+  'Market': 'MARKET',
+  RPT: 'REAL PROPERTY TAX',
+  'RPT WINDOW': 'REAL PROPERTY TAX',
+  BT: 'BUSINESS TAX',
+  'BT WINDOW': 'BUSINESS TAX',
+  BUSINESS: 'BUSINESS TAX',
+  'BUSINESS WINDOW': 'BUSINESS TAX',
+  MISC: 'MISCELLANEOUS',
+  'MISC WINDOW': 'MISCELLANEOUS',
+  CTC: 'COMMUNITY TAX CERTIFICATE',
+  'CTC WINDOW': 'COMMUNITY TAX CERTIFICATE',
+  PTR: 'PROFESSIONAL TAX RECEIPT',
+  'PTR WINDOW': 'PROFESSIONAL TAX RECEIPT',
+  MARKET: 'MARKET',
+  'MARKET WINDOW': 'MARKET',
+};
+
+const getBranchTaxDisplayName = (name) => {
+  if (!name) return 'N/A';
+  const clean = name.replace(/ Window$/i, '').trim();
+  const displayName = BRANCH_TAX_DISPLAY_NAMES[clean]
+    || BRANCH_TAX_DISPLAY_NAMES[clean.toUpperCase()]
+    || BRANCH_TAX_DISPLAY_NAMES[name]
+    || BRANCH_TAX_DISPLAY_NAMES[name.toUpperCase()];
+  if (displayName) return displayName;
+  return name;
+};
+
 const ReceiptManagement = () => {
   const [selectedFile, setSelectedFile] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState('RPT');
@@ -2148,7 +2182,7 @@ const ReceiptManagement = () => {
                   <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
                     {[
                       ['Taxpayer', request.taxpayerName || 'N/A'],
-                      ['Tax Type', request.taxType || 'N/A'],
+                      ['Tax Type', getBranchTaxDisplayName(request.taxType)],
                       ['Reason', request.requestReason === 'Other' ? (request.requestReasonOther || 'Other') : (request.requestReason || 'N/A')],
                       ['Transaction Date', request.transactionDate || 'N/A'],
                       ['Reference', request.refNumber || 'N/A'],
@@ -2349,7 +2383,7 @@ const ReceiptManagement = () => {
             <div className="grid gap-6 px-6 py-6 md:grid-cols-2">
               {[
                 ['Taxpayer', selectedCompletedRequest.taxpayerName],
-                ['Tax Type', selectedCompletedRequest.taxType],
+                ['Tax Type', getBranchTaxDisplayName(selectedCompletedRequest.taxType)],
                 ['Reason for Request', selectedCompletedRequest.requestReason === 'Other' ? (selectedCompletedRequest.requestReasonOther || 'Other') : selectedCompletedRequest.requestReason],
                 ['Reference Number', selectedCompletedRequest.refNumber],
                 ['Status', selectedCompletedRequest.status],
