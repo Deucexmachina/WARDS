@@ -57,6 +57,8 @@ api.interceptors.request.use((config) => {
     token = localStorage.getItem('adminToken') || localStorage.getItem('branchToken');
   } else if (url.includes('/accounts')) {
     token = localStorage.getItem('adminToken') || localStorage.getItem('branchToken');
+  } else if (url.includes('/activity-logs')) {
+    token = localStorage.getItem('adminToken') || localStorage.getItem('branchToken');
   } else if (isBranchApiRequest(url)) {
     token = localStorage.getItem('branchToken');
   } else if (isAdminApiRequest(url)) {

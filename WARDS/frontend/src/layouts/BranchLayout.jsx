@@ -98,6 +98,7 @@ const BranchLayout = () => {
         { label: 'Policies & SOPs', path: `${basePath}/policies` },
         ...((isBranchAdmin || isSuperadminManagedBranch)
           ? [
+            { label: 'Activity Logs', path: `${basePath}/activity-logs` },
             { label: 'System Settings', path: `${basePath}/settings/login` },
             ...(isBranchAdmin ? [{ label: 'Account Management', path: `${basePath}/accounts` }] : []),
           ]

@@ -270,10 +270,13 @@ def serialize_queue_history(queue: QueueHistory):
 
 
 def log_branch_action(db: Session, staff: BranchStaff, action: str, details: str):
+    branch = db.query(Branch).filter(Branch.id == staff.branch_id).first()
+    branch_name = (branch.name if branch else None) or f"Branch {staff.branch_id}"
+    role_label = staff.role or "branch_staff"
     db.add(ActivityLog(
         action=action,
         user=staff.username,
-        details=f"Branch {staff.branch_id}: {details}",
+        details=f"branch: {branch_name} | role: {role_label} | {details}",
         type="branch_portal",
     ))
 

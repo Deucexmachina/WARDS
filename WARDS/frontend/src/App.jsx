@@ -29,6 +29,7 @@ import BranchPolicies from './pages/branch/BranchPolicies'
 import BranchReports from './pages/branch/BranchReports'
 import BranchSettings from './pages/branch/BranchSettings'
 import BranchSystemSettingsLogin from './pages/branch/BranchSystemSettingsLogin'
+import BranchActivityLogs from './pages/branch/BranchActivityLogs'
 import LiveQueueMonitor from './pages/branch/LiveQueueMonitor'
 import WindowStaffAccount from './pages/branch/WindowStaffAccount'
 import PayTaxes from './pages/public/PayTaxes'
@@ -119,6 +120,7 @@ function App() {
           <Route path="alerts" element={<Alerts />} />
           <Route path="discrepancies" element={<BranchDiscrepancies />} />
           <Route path="policies" element={<BranchPolicies />} />
+          <Route path="activity-logs" element={<BranchActivityLogs />} />
           <Route path="settings" element={<BranchSystemSettingsProtectedRoute><BranchSettings /></BranchSystemSettingsProtectedRoute>} />
         </Route>
         {/* Dedicated Live Monitor Route - No Layout */}

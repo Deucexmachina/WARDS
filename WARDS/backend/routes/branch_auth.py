@@ -9,7 +9,7 @@ import os
 import secrets
 import time
 
-from database.models import BranchStaff, ActivityLog, get_db
+from database.models import Branch, BranchStaff, ActivityLog, get_db
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -248,7 +248,9 @@ async def branch_login(request: Request, credentials: BranchLoginRequest, db: Se
     staff.last_login = datetime.utcnow()
     db.commit()
     
-    log_activity(db, "Successful Branch Login", credentials.username, f"Role: {staff.role}, Branch: {staff.branch_id}, IP: {client_ip}", "branch_auth")
+    _branch = db.query(Branch).filter(Branch.id == staff.branch_id).first() if staff.branch_id else None
+    _branch_name = (_branch.name if _branch else None) or f"Branch {staff.branch_id}"
+    log_activity(db, "Successful Branch Login", credentials.username, f"branch: {_branch_name} | role: {staff.role} | ip: {client_ip}", "branch_auth")
     
     return {
         "access_token": access_token,

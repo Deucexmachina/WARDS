@@ -51,6 +51,7 @@ PERMISSIONS = {
         "view_announcements",
         "generate_branch_reports",
         "view_branch_alerts",
+        "view_branch_activity_logs",
     ],
     ROLE_BRANCH_STAFF: [
         "view_branch_operations",

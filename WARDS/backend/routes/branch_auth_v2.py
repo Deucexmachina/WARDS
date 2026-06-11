@@ -30,7 +30,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
-from database.models import BranchStaff, ActivityLog, Invite, MFASecret, get_db
+from database.models import Branch, BranchStaff, ActivityLog, Invite, MFASecret, get_db
 from middleware.branch_auth import require_branch_admin
 from utils.field_crypto import apply_mfa_secret_security, find_invite_by_token, find_mfa_secret_record, get_decrypted_or_raw
 from utils.system_settings import get_setting_value
@@ -456,7 +456,9 @@ async def branch_login(request: Request, credentials: BranchLoginRequest, db: Se
     staff.last_login = datetime.utcnow()
     db.commit()
     
-    log_activity(db, "Successful Branch Login", normalized_email, f"Role: {staff.role}, Branch: {staff.branch_id}, IP: {client_ip}", "security")
+    _branch = db.query(Branch).filter(Branch.id == staff.branch_id).first() if staff.branch_id else None
+    _branch_name = (_branch.name if _branch else None) or f"Branch {staff.branch_id}"
+    log_activity(db, "Successful Branch Login", normalized_email, f"branch: {_branch_name} | role: {staff.role} | ip: {client_ip}", "security")
     
     
     return {
