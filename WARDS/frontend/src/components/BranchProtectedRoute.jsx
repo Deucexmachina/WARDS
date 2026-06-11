@@ -1,6 +1,7 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import axios from 'axios';
+import { clearBranchSettingsSession } from '../utils/settingsSecurity';
 
 const BranchProtectedRoute = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(null);
@@ -41,6 +42,7 @@ const BranchProtectedRoute = ({ children }) => {
         localStorage.removeItem('branchToken');
         localStorage.removeItem('branchUser');
         localStorage.removeItem('branchAuthenticatedAt');
+        clearBranchSettingsSession();
         sessionStorage.setItem('redirectAfterLogin', location.pathname);
         sessionStorage.setItem('loginPortal', 'branch');
         sessionStorage.setItem('loginMessage', 'Please login again after the backend restarts.');
@@ -58,6 +60,7 @@ const BranchProtectedRoute = ({ children }) => {
         localStorage.removeItem('branchToken');
         localStorage.removeItem('branchUser');
         localStorage.removeItem('branchAuthenticatedAt');
+        clearBranchSettingsSession();
         sessionStorage.setItem('redirectAfterLogin', location.pathname);
         sessionStorage.setItem('loginPortal', 'branch');
         sessionStorage.setItem('loginMessage', 'Please login with your branch account to continue.');
@@ -67,6 +70,7 @@ const BranchProtectedRoute = ({ children }) => {
       localStorage.removeItem('branchToken');
       localStorage.removeItem('branchUser');
       localStorage.removeItem('branchAuthenticatedAt');
+      clearBranchSettingsSession();
       sessionStorage.setItem('redirectAfterLogin', location.pathname);
       sessionStorage.setItem('loginPortal', 'branch');
       sessionStorage.setItem('loginMessage', 'Please login with your branch account to continue.');

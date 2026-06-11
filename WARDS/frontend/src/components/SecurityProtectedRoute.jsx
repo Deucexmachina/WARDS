@@ -13,7 +13,11 @@ const clearAdminSession = () => {
   localStorage.removeItem('adminToken');
   localStorage.removeItem('adminUser');
   localStorage.removeItem('adminAuthenticatedAt');
+  localStorage.removeItem('settingsAuthenticated');
+  localStorage.removeItem('settingsAuthenticatedAt');
   clearSecuritySession();
+  sessionStorage.removeItem('settingsAuthenticated');
+  sessionStorage.removeItem('settingsAuthenticatedAt');
 };
 
 const SecurityProtectedRoute = ({ children }) => {

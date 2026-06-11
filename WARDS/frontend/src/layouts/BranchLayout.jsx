@@ -7,6 +7,7 @@ import ActionConfirmationModal from '../components/ActionConfirmationModal';
 import api from '../services/api';
 import { branchAnnouncementAPI, discrepancyAPI } from '../services/api';
 import { getBranchPortalPath } from '../utils/auth';
+import { clearBranchSettingsSession } from '../utils/settingsSecurity';
 import {
   BRANCH_REPORT_VIEWED_EVENT,
   BRANCH_REPORTS_UPDATED_EVENT,
@@ -92,9 +93,9 @@ const BranchLayout = () => {
         { label: 'Announcements', path: `${basePath}/announcements` },
         { label: 'Discrepancy Reports', path: `${basePath}/discrepancies` },
         { label: 'Policies & SOPs', path: `${basePath}/policies` },
-        ...(isBranchAdmin || isSuperadminManagedBranch
+        ...((isBranchAdmin || isSuperadminManagedBranch)
           ? [
-            { label: 'System Settings', path: `${basePath}/settings` },
+            { label: 'System Settings', path: `${basePath}/settings/login` },
             ...(isBranchAdmin ? [{ label: 'Account Management', path: `${basePath}/accounts` }] : []),
           ]
           : []),
@@ -290,6 +291,7 @@ const BranchLayout = () => {
       localStorage.removeItem('branchToken');
       localStorage.removeItem('branchUser');
       localStorage.removeItem('branchAuthenticatedAt');
+      clearBranchSettingsSession();
       setShowLogoutConfirm(false);
       setIsLoggingOut(false);
       navigate('/admin', { replace: true });
@@ -304,6 +306,7 @@ const BranchLayout = () => {
       localStorage.removeItem('branchToken');
       localStorage.removeItem('branchUser');
       localStorage.removeItem('branchAuthenticatedAt');
+      clearBranchSettingsSession();
       setShowLogoutConfirm(false);
       setIsLoggingOut(false);
       navigate('/login', { replace: true });
@@ -341,7 +344,9 @@ const BranchLayout = () => {
               end={item.path === basePath}
               className={({ isActive }) =>
                 `flex items-center justify-between rounded-lg px-4 py-3 font-semibold transition ${
-                  isActive ? 'bg-purple-600 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                  (isActive || (item.label === 'System Settings' && location.pathname.startsWith(`${basePath}/settings`)))
+                    ? 'bg-purple-600 text-white'
+                    : 'text-slate-300 hover:bg-slate-800 hover:text-white'
                 }`
               }
             >

@@ -20,8 +20,12 @@ const ProtectedRoute = ({ children }) => {
     localStorage.removeItem('adminAuthenticatedAt');
     localStorage.removeItem('securityAuthenticated');
     localStorage.removeItem('securityAuthenticatedAt');
+    localStorage.removeItem('settingsAuthenticated');
+    localStorage.removeItem('settingsAuthenticatedAt');
     sessionStorage.removeItem('securityAuthenticated');
     sessionStorage.removeItem('securityAuthenticatedAt');
+    sessionStorage.removeItem('settingsAuthenticated');
+    sessionStorage.removeItem('settingsAuthenticatedAt');
   };
 
   const verifyToken = async () => {

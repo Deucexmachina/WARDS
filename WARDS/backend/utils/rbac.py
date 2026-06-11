@@ -152,7 +152,7 @@ def get_sidebar_modules(role: str) -> list:
             {"name": "Activity Logs", "path": "/admin/activity-logs", "icon": "logs"},
             {"name": "Backup & Recovery", "path": "/admin/backup", "icon": "backup"},
             {"name": "Policies & SOPs", "path": "/admin/policies", "icon": "policies"},
-            {"name": "System Settings", "path": "/admin/settings", "icon": "settings"},
+            {"name": "System Settings", "path": "/admin/settings/login", "icon": "settings"},
             {"name": "Account Management", "path": "/admin/accounts", "icon": "accounts"}
         ]
         if role in {ROLE_MAIN_ADMIN, ROLE_SUPERADMIN}:

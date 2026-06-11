@@ -4,6 +4,7 @@ import axios from 'axios';
 import ReCAPTCHA from 'react-google-recaptcha';
 
 import { getPortalHome, getStoredPortal, persistSession } from '../../utils/auth';
+import { AUTH_GRADIENTS } from '../../utils/authTheme';
 
 const API_URL = 'http://localhost:8000';
 const RECAPTCHA_SITE_KEY = '6LdOdsAsAAAAAKW-mZvEfaesLvdAwCm_SnZoiirK';
@@ -15,25 +16,25 @@ const portalCopy = {
   public: {
     title: 'Citizen Access',
     subtitle: 'Email, password, and Microsoft Authenticator MFA',
-    accent: 'from-green-600 via-green-700 to-emerald-800',
+    accent: AUTH_GRADIENTS.public,
     button: 'bg-green-600 hover:bg-green-700',
   },
   admin: {
     title: 'Main Office Admin',
     subtitle: 'MFA required for secured access',
-    accent: 'from-blue-900 via-blue-800 to-slate-900',
+    accent: AUTH_GRADIENTS.admin,
     button: 'bg-blue-600 hover:bg-blue-700',
   },
   branch: {
     title: 'Branch Office',
     subtitle: 'MFA required for staff and branch admins',
-    accent: 'from-indigo-800 via-slate-800 to-purple-900',
+    accent: AUTH_GRADIENTS.branch,
     button: 'bg-purple-600 hover:bg-purple-700',
   },
   default: {
     title: 'WARDS Login',
     subtitle: '',
-    accent: 'from-slate-900 via-blue-900 to-teal-800',
+    accent: AUTH_GRADIENTS.default,
     button: 'bg-slate-900 hover:bg-slate-800',
   },
 };

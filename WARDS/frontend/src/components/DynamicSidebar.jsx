@@ -469,7 +469,7 @@ const DynamicSidebar = () => {
         { name: 'Activity Logs', path: '/admin/activity-logs', icon: 'logs' },
         { name: 'Backup & Recovery', path: '/admin/backup/login', icon: 'backup' },
         { name: 'Policies & SOPs', path: '/admin/policies', icon: 'policies' },
-        { name: 'System Settings', path: '/admin/settings', icon: 'settings' },
+        { name: 'System Settings', path: '/admin/settings/login', icon: 'settings' },
         { name: 'Account Management', path: '/admin/accounts', icon: 'accounts' }
       ];
       if (role === 'main_admin' || role === 'superadmin') {
@@ -548,7 +548,10 @@ const DynamicSidebar = () => {
       </div>
       <nav className="p-3">
         {modules.map((module, index) => {
-          const isActive = location.pathname === module.path;
+          const isSettingsModule = module.icon === 'settings';
+          const isActive = isSettingsModule
+            ? location.pathname.startsWith('/admin/settings')
+            : location.pathname === module.path;
           const isMemoModule = module.icon === 'memos';
           const isPolicyModule = module.icon === 'policies';
           const isDiscrepancyModule = module.icon === 'discrepancies';

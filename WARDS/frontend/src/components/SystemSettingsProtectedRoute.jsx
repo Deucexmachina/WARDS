@@ -1,0 +1,115 @@
+import { Navigate } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import axios from 'axios';
+import {
+  clearSettingsSession,
+  isSettingsRoleAllowed,
+  isSettingsSessionActive,
+} from '../utils/settingsSecurity';
+
+const clearAdminSession = () => {
+  localStorage.removeItem('adminToken');
+  localStorage.removeItem('adminUser');
+  localStorage.removeItem('adminAuthenticatedAt');
+  localStorage.removeItem('securityAuthenticated');
+  localStorage.removeItem('securityAuthenticatedAt');
+  sessionStorage.removeItem('securityAuthenticated');
+  sessionStorage.removeItem('securityAuthenticatedAt');
+  clearSettingsSession();
+};
+
+const SystemSettingsProtectedRoute = ({ children }) => {
+  const [allowed, setAllowed] = useState(null);
+  const allowCleanupRef = useRef(false);
+
+  useEffect(() => {
+    let active = true;
+    const cleanupTimer = window.setTimeout(() => {
+      allowCleanupRef.current = true;
+    }, 0);
+
+    const verify = async () => {
+      const token = localStorage.getItem('adminToken');
+      const adminAuthenticatedAt = Date.parse(localStorage.getItem('adminAuthenticatedAt') || '');
+      const settingsAuthenticatedAt = Date.parse(sessionStorage.getItem('settingsAuthenticatedAt') || '');
+
+      if (!token) {
+        clearSettingsSession();
+        if (active) setAllowed(false);
+        return;
+      }
+
+      if (!isSettingsSessionActive() || !adminAuthenticatedAt || !settingsAuthenticatedAt || settingsAuthenticatedAt <= adminAuthenticatedAt) {
+        clearSettingsSession();
+        if (active) setAllowed(false);
+        return;
+      }
+
+      try {
+        const [verifyResponse, accessResponse] = await Promise.all([
+          axios.get('http://localhost:8000/api/admin/auth/verify', {
+            headers: { Authorization: `Bearer ${token}` },
+          }),
+          axios.get('http://localhost:8000/api/settings/access', {
+            headers: { Authorization: `Bearer ${token}` },
+          }),
+        ]);
+
+        const serverStartedAt = Date.parse(verifyResponse.data.server_started_at || '');
+        const verifiedUser = verifyResponse.data.user || {};
+
+        if (
+          !verifyResponse.data.valid ||
+          verifiedUser?.role !== 'admin' ||
+          !isSettingsRoleAllowed(verifiedUser) ||
+          !accessResponse.data?.allowed ||
+          (serverStartedAt && adminAuthenticatedAt <= serverStartedAt)
+        ) {
+          clearAdminSession();
+          if (active) setAllowed(false);
+          return;
+        }
+
+        if (active) setAllowed(true);
+      } catch (error) {
+        if (error?.response?.status === 401) {
+          clearAdminSession();
+        } else {
+          clearSettingsSession();
+        }
+        if (active) setAllowed(false);
+      }
+    };
+
+    verify();
+    const interval = window.setInterval(verify, 10000);
+
+    return () => {
+      active = false;
+      window.clearTimeout(cleanupTimer);
+      window.clearInterval(interval);
+      if (allowCleanupRef.current) {
+        clearSettingsSession();
+      }
+    };
+  }, []);
+
+  if (allowed === null) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-lightbg">
+        <div className="text-center">
+          <div className="inline-block h-16 w-16 animate-spin rounded-full border-b-4 border-t-4 border-blue-600"></div>
+          <p className="mt-4 font-semibold text-gray-600">Verifying secured settings access...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!allowed) {
+    return <Navigate to={localStorage.getItem('adminToken') ? '/admin/settings/login' : '/login'} replace />;
+  }
+
+  return children;
+};
+
+export default SystemSettingsProtectedRoute;

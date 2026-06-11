@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database.models import Branch, BranchStaff, Service, get_db
-from middleware.branch_auth import get_current_branch_staff, require_branch_admin
+from middleware.branch_auth import require_branch_admin
 from utils.branch_appointment_settings import (
     delete_branch_schedule_history_entry,
     get_branch_schedule_history,
@@ -44,9 +44,20 @@ def get_current_staff_branch(current_staff: BranchStaff, db: Session) -> Branch:
     return branch
 
 
+@router.get("/access")
+async def get_branch_settings_access(
+    current_staff: BranchStaff = Depends(require_branch_admin()),
+):
+    return {
+        "allowed": True,
+        "role": current_staff.role,
+        "branch_id": current_staff.branch_id,
+    }
+
+
 @router.get("/appointments")
 async def get_branch_appointment_settings(
-    current_staff: BranchStaff = Depends(get_current_branch_staff),
+    current_staff: BranchStaff = Depends(require_branch_admin()),
     db: Session = Depends(get_db),
 ):
     branch = get_current_staff_branch(current_staff, db)
@@ -55,7 +66,7 @@ async def get_branch_appointment_settings(
 
 @router.get("/system")
 async def get_branch_system_settings(
-    current_staff: BranchStaff = Depends(get_current_branch_staff),
+    current_staff: BranchStaff = Depends(require_branch_admin()),
     db: Session = Depends(get_db),
 ):
     branch = get_current_staff_branch(current_staff, db)
@@ -81,7 +92,7 @@ async def save_branch_system_settings(
 async def get_branch_appointment_history(
     page: int = Query(1, ge=1),
     page_size: int = Query(5, ge=1, le=5),
-    current_staff: BranchStaff = Depends(get_current_branch_staff),
+    current_staff: BranchStaff = Depends(require_branch_admin()),
     db: Session = Depends(get_db),
 ):
     branch = get_current_staff_branch(current_staff, db)

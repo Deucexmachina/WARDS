@@ -7,6 +7,8 @@ import ProtectedRoute from './components/ProtectedRoute'
 import UserProtectedRoute from './components/UserProtectedRoute'
 import BranchProtectedRoute from './components/BranchProtectedRoute'
 import SecurityProtectedRoute from './components/SecurityProtectedRoute'
+import SystemSettingsProtectedRoute from './components/SystemSettingsProtectedRoute'
+import BranchSystemSettingsProtectedRoute from './components/BranchSystemSettingsProtectedRoute'
 import BranchPortalRedirect from './components/BranchPortalRedirect'
 import GlobalSystemMessageModal from './components/GlobalSystemMessageModal'
 import HomeEntry from './components/HomeEntry'
@@ -26,6 +28,7 @@ import BranchDiscrepancies from './pages/branch/BranchDiscrepancies'
 import BranchPolicies from './pages/branch/BranchPolicies'
 import BranchReports from './pages/branch/BranchReports'
 import BranchSettings from './pages/branch/BranchSettings'
+import BranchSystemSettingsLogin from './pages/branch/BranchSystemSettingsLogin'
 import LiveQueueMonitor from './pages/branch/LiveQueueMonitor'
 import PayTaxes from './pages/public/PayTaxes'
 import PayTaxesRPT from './pages/public/PayTaxesRPT'
@@ -49,6 +52,7 @@ import Memos from './pages/admin/Memos'
 import Alerts from './pages/admin/Alerts'
 import ActivityLogs from './pages/admin/ActivityLogs'
 import SecurityBackupLogin from './pages/admin/SecurityBackupLogin'
+import SystemSettingsLogin from './pages/admin/SystemSettingsLogin'
 import Policies from './pages/admin/Policies'
 import Settings from './pages/admin/Settings'
 import Accounts from './pages/admin/Accounts'
@@ -99,6 +103,7 @@ function App() {
         {/* Branch Portal */}
         <Route path="/branch/login" element={<Navigate to="/login" replace />} />
         <Route path="/branch-dashboard" element={<BranchProtectedRoute><BranchPortalRedirect /></BranchProtectedRoute>} />
+        <Route path="/branch-dashboard/:branchSlug/settings/login" element={<BranchProtectedRoute><BranchSystemSettingsLogin /></BranchProtectedRoute>} />
         <Route path="/branch-dashboard/:branchSlug" element={<BranchProtectedRoute><BranchLayout /></BranchProtectedRoute>}>
           <Route index element={<BranchDashboard />} />
           <Route path="queue" element={<BranchQueueManagement />} />
@@ -112,7 +117,7 @@ function App() {
           <Route path="alerts" element={<Alerts />} />
           <Route path="discrepancies" element={<BranchDiscrepancies />} />
           <Route path="policies" element={<BranchPolicies />} />
-          <Route path="settings" element={<BranchSettings />} />
+          <Route path="settings" element={<BranchSystemSettingsProtectedRoute><BranchSettings /></BranchSystemSettingsProtectedRoute>} />
         </Route>
         {/* Dedicated Live Monitor Route - No Layout */}
         <Route path="/live-monitor/:branchSlug" element={<BranchProtectedRoute><LiveQueueMonitor /></BranchProtectedRoute>} />
@@ -122,6 +127,7 @@ function App() {
         <Route path="/admin/login" element={<Navigate to="/login" replace />} />
         <Route path="/admin/backup/login" element={<SecurityBackupLogin />} />
         <Route path="/admin/backup" element={<SecurityProtectedRoute><Suspense fallback={<div className="flex h-screen items-center justify-center text-slate-600">Loading Security Dashboard...</div>}><BackupRecovery /></Suspense></SecurityProtectedRoute>} />
+        <Route path="/admin/settings/login" element={<SystemSettingsLogin />} />
         <Route path="/admin-dashboard" element={<ProtectedRoute><Navigate to="/admin" replace /></ProtectedRoute>} />
         <Route path="/admin" element={<ProtectedRoute><AdminLayout /></ProtectedRoute>}>
           <Route index element={<Dashboard />} />
@@ -133,7 +139,7 @@ function App() {
           <Route path="activity-logs" element={<ActivityLogs />} />
           <Route path="backup-recovery" element={<Navigate to="/admin/backup/login" replace />} />
           <Route path="policies" element={<Policies />} />
-          <Route path="settings" element={<Settings />} />
+          <Route path="settings" element={<SystemSettingsProtectedRoute><Settings /></SystemSettingsProtectedRoute>} />
           <Route path="accounts" element={<Accounts />} />
           <Route path="queue" element={<QueueManagement />} />
           <Route path="receipts" element={<ReceiptManagement />} />

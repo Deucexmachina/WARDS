@@ -120,8 +120,12 @@ api.interceptors.response.use(
       localStorage.removeItem('adminAuthenticatedAt');
       localStorage.removeItem('securityAuthenticated');
       localStorage.removeItem('securityAuthenticatedAt');
+      localStorage.removeItem('settingsAuthenticated');
+      localStorage.removeItem('settingsAuthenticatedAt');
       sessionStorage.removeItem('securityAuthenticated');
       sessionStorage.removeItem('securityAuthenticatedAt');
+      sessionStorage.removeItem('settingsAuthenticated');
+      sessionStorage.removeItem('settingsAuthenticatedAt');
       if (!window.location.pathname.startsWith('/login')) {
         window.location.assign('/login');
       }
@@ -261,6 +265,7 @@ export const branchReportAPI = {
 };
 
 export const branchSettingsAPI = {
+  getAccess: () => api.get('/branch/settings/access'),
   getAppointmentSettings: () => api.get('/branch/settings/appointments'),
   getSystemSettings: () => api.get('/branch/settings/system'),
   saveSystemSettings: (data) => api.put('/branch/settings/system', data),
@@ -396,6 +401,7 @@ export const policyAPI = {
 
 export const settingsAPI = {
   get: () => api.get('/settings'),
+  getAccess: () => api.get('/settings/access'),
   update: (data) => api.put('/settings', data),
   getHistory: (params) => api.get('/settings/history', { params }),
   deleteHistoryEntry: (id) => api.delete(`/settings/history/${id}`),

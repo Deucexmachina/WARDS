@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -15,6 +15,16 @@ from utils.system_settings import (
 )
 
 router = APIRouter()
+
+
+def ensure_settings_access(current_user: User):
+    if current_user.role not in {"main_admin", "superadmin"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="System Settings access is restricted to Main Admin and Super Admin.",
+        )
+    require_permission("manage_settings")(current_user)
+    return current_user
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -37,7 +47,7 @@ async def get_settings(
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
-    require_permission("manage_settings")(current_user)
+    ensure_settings_access(current_user)
     payload = get_settings_payload(db)
     payload["metadata"] = SETTINGS_METADATA
     payload["serviceOptions"] = sorted(
@@ -50,6 +60,17 @@ async def get_settings(
     return payload
 
 
+@router.get("/access")
+async def get_settings_access(
+    current_user: User = Depends(get_current_admin_user),
+):
+    ensure_settings_access(current_user)
+    return {
+        "allowed": True,
+        "role": current_user.role,
+    }
+
+
 @router.get("/history")
 async def get_settings_history(
     page: int = Query(default=1, ge=1),
@@ -59,7 +80,7 @@ async def get_settings_history(
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
-    require_permission("manage_settings")(current_user)
+    ensure_settings_access(current_user)
     return get_settings_audit_history(
         db,
         page=page,
@@ -75,7 +96,7 @@ async def delete_settings_history_entry(
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
-    require_permission("manage_settings")(current_user)
+    ensure_settings_access(current_user)
     return delete_settings_audit_entry(db, audit_id=audit_id, deleted_by=current_user.username)
 
 
@@ -85,7 +106,7 @@ async def update_settings(
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
-    require_permission("manage_settings")(current_user)
+    ensure_settings_access(current_user)
     return update_system_settings(
         db=db,
         payload=request.model_dump(exclude={"reason"}),

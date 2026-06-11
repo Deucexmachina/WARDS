@@ -71,8 +71,12 @@ export const persistSession = ({ portal, access_token, user }) => {
     localStorage.setItem('adminAuthenticatedAt', new Date().toISOString());
     localStorage.removeItem('securityAuthenticated');
     localStorage.removeItem('securityAuthenticatedAt');
+    localStorage.removeItem('settingsAuthenticated');
+    localStorage.removeItem('settingsAuthenticatedAt');
     sessionStorage.removeItem('securityAuthenticated');
     sessionStorage.removeItem('securityAuthenticatedAt');
+    sessionStorage.removeItem('settingsAuthenticated');
+    sessionStorage.removeItem('settingsAuthenticatedAt');
     localStorage.removeItem('branchToken');
     localStorage.removeItem('branchUser');
     localStorage.removeItem('userToken');
@@ -84,6 +88,10 @@ export const persistSession = ({ portal, access_token, user }) => {
     localStorage.setItem('branchToken', access_token);
     localStorage.setItem('branchUser', JSON.stringify(user));
     localStorage.setItem('branchAuthenticatedAt', new Date().toISOString());
+    localStorage.removeItem('branchSettingsAuthenticated');
+    localStorage.removeItem('branchSettingsAuthenticatedAt');
+    sessionStorage.removeItem('branchSettingsAuthenticated');
+    sessionStorage.removeItem('branchSettingsAuthenticatedAt');
     localStorage.removeItem('adminToken');
     localStorage.removeItem('adminUser');
     localStorage.removeItem('userToken');
@@ -107,8 +115,12 @@ export const clearSession = (portal) => {
     localStorage.removeItem('adminAuthenticatedAt');
     localStorage.removeItem('securityAuthenticated');
     localStorage.removeItem('securityAuthenticatedAt');
+    localStorage.removeItem('settingsAuthenticated');
+    localStorage.removeItem('settingsAuthenticatedAt');
     sessionStorage.removeItem('securityAuthenticated');
     sessionStorage.removeItem('securityAuthenticatedAt');
+    sessionStorage.removeItem('settingsAuthenticated');
+    sessionStorage.removeItem('settingsAuthenticatedAt');
     return;
   }
 
@@ -116,6 +128,10 @@ export const clearSession = (portal) => {
     localStorage.removeItem('branchToken');
     localStorage.removeItem('branchUser');
     localStorage.removeItem('branchAuthenticatedAt');
+    localStorage.removeItem('branchSettingsAuthenticated');
+    localStorage.removeItem('branchSettingsAuthenticatedAt');
+    sessionStorage.removeItem('branchSettingsAuthenticated');
+    sessionStorage.removeItem('branchSettingsAuthenticatedAt');
     return;
   }
 
