@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 
 from database.models import ActivityLog, Branch, BranchStaff, User, get_db
+from utils.field_crypto import get_decrypted_or_raw
 from middleware.admin_auth import get_current_admin_user
 from utils.log_integrity import verify_record_integrity
 from utils.rbac import require_permission
@@ -18,7 +19,9 @@ def _get_branch_name_for_user(current_user, db: Session) -> Optional[str]:
     """Return the branch name for a BranchStaff user, or None for admin users."""
     if isinstance(current_user, BranchStaff) and current_user.branch_id:
         branch = db.query(Branch).filter(Branch.id == current_user.branch_id).first()
-        return branch.name if branch else None
+        if not branch:
+            return None
+        return get_decrypted_or_raw(branch, "name") or branch.name
     return None
 
 

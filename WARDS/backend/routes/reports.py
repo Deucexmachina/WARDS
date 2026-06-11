@@ -475,7 +475,7 @@ def save_branch_report_automation_settings(
     db.add(ActivityLog(
         action="Branch Report Automation Updated",
         user=updated_by,
-        details=f"Updated automatic report sending for {branch.name}",
+        details=f"Updated automatic report sending for {get_branch_display_name(branch)}",
         type="report",
     ))
     db.commit()

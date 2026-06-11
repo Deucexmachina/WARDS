@@ -9,7 +9,7 @@ from typing import Optional
 
 from typing import List
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -269,14 +269,15 @@ def serialize_queue_history(queue: QueueHistory):
     }
 
 
-def log_branch_action(db: Session, staff: BranchStaff, action: str, details: str):
+def log_branch_action(db: Session, staff: BranchStaff, action: str, details: str, ip: Optional[str] = None):
     branch = db.query(Branch).filter(Branch.id == staff.branch_id).first()
-    branch_name = (branch.name if branch else None) or f"Branch {staff.branch_id}"
+    branch_name = (get_decrypted_or_raw(branch, "name") or branch.name) if branch else f"Branch {staff.branch_id}"
     role_label = staff.role or "branch_staff"
+    ip_part = f" | ip: {ip}" if ip else ""
     db.add(ActivityLog(
         action=action,
         user=staff.username,
-        details=f"branch: {branch_name} | role: {role_label} | {details}",
+        details=f"branch: {branch_name} | role: {role_label}{ip_part} | {details}",
         type="branch_portal",
     ))
 
@@ -426,6 +427,7 @@ def reconcile_active_queue_state(
     db: Session,
     current_staff: BranchStaff,
     service_window: Optional[str] = None,
+    ip: Optional[str] = None,
 ) -> tuple[Optional[Queue], bool]:
     active_queues = get_active_branch_queues(db, current_staff.branch_id, current_staff=current_staff, service_window=service_window)
     if not active_queues:
@@ -451,6 +453,7 @@ def reconcile_active_queue_state(
             current_staff,
             "Queue Recovery",
             f"Auto-skipped stale called queue {queue_value(queue, 'queue_number')} after {STALE_CALLED_QUEUE_MINUTES} minutes without progression",
+            ip=ip,
         )
         queue_changed = True
 
@@ -480,6 +483,7 @@ def reconcile_active_queue_state(
             current_staff,
             "Queue Recovery",
             f"Recovered duplicate active queue {queue_value(queue, 'queue_number')} by moving it to {queue_value(queue, 'status')}",
+            ip=ip,
         )
         queue_changed = True
 
@@ -1053,6 +1057,7 @@ def create_branch_remittance_record(
     report_file_name: str | None = None,
     report_file_mime: str | None = None,
     remittance_number: str | None = None,
+    ip: Optional[str] = None,
 ) -> Remittance:
     unique_payment_ids = sorted({int(payment_id) for payment_id in payment_ids or []})
     if not unique_payment_ids:
@@ -1101,7 +1106,7 @@ def create_branch_remittance_record(
     branch_account.current_balance = max(0.0, float(branch_account.current_balance or 0) - total_amount)
     branch_account.total_remitted = float(branch_account.total_remitted or 0) + total_amount
     branch_account.updated_at = datetime.utcnow()
-    log_branch_action(db, current_staff, "Remittance Submitted", f"Submitted {remittance_number} for {format_currency(total_amount)}")
+    log_branch_action(db, current_staff, "Remittance Submitted", f"Submitted {remittance_number} for {format_currency(total_amount)}", ip=ip)
     return remittance
 
 
@@ -1244,6 +1249,7 @@ def ensure_branch_queue_operations_enabled(db: Session, branch_id: int):
 
 @router.get("/dashboard")
 async def get_branch_dashboard(
+    request: Request,
     current_staff: BranchStaff = Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
@@ -1269,7 +1275,7 @@ async def get_branch_dashboard(
             "completed": len([q for q in queues if queue_value(q, "status") == "Completed" and q.completed_at and bucket_start <= q.completed_at < bucket_end]),
         })
 
-    log_branch_action(db, current_staff, "Branch Dashboard Viewed", "Viewed branch dashboard")
+    log_branch_action(db, current_staff, "Branch Dashboard Viewed", "Viewed branch dashboard", request.client.host)
     db.commit()
 
     return {
@@ -1335,6 +1341,7 @@ async def list_branch_queue_history(
 @router.delete("/queue/history/{history_id}")
 async def delete_branch_queue_history(
     history_id: int,
+    request: Request,
     current_staff: BranchStaff = Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
@@ -1351,7 +1358,7 @@ async def delete_branch_queue_history(
 
     queue_number = queue_history.queue_number
     db.delete(queue_history)
-    log_branch_action(db, current_staff, "Completed Queue History Deleted", f"Deleted completed queue history {queue_number}")
+    log_branch_action(db, current_staff, "Completed Queue History Deleted", f"Deleted completed queue history {queue_number}", request.client.host)
     db.commit()
     return {"success": True, "historyId": history_id, "queueNumber": queue_number}
 
@@ -1440,6 +1447,7 @@ async def get_live_queue_monitor(
 
 @router.post("/queue/call-next")
 async def call_next_queue(
+    request: Request,
     service_window: Optional[str] = Query(None),
     queue_id: Optional[int] = Query(None),
     current_staff: BranchStaff = Depends(get_current_branch_staff),
@@ -1451,7 +1459,7 @@ async def call_next_queue(
         requested_service_window = current_staff.service_window
     for attempt in range(2):
         try:
-            active_queue, recovered_state = reconcile_active_queue_state(db, current_staff, service_window=requested_service_window)
+            active_queue, recovered_state = reconcile_active_queue_state(db, current_staff, service_window=requested_service_window, ip=request.client.host)
             if active_queue:
                 if recovered_state:
                     db.commit()
@@ -1489,7 +1497,7 @@ async def call_next_queue(
 
             queue.status = "Called"
             apply_queue_security(queue)
-            log_branch_action(db, current_staff, "Queue Called", f"Called queue {queue_value(queue, 'queue_number')}")
+            log_branch_action(db, current_staff, "Queue Called", f"Called queue {queue_value(queue, 'queue_number')}", request.client.host)
             db.commit()
             db.refresh(queue)
             service_window = normalize_service_window_for_branch(db, current_staff.branch_id, queue_value(queue, "service_type"))
@@ -1523,6 +1531,7 @@ async def call_next_queue(
 @router.post("/queue/{queue_id}/serve")
 async def serve_queue(
     queue_id: int,
+    request: Request,
     current_staff: BranchStaff = Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
@@ -1540,7 +1549,7 @@ async def serve_queue(
     queue.status = "Serving"
     queue.served_at = datetime.utcnow()
     apply_queue_security(queue)
-    log_branch_action(db, current_staff, "Queue Served", f"Serving queue {queue_value(queue, 'queue_number')}")
+    log_branch_action(db, current_staff, "Queue Served", f"Serving queue {queue_value(queue, 'queue_number')}", request.client.host)
     db.commit()
     db.refresh(queue)
     service_window = normalize_service_window_for_branch(db, current_staff.branch_id, queue_value(queue, "service_type"))
@@ -1550,6 +1559,7 @@ async def serve_queue(
 @router.post("/queue/{queue_id}/skip")
 async def skip_queue(
     queue_id: int,
+    request: Request,
     current_staff: BranchStaff = Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
@@ -1562,7 +1572,7 @@ async def skip_queue(
         raise HTTPException(status_code=409, detail="Only the active queue can be skipped.")
     queue.status = "Skipped"
     apply_queue_security(queue)
-    log_branch_action(db, current_staff, "Queue Skipped", f"Skipped queue {queue_value(queue, 'queue_number')}")
+    log_branch_action(db, current_staff, "Queue Skipped", f"Skipped queue {queue_value(queue, 'queue_number')}", request.client.host)
     db.commit()
     db.refresh(queue)
     service_window = normalize_service_window_for_branch(db, current_staff.branch_id, queue_value(queue, "service_type"))
@@ -1572,6 +1582,7 @@ async def skip_queue(
 @router.post("/queue/{queue_id}/recall-skipped")
 async def recall_skipped_queue(
     queue_id: int,
+    request: Request,
     current_staff: BranchStaff = Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
@@ -1588,7 +1599,7 @@ async def recall_skipped_queue(
 
     queue.status = "Called"
     apply_queue_security(queue)
-    log_branch_action(db, current_staff, "Skipped Queue Recalled", f"Pulled skipped queue {queue_value(queue, 'queue_number')} back to the current window")
+    log_branch_action(db, current_staff, "Skipped Queue Recalled", f"Pulled skipped queue {queue_value(queue, 'queue_number')} back to the current window", request.client.host)
     db.commit()
     db.refresh(queue)
     service_window = normalize_service_window_for_branch(db, current_staff.branch_id, queue_value(queue, "service_type"))
@@ -1597,6 +1608,7 @@ async def recall_skipped_queue(
 
 @router.delete("/queue/skipped")
 async def delete_skipped_queues(
+    request: Request,
     current_staff: BranchStaff = Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
@@ -1616,7 +1628,7 @@ async def delete_skipped_queues(
     count = len(skipped_queues)
     for queue in skipped_queues:
         db.delete(queue)
-    log_branch_action(db, current_staff, "Skipped Queues Deleted", f"Deleted {count} skipped queue record(s)")
+    log_branch_action(db, current_staff, "Skipped Queues Deleted", f"Deleted {count} skipped queue record(s)", request.client.host)
     db.commit()
     return {"success": True, "deleted": count}
 
@@ -1624,6 +1636,7 @@ async def delete_skipped_queues(
 @router.post("/queue/{queue_id}/complete")
 async def complete_queue(
     queue_id: int,
+    request: Request,
     current_staff: BranchStaff = Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
@@ -1641,7 +1654,7 @@ async def complete_queue(
     archive_completed_queue(db, queue, get_staff_display_name(current_staff))
     queue_number = queue_value(queue, "queue_number")
     db.delete(queue)
-    log_branch_action(db, current_staff, "Queue Completed", f"Completed queue {queue_number}")
+    log_branch_action(db, current_staff, "Queue Completed", f"Completed queue {queue_number}", request.client.host)
     db.commit()
     return {"success": True, "queue_number": queue_number, "status": "completed"}
 
@@ -1649,6 +1662,7 @@ async def complete_queue(
 @router.delete("/queue/{queue_id}")
 async def delete_queue(
     queue_id: int,
+    request: Request,
     current_staff: BranchStaff = Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
@@ -1660,13 +1674,14 @@ async def delete_queue(
 
     queue_number = queue_value(queue, "queue_number")
     db.delete(queue)
-    log_branch_action(db, current_staff, "Queue Deleted", f"Deleted queue {queue_number}")
+    log_branch_action(db, current_staff, "Queue Deleted", f"Deleted queue {queue_number}", request.client.host)
     db.commit()
     return {"success": True, "queueId": queue_id, "queueNumber": queue_number}
 
 
 @router.get("/payments")
 async def list_branch_payments(
+    request: Request,
     current_staff: BranchStaff = Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
@@ -1675,7 +1690,7 @@ async def list_branch_payments(
         raise HTTPException(status_code=404, detail="Branch not found")
     payments = get_branch_payments(current_staff, branch, db)
     remittance_statuses = get_branch_remittance_item_statuses(db, [payment.id for payment in payments])
-    log_branch_action(db, current_staff, "Payments Viewed", f"Viewed {branch.name} payments")
+    log_branch_action(db, current_staff, "Payments Viewed", f"Viewed {get_decrypted_or_raw(branch, 'name') or branch.name} payments", request.client.host)
     db.commit()
     serialized = []
     for payment in payments:
@@ -1783,13 +1798,14 @@ async def list_branch_remittances(
 @router.post("/payments/remittances")
 async def create_branch_remittance(
     payload: BranchRemittanceCreatePayload,
+    request: Request,
     current_staff: BranchStaff = Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
     branch = db.query(Branch).filter(Branch.id == current_staff.branch_id).first()
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
-    remittance = create_branch_remittance_record(db, current_staff, branch, payload.payment_ids, payload.remarks)
+    remittance = create_branch_remittance_record(db, current_staff, branch, payload.payment_ids, payload.remarks, ip=request.client.host)
     db.commit()
     db.refresh(remittance)
     return serialize_remittance(db, remittance)
@@ -1797,6 +1813,7 @@ async def create_branch_remittance(
 
 @router.post("/payments/remittances/report")
 async def create_branch_remittance_with_report(
+    request: Request,
     payment_ids: str = Form(...),
     report: UploadFile = File(...),
     current_staff: BranchStaff = Depends(get_current_branch_staff),
@@ -1825,6 +1842,7 @@ async def create_branch_remittance_with_report(
             report_file_name=report_file_name,
             report_file_mime=report_file_mime,
             remittance_number=remittance_number,
+            ip=request.client.host,
         )
         db.commit()
         db.refresh(remittance)
@@ -1838,6 +1856,7 @@ async def create_branch_remittance_with_report(
 @router.put("/payments/{payment_id}/verify")
 async def verify_branch_payment(
     payment_id: int,
+    request: Request,
     current_staff: BranchStaff = Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
@@ -1894,15 +1913,16 @@ async def verify_branch_payment(
         )
         if email_result.get("sent"):
             payment.receipt_sent_at = datetime.utcnow()
-            log_branch_action(db, current_staff, "Verification Email Sent", f"Verification email sent for {payment.ref_number}")
+            log_branch_action(db, current_staff, "Verification Email Sent", f"Verification email sent for {payment.ref_number}", request.client.host)
         else:
             log_branch_action(
                 db,
                 current_staff,
                 "Verification Email Not Sent",
                 f"Verification email was not sent for {payment.ref_number}: {email_result.get('message')}",
+                request.client.host,
             )
-    log_branch_action(db, current_staff, "Payment Verified", f"Verified payment {payment.ref_number}")
+    log_branch_action(db, current_staff, "Payment Verified", f"Verified payment {payment.ref_number}", request.client.host)
     db.commit()
 
     return {"message": "Payment verified successfully", "status": payment.status}
@@ -1911,6 +1931,7 @@ async def verify_branch_payment(
 @router.put("/payments/{payment_id}/decline")
 async def decline_branch_payment(
     payment_id: int,
+    request: Request,
     current_staff: BranchStaff = Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
@@ -1936,7 +1957,7 @@ async def decline_branch_payment(
             bt_application.payment_status = "Failed"
             bt_application.returned_at = datetime.utcnow()
             bt_application.verifier_remarks = "Business Tax submission was returned for correction by branch treasury personnel."
-    log_branch_action(db, current_staff, "Payment Declined", f"Declined payment {payment.ref_number}")
+    log_branch_action(db, current_staff, "Payment Declined", f"Declined payment {payment.ref_number}", request.client.host)
     db.commit()
 
     return {"message": "Payment declined successfully", "status": payment.status}
@@ -1945,6 +1966,7 @@ async def decline_branch_payment(
 @router.delete("/payments/{payment_id}")
 async def delete_branch_payment(
     payment_id: int,
+    request: Request,
     current_staff: BranchStaff = Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
@@ -1958,7 +1980,7 @@ async def delete_branch_payment(
 
     ref_number = payment.ref_number
     db.delete(payment)
-    log_branch_action(db, current_staff, "Payment Deleted", f"Deleted payment {ref_number}")
+    log_branch_action(db, current_staff, "Payment Deleted", f"Deleted payment {ref_number}", request.client.host)
     db.commit()
 
     return {"message": "Payment deleted successfully", "ref_number": ref_number}
@@ -1966,6 +1988,7 @@ async def delete_branch_payment(
 
 @router.get("/memos")
 async def list_branch_memos(
+    request: Request,
     current_staff: BranchStaff = Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
@@ -1989,7 +2012,7 @@ async def list_branch_memos(
         )
     ]
 
-    log_branch_action(db, current_staff, "Memos Viewed", f"Viewed {len(memos)} memo(s)")
+    log_branch_action(db, current_staff, "Memos Viewed", f"Viewed {len(memos)} memo(s)", request.client.host)
     db.commit()
 
     return [
@@ -2044,6 +2067,7 @@ def _store_memo_attachment(attachment: Optional[UploadFile]) -> tuple[str | None
 
 @router.post("/memos")
 async def create_branch_memo(
+    request: Request,
     title: str = Form(...),
     content: str = Form(...),
     priority: str = Form("normal"),
@@ -2069,7 +2093,7 @@ async def create_branch_memo(
     db.add(memo)
     db.flush()
     apply_memo_security(memo)
-    log_branch_action(db, current_staff, "Memo Created", f"Created internal memo: {title.strip()}")
+    log_branch_action(db, current_staff, "Memo Created", f"Created internal memo: {title.strip()}", request.client.host)
     db.commit()
     db.refresh(memo)
     return {"id": memo.id, "message": "Memo created successfully"}
@@ -2078,6 +2102,7 @@ async def create_branch_memo(
 @router.put("/memos/{memo_id}")
 async def update_branch_memo(
     memo_id: int,
+    request: Request,
     title: str = Form(...),
     content: str = Form(...),
     priority: str = Form("normal"),
@@ -2103,7 +2128,7 @@ async def update_branch_memo(
     memo.recipient_type = "specific_branches"
     memo.updated_at = datetime.utcnow()
     apply_memo_security(memo)
-    log_branch_action(db, current_staff, "Memo Updated", f"Updated internal memo: {title.strip()}")
+    log_branch_action(db, current_staff, "Memo Updated", f"Updated internal memo: {title.strip()}", request.client.host)
     db.commit()
     return {"message": "Memo updated successfully"}
 
@@ -2111,6 +2136,7 @@ async def update_branch_memo(
 @router.delete("/memos/{memo_id}")
 async def delete_branch_memo(
     memo_id: int,
+    request: Request,
     current_staff: BranchStaff = Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
@@ -2125,7 +2151,7 @@ async def delete_branch_memo(
         os.remove(attachment_path)
     db.query(MemoView).filter(MemoView.memo_id == memo_id).delete()
     db.delete(memo)
-    log_branch_action(db, current_staff, "Memo Deleted", f"Deleted internal memo #{memo_id}")
+    log_branch_action(db, current_staff, "Memo Deleted", f"Deleted internal memo #{memo_id}", request.client.host)
     db.commit()
     return {"message": "Memo deleted successfully"}
 
@@ -2168,6 +2194,7 @@ async def get_branch_announcement_unread_count(
 @router.post("/announcements/{announcement_id}/mark-viewed")
 async def mark_branch_announcement_as_viewed(
     announcement_id: int,
+    request: Request,
     current_staff: BranchStaff = Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
@@ -2175,7 +2202,7 @@ async def mark_branch_announcement_as_viewed(
     title = decrypt_optional_value(getattr(announcement, "title_enc", None)) or announcement.title
     try:
         mark_branch_announcement_viewed(db, announcement.id, current_staff.username, "branch_staff")
-        log_branch_action(db, current_staff, "Announcement Viewed", f"Viewed announcement: {title}")
+        log_branch_action(db, current_staff, "Announcement Viewed", f"Viewed announcement: {title}", request.client.host)
         db.commit()
     except HTTPException:
         db.rollback()
@@ -2189,6 +2216,7 @@ async def mark_branch_announcement_as_viewed(
 @router.post("/announcements")
 async def create_branch_announcement(
     payload: BranchAnnouncementPayload,
+    request: Request,
     current_staff: BranchStaff = Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
@@ -2210,7 +2238,7 @@ async def create_branch_announcement(
         db.add(announcement)
         db.flush()
         mark_branch_announcement_viewed(db, announcement.id, current_staff.username, "branch_staff")
-        log_branch_action(db, current_staff, "Announcement Created", f"Created branch announcement: {payload.title}")
+        log_branch_action(db, current_staff, "Announcement Created", f"Created branch announcement: {payload.title}", request.client.host)
         db.commit()
         db.refresh(announcement)
     except HTTPException:
@@ -2227,6 +2255,7 @@ async def create_branch_announcement(
 async def update_branch_announcement(
     announcement_id: int,
     payload: BranchAnnouncementPayload,
+    request: Request,
     current_staff: BranchStaff = Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
@@ -2256,7 +2285,7 @@ async def update_branch_announcement(
             announcement.publish_date = datetime.utcnow()
 
         mark_branch_announcement_viewed(db, announcement.id, current_staff.username, "branch_staff")
-        log_branch_action(db, current_staff, "Announcement Updated", f"Updated branch announcement: {payload.title}")
+        log_branch_action(db, current_staff, "Announcement Updated", f"Updated branch announcement: {payload.title}", request.client.host)
         db.commit()
         db.refresh(announcement)
     except HTTPException:
@@ -2272,6 +2301,7 @@ async def update_branch_announcement(
 @router.delete("/announcements/{announcement_id}")
 async def delete_branch_announcement(
     announcement_id: int,
+    request: Request,
     current_staff: BranchStaff = Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
@@ -2294,7 +2324,7 @@ async def delete_branch_announcement(
         remove_announcement_directory(announcement.id)
         db.query(AnnouncementView).filter(AnnouncementView.announcement_id == announcement.id).delete()
         db.delete(announcement)
-        log_branch_action(db, current_staff, "Announcement Deleted", f"Deleted branch announcement: {title}")
+        log_branch_action(db, current_staff, "Announcement Deleted", f"Deleted branch announcement: {title}", request.client.host)
         db.commit()
     except HTTPException:
         db.rollback()
