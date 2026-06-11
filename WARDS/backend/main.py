@@ -22,7 +22,7 @@ from slowapi.errors import RateLimitExceeded
 
 load_dotenv(Path(__file__).resolve().with_name(".env"), override=True)
 
-from routes import auth, branches, reports, announcements, memos, alerts, logs, backup, users, payments, receipts, settings, policies, privacy, rbac_routes, dashboard, public, public_auth, admin_auth_v2, user_auth_v2, branch_auth_v2, invites, admin_users, branch_portal, branch_settings, unified_auth, discrepancies, tax_assessment, security_dashboard, public_content
+from routes import auth, branches, reports, announcements, memos, alerts, logs, backup, users, payments, receipts, settings, policies, privacy, rbac_routes, dashboard, public, public_auth, admin_auth_v2, user_auth_v2, branch_auth_v2, invites, admin_users, branch_portal, branch_settings, unified_auth, discrepancies, tax_assessment, security_dashboard, public_content, window_staff_account
 from services import ocr_routes
 from database.models import Base, engine, SessionLocal, Admin, Announcement, AnnouncementAttachment, Branch, BusinessRegistry, BusinessTaxApplication, DiscrepancyReport, EmailOTP, EmailVerificationToken, FAQ, Invite, Memo, MemoView, MFASecret, Payment, Queue, QueueActivity, ReceiptRecord, ReceiptRequest, ReceiptRequestHistory, RPTPropertyRecord, Service, ServiceWindowConfig, TaxpayerGuide
 from utils.field_crypto import apply_citizen_user_security, apply_discrepancy_report_security, apply_email_otp_security, apply_email_verification_token_security, apply_faq_security, apply_invite_security, apply_memo_security, apply_memo_view_security, apply_mfa_secret_security, apply_payment_security, apply_queue_activity_security, apply_queue_security, apply_receipt_record_security, apply_receipt_request_history_security, apply_receipt_request_security, apply_rpt_property_record_security, apply_service_security, apply_service_window_config_security, apply_system_setting_security, apply_tax_assessment_record_security, apply_taxpayer_guide_security, apply_taxpayer_identifier_submission_security, build_redacted_text, get_decrypted_or_raw, hash_optional_value, set_encrypted_hash_companions
@@ -1775,6 +1775,7 @@ app.include_router(user_auth_v2.router, prefix="/api/user/auth", tags=["User Aut
 app.include_router(branch_auth_v2.router, prefix="/api/branch/auth", tags=["Branch Authentication V2"])
 app.include_router(branch_portal.router, prefix="/api/branch", tags=["Branch Portal"])
 app.include_router(branch_settings.router, prefix="/api/branch/settings", tags=["Branch Settings"])
+app.include_router(window_staff_account.router, prefix="/api/branch/account", tags=["Window Staff Account"])
 app.include_router(reports.branch_router, prefix="/api/branch/reports", tags=["Branch Reports"])
 app.include_router(admin_auth_v2.router, prefix="/api/admin/auth", tags=["Admin Authentication V2"])
 app.include_router(invites.router, prefix="/api/admin", tags=["Admin Invites"])

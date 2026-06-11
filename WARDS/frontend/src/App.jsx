@@ -30,6 +30,7 @@ import BranchReports from './pages/branch/BranchReports'
 import BranchSettings from './pages/branch/BranchSettings'
 import BranchSystemSettingsLogin from './pages/branch/BranchSystemSettingsLogin'
 import LiveQueueMonitor from './pages/branch/LiveQueueMonitor'
+import WindowStaffAccount from './pages/branch/WindowStaffAccount'
 import PayTaxes from './pages/public/PayTaxes'
 import PayTaxesRPT from './pages/public/PayTaxesRPT'
 import PayTaxesBT from './pages/public/PayTaxesBT'
@@ -111,6 +112,7 @@ function App() {
           <Route path="receipts" element={<BranchReceiptManagement />} />
           <Route path="payments" element={<BranchPaymentManagement />} />
           <Route path="accounts" element={<Accounts />} />
+          <Route path="account-management" element={<WindowStaffAccount />} />
           <Route path="memos" element={<BranchMemos />} />
           <Route path="reports" element={<BranchReports />} />
           <Route path="announcements" element={<BranchAnnouncements />} />

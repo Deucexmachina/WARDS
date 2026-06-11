@@ -269,6 +269,13 @@ export const branchReportAPI = {
   export: (reportId, format) => api.get(`/branch/reports/${reportId}/export/${format}`, { responseType: 'blob' }),
 };
 
+export const windowStaffAccountAPI = {
+  getProfile: () => api.get('/branch/account/profile'),
+  updateProfile: (data) => api.put('/branch/account/profile', data),
+  changePassword: (data) => api.put('/branch/account/password', data),
+  resetMfa: (data) => api.post('/branch/account/reset-mfa', data),
+};
+
 export const branchSettingsAPI = {
   getAccess: () => api.get('/branch/settings/access'),
   getAppointmentSettings: () => api.get('/branch/settings/appointments'),

@@ -82,7 +82,10 @@ const BranchLayout = () => {
     return Math.max(0, currentCount + delta);
   };
   const navItems = isQueueWindowAccount
-    ? [{ label: `${assignedWindowLabel || 'Queue Window'} Queue Management`, path: queueOnlyPath }]
+    ? [
+        { label: `${assignedWindowLabel || 'Queue Window'} Queue Management`, path: queueOnlyPath },
+        { label: 'Account Management', path: `${basePath}/account-management` },
+      ]
     : [
         { label: 'Dashboard', path: basePath },
         { label: 'Queue Management', path: `${basePath}/queue` },
@@ -101,7 +104,13 @@ const BranchLayout = () => {
           : []),
       ];
 
-  if (isQueueWindowAccount && location.pathname !== queueOnlyPath && !location.pathname.includes('/live-monitor')) {
+  const accountManagementPath = `${basePath}/account-management`;
+  if (
+    isQueueWindowAccount
+    && location.pathname !== queueOnlyPath
+    && location.pathname !== accountManagementPath
+    && !location.pathname.includes('/live-monitor')
+  ) {
     return <Navigate to={queueOnlyPath} replace />;
   }
 
