@@ -166,6 +166,7 @@ const Accounts = () => {
       const response = await accountAPI.getAll({
         page,
         page_size: pagination.page_size,
+        ...(isBranchPortal && currentManager?.branch_id ? { branch_id: currentManager.branch_id } : {}),
       });
       setAccounts(response.data.items || []);
       setPagination((current) => ({

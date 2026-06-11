@@ -297,14 +297,38 @@ def find_account(db: Session, user_id: int, role: Optional[str] = None):
 async def get_all_users(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
+    branch_id: Optional[int] = Query(None),
     current_user: Admin | BranchStaff = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
     require_accounts_access(current_user)
 
     accounts = []
+    effective_branch_id = branch_id or (current_user.branch_id if current_user.role == "branch_admin" else None)
 
-    if current_user.role in {"main_admin", "superadmin"}:
+    if effective_branch_id:
+        branch_name = "Unassigned Branch"
+        branch = db.query(Branch).filter(Branch.id == effective_branch_id).first()
+        if branch:
+            branch_name = (get_decrypted_or_raw(branch, "name") or branch.name)
+
+        accounts.extend(
+            serialize_account(user, branch_name)
+            for user in db.query(BranchStaff)
+            .filter(
+                BranchStaff.branch_id == effective_branch_id,
+                BranchStaff.role.in_(["branch_admin", "branch_staff"]),
+            )
+            .all()
+        )
+
+        citizen_ids = get_branch_managed_citizen_ids(db, effective_branch_id)
+        if citizen_ids:
+            accounts.extend(
+                serialize_account(user, "Public Portal")
+                for user in db.query(CitizenUser).filter(CitizenUser.id.in_(citizen_ids)).all()
+            )
+    elif current_user.role in {"main_admin", "superadmin"}:
         accounts.extend(serialize_account(user, "All Branches") for user in db.query(Admin).all())
         accounts.extend(
             serialize_account(
@@ -314,29 +338,6 @@ async def get_all_users(
             for user, branch in db.query(BranchStaff, Branch).outerjoin(Branch, Branch.id == BranchStaff.branch_id).all()
         )
         accounts.extend(serialize_account(user, "Public Portal") for user in db.query(CitizenUser).all())
-    elif current_user.role == "branch_admin":
-        branch_name = "Unassigned Branch"
-        if current_user.branch_id:
-            branch = db.query(Branch).filter(Branch.id == current_user.branch_id).first()
-            if branch:
-                branch_name = (get_decrypted_or_raw(branch, "name") or branch.name)
-
-        accounts.extend(
-            serialize_account(user, branch_name)
-            for user in db.query(BranchStaff)
-            .filter(
-                BranchStaff.branch_id == current_user.branch_id,
-                BranchStaff.role.in_(["branch_admin", "branch_staff"]),
-            )
-            .all()
-        )
-
-        citizen_ids = get_branch_managed_citizen_ids(db, current_user.branch_id) if current_user.branch_id else set()
-        if citizen_ids:
-            accounts.extend(
-                serialize_account(user, "Public Portal")
-                for user in db.query(CitizenUser).filter(CitizenUser.id.in_(citizen_ids)).all()
-            )
 
     accounts.sort(key=lambda account: (account_sort_value(account), account.get("id") or 0), reverse=True)
 
