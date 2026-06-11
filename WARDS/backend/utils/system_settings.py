@@ -90,6 +90,7 @@ SETTINGS_METADATA = {
 
 SYSTEM_CONFIGURATION_UPDATE_CATEGORY = "System Configuration Updates"
 SYSTEM_DISABLED_MESSAGE = "This service is currently unavailable because it has been disabled by system administration."
+BRANCH_QUEUE_DISABLED_MESSAGE = "Queue services are currently unavailable for this branch. Please try again later or contact the City Treasurer's Office."
 PH_TIMEZONE = timezone(timedelta(hours=8))
 
 

@@ -119,7 +119,9 @@ const QueueRegistration = () => {
         axios.get(`${API_BASE_URL}/public/branches/${branchId}`),
         axios.get(`${API_BASE_URL}/public/services`)
       ]);
-      const statusRes = await axios.get(`${API_BASE_URL}/public/system-status`);
+      const statusRes = await axios.get(`${API_BASE_URL}/public/system-status`, {
+        params: { branch_id: branchId }
+      });
       setBranch(branchRes.data);
       setServices(servicesRes.data);
       setSystemStatus(statusRes.data);
@@ -159,7 +161,7 @@ const QueueRegistration = () => {
   };
 
   const handleRegister = async () => {
-    if (!systemStatus?.queueEnabled) {
+    if (!systemStatus?.queueEnabled || !systemStatus?.enabledServices?.length) {
       setMessageModal({
         tone: 'warning',
         title: language === 'en' ? 'Queue Unavailable' : 'Hindi Available ang Pila',

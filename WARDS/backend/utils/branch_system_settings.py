@@ -74,7 +74,10 @@ def get_branch_settings_payload(db: Session, branch_id: int) -> dict:
     payload["paymentGatewayEnabled"] = bool(global_payload.get("paymentGatewayEnabled")) and bool(payload.get("paymentGatewayEnabled"))
     payload["receiptRequestEnabled"] = bool(global_payload.get("receiptRequestEnabled")) and bool(payload.get("receiptRequestEnabled"))
 
-    payload["enabledServices"] = sorted(branch_service_names) if payload["queueEnabled"] else []
+    if not payload["queueEnabled"]:
+        payload["enabledServices"] = []
+    elif not payload.get("enabledServices"):
+        payload["enabledServices"] = branch_service_names
 
     payload["serviceOptions"] = branch_service_names
     return payload
@@ -98,12 +101,28 @@ def update_branch_system_settings(
         raise HTTPException(status_code=400, detail="No branch system settings were provided.")
 
     global_payload = get_settings_payload(db)
-    if "queueEnabled" in normalized_payload:
-        normalized_payload["enabledServices"] = _get_branch_service_names(db, branch.id) if bool(normalized_payload["queueEnabled"]) else []
+    if "queueEnabled" in normalized_payload and not bool(normalized_payload["queueEnabled"]):
+        normalized_payload["enabledServices"] = []
 
     changed = False
     change_lines: list[str] = []
     existing_rows = {row.key: row for row in _get_branch_override_rows(db, branch.id)}
+
+    # When re-enabling queue, remove a stale enabledServices=[] override
+    # so it falls back to the branch's available services.
+    if "queueEnabled" in normalized_payload and bool(normalized_payload["queueEnabled"]):
+        es_row = existing_rows.get("enabledServices")
+        if es_row and _deserialize_value(es_row.value_type, es_row.value) == []:
+            db.delete(es_row)
+            del existing_rows["enabledServices"]
+            changed = True
+            change_lines.append(
+                f"{SETTINGS_METADATA['enabledServices']['label']}: Disabled -> Branch Default"
+            )
+        # If the payload also sends an empty enabledServices, drop it so the
+        # loop below doesn't recreate the stale empty override.
+        if "enabledServices" in normalized_payload and not normalized_payload["enabledServices"]:
+            del normalized_payload["enabledServices"]
 
     def _format_audit_value(value):
         if isinstance(value, bool):

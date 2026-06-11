@@ -30,10 +30,10 @@ from utils.branch_appointment_settings import (
     get_window_capacity_snapshot,
     validate_branch_appointment_datetime,
 )
-from utils.branch_window_config import get_branch_service_options, get_branch_window_metadata
+from utils.branch_window_config import get_branch_service_options, get_branch_window_metadata, infer_service_window
 from utils.security_validation import normalize_citizen_full_name, normalize_email, normalize_ph_contact_number
 from utils.branch_system_settings import get_branch_setting_value
-from utils.system_settings import SYSTEM_DISABLED_MESSAGE, get_setting_value
+from utils.system_settings import SYSTEM_DISABLED_MESSAGE, BRANCH_QUEUE_DISABLED_MESSAGE, get_setting_value
 from utils.field_crypto import decrypt_optional_value
 from utils.announcement_attachments import serialize_attachments
 
@@ -293,13 +293,7 @@ def find_existing_active_queue(
 
 def get_enabled_service_names(db: Session, branch_id: int | None = None) -> set[str]:
     configured_services = get_branch_setting_value(db, "enabledServices", branch_id) if branch_id else (get_setting_value(db, "enabledServices") or [])
-    if configured_services:
-        return set(configured_services)
-    return {
-        service_value(service, "name")
-        for service in db.query(Service).filter(Service.is_active.is_(True)).all()
-        if service_value(service, "name")
-    }
+    return {infer_service_window(name) for name in configured_services}
 
 
 def get_branch_configured_service_names(db: Session, branch_id: int) -> set[str]:
@@ -310,13 +304,14 @@ def get_branch_configured_service_names(db: Session, branch_id: int) -> set[str]
 
 def build_public_system_status(db: Session, branch_id: int | None = None) -> dict:
     enabled_service_names = sorted(get_enabled_service_names(db, branch_id))
+    queue_enabled = bool(get_branch_setting_value(db, "queueEnabled", branch_id) if branch_id else get_setting_value(db, "queueEnabled"))
     return {
         "maintenanceMode": bool(get_branch_setting_value(db, "maintenanceMode", branch_id) if branch_id else get_setting_value(db, "maintenanceMode")),
-        "queueEnabled": bool(get_branch_setting_value(db, "queueEnabled", branch_id) if branch_id else get_setting_value(db, "queueEnabled")),
+        "queueEnabled": queue_enabled,
         "paymentGatewayEnabled": bool(get_branch_setting_value(db, "paymentGatewayEnabled", branch_id) if branch_id else get_setting_value(db, "paymentGatewayEnabled")),
         "receiptRequestEnabled": bool(get_branch_setting_value(db, "receiptRequestEnabled", branch_id) if branch_id else get_setting_value(db, "receiptRequestEnabled")),
         "enabledServices": enabled_service_names,
-        "disabledMessage": SYSTEM_DISABLED_MESSAGE,
+        "disabledMessage": BRANCH_QUEUE_DISABLED_MESSAGE if branch_id and not queue_enabled else SYSTEM_DISABLED_MESSAGE,
     }
 
 
@@ -328,7 +323,7 @@ def ensure_public_operations_available(db: Session, branch_id: int | None = None
 def ensure_queue_registration_allowed(db: Session, branch_id: int | None = None):
     ensure_public_operations_available(db, branch_id)
     if not get_branch_setting_value(db, "queueEnabled", branch_id):
-        raise HTTPException(status_code=403, detail=SYSTEM_DISABLED_MESSAGE)
+        raise HTTPException(status_code=403, detail=BRANCH_QUEUE_DISABLED_MESSAGE)
 
 
 def ensure_payment_gateway_available(db: Session, branch_id: int | None = None):
@@ -340,7 +335,7 @@ def ensure_payment_gateway_available(db: Session, branch_id: int | None = None):
 def ensure_queue_operations_manageable(db: Session, branch_id: int | None = None):
     ensure_public_operations_available(db, branch_id)
     if not get_branch_setting_value(db, "queueEnabled", branch_id):
-        raise HTTPException(status_code=403, detail=SYSTEM_DISABLED_MESSAGE)
+        raise HTTPException(status_code=403, detail=BRANCH_QUEUE_DISABLED_MESSAGE)
 
 # ============= Pydantic Models =============
 
@@ -566,8 +561,8 @@ async def get_all_services(db: Session = Depends(get_db)):
 
 
 @router.get("/system-status")
-async def get_public_system_status(db: Session = Depends(get_db)):
-    return build_public_system_status(db)
+async def get_public_system_status(branch_id: int | None = None, db: Session = Depends(get_db)):
+    return build_public_system_status(db, branch_id)
 
 # ============= Queueing Module =============
 
@@ -731,10 +726,10 @@ async def get_branch_queues(request: Request, branch_id: int, db: Session = Depe
 @router.put("/queue/{queue_id}/status")
 async def update_queue_status(queue_id: int, status_update: dict, db: Session = Depends(get_db)):
     """Update queue status (for Branch Admin)"""
-    ensure_queue_operations_manageable(db)
     queue = db.query(Queue).filter(Queue.id == queue_id).first()
     if not queue:
         raise HTTPException(status_code=404, detail="Queue not found")
+    ensure_queue_operations_manageable(db, queue.branch_id)
     
     queue.status = status_update.get("status", queue_value(queue, "status"))
     if should_release_appointment_reservation(queue_value(queue, "status")):
@@ -758,7 +753,10 @@ async def register_queue(
     branch = db.query(Branch).filter(Branch.id == registration.branch_id, Branch.status == "Active").first()
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
-    if registration.service_type not in get_branch_configured_service_names(db, branch.id):
+    configured_services = get_branch_configured_service_names(db, branch.id)
+    if not configured_services:
+        raise HTTPException(status_code=403, detail=BRANCH_QUEUE_DISABLED_MESSAGE)
+    if registration.service_type not in configured_services:
         raise HTTPException(status_code=400, detail=SYSTEM_DISABLED_MESSAGE)
     queue_type = normalize_queue_type(registration.queue_type)
     service = db.query(Service).filter(hash_aware_match(Service, "name", registration.service_type), Service.is_active == True).first()

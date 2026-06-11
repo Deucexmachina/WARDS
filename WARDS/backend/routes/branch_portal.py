@@ -40,7 +40,7 @@ from utils.branch_window_config import (
     infer_service_window,
     normalize_service_window as normalize_window_service_code,
 )
-from utils.system_settings import SYSTEM_DISABLED_MESSAGE, get_setting_value
+from utils.system_settings import SYSTEM_DISABLED_MESSAGE, BRANCH_QUEUE_DISABLED_MESSAGE, get_setting_value
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -1245,7 +1245,7 @@ def ensure_branch_queue_operations_enabled(db: Session, branch_id: int):
     if get_branch_setting_value(db, "maintenanceMode", branch_id):
         raise HTTPException(status_code=503, detail="Public services are temporarily unavailable because maintenance mode is active.")
     if not get_branch_setting_value(db, "queueEnabled", branch_id):
-        raise HTTPException(status_code=403, detail=SYSTEM_DISABLED_MESSAGE)
+        raise HTTPException(status_code=403, detail=BRANCH_QUEUE_DISABLED_MESSAGE)
 
 
 @router.get("/dashboard")

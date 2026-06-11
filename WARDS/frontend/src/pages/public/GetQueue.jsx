@@ -249,6 +249,10 @@ const GetQueue = () => {
   }, []);
 
   useEffect(() => {
+    fetchBranchSystemStatus(selectedBranch?.id || null);
+  }, [selectedBranch]);
+
+  useEffect(() => {
     const syncStoredUser = () => {
       try {
         const storedUser = getStoredPublicUser() || {};
@@ -402,13 +406,9 @@ const GetQueue = () => {
 
   const fetchData = async () => {
     try {
-      const [branchesRes, statusRes] = await Promise.all([
-        api.get('/public/branches'),
-        api.get('/public/system-status'),
-      ]);
+      const branchesRes = await api.get('/public/branches');
       setBranches(branchesRes.data);
       setServices([]);
-      setSystemStatus(statusRes.data);
       setLoading(false);
     } catch (error) {
       console.error('Failed to fetch data:', error);
@@ -418,6 +418,28 @@ const GetQueue = () => {
         setLoadError('Failed to load queue registration data.');
       }
       setLoading(false);
+    }
+  };
+
+  const fetchBranchSystemStatus = async (branchId) => {
+    if (!branchId) {
+      setSystemStatus(null);
+      return;
+    }
+    try {
+      const response = await api.get('/public/system-status', {
+        params: { branch_id: branchId }
+      });
+      setSystemStatus(response.data);
+    } catch (error) {
+      console.error('Failed to fetch branch system status:', error);
+      if (error.response?.status === 503 || error.response?.status === 403) {
+        setSystemStatus({
+          queueEnabled: false,
+          maintenanceMode: true,
+          disabledMessage: error.response?.data?.detail || DEFAULT_DISABLED_MESSAGE,
+        });
+      }
     }
   };
 
@@ -589,7 +611,7 @@ const GetQueue = () => {
       return;
     }
 
-    if (!systemStatus?.queueEnabled) {
+    if (!systemStatus?.queueEnabled || !systemStatus?.enabledServices?.length) {
       setFormError(systemStatus?.disabledMessage || DEFAULT_DISABLED_MESSAGE);
       return;
     }
@@ -706,7 +728,7 @@ const GetQueue = () => {
   const currentServingQueueLabel = queueAnalysis?.current_serving_queue || statusLabels.noActiveQueue;
   const currentServingStatusLabel = queueAnalysis?.current_serving_status || statusLabels.waitingForNextCall;
 
-  const queueUnavailable = systemStatus && (!systemStatus.queueEnabled || systemStatus.maintenanceMode);
+  const queueUnavailable = systemStatus && (!systemStatus.queueEnabled || !systemStatus.enabledServices?.length || systemStatus.maintenanceMode);
   const disabledMessage = systemStatus?.disabledMessage || loadError || DEFAULT_DISABLED_MESSAGE;
 
   if (loading) {
