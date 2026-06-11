@@ -75,6 +75,56 @@ const serviceIcons = {
   'Miscellaneous Tax': 'MSC',
 };
 
+const serviceIconLabels = {
+  'Miscellaneous Tax': 'MSC',
+  'Business Tax': 'BT',
+  'Real Property Tax': 'RPT',
+  'Community Tax Certificate': 'CTC',
+  'Professional Tax Receipt': 'PTR',
+  'Market': 'MAR',
+  MISC: 'MSC',
+  BT: 'BT',
+  RPT: 'RPT',
+  CTC: 'CTC',
+  PTR: 'PTR',
+  MARKET: 'MAR',
+};
+
+const serviceDisplayNames = {
+  'Miscellaneous Tax': 'MISCELLANEOUS',
+  'Business Tax': 'BUSINESS TAX',
+  'Real Property Tax': 'REAL PROPERTY TAX',
+  'Community Tax Certificate': 'COMMUNITY TAX CERTIFICATE',
+  'Professional Tax Receipt': 'PROFESSIONAL TAX RECEIPT',
+  'Market': 'MARKET',
+  MISC: 'MISCELLANEOUS',
+  BT: 'BUSINESS TAX',
+  RPT: 'REAL PROPERTY TAX',
+  CTC: 'COMMUNITY TAX CERTIFICATE',
+  PTR: 'PROFESSIONAL TAX RECEIPT',
+  MARKET: 'MARKET',
+};
+
+const getServiceDisplayName = (name) => {
+  if (!name) return '';
+  const clean = name.replace(/ Window$/i, '').trim();
+  const exact = serviceDisplayNames[clean] || serviceDisplayNames[name];
+  if (exact) return exact;
+  const upper = serviceDisplayNames[clean.toUpperCase()] || serviceDisplayNames[name.toUpperCase()];
+  if (upper) return upper;
+  return name;
+};
+
+const getServiceIconLabel = (name) => {
+  if (!name) return '';
+  const clean = name.replace(/ Window$/i, '').trim();
+  const exact = serviceIcons[clean] || serviceIconLabels[clean] || serviceIcons[name] || serviceIconLabels[name];
+  if (exact) return exact;
+  const upper = serviceIconLabels[clean.toUpperCase()] || serviceIconLabels[name.toUpperCase()];
+  if (upper) return upper;
+  return clean.slice(0, 3).toUpperCase();
+};
+
 const validateTaxpayerName = (value) => {
   return validateCitizenFullName(value).replace('Full name', 'Name');
 };
@@ -903,9 +953,9 @@ const GetQueue = () => {
                       >
                         <div className="text-center">
                           <div className="mb-2 inline-flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600">
-                            {serviceIcons[service.name] || service.name.slice(0, 3).toUpperCase()}
+                            {getServiceIconLabel(service.name)}
                           </div>
-                          <div className="text-lg font-bold mb-1">{service.name}</div>
+                          <div className="text-lg font-bold mb-1">{getServiceDisplayName(service.name)}</div>
                           <div className="text-sm opacity-75">~{service.average_time} min</div>
                         </div>
                       </button>

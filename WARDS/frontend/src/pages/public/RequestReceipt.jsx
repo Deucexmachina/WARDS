@@ -53,6 +53,22 @@ const RECEIPT_REASON_TRANSLATIONS = {
   Other: { en: 'Other', tl: 'Iba pa' },
 };
 
+const RECEIPT_TAX_DISPLAY_NAMES = {
+  'Real Property Tax': 'REAL PROPERTY TAX',
+  'Business Tax': 'BUSINESS TAX',
+  'Miscellaneous Tax': 'MISCELLANEOUS',
+  'Community Tax Certificate': 'COMMUNITY TAX CERTIFICATE',
+  'Professional Tax Receipt': 'PROFESSIONAL TAX RECEIPT',
+  'Market': 'MARKET',
+  RPT: 'REAL PROPERTY TAX',
+  BT: 'BUSINESS TAX',
+  BUSINESS: 'BUSINESS TAX',
+  MISC: 'MISCELLANEOUS',
+  CTC: 'COMMUNITY TAX CERTIFICATE',
+  PTR: 'PROFESSIONAL TAX RECEIPT',
+  MARKET: 'MARKET',
+};
+
 const TAX_TYPE_TRANSLATIONS = {
   RPT: { en: 'RPT', tl: 'RPT' },
   BUSINESS: { en: 'BT', tl: 'BT' },
@@ -224,6 +240,13 @@ const RequestReceipt = () => {
   };
 
   const localizeTaxType = (value) => {
+    if (!value) return value;
+    const clean = value.replace(/ Window$/i, '').trim();
+    const displayName = RECEIPT_TAX_DISPLAY_NAMES[clean]
+      || RECEIPT_TAX_DISPLAY_NAMES[clean.toUpperCase()]
+      || RECEIPT_TAX_DISPLAY_NAMES[value]
+      || RECEIPT_TAX_DISPLAY_NAMES[value.toUpperCase()];
+    if (displayName) return displayName;
     const entry = TAX_TYPE_TRANSLATIONS[value];
     return entry ? entry[language] : value;
   };
