@@ -11,6 +11,31 @@ const api = axios.create({
   },
 });
 
+const isBranchApiRequest = (url = '') => (
+  url.includes('/branch/auth')
+  || url.includes('/branch/')
+  || url.includes('/discrepancies/branch')
+);
+
+const isAdminApiRequest = (url = '') => (
+  url.includes('/admin/auth')
+  || url.includes('/admin/')
+  || url.includes('/tax-assessment/admin/')
+  || url.includes('/branches')
+  || url.includes('/reports')
+  || url.includes('/dashboard')
+  || url.includes('/security')
+  || url.includes('/announcements')
+  || url.includes('/memos')
+  || url.includes('/activity-logs')
+  || url.includes('/backup')
+  || url.includes('/policies')
+  || url.includes('/settings')
+  || url.includes('/rbac')
+  || url.includes('/discrepancies/admin')
+  || /\/discrepancies\/\d+\/verify(?:\?|$)/.test(url)
+);
+
 api.interceptors.request.use((config) => {
   if (config.headers?.Authorization) {
     return config;
@@ -32,18 +57,9 @@ api.interceptors.request.use((config) => {
     token = localStorage.getItem('adminToken') || localStorage.getItem('branchToken');
   } else if (url.includes('/accounts')) {
     token = localStorage.getItem('adminToken') || localStorage.getItem('branchToken');
-  } else if (url.includes('/branch/auth') || url.includes('/branch/')) {
+  } else if (isBranchApiRequest(url)) {
     token = localStorage.getItem('branchToken');
-  } else if (url.includes('/admin/auth') || url.includes('/admin/') ||
-             url.includes('/tax-assessment/admin/') ||
-             url.includes('/branches') || url.includes('/reports') ||
-             url.includes('/dashboard') ||
-             url.includes('/security') ||
-             url.includes('/announcements') || url.includes('/memos') ||
-             url.includes('/activity-logs') ||
-             url.includes('/backup') || url.includes('/policies') ||
-             url.includes('/settings') ||
-             url.includes('/rbac')) {
+  } else if (isAdminApiRequest(url)) {
     token = localStorage.getItem('adminToken');
   } else {
     // Default to checking all tokens for public routes
@@ -85,21 +101,10 @@ api.interceptors.response.use(
 
     const hasAdminToken = Boolean(localStorage.getItem('adminToken'));
     const isAdminRequest =
-      url.includes('/admin/') ||
-      url.includes('/security') ||
-      url.includes('/branches') ||
-      url.includes('/reports') ||
-      url.includes('/dashboard') ||
-      url.includes('/announcements') ||
-      url.includes('/memos') ||
+      isAdminApiRequest(url) ||
       url.includes('/alerts') ||
-      url.includes('/activity-logs') ||
       url.includes('/public-content') ||
-      url.includes('/backup') ||
-      url.includes('/policies') ||
-      url.includes('/settings') ||
-      url.includes('/accounts') ||
-      url.includes('/rbac');
+      url.includes('/accounts');
 
     // Check if this is a password confirmation error (incorrect password, not session expiration)
     const errorDetail = typeof responseDetail === 'string' ? responseDetail : (responseDetail?.message || '');

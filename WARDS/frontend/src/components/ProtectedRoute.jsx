@@ -2,6 +2,8 @@ import { Navigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 
+const ALLOWED_ADMIN_INTERNAL_ROLES = new Set(['main_admin', 'superadmin']);
+
 const ProtectedRoute = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -46,6 +48,7 @@ const ProtectedRoute = ({ children }) => {
 
       const adminAuthenticatedAt = Date.parse(localStorage.getItem('adminAuthenticatedAt') || '');
       const serverStartedAt = Date.parse(response.data.server_started_at || '');
+      const resolvedRole = response.data.user?.internal_role || response.data.user?.role;
 
       if (serverStartedAt && (!adminAuthenticatedAt || adminAuthenticatedAt <= serverStartedAt)) {
         clearAdminSession();
@@ -53,7 +56,11 @@ const ProtectedRoute = ({ children }) => {
         return;
       }
 
-      if (response.data.valid && response.data.user?.role === 'admin') {
+      if (
+        response.data.valid
+        && response.data.user?.role === 'admin'
+        && ALLOWED_ADMIN_INTERNAL_ROLES.has(resolvedRole)
+      ) {
         setIsAuthenticated(true);
         localStorage.setItem('adminUser', JSON.stringify(response.data.user));
         if (!localStorage.getItem('adminAuthenticatedAt')) {

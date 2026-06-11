@@ -119,9 +119,20 @@ async def get_current_admin_user(
 
 def require_admin_role(*allowed_roles: str):
     async def role_checker(
-        current_user: Admin | BranchStaff = Depends(get_current_admin_user)
+        current_user: Admin | BranchStaff = Depends(get_current_admin_user),
+        db: Session = Depends(get_db),
     ) -> Admin | BranchStaff:
         if current_user.role not in allowed_roles:
+            try:
+                db.add(ActivityLog(
+                    action="Admin Authorization Denied",
+                    user=current_user.username,
+                    details=f"Role '{current_user.role}' attempted admin access requiring: {', '.join(allowed_roles)}",
+                    type="security",
+                ))
+                db.commit()
+            except Exception:
+                db.rollback()
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Access denied. Required roles: {', '.join(allowed_roles)}"
