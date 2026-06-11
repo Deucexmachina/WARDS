@@ -274,6 +274,7 @@ export const windowStaffAccountAPI = {
   updateProfile: (data) => api.put('/branch/account/profile', data),
   changePassword: (data) => api.put('/branch/account/password', data),
   resetMfa: (data) => api.post('/branch/account/reset-mfa', data),
+  verifyMfa: (data) => api.post('/branch/account/verify-mfa', data),
 };
 
 export const branchSettingsAPI = {
