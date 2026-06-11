@@ -92,15 +92,17 @@ const Navbar = () => {
 
   const navigationLinks = [
     { to: '/', label: 'Home' },
+    { to: '/get-queue', label: 'Get Queue Number' },
     { to: '/pay-taxes', label: 'Pay Taxes' },
     { to: '/request-receipt', label: 'Request Receipt' },
     { to: '/taxpayer-guide', label: 'Taxpayer Guide' },
-    { to: '/contact', label: 'Contact' },
+    { to: '/contact', label: 'Contact Us' },
+    { to: '/faqs', label: 'FAQs' },
   ];
   const drawerLinks = [
-    ...navigationLinks.slice(0, 2),
+    navigationLinks[0],
     ...(isTaxpayerLoggedIn ? [{ to: '/account-management', label: 'Account Management' }] : []),
-    ...navigationLinks.slice(2),
+    ...navigationLinks.slice(1),
   ];
 
   return (

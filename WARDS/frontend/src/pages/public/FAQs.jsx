@@ -1,0 +1,129 @@
+import { useEffect, useState } from 'react';
+import { publicContentAPI } from '../../services/api';
+
+const FAQs = () => {
+  const [pageContent, setPageContent] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [language, setLanguage] = useState('en');
+
+  useEffect(() => {
+    const fetchContent = async () => {
+      try {
+        const response = await publicContentAPI.getPublicTaxpayerGuide();
+        setPageContent(response.data || {});
+      } catch (error) {
+        console.error('Failed to fetch FAQ content:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchContent();
+  }, []);
+
+  const faqs = language === 'en' ? pageContent?.faqs_en || [] : pageContent?.faqs_tl || [];
+  const faqCategories = [...new Set(faqs.map((faq) => faq.category).filter(Boolean))];
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="text-center">
+          <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-4 border-blue-600 border-t-transparent"></div>
+          <p className="text-gray-600">{language === 'en' ? 'Loading...' : 'Naglo-load...'}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 py-12">
+      <div className="container mx-auto max-w-6xl px-4">
+        <div className="mb-8 rounded-xl bg-white p-8 shadow-lg">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h1 className="mb-2 text-4xl font-bold text-gray-800">
+                {language === 'en' ? 'Frequently Asked Questions' : 'Mga Madalas Itanong'}
+              </h1>
+              <p className="text-gray-600">
+                {language === 'en'
+                  ? 'Find answers to common questions about our services.'
+                  : 'Hanapin ang mga sagot sa mga karaniwang tanong tungkol sa aming mga serbisyo.'}
+              </p>
+            </div>
+            <button
+              onClick={() => setLanguage(language === 'en' ? 'tl' : 'en')}
+              className="rounded-lg bg-blue-600 px-6 py-3 font-semibold text-white transition hover:bg-blue-700"
+            >
+              {language === 'en' ? 'Switch to Tagalog' : 'Lumipat sa English'}
+            </button>
+          </div>
+        </div>
+
+        {faqCategories.length > 0 ? (
+          <div className="space-y-8">
+            {faqCategories.map((category) => (
+              <div key={category} className="rounded-xl bg-white p-8 shadow-lg">
+                <h2 className="mb-6 text-xl font-bold text-blue-600">{category}</h2>
+                <div className="space-y-4">
+                  {faqs
+                    .filter((faq) => faq.category === category)
+                    .map((faq, index) => (
+                      <details
+                        key={`${faq.question || 'faq'}-${index}`}
+                        className="cursor-pointer rounded-lg bg-gray-50 p-4 transition hover:bg-gray-100"
+                      >
+                        <summary className="flex items-center font-semibold text-gray-800">
+                          <svg className="mr-2 h-5 w-5 flex-shrink-0 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                          </svg>
+                          {faq.question}
+                        </summary>
+                        <p className="mt-3 pl-7 text-gray-700">{faq.answer}</p>
+                      </details>
+                    ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-xl bg-white p-8 shadow-lg text-center text-gray-500">
+            {language === 'en' ? 'No FAQs available at the moment.' : 'Walang mga FAQ sa ngayon.'}
+          </div>
+        )}
+
+        <div className="mt-8 rounded-xl bg-blue-600 p-8 text-white shadow-lg">
+          <h2 className="mb-4 text-2xl font-bold">
+            {language === 'en' ? pageContent?.help_title_en : pageContent?.help_title_tl}
+          </h2>
+          <p className="mb-6">
+            {language === 'en' ? pageContent?.help_description_en : pageContent?.help_description_tl}
+          </p>
+          <div className="grid gap-6 md:grid-cols-2">
+            {(pageContent?.help_contacts || []).map((contact, index) => (
+              <div key={`help-contact-${index}`} className="flex items-start">
+                <svg className="mr-3 mt-1 h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d={
+                      String(contact.value || '').includes('@')
+                        ? 'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z'
+                        : 'M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z'
+                    }
+                  ></path>
+                </svg>
+                <div>
+                  <p className="font-semibold">{language === 'en' ? contact.label_en : contact.label_tl}</p>
+                  <p className="text-blue-100">{contact.value}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default FAQs;

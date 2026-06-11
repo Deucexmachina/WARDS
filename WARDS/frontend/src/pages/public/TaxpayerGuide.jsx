@@ -23,10 +23,8 @@ const TaxpayerGuide = () => {
   }, []);
 
   const guides = language === 'en' ? pageContent?.guides_en || [] : pageContent?.guides_tl || [];
-  const faqs = language === 'en' ? pageContent?.faqs_en || [] : pageContent?.faqs_tl || [];
   const categories = ['all', ...new Set(guides.map((guide) => guide.category).filter(Boolean))];
   const filteredGuides = activeCategory === 'all' ? guides : guides.filter((guide) => guide.category === activeCategory);
-  const faqCategories = [...new Set(faqs.map((faq) => faq.category).filter(Boolean))];
 
   useEffect(() => {
     setActiveCategory('all');
@@ -81,7 +79,7 @@ const TaxpayerGuide = () => {
           </div>
         </div>
 
-        <div className="mb-12 space-y-6">
+        <div className="mb-8 space-y-6">
           {filteredGuides.map((guide, index) => (
             <div key={`${guide.title || 'guide'}-${index}`} className="rounded-xl bg-white p-8 shadow-lg">
               <div className="flex items-start">
@@ -97,33 +95,6 @@ const TaxpayerGuide = () => {
                   <h2 className="mb-3 text-2xl font-bold text-gray-800">{guide.title}</h2>
                   <div className="whitespace-pre-line leading-relaxed text-gray-700">{guide.content}</div>
                 </div>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="rounded-xl bg-white p-8 shadow-lg">
-          <h2 className="mb-6 text-3xl font-bold text-gray-800">
-            {language === 'en' ? 'Frequently Asked Questions' : 'Mga Madalas Itanong'}
-          </h2>
-
-          {faqCategories.map((category) => (
-            <div key={category} className="mb-8">
-              <h3 className="mb-4 text-xl font-bold text-blue-600">{category}</h3>
-              <div className="space-y-4">
-                {faqs
-                  .filter((faq) => faq.category === category)
-                  .map((faq, index) => (
-                    <details key={`${faq.question || 'faq'}-${index}`} className="cursor-pointer rounded-lg bg-gray-50 p-4 transition hover:bg-gray-100">
-                      <summary className="flex items-center font-semibold text-gray-800">
-                        <svg className="mr-2 h-5 w-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                        </svg>
-                        {faq.question}
-                      </summary>
-                      <p className="mt-3 pl-7 text-gray-700">{faq.answer}</p>
-                    </details>
-                  ))}
               </div>
             </div>
           ))}

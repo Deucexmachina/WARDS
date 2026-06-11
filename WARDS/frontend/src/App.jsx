@@ -39,6 +39,7 @@ import PayTaxesPlaceholder from './pages/public/PayTaxesPlaceholder'
 import AccountManagement from './pages/public/AccountManagement'
 import RequestReceipt from './pages/public/RequestReceipt'
 import TaxpayerGuide from './pages/public/TaxpayerGuide'
+import FAQs from './pages/public/FAQs'
 import Contact from './pages/public/Contact'
 import GetQueue from './pages/public/GetQueue'
 import DataPrivacyAgreement from './pages/public/DataPrivacyAgreement'
@@ -82,6 +83,7 @@ function App() {
           <Route path="account-management" element={<UserProtectedRoute><AccountManagement /></UserProtectedRoute>} />
           <Route path="request-receipt" element={<UserProtectedRoute><RequestReceipt /></UserProtectedRoute>} />
           <Route path="taxpayer-guide" element={<TaxpayerGuide />} />
+          <Route path="faqs" element={<FAQs />} />
           <Route path="contact" element={<Contact />} />
           <Route path="get-queue" element={<UserProtectedRoute><GetQueue /></UserProtectedRoute>} />
           <Route path="data-privacy-agreement" element={<DataPrivacyAgreement />} />
