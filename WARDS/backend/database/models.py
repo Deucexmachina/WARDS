@@ -686,6 +686,7 @@ class ReceiptRequest(Base):
     __tablename__ = "receipt_requests"
     
     id = Column(Integer, primary_key=True, index=True)
+    citizen_user_id = Column(Integer, ForeignKey("citizen_users.id"), nullable=True, index=True)
     request_id = Column(String, unique=True, index=True)
     request_id_hash = Column(String, nullable=True, index=True)
     request_id_enc = Column(Text, nullable=True)
@@ -739,6 +740,7 @@ class ReceiptRequestHistory(Base):
     __tablename__ = "receipt_request_history"
 
     id = Column(Integer, primary_key=True, index=True)
+    citizen_user_id = Column(Integer, ForeignKey("citizen_users.id"), nullable=True, index=True)
     request_id = Column(String, unique=True, index=True)
     request_id_hash = Column(String, nullable=True, index=True)
     request_id_enc = Column(Text, nullable=True)

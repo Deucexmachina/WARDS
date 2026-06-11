@@ -18,6 +18,7 @@ from utils.file_validation import validate_upload_file
 from PIL import Image
 import qrcode
 from pydantic import BaseModel
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from slowapi import Limiter
@@ -64,6 +65,13 @@ ALLOWED_RELEASE_MIME_TYPES = {"image/jpeg", "image/png"}
 MAX_RELEASE_FILE_SIZE = 5 * 1024 * 1024
 ALLOWED_OCR_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 RECEIPT_REQUEST_FEE = 200.0
+MAX_RECEIPT_REQUESTS_PER_MINUTE = 3
+MAX_RECEIPT_REQUESTS_PER_HOUR = 5
+MAX_RECEIPT_REQUESTS_PER_DAY = 10
+MAX_RECEIPT_REQUESTS_PER_MINUTE_MESSAGE = "Too many requests. Please wait before submitting another receipt copy request."
+MAX_RECEIPT_REQUESTS_PER_HOUR_MESSAGE = "You have reached the hourly request limit. Please try again later."
+MAX_RECEIPT_REQUESTS_PER_DAY_MESSAGE = "You have reached the maximum number of receipt copy requests allowed for today. Please try again tomorrow."
+RECENT_RECEIPT_DUPLICATE_WINDOW_SECONDS = 30
 RECEIPT_REQUEST_REASON_OPTIONS = {
     "Lost original receipt",
     "Damaged receipt",
@@ -242,6 +250,7 @@ def serialize_receipt_request(request: ReceiptRequest, db: Session):
         "releaseStatus": release_status,
         "nextAction": next_action,
         "feePaid": request.fee_paid,
+        "citizenUserId": getattr(request, "citizen_user_id", None),
         "branchId": request.branch_id,
         "branchName": branch_name,
         "matchedReceiptId": request.matched_receipt_id,
@@ -289,6 +298,7 @@ def serialize_receipt_request_history(history: ReceiptRequestHistory, db: Sessio
         "paymentStatus": "Verified" if history.fee_paid else "Pending",
         "releaseStatus": "Released" if receipt_request_history_value(history, "final_status") in {"Released", "Completed"} else "Not Ready for Release",
         "feePaid": history.fee_paid,
+        "citizenUserId": getattr(history, "citizen_user_id", None),
         "branchId": history.branch_id,
         "branchName": branch_name,
         "matchedReceiptId": history.matched_receipt_id,
@@ -569,6 +579,7 @@ def archive_receipt_request(
     )
 
     history_record = existing_history or ReceiptRequestHistory(request_id=receipt_request_value(receipt_request, "request_id"))
+    history_record.citizen_user_id = getattr(receipt_request, "citizen_user_id", None)
     history_record.branch_id = receipt_request.branch_id
     history_record.taxpayer_name = receipt_request_value(receipt_request, "taxpayer_name")
     history_record.tax_type = receipt_request_value(receipt_request, "tax_type")
@@ -592,6 +603,107 @@ def archive_receipt_request(
     apply_receipt_request_history_security(history_record)
     db.add(history_record)
     return history_record
+
+
+def get_receipt_request_day_bounds() -> tuple[datetime, datetime]:
+    current_manila_date = datetime.now(MANILA_TIMEZONE).date()
+    day_start_local = datetime.combine(current_manila_date, datetime.min.time(), tzinfo=MANILA_TIMEZONE)
+    day_end_local = day_start_local + timedelta(days=1)
+    day_start_utc = day_start_local.astimezone(timezone.utc).replace(tzinfo=None)
+    day_end_utc = day_end_local.astimezone(timezone.utc).replace(tzinfo=None)
+    return day_start_utc, day_end_utc
+
+
+def get_receipt_request_identity_filter(model, citizen_user: CitizenUser, email: str):
+    filters = [model.citizen_user_id == citizen_user.id]
+    if email:
+        filters.append(hash_aware_match(model, "email", email))
+    return or_(*filters)
+
+
+def get_receipt_request_count_since(
+    db: Session,
+    citizen_user: CitizenUser,
+    email: str,
+    since_utc: datetime,
+) -> int:
+    active_identity_filters = get_receipt_request_identity_filter(ReceiptRequest, citizen_user, email)
+    history_identity_filters = get_receipt_request_identity_filter(ReceiptRequestHistory, citizen_user, email)
+    active_count = (
+        db.query(ReceiptRequest)
+        .filter(
+            active_identity_filters,
+            ReceiptRequest.created_at >= since_utc,
+        )
+        .count()
+    )
+    history_count = (
+        db.query(ReceiptRequestHistory)
+        .filter(
+            history_identity_filters,
+            ReceiptRequestHistory.created_at >= since_utc,
+        )
+        .count()
+    )
+    return active_count + history_count
+
+
+def get_daily_receipt_request_count(db: Session, citizen_user: CitizenUser, email: str) -> int:
+    day_start_utc, _ = get_receipt_request_day_bounds()
+    return get_receipt_request_count_since(db, citizen_user, email, day_start_utc)
+
+
+def get_recent_receipt_request_duplicate(
+    db: Session,
+    citizen_user: CitizenUser,
+    email: str,
+    *,
+    branch_id: int,
+    taxpayer_name: str,
+    tax_type: str,
+    request_reason: str,
+    request_reason_other: str | None,
+    transaction_date: str,
+    ref_number: str | None,
+    created_after_utc: datetime,
+):
+    query = (
+        db.query(ReceiptRequest)
+        .filter(
+            get_receipt_request_identity_filter(ReceiptRequest, citizen_user, email),
+            ReceiptRequest.created_at >= created_after_utc,
+            ReceiptRequest.branch_id == branch_id,
+            hash_aware_match(ReceiptRequest, "taxpayer_name", taxpayer_name),
+            hash_aware_match(ReceiptRequest, "tax_type", tax_type),
+            hash_aware_match(ReceiptRequest, "request_reason", request_reason),
+            hash_aware_match(ReceiptRequest, "request_reason_other", request_reason_other or ""),
+            hash_aware_match(ReceiptRequest, "transaction_date", transaction_date),
+            hash_aware_match(ReceiptRequest, "ref_number", ref_number or ""),
+        )
+        .order_by(ReceiptRequest.created_at.desc(), ReceiptRequest.id.desc())
+    )
+    return query.first()
+
+
+def log_receipt_request_rate_limit_violation(
+    db: Session,
+    *,
+    citizen_user: CitizenUser | None,
+    email: str,
+    limit_type: str,
+    limit_value: int,
+    current_count: int,
+):
+    db.add(ActivityLog(
+        action="Receipt Request Rate Limit Blocked",
+        user=email,
+        details=(
+            f"Blocked receipt request for citizen_user_id={getattr(citizen_user, 'id', None)} "
+            f"at {limit_type} limit ({current_count}/{limit_value})."
+        ),
+        type="public_receipts",
+    ))
+    db.commit()
 
 
 def normalize_receipt_category(value: str | None) -> str:
@@ -2754,7 +2866,6 @@ async def download_release_copy(
 
 
 @router.post("/request")
-@limiter.limit("5/hour")
 async def create_receipt_request(
     request: Request,
     receipt_req: PublicReceiptRequestCreate,
@@ -2766,13 +2877,87 @@ async def create_receipt_request(
     normalized_email = normalize_email(receipt_req.email, check_deliverability=True)
     normalized_ref_number = normalize_reference_number(receipt_req.refNumber)
     request_reason, request_reason_other = validate_receipt_request_reason(receipt_req.requestReason, receipt_req.requestReasonOther)
-    _ = resolve_authenticated_citizen(credentials, db)
+    current_citizen = resolve_authenticated_citizen(credentials, db)
+    limit_account = current_citizen or find_citizen_by_email(db, CitizenUser, normalized_email)
     tax_type = normalize_receipt_category(receipt_req.taxType)
     branch_id = receipt_req.branchId
     ensure_receipt_requests_enabled(db, branch_id)
     branch = db.query(Branch).filter(Branch.id == branch_id, Branch.status == "Active").first()
     if not branch:
         raise HTTPException(status_code=404, detail="Selected branch not found")
+
+    if limit_account:
+        requests_last_minute = get_receipt_request_count_since(
+            db,
+            limit_account,
+            normalized_email,
+            datetime.utcnow() - timedelta(minutes=1),
+        )
+        if requests_last_minute >= MAX_RECEIPT_REQUESTS_PER_MINUTE:
+            log_receipt_request_rate_limit_violation(
+                db,
+                citizen_user=limit_account,
+                email=normalized_email,
+                limit_type="minute",
+                limit_value=MAX_RECEIPT_REQUESTS_PER_MINUTE,
+                current_count=requests_last_minute,
+            )
+            raise HTTPException(
+                status_code=429,
+                detail=MAX_RECEIPT_REQUESTS_PER_MINUTE_MESSAGE,
+            )
+
+        requests_last_hour = get_receipt_request_count_since(
+            db,
+            limit_account,
+            normalized_email,
+            datetime.utcnow() - timedelta(hours=1),
+        )
+        if requests_last_hour >= MAX_RECEIPT_REQUESTS_PER_HOUR:
+            log_receipt_request_rate_limit_violation(
+                db,
+                citizen_user=limit_account,
+                email=normalized_email,
+                limit_type="hour",
+                limit_value=MAX_RECEIPT_REQUESTS_PER_HOUR,
+                current_count=requests_last_hour,
+            )
+            raise HTTPException(
+                status_code=429,
+                detail=MAX_RECEIPT_REQUESTS_PER_HOUR_MESSAGE,
+            )
+
+        requests_today = get_daily_receipt_request_count(db, limit_account, normalized_email)
+        if requests_today >= MAX_RECEIPT_REQUESTS_PER_DAY:
+            log_receipt_request_rate_limit_violation(
+                db,
+                citizen_user=limit_account,
+                email=normalized_email,
+                limit_type="day",
+                limit_value=MAX_RECEIPT_REQUESTS_PER_DAY,
+                current_count=requests_today,
+            )
+            raise HTTPException(
+                status_code=429,
+                detail=MAX_RECEIPT_REQUESTS_PER_DAY_MESSAGE,
+            )
+
+        recent_duplicate = get_recent_receipt_request_duplicate(
+            db,
+            limit_account,
+            normalized_email,
+            branch_id=branch_id,
+            taxpayer_name=taxpayer_name,
+            tax_type=tax_type,
+            request_reason=request_reason,
+            request_reason_other=request_reason_other,
+            transaction_date=transaction_date,
+            ref_number=normalized_ref_number,
+            created_after_utc=datetime.utcnow() - timedelta(seconds=RECENT_RECEIPT_DUPLICATE_WINDOW_SECONDS),
+        )
+        if recent_duplicate:
+            return serialize_receipt_request(recent_duplicate, db) | {"fee": RECEIPT_REQUEST_FEE}
+
     request_id = unique_receipt_request_id()
     matched_receipt = find_matching_receipt(db, branch_id, normalized_ref_number, taxpayer_name, transaction_date, tax_type)
 
@@ -2785,6 +2970,7 @@ async def create_receipt_request(
         transaction_date=transaction_date,
         ref_number=normalized_ref_number,
         email=normalized_email,
+        citizen_user_id=limit_account.id if limit_account else None,
         fee_paid=False,
         branch_id=branch_id,
         matched_receipt_id=matched_receipt.id if matched_receipt else None,

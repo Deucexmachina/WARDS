@@ -916,6 +916,28 @@ def ensure_auth_extensions():
                 if "ix_queue_history_citizen_user_id" not in queue_history_indexes:
                     conn.execute(text("CREATE INDEX ix_queue_history_citizen_user_id ON queue_history (citizen_user_id)"))
 
+        receipt_request_columns = {column["name"] for column in inspector.get_columns("receipt_requests")}
+        if "citizen_user_id" not in receipt_request_columns:
+            if engine.dialect.name == "sqlite":
+                conn.execute(text("ALTER TABLE receipt_requests ADD COLUMN citizen_user_id INTEGER"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_receipt_requests_citizen_user_id ON receipt_requests (citizen_user_id)"))
+            else:
+                conn.execute(text("ALTER TABLE receipt_requests ADD COLUMN citizen_user_id INTEGER NULL"))
+                receipt_request_indexes = {index["name"] for index in inspect(conn).get_indexes("receipt_requests")}
+                if "ix_receipt_requests_citizen_user_id" not in receipt_request_indexes:
+                    conn.execute(text("CREATE INDEX ix_receipt_requests_citizen_user_id ON receipt_requests (citizen_user_id)"))
+
+        receipt_request_history_columns = {column["name"] for column in inspector.get_columns("receipt_request_history")}
+        if "citizen_user_id" not in receipt_request_history_columns:
+            if engine.dialect.name == "sqlite":
+                conn.execute(text("ALTER TABLE receipt_request_history ADD COLUMN citizen_user_id INTEGER"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_receipt_request_history_citizen_user_id ON receipt_request_history (citizen_user_id)"))
+            else:
+                conn.execute(text("ALTER TABLE receipt_request_history ADD COLUMN citizen_user_id INTEGER NULL"))
+                receipt_request_history_indexes = {index["name"] for index in inspect(conn).get_indexes("receipt_request_history")}
+                if "ix_receipt_request_history_citizen_user_id" not in receipt_request_history_indexes:
+                    conn.execute(text("CREATE INDEX ix_receipt_request_history_citizen_user_id ON receipt_request_history (citizen_user_id)"))
+
         business_registry_columns = {column["name"] for column in inspector.get_columns("business_registry")}
         for column_name, column_type in (
             ("business_name_hash", "VARCHAR(255)"),

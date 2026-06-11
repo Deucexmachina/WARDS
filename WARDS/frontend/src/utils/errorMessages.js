@@ -62,7 +62,7 @@ export const getFriendlyErrorMessage = (error, fallback = 'Something went wrong.
 };
 
 export const getModalToneForError = (error) => (
-  error?.response?.status === 429 ? 'warning' : 'error'
+  error?.response?.status === 429 ? 'error' : 'error'
 );
 
 export const shouldSuppressGlobalErrorModal = (error) => {
