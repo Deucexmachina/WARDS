@@ -2526,7 +2526,7 @@ async def release_receipt_request(request_id: str, current_staff=Depends(get_cur
     archive_receipt_request(db, receipt_request, current_staff.username)
 
     branch = db.query(Branch).filter(Branch.id == current_staff.branch_id).first()
-    branch_name = branch.name if branch else f"Branch {current_staff.branch_id}"
+    branch_name = get_decrypted_or_raw(branch, "name") if branch else f"Branch {current_staff.branch_id}"
     email_result = send_receipt_release_email(
         recipient_email=receipt_request_value(receipt_request, "email"),
         taxpayer_name=receipt_request_value(receipt_request, "taxpayer_name"),
@@ -2851,7 +2851,7 @@ async def pay_request_fee(
     if receipt_request.branch_id:
         branch = db.query(Branch).filter(Branch.id == receipt_request.branch_id).first()
         if branch:
-            branch_name = branch.name
+            branch_name = get_decrypted_or_raw(branch, "name") or branch.name
 
     payment_ref, txn_id = unique_receipt_payment_refs()
     payment = Payment(
