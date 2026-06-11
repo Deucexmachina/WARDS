@@ -1174,9 +1174,7 @@ const QueueManagement = () => {
       setProcessingReceipt(true);
       setCompletionError('');
       setCompletionNotice('');
-      console.log('[FRONTEND] Starting uploadForOCR...');
       const response = await receiptAPI.uploadForOCR(formData, { queue_context: 'true' });
-      console.log('[FRONTEND] uploadForOCR success:', response.status, response.data);
       const resolvedCategory = normalizeReceiptCategory(response.data?.selected_category || response.data?.tax_type || response.data?.category || category);
       const todayDate = getTodayDateInputValue();
       setReceiptDraft(normalizeReceiptDraftReviewState({
@@ -1192,11 +1190,7 @@ const QueueManagement = () => {
         selected_category: response.data?.selected_category || category,
       }));
       setCompletionMode('review');
-      console.log('[FRONTEND] Switched to review mode');
     } catch (err) {
-      console.error('[FRONTEND] uploadForOCR error:', err);
-      console.error('[FRONTEND] error.response:', err.response);
-      console.error('[FRONTEND] error.message:', err.message);
       setCompletionError(err.response?.data?.detail || 'Failed to parse receipt image.');
     } finally {
       setProcessingReceipt(false);

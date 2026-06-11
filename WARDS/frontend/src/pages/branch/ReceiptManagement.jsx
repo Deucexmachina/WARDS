@@ -1263,7 +1263,6 @@ const ReceiptManagement = () => {
   };
 
   const requestDeleteConfirmation = (target) => {
-    console.log('[FRONTEND] Delete confirmation requested:', target);
     setDeleteTarget(target);
   };
 
@@ -1271,7 +1270,6 @@ const ReceiptManagement = () => {
     if (!deleteTarget) {
       return;
     }
-    console.log('[FRONTEND] Confirming delete:', deleteTarget);
 
     if (deleteTarget.type === 'record') {
       await handleDeleteRecord(deleteTarget.id);
@@ -1669,14 +1667,10 @@ const ReceiptManagement = () => {
     setSuccessMessage('');
 
     try {
-      console.log('[FRONTEND] Deleting history request:', requestId);
       await receiptAPI.deleteRequestHistory(requestId);
-      console.log('[FRONTEND] History request deleted successfully');
       setSuccessMessage(`Completed receipt request ${requestId} deleted successfully.`);
       await refreshData({ emitReceiptEvent: true });
     } catch (err) {
-      console.error('[FRONTEND] Delete history request error:', err);
-      console.error('[FRONTEND] error.response:', err.response);
       setError(err.response?.data?.detail || 'Failed to delete completed receipt request.');
     } finally {
       setDeletingHistoryId(null);

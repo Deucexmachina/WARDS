@@ -2042,8 +2042,7 @@ async def upload_receipt_for_ocr(
                 raise
         except (asyncio.TimeoutError, asyncio.CancelledError):
             pass
-        except Exception as exc:
-            print(f"[OCR FALLBACK] Queue OCR failed: {exc}")
+        except Exception:
             pass
         if ocr_result is not None:
             return ocr_result
@@ -2422,7 +2421,6 @@ async def delete_receipt_request_history(
     current_staff=Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
-    print(f"[BACKEND] Deleting history request: {request_id}, staff_branch={current_staff.branch_id}")
     receipt_request = (
         db.query(ReceiptRequestHistory)
         .filter(ReceiptRequestHistory.request_id == request_id)
@@ -2434,12 +2432,9 @@ async def delete_receipt_request_history(
                 receipt_request = candidate
                 break
     if not receipt_request:
-        print(f"[BACKEND] History request not found: {request_id}")
         raise HTTPException(status_code=404, detail="Completed receipt request not found")
 
-    print(f"[BACKEND] Found history request, branch_id={receipt_request.branch_id}")
     if receipt_request.branch_id and receipt_request.branch_id != current_staff.branch_id:
-        print(f"[BACKEND] Branch mismatch: request_branch={receipt_request.branch_id}, staff_branch={current_staff.branch_id}")
         raise HTTPException(status_code=403, detail="Request belongs to another branch")
 
     db.delete(receipt_request)
@@ -2450,7 +2445,6 @@ async def delete_receipt_request_history(
         type="branch_receipts",
     ))
     db.commit()
-    print(f"[BACKEND] History request deleted: {request_id}")
     return {"success": True, "requestId": request_id}
 
 
