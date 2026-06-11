@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { settingsAPI } from '../../services/api';
+import { branchAPI, settingsAPI } from '../../services/api';
 import { formatUtc8Date, formatUtc8Time } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 
@@ -31,6 +31,76 @@ const formatManilaTime = (value) => formatUtc8Time(value);
 
 const countConfiguredServices = (settings) => settings.enabledServices?.length || 0;
 
+const SERVICE_LABELS = {
+  RPT: 'Real Property Tax',
+  BUSINESS: 'Business Tax',
+  MISC: 'Miscellaneous Tax',
+  CTC: 'Community Tax Certificate',
+  PTR: 'Professional Tax Receipt',
+  MARKET: 'Market',
+};
+
+const normalizeServiceCode = (value) => {
+  const raw = String(value || '').trim().toUpperCase();
+  if (!raw) {
+    return '';
+  }
+
+  const alias = {
+    'REAL PROPERTY TAX': 'RPT',
+    REAL_PROPERTY_TAX: 'RPT',
+    BT: 'BUSINESS',
+    'BUSINESS TAX': 'BUSINESS',
+    BUSINESS_TAX: 'BUSINESS',
+    MISCELLANEOUS: 'MISC',
+    'MISCELLANEOUS TAX': 'MISC',
+    'COMMUNITY TAX CERTIFICATE': 'CTC',
+    COMMUNITY_TAX_CERTIFICATE: 'CTC',
+    'PROFESSIONAL TAX RECEIPT': 'PTR',
+    PROFESSIONAL_TAX_RECEIPT: 'PTR',
+  }[raw];
+
+  if (alias) {
+    return alias;
+  }
+
+  if (/^QW\d+$/.test(raw)) {
+    return raw;
+  }
+
+  return raw.replace(/[^A-Z0-9]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+};
+
+const getServiceLabel = (code) => {
+  const normalized = normalizeServiceCode(code);
+  if (!normalized) {
+    return 'Unassigned';
+  }
+  if (SERVICE_LABELS[normalized]) {
+    return SERVICE_LABELS[normalized];
+  }
+  if (/^QW\d+$/.test(normalized)) {
+    return `Window ${normalized.slice(2)}`;
+  }
+  return normalized;
+};
+
+const formatBranchWindowSummary = (branch) => {
+  const windows = Array.isArray(branch?.window_accounts) ? branch.window_accounts : [];
+  if (!windows.length) {
+    return 'No queue windows configured';
+  }
+
+  return windows
+    .map((account) => {
+      const windowNumber = account.assigned_window_number || '—';
+      const label = getServiceLabel(account.service_window_label || account.service_window);
+      const status = account.is_verified && account.status === 'Active' ? 'Active' : account.status || 'Inactive';
+      return `Window ${windowNumber}: ${label} (${status})`;
+    })
+    .join(' | ');
+};
+
 const showSystemSuccessMessage = ({ title, message }) => {
   window.dispatchEvent(new CustomEvent('wards:system-message', {
     detail: {
@@ -45,6 +115,7 @@ const showSystemSuccessMessage = ({ title, message }) => {
 const Settings = () => {
   const [settings, setSettings] = useState(defaultSettings);
   const [serviceOptions, setServiceOptions] = useState([]);
+  const [branches, setBranches] = useState([]);
   const [metadata, setMetadata] = useState({});
   const [historyState, setHistoryState] = useState({
     items: [],
@@ -91,6 +162,16 @@ const Settings = () => {
     setServiceOptions(settingsData.serviceOptions || []);
   };
 
+  const fetchBranches = async () => {
+    try {
+      const response = await branchAPI.getAll();
+      setBranches(Array.isArray(response.data) ? response.data : []);
+    } catch (error) {
+      console.error('Error fetching branch service snapshot:', error);
+      setBranches([]);
+    }
+  };
+
   const fetchHistory = async (page = 1, overrides = {}) => {
     try {
       setHistoryError('');
@@ -112,6 +193,7 @@ const Settings = () => {
       setLoading(true);
       await Promise.all([
         fetchSettings(),
+        fetchBranches(),
         fetchHistory(1, { search: historySearch, category: historyCategory }),
       ]);
       setSaveError('');
@@ -351,6 +433,55 @@ const Settings = () => {
                               </label>
                             );
                           })}
+                        </div>
+                        <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                          <div className="border-b border-slate-100 px-5 py-4">
+                            <p className="font-semibold text-slate-800">Branch Service Separation</p>
+                            <p className="mt-1 text-sm text-slate-500">
+                              Read-only snapshot of each branch’s queue windows so the main configuration stays in sync with branch admins.
+                            </p>
+                          </div>
+                          <div className="overflow-x-auto">
+                            <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+                              <thead className="bg-slate-50">
+                                <tr>
+                                  <th className="px-5 py-3 font-semibold text-slate-600">Branch</th>
+                                  <th className="px-5 py-3 font-semibold text-slate-600">Queue Counters</th>
+                                  <th className="px-5 py-3 font-semibold text-slate-600">Window Assignments</th>
+                                  <th className="px-5 py-3 font-semibold text-slate-600">Verification</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 bg-white">
+                                {branches.length ? branches.map((branch) => (
+                                  <tr key={branch.id}>
+                                    <td className="px-5 py-4">
+                                      <p className="font-semibold text-slate-800">{branch.name}</p>
+                                      <p className="mt-1 text-xs text-slate-500">{branch.location || 'No location listed'}</p>
+                                    </td>
+                                    <td className="px-5 py-4 text-slate-700">{branch.counters || 0}</td>
+                                    <td className="px-5 py-4 text-slate-700">{formatBranchWindowSummary(branch)}</td>
+                                    <td className="px-5 py-4">
+                                      <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                        branch.verification_status === 'Pending'
+                                          ? 'bg-amber-50 text-amber-700'
+                                          : branch.status === 'Active'
+                                            ? 'bg-emerald-50 text-emerald-700'
+                                            : 'bg-slate-100 text-slate-600'
+                                      }`}>
+                                        {branch.verification_status || branch.status || 'Unknown'}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                )) : (
+                                  <tr>
+                                    <td colSpan="4" className="px-5 py-6 text-center text-sm text-slate-500">
+                                      No branches available for the separation table.
+                                    </td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
                       </div>
                     );

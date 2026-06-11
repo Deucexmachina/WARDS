@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { branchSettingsAPI } from '../../services/api';
+import { activityLogAPI, branchSettingsAPI } from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 
@@ -21,6 +21,70 @@ const DEFAULT_SYSTEM_SETTINGS = {
   receiptRequestEnabled: true,
   maintenanceMode: false,
   serviceOptions: [],
+};
+
+const SERVICE_WINDOW_LABELS = {
+  RPT: 'Real Property Tax',
+  BUSINESS: 'Business Tax',
+  MISC: 'Miscellaneous Tax',
+  CTC: 'Community Tax Certificate',
+  PTR: 'Professional Tax Receipt',
+  MARKET: 'Market',
+};
+
+const SERVICE_WINDOW_ALIASES = {
+  RPT: 'RPT',
+  'REAL PROPERTY TAX': 'RPT',
+  'REAL_PROPERTY_TAX': 'RPT',
+  BUSINESS: 'BUSINESS',
+  BT: 'BUSINESS',
+  'BUSINESS TAX': 'BUSINESS',
+  'BUSINESS_TAX': 'BUSINESS',
+  MISC: 'MISC',
+  MISCELLANEOUS: 'MISC',
+  'MISCELLANEOUS TAX': 'MISC',
+  CTC: 'CTC',
+  'COMMUNITY TAX CERTIFICATE': 'CTC',
+  'COMMUNITY_TAX_CERTIFICATE': 'CTC',
+  PTR: 'PTR',
+  'PROFESSIONAL TAX RECEIPT': 'PTR',
+  'PROFESSIONAL_TAX_RECEIPT': 'PTR',
+  MARKET: 'MARKET',
+};
+
+const normalizeServiceWindowCode = (value) => {
+  const rawValue = typeof value === 'string'
+    ? value
+    : (value?.code || value?.name || value?.service_window || value?.display_label || '');
+  const normalized = String(rawValue).trim().toUpperCase().replace(/\s+/g, ' ');
+  if (!normalized) {
+    return '';
+  }
+  if (SERVICE_WINDOW_ALIASES[normalized]) {
+    return SERVICE_WINDOW_ALIASES[normalized];
+  }
+  const compact = normalized.replace(/[^A-Z0-9]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+  if (SERVICE_WINDOW_ALIASES[compact]) {
+    return SERVICE_WINDOW_ALIASES[compact];
+  }
+  if (/^QW\d+$/.test(compact)) {
+    return compact;
+  }
+  return compact || normalized;
+};
+
+const getServiceWindowLabel = (code) => {
+  const normalized = normalizeServiceWindowCode(code);
+  if (!normalized) {
+    return '';
+  }
+  if (SERVICE_WINDOW_LABELS[normalized]) {
+    return SERVICE_WINDOW_LABELS[normalized];
+  }
+  if (/^QW\d+$/.test(normalized)) {
+    return `Window ${normalized.slice(2)}`;
+  }
+  return normalized;
 };
 
 const createEmptyOverride = () => ({
@@ -87,8 +151,12 @@ const normalizeScheduleConfig = (config, effectiveDate) => {
 const normalizeSystemSettings = (settings) => ({
   ...DEFAULT_SYSTEM_SETTINGS,
   ...(settings || {}),
-  enabledServices: Array.isArray(settings?.enabledServices) ? settings.enabledServices : [],
-  serviceOptions: Array.isArray(settings?.serviceOptions) ? settings.serviceOptions : [],
+  enabledServices: Array.isArray(settings?.enabledServices)
+    ? settings.enabledServices.map((serviceName) => normalizeServiceWindowCode(serviceName)).filter(Boolean)
+    : [],
+  serviceOptions: Array.isArray(settings?.serviceOptions)
+    ? settings.serviceOptions.map((serviceName) => normalizeServiceWindowCode(serviceName)).filter(Boolean)
+    : [],
 });
 
 const normalizeHistoryState = (history) => ({
@@ -275,6 +343,7 @@ const BranchSettings = () => {
   const [publishedSchedule, setPublishedSchedule] = useState(null);
   const [systemSettings, setSystemSettings] = useState(null);
   const [historyState, setHistoryState] = useState({ items: [], page: 1, page_size: PAGE_SIZE, total: 0, total_pages: 1 });
+  const [systemSettingsLogs, setSystemSettingsLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -301,10 +370,11 @@ const BranchSettings = () => {
   });
 
   const fetchSettings = async () => {
-    const [settingsResponse, historyResponse, systemSettingsResponse] = await Promise.all([
+    const [settingsResponse, historyResponse, systemSettingsResponse, logsResponse] = await Promise.all([
       branchSettingsAPI.getAppointmentSettings(),
       branchSettingsAPI.getAppointmentHistory({ page: 1, page_size: PAGE_SIZE }),
       branchSettingsAPI.getSystemSettings(),
+      activityLogAPI.getAll({ type: 'branch_portal', page: 1, page_size: 50 }),
     ]);
     const appointmentSettings = settingsResponse.data || {};
     setSchedule(normalizeScheduleConfig(appointmentSettings.draft, todayDate));
@@ -315,6 +385,10 @@ const BranchSettings = () => {
     );
     setSystemSettings(normalizeSystemSettings(systemSettingsResponse.data));
     setHistoryState(normalizeHistoryState(historyResponse.data));
+    const logs = Array.isArray(logsResponse?.data?.items) ? logsResponse.data.items : [];
+    setSystemSettingsLogs(
+      logs.filter((entry) => entry?.action === 'Branch System Settings Updated')
+    );
   };
 
   useEffect(() => {
@@ -520,12 +594,64 @@ const BranchSettings = () => {
     publishedOverrides: publishedSchedule?.date_overrides?.length || 0,
     lastPublished: historyState.items.find((item) => item.action === 'published')?.changed_at || null,
   }), [schedule, publishedSchedule, historyState.items]);
+  const branchWindowAccounts = useMemo(
+    () => (Array.isArray(branchUser?.window_accounts) ? branchUser.window_accounts : []),
+    [branchUser],
+  );
   const enabledPublicServices = useMemo(() => (
-    systemSettings?.serviceOptions?.map((serviceName) => ({
-      name: serviceName,
-      enabled: Boolean(systemSettings?.queueEnabled) && (systemSettings?.enabledServices || []).includes(serviceName),
-    })) || []
-  ), [systemSettings]);
+    (() => {
+      const seen = new Set();
+      const services = [];
+      const enabledServices = new Set((systemSettings?.enabledServices || []).map((serviceName) => normalizeServiceWindowCode(serviceName)).filter(Boolean));
+      const addService = (serviceValue) => {
+        const serviceName = normalizeServiceWindowCode(serviceValue);
+        if (!serviceName || seen.has(serviceName)) {
+          return;
+        }
+        seen.add(serviceName);
+        services.push({
+          name: serviceName,
+          label: getServiceWindowLabel(serviceName),
+          enabled: Boolean(systemSettings?.queueEnabled) && enabledServices.has(serviceName),
+        });
+      };
+
+      (systemSettings?.serviceOptions || []).forEach(addService);
+      branchWindowAccounts.forEach((account) => addService(account?.service_window || account?.service_window_label));
+      return services;
+    })()
+  ), [branchWindowAccounts, systemSettings]);
+
+  useEffect(() => {
+    if (!systemSettings?.queueEnabled || !enabledPublicServices.length) {
+      return;
+    }
+
+    const visibleServiceNames = enabledPublicServices.map((service) => service.name).filter(Boolean);
+    const currentEnabledServices = (systemSettings.enabledServices || []).map((serviceName) => normalizeServiceWindowCode(serviceName)).filter(Boolean);
+    const missingServices = visibleServiceNames.filter((serviceName) => !currentEnabledServices.includes(serviceName));
+
+    if (!missingServices.length) {
+      return;
+    }
+
+    setSystemSettings((current) => {
+      if (!current?.queueEnabled) {
+        return current;
+      }
+
+      const nextEnabledServices = Array.from(new Set([
+        ...(current.enabledServices || []),
+        ...visibleServiceNames,
+      ].map((serviceName) => normalizeServiceWindowCode(serviceName)).filter(Boolean))).sort();
+
+      return {
+        ...current,
+        enabledServices: nextEnabledServices,
+      };
+    });
+  }, [enabledPublicServices, systemSettings?.queueEnabled, systemSettings?.enabledServices]);
+
   const latestPublishedHistoryId = useMemo(
     () => historyState.items.find((item) => item.action === 'published')?.id || null,
     [historyState.items],
@@ -538,11 +664,29 @@ const BranchSettings = () => {
   }, [latestPublishedHistoryId, viewedPublishedHistoryIds]);
 
   const updateBranchSystemSetting = (fieldName, value) => {
-    setSystemSettings((current) => ({
-      ...current,
-      [fieldName]: value,
-      ...(fieldName === 'queueEnabled' && value === false ? { enabledServices: [] } : {}),
-    }));
+    setSystemSettings((current) => {
+      if (fieldName === 'queueEnabled') {
+        const nextQueueEnabled = Boolean(value);
+        const nextEnabledServices = nextQueueEnabled
+          ? Array.from(new Set([
+            ...(current.serviceOptions || []),
+            ...branchWindowAccounts.map((account) => account?.service_window || account?.service_window_label),
+            ...enabledPublicServices.map((service) => service?.name),
+          ].map((serviceName) => normalizeServiceWindowCode(serviceName)).filter(Boolean)))
+          : current.enabledServices;
+
+        return {
+          ...current,
+          queueEnabled: nextQueueEnabled,
+          enabledServices: nextEnabledServices,
+        };
+      }
+
+      return {
+        ...current,
+        [fieldName]: value,
+      };
+    });
   };
 
   const toggleBranchService = (serviceName) => {
@@ -578,6 +722,7 @@ const BranchSettings = () => {
       });
       setSystemSettings(response.data?.settings || systemSettings);
       setSuccessMessage('Branch-only system settings saved successfully.');
+      await fetchSettings();
     } catch (saveError) {
       console.error('Failed to save branch system settings:', saveError);
       setError(saveError.response?.data?.detail || 'Failed to save branch-only system settings.');
@@ -707,8 +852,7 @@ const BranchSettings = () => {
                     </div>
                   </div>
                 </div>
-              ))}
-            </div>
+              ))}            </div>
           </div>
 
           <div className="overflow-hidden rounded-2xl bg-white shadow">
@@ -734,7 +878,7 @@ const BranchSettings = () => {
                           : 'border-slate-200 bg-white'
                       } ${isBranchAdmin && systemSettings.queueEnabled ? 'cursor-pointer' : 'cursor-not-allowed opacity-75'}`}
                     >
-                      <span className="text-sm font-medium text-slate-700">{service.name}</span>
+                      <span className="text-sm font-medium text-slate-700">{service.label || service.name}</span>
                       <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${service.enabled ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-600'}`}>
                         {service.enabled ? 'On' : 'Off'}
                       </span>
@@ -796,6 +940,36 @@ const BranchSettings = () => {
                       className="h-5 w-5 accent-emerald-500"
                     />
                   </label>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-2xl bg-white shadow">
+            <div className="border-b border-slate-100 bg-slate-50 px-6 py-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Publish Control</p>
+              <h2 className="mt-2 text-xl font-bold text-primary">Save Branch System Configuration</h2>
+              <p className="mt-2 text-sm text-gray-500">
+                Save queue availability, enabled services, payment gateway, receipt copy access, and maintenance mode for this branch only.
+              </p>
+            </div>
+            <div className="space-y-4 p-6">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="flex-1">
+                    <p className="font-semibold text-slate-800">System Settings Save</p>
+                    <p className="mt-1 text-sm text-slate-500">
+                      This saves the branch-specific queue and service configuration shown above and writes an audit record.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSaveBranchSystemSettings}
+                    disabled={!isBranchAdmin || systemSaving}
+                    className="w-full rounded-2xl bg-primary px-5 py-4 font-semibold text-white transition hover:bg-secondary disabled:opacity-60 lg:w-auto lg:min-w-[260px]"
+                  >
+                    {systemSaving ? 'Saving Configuration...' : 'Save Branch System Configuration'}
+                  </button>
                 </div>
               </div>
             </div>
@@ -1146,6 +1320,64 @@ const BranchSettings = () => {
             </div>
           </div>
         )}
+      </section>
+
+      <section className="overflow-hidden rounded-2xl bg-white shadow">
+        <div className="border-b border-slate-100 px-6 py-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Traceability</p>
+              <h2 className="mt-2 text-2xl font-bold text-primary">System Settings Change Log</h2>
+              <p className="mt-2 text-sm leading-6 text-gray-500">
+                Review saved branch system settings changes such as queue availability, service toggles, payment gateway, and receipt request access.
+              </p>
+            </div>
+            <div className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700">
+              {systemSettingsLogs.length} record{systemSettingsLogs.length === 1 ? '' : 's'}
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-4 p-6">
+          {systemSettingsLogs.length ? systemSettingsLogs.map((entry) => (
+            <div key={`system-${entry.id}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-5 transition hover:border-slate-300">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-blue-700">
+                      Saved Settings
+                    </span>
+                    <span className="text-xs font-medium uppercase tracking-[0.18em] text-slate-400">
+                      {entry.created_at ? formatUtc8DateTime(entry.created_at) : 'N/A'}
+                    </span>
+                  </div>
+                  <h3 className="mt-3 text-lg font-bold text-primary">Branch System Settings Updated</h3>
+                  <div className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Details</p>
+                    <p className="mt-3 whitespace-pre-line text-sm leading-6 text-slate-700">
+                      {entry.details || 'No details available.'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex w-full flex-col gap-3 lg:w-[240px]">
+                  <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Changed By</p>
+                    <p className="mt-2 text-sm font-medium text-slate-700">{entry.user || 'N/A'}</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Action</p>
+                    <p className="mt-2 text-sm font-medium text-slate-700">{entry.action || 'Branch System Settings Updated'}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )) : (
+            <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-12 text-center text-sm text-slate-500">
+              No branch system settings changes yet.
+            </div>
+          )}
+        </div>
       </section>
 
       {showHistoryModal && selectedHistoryEntry && (

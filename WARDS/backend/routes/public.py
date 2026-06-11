@@ -303,11 +303,9 @@ def get_enabled_service_names(db: Session, branch_id: int | None = None) -> set[
 
 
 def get_branch_configured_service_names(db: Session, branch_id: int) -> set[str]:
-    return {
-        option["name"]
-        for option in get_branch_service_options(db, branch_id)
-        if option.get("name")
-    }
+    if not bool(get_branch_setting_value(db, "queueEnabled", branch_id)):
+        return set()
+    return get_enabled_service_names(db, branch_id)
 
 
 def build_public_system_status(db: Session, branch_id: int | None = None) -> dict:
@@ -454,6 +452,7 @@ async def get_branch_details(branch_id: int, db: Session = Depends(get_db)):
         "contact": get_decrypted_or_raw(branch, "contact") or branch.contact,
         "counters": branch.counters,
         "status": branch.status,
+        "queue_enabled": bool(get_branch_setting_value(db, "queueEnabled", branch_id)),
         "announcements": [serialize_public_announcement(a) for a in announcements],
         "services": services,
         "operating_hours": [

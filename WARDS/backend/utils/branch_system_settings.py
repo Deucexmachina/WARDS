@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 from fastapi import HTTPException
@@ -7,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from database.models import ActivityLog, Branch, BranchSystemSetting, Service
 from utils.field_crypto import service_value
+from utils.branch_window_config import get_branch_service_options
 from utils.system_settings import (
     SETTINGS_METADATA,
     _deserialize_value,
@@ -49,9 +51,20 @@ def _get_active_service_names(db: Session) -> list[str]:
     )
 
 
+def _get_branch_service_names(db: Session, branch_id: int) -> list[str]:
+    return sorted(
+        {
+            option["name"]
+            for option in get_branch_service_options(db, branch_id)
+            if option.get("name")
+        }
+    )
+
+
 def get_branch_settings_payload(db: Session, branch_id: int) -> dict:
     global_payload = get_settings_payload(db)
     payload = {key: value for key, value in global_payload.items() if key in BRANCH_SCOPED_SETTING_KEYS}
+    branch_service_names = _get_branch_service_names(db, branch_id)
 
     for row in _get_branch_override_rows(db, branch_id):
         payload[row.key] = _deserialize_value(row.value_type, row.value)
@@ -61,14 +74,9 @@ def get_branch_settings_payload(db: Session, branch_id: int) -> dict:
     payload["paymentGatewayEnabled"] = bool(global_payload.get("paymentGatewayEnabled")) and bool(payload.get("paymentGatewayEnabled"))
     payload["receiptRequestEnabled"] = bool(global_payload.get("receiptRequestEnabled")) and bool(payload.get("receiptRequestEnabled"))
 
-    global_services = set(global_payload.get("enabledServices") or [])
-    branch_services = set(payload.get("enabledServices") or [])
-    effective_services = sorted(global_services & branch_services) if branch_services else sorted(global_services)
-    if not payload["queueEnabled"]:
-        effective_services = []
-    payload["enabledServices"] = effective_services
+    payload["enabledServices"] = sorted(branch_service_names) if payload["queueEnabled"] else []
 
-    payload["serviceOptions"] = _get_active_service_names(db)
+    payload["serviceOptions"] = branch_service_names
     return payload
 
 
@@ -90,20 +98,25 @@ def update_branch_system_settings(
         raise HTTPException(status_code=400, detail="No branch system settings were provided.")
 
     global_payload = get_settings_payload(db)
-    active_service_names = set(_get_active_service_names(db))
-    if normalized_payload.get("queueEnabled") is False:
-        normalized_payload["enabledServices"] = []
+    if "queueEnabled" in normalized_payload:
+        normalized_payload["enabledServices"] = _get_branch_service_names(db, branch.id) if bool(normalized_payload["queueEnabled"]) else []
 
     changed = False
+    change_lines: list[str] = []
     existing_rows = {row.key: row for row in _get_branch_override_rows(db, branch.id)}
 
-    for key, raw_value in normalized_payload.items():
+    def _format_audit_value(value):
+        if isinstance(value, bool):
+          return "Enabled" if value else "Disabled"
+        if isinstance(value, (list, tuple, set)):
+            return json.dumps(list(value), ensure_ascii=False)
+        if value is None:
+            return "None"
+        return str(value)
+
+    for key, raw_value in list(normalized_payload.items()):
         metadata = SETTINGS_METADATA[key]
         normalized_value = _normalize_value(key, raw_value)
-
-        if key == "enabledServices":
-            normalized_value = [service for service in normalized_value if service in active_service_names]
-            normalized_value = [service for service in normalized_value if service in set(global_payload.get("enabledServices") or [])]
 
         if key == "queueEnabled":
             normalized_value = bool(normalized_value)
@@ -119,6 +132,10 @@ def update_branch_system_settings(
 
         if previous_value == normalized_value:
             continue
+
+        change_lines.append(
+            f"{metadata['label']}: {_format_audit_value(previous_value)} -> {_format_audit_value(normalized_value)}"
+        )
 
         serialized_value = _serialize_value(metadata["type"], normalized_value)
         if not row:
@@ -156,10 +173,11 @@ def update_branch_system_settings(
             "message": "No changes were needed - settings are already up to date.",
         }
 
+    change_details = "; ".join(change_lines) if change_lines else "No field-level changes were recorded."
     db.add(ActivityLog(
         action="Branch System Settings Updated",
         user=changed_by,
-        details=f"Updated branch-only system settings for {branch.name}",
+        details=f"branch: {branch.name} | role: branch_admin | changes: {change_details}",
         type="branch_portal",
     ))
     db.commit()

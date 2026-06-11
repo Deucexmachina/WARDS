@@ -33,6 +33,7 @@ from utils.security_validation import format_tin
 from utils.branch_system_settings import get_branch_setting_value
 from utils.branch_window_config import (
     default_assigned_window_number as resolve_default_assigned_window_number,
+    default_service_window_for_position,
     get_branch_window_metadata,
     get_configured_window_accounts as load_configured_window_accounts,
     get_service_window_display_label,
@@ -1382,15 +1383,25 @@ async def get_live_queue_monitor(
     else:
         queues = query.order_by(Queue.created_at.asc()).all()
     
+    configured_window_count = max(1, int(branch.counters or 1))
+    configured_accounts = {
+        (account.service_window or "MISC"): account
+        for account in get_configured_window_accounts(db, current_staff.branch_id)
+        if not is_queue_window_staff(current_staff) or account.service_window == current_staff.service_window
+    }
+    visible_service_windows = (
+        [current_staff.service_window or "MISC"]
+        if is_queue_window_staff(current_staff)
+        else [default_service_window_for_position(index) for index in range(configured_window_count)]
+    )
+
     windows_data = {}
 
-    for account in get_configured_window_accounts(db, current_staff.branch_id):
-        if is_queue_window_staff(current_staff) and account.service_window != current_staff.service_window:
-            continue
-        service_window = account.service_window or "MISC"
+    for service_window in visible_service_windows:
+        account = configured_accounts.get(service_window)
         windows_data[service_window] = {
-            "window_label": get_service_window_display_label(service_window, account.service_window_label),
-            "assigned_window_number": account.assigned_window_number or default_assigned_window_number(service_window),
+            "window_label": get_service_window_display_label(service_window, account.service_window_label if account else None),
+            "assigned_window_number": (account.assigned_window_number if account and account.assigned_window_number else default_assigned_window_number(service_window)),
             "serving": [],
             "waiting": [],
             "completed": [],

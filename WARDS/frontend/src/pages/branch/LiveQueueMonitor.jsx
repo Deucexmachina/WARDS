@@ -305,7 +305,8 @@ const LiveQueueMonitor = () => {
           </div>
 
         {(() => {
-            const windowCount = Object.keys(queueData.windows).length;
+            const configuredWindowCount = Number(queueData.branchInfo?.counters || Object.keys(queueData.windows).length || 1);
+            const windowCount = Math.max(configuredWindowCount, Object.keys(queueData.windows).length);
             const isDenseLayout = windowCount >= 5;
             const isUltraDenseLayout = windowCount >= 6;
             

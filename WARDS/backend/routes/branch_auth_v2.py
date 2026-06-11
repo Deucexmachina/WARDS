@@ -255,6 +255,22 @@ def get_branch_dashboard_url(staff: BranchStaff) -> str:
     return f"{base_url}/branch-dashboard/branch-{staff.branch_id or 'portal'}"
 
 
+def get_branch_window_accounts(db: Session, branch_id: int) -> list[BranchStaff]:
+    if not branch_id:
+        return []
+    return (
+        db.query(BranchStaff)
+        .filter(
+            BranchStaff.branch_id == branch_id,
+            BranchStaff.role == "branch_staff",
+            BranchStaff.account_scope == "queue_window",
+            BranchStaff.status == "Active",
+        )
+        .order_by(BranchStaff.assigned_window_number.asc(), BranchStaff.id.asc())
+        .all()
+    )
+
+
 def normalize_branch_email(email: str) -> str:
     return str(email).strip().lower()
 
@@ -437,6 +453,8 @@ async def branch_login(request: Request, credentials: BranchLoginRequest, db: Se
     reset_failed_attempts(normalized_email)
     
     access_token_expires = timedelta(minutes=get_session_timeout_minutes(db))
+    branch = db.query(Branch).filter(Branch.id == staff.branch_id).first() if staff.branch_id else None
+    window_accounts = get_branch_window_accounts(db, staff.branch_id) if staff.role == "branch_admin" else []
     access_token = create_access_token(
         data={
             "sub": staff.username,
@@ -456,8 +474,7 @@ async def branch_login(request: Request, credentials: BranchLoginRequest, db: Se
     staff.last_login = datetime.utcnow()
     db.commit()
     
-    _branch = db.query(Branch).filter(Branch.id == staff.branch_id).first() if staff.branch_id else None
-    _branch_name = (_branch.name if _branch else None) or f"Branch {staff.branch_id}"
+    _branch_name = (branch.name if branch else None) or f"Branch {staff.branch_id}"
     log_activity(db, "Successful Branch Login", normalized_email, f"branch: {_branch_name} | role: {staff.role} | ip: {client_ip}", "security")
     
     
@@ -479,6 +496,19 @@ async def branch_login(request: Request, credentials: BranchLoginRequest, db: Se
             "service_window_label": get_window_display_label(staff),
             "window_label": get_window_display_label(staff),
             "assigned_window_number": get_assigned_window_number(staff),
+            "branch_window_count": branch.counters if branch else None,
+            "window_accounts": [
+                {
+                    "id": account.id,
+                    "username": account.username,
+                    "full_name": account.full_name,
+                    "service_window": account.service_window,
+                    "service_window_label": get_window_display_label(account),
+                    "assigned_window_number": get_assigned_window_number(account),
+                    "window_label": get_window_display_label(account),
+                }
+                for account in window_accounts
+            ],
         },
         "requires_mfa": False,
         "requires_captcha": False
@@ -597,40 +627,32 @@ async def verify_token(request: Request, db: Session = Depends(get_db)):
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User not found or inactive"
             )
+        branch = db.query(Branch).filter(Branch.id == staff.branch_id).first() if staff.branch_id else None
         
         is_superadmin_managed_branch = managed_by == "superadmin"
-        window_accounts = []
-        if is_superadmin_managed_branch:
-            window_accounts = (
-                db.query(BranchStaff)
-                .filter(
-                    BranchStaff.branch_id == staff.branch_id,
-                    BranchStaff.account_scope == "queue_window",
-                    BranchStaff.status == "Active",
-                )
-                .order_by(BranchStaff.assigned_window_number.asc(), BranchStaff.id.asc())
-                .all()
-            )
+        should_include_window_accounts = staff.role == "branch_admin" or is_superadmin_managed_branch
+        window_accounts = get_branch_window_accounts(db, staff.branch_id) if should_include_window_accounts else []
 
         return {
             "valid": True,
             "server_started_at": SERVER_STARTED_AT,
-            "user": {
-                "id": staff.id,
-                "username": "superadmin" if is_superadmin_managed_branch else staff.username,
-                "email": staff.email,
-                "full_name": "superadmin" if is_superadmin_managed_branch else staff.full_name,
+        "user": {
+            "id": staff.id,
+            "username": "superadmin" if is_superadmin_managed_branch else staff.username,
+            "email": staff.email,
+            "full_name": "superadmin" if is_superadmin_managed_branch else staff.full_name,
                 "role": public_role(staff.role),
                 "internal_role": staff.role,
                 "branch_id": staff.branch_id,
                 "dashboard_url": get_branch_dashboard_url(staff),
                 "account_scope": staff.account_scope or "full_branch",
                 "service_window": staff.service_window,
-                "service_window_label": get_window_display_label(staff),
-                "window_label": get_window_display_label(staff),
-                "assigned_window_number": get_assigned_window_number(staff),
-                "superadmin_managed_branch": is_superadmin_managed_branch,
-                "window_accounts": [
+            "service_window_label": get_window_display_label(staff),
+            "window_label": get_window_display_label(staff),
+            "assigned_window_number": get_assigned_window_number(staff),
+            "branch_window_count": branch.counters if branch else None,
+            "superadmin_managed_branch": is_superadmin_managed_branch,
+            "window_accounts": [
                     {
                         "id": account.id,
                         "username": account.username,
