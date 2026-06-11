@@ -37,11 +37,11 @@ export const getDiscrepancyValidationErrors = (formData) => {
   }
 
   if (!discrepancyType) {
-    errors.discrepancy_type = 'Please select the Discrepancy Type.';
+    errors.discrepancy_type = 'Please select a discrepancy type.';
   }
 
   if (discrepancyType === 'Other' && !otherSpecification) {
-    errors.other_specification = 'Please provide additional details for the Other discrepancy type.';
+    errors.other_specification = 'Please specify the discrepancy type.';
   }
 
   if (!description) {

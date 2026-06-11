@@ -414,12 +414,12 @@ async def create_branch_discrepancy(
 
     normalized_discrepancy_type = discrepancy_type.strip()
     if not normalized_discrepancy_type:
-        raise HTTPException(status_code=400, detail="Please select the Discrepancy Type.")
+        raise HTTPException(status_code=400, detail="Please select a discrepancy type.")
     normalized_other_specification = (other_specification or "").strip()
     if normalized_discrepancy_type.lower() == "other" and not normalized_other_specification:
         raise HTTPException(
             status_code=400,
-            detail="Please provide additional details for the Other discrepancy type.",
+            detail="Please specify the discrepancy type.",
         )
     if normalized_other_specification:
         description = f"{description}\n\nOther specification: {normalized_other_specification}"

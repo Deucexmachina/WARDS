@@ -356,12 +356,15 @@ const BranchDashboard = () => {
                   required
                 >
                   <option value="">Select type</option>
-                  <option value="Collection Variance">Collection Variance</option>
-                  <option value="Official Record Mismatch">Official Record Mismatch</option>
-                  <option value="Missing Transaction">Missing Transaction</option>
-                  <option value="Duplicate Entry">Duplicate Entry</option>
-                  <option value="Offline Collection Encoding">Offline Collection Encoding</option>
-                  <option value="Other">Other</option>
+                    <option value="No Internet Connection">No Internet Connection</option>
+                    <option value="Slow Internet Connection">Slow Internet Connection</option>
+                    <option value="Complete Network Outage">Complete Network Outage</option>
+                    <option value="No Electricity / Power Interruption">No Electricity / Power Interruption</option>
+                    <option value="Receipt Printer Not Working">Receipt Printer Not Working</option>
+                    <option value="Flooding in Branch Office">Flooding in Branch Office</option>
+                    <option value="Branch Closure Due to Emergency">Branch Closure Due to Emergency</option>
+                    <option value="Revenue Collection Interruption">Revenue Collection Interruption</option>
+                    <option value="Other">Other</option>
                 </select>
                 {validationErrors.discrepancy_type ? (
                   <p className="mt-2 text-xs font-medium text-rose-600">{validationErrors.discrepancy_type}</p>
@@ -371,7 +374,7 @@ const BranchDashboard = () => {
 
             {formData.discrepancy_type === 'Other' && (
               <div className="mt-4">
-                <label className="mb-2 block text-sm font-semibold text-gray-700">Specify Other Discrepancy</label>
+                <label className="mb-2 block text-sm font-semibold text-gray-700">Specify Discrepancy Type</label>
                 <textarea
                   name="other_specification"
                   value={formData.other_specification}
