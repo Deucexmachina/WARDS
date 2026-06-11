@@ -11,24 +11,18 @@ import {
 } from '../../components/discrepancies/DiscrepancyUI';
 import { discrepancyAPI } from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
+import { getFriendlyErrorMessage } from '../../utils/errorMessages';
+import {
+  DISCREPANCY_TITLE_MAX_LENGTH,
+  getDiscrepancySubmitErrorMessage,
+  getDiscrepancyValidationErrors,
+  getDiscrepancyValidationSummary,
+  getInitialDiscrepancyForm,
+} from '../../utils/discrepancyValidation';
 
-const EMPTY_FORM = {
-  title: '',
-  report_date: '',
-  discrepancy_type: '',
-  description: '',
-  other_specification: '',
-  supporting_documents: '',
-  submitted_offline: false,
-};
+const EMPTY_FORM = getInitialDiscrepancyForm();
 
 const CLOSED_STATUSES = new Set(['Solved', 'Rejected']);
-
-const getTodayDate = () => {
-  const now = new Date();
-  const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
-  return localDate.toISOString().split('T')[0];
-};
 
 const formatDateTime = (value) => formatUtc8DateTime(value);
 
@@ -64,13 +58,13 @@ const BranchDiscrepancies = () => {
   const [showForm, setShowForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formData, setFormData] = useState(EMPTY_FORM);
+  const [validationErrors, setValidationErrors] = useState({});
   const [attachmentFile, setAttachmentFile] = useState(null);
   const [selectedReport, setSelectedReport] = useState(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
   const [replyDraft, setReplyDraft] = useState('');
   const [showReplyComposer, setShowReplyComposer] = useState(false);
   const [replying, setReplying] = useState(false);
-  const todayDate = getTodayDate();
 
   const fetchReports = async () => {
     try {
@@ -90,40 +84,67 @@ const BranchDiscrepancies = () => {
     fetchReports();
   }, []);
 
+  const syncTrustedReportDate = async () => {
+    try {
+      const response = await discrepancyAPI.getBranchReportDate();
+      const trustedReportDate = response.data?.report_date || '';
+      if (trustedReportDate) {
+        setFormData((previous) => ({
+          ...previous,
+          report_date: trustedReportDate,
+        }));
+      }
+      return trustedReportDate;
+    } catch (dateError) {
+      console.error('Failed to load trusted discrepancy report date:', dateError);
+      setError(getFriendlyErrorMessage(dateError, 'Failed to load the current Report Date.'));
+      return '';
+    }
+  };
+
   const handleInputChange = (event) => {
     const { name, value, type, checked } = event.target;
     setFormData((previous) => ({
       ...previous,
       [name]: type === 'checkbox' ? checked : value,
     }));
+    setValidationErrors((current) => {
+      if (!current[name]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[name];
+      return next;
+    });
+    setError('');
   };
 
   const resetForm = () => {
-    setFormData(EMPTY_FORM);
+    setFormData(getInitialDiscrepancyForm());
+    setValidationErrors({});
     setAttachmentFile(null);
   };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    const nextValidationErrors = getDiscrepancyValidationErrors(formData);
+    if (Object.keys(nextValidationErrors).length) {
+      setValidationErrors(nextValidationErrors);
+      setError(getDiscrepancyValidationSummary(nextValidationErrors));
+      return;
+    }
     try {
       setSubmitting(true);
       setError('');
-      if (formData.report_date < todayDate) {
-        throw new Error("Report date cannot be earlier than today's date.");
-      }
-      if (!formData.title || !formData.title.trim()) {
-        throw new Error('Title/Subject is required.');
-      }
-      if (formData.discrepancy_type === 'Other' && !formData.other_specification.trim()) {
-        throw new Error('Please provide additional details for the "Other" discrepancy type.');
-      }
+      setValidationErrors({});
+      const trustedReportDate = await syncTrustedReportDate();
       const payload = new FormData();
-      payload.append('title', formData.title);
-      payload.append('report_date', formData.report_date);
-      payload.append('discrepancy_type', formData.discrepancy_type);
-      payload.append('description', formData.description);
-      payload.append('other_specification', formData.other_specification || '');
-      payload.append('supporting_documents', formData.supporting_documents || '');
+      payload.append('title', formData.title.trim());
+      payload.append('report_date', trustedReportDate || formData.report_date);
+      payload.append('discrepancy_type', formData.discrepancy_type.trim());
+      payload.append('description', formData.description.trim());
+      payload.append('other_specification', formData.other_specification.trim());
+      payload.append('supporting_documents', formData.supporting_documents.trim());
       payload.append('submitted_offline', String(formData.submitted_offline));
       if (attachmentFile) {
         payload.append('attachment', attachmentFile);
@@ -135,7 +156,7 @@ const BranchDiscrepancies = () => {
       window.dispatchEvent(new CustomEvent('branch-discrepancy-viewed'));
     } catch (submitError) {
       console.error('Failed to submit discrepancy report:', submitError);
-      setError(submitError.response?.data?.detail || submitError.message || 'Failed to submit discrepancy report.');
+      setError(getDiscrepancySubmitErrorMessage(submitError));
     } finally {
       setSubmitting(false);
     }
@@ -244,7 +265,18 @@ const BranchDiscrepancies = () => {
         subtitle="Submit and track discrepancies between system records and official collection records. Every submission is forwarded to Main Office for review, verification, and audit traceability."
         actions={(
           <button
-            onClick={() => setShowForm((previous) => !previous)}
+            onClick={async () => {
+              const nextShowForm = !showForm;
+              setError('');
+              if (!nextShowForm) {
+                setShowForm(false);
+                resetForm();
+                return;
+              }
+              resetForm();
+              setShowForm(true);
+              await syncTrustedReportDate();
+            }}
             className="rounded-2xl bg-blue-900 px-5 py-3 font-semibold text-white transition hover:bg-blue-800"
           >
             {showForm ? 'Cancel Report' : 'Report Discrepancy'}
@@ -260,7 +292,12 @@ const BranchDiscrepancies = () => {
       )}
 
       {showForm && (
-        <form onSubmit={handleSubmit} className="mb-8 rounded-[2rem] border border-slate-200 bg-white p-6 shadow-lg">
+        <form onSubmit={handleSubmit} noValidate className="mb-8 rounded-[2rem] border border-slate-200 bg-white p-6 shadow-lg">
+          {Object.keys(validationErrors).length ? (
+            <div className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">
+              Please correct the highlighted discrepancy fields before submitting.
+            </div>
+          ) : null}
           <div className="mb-4">
             <label className="mb-2 block text-sm font-semibold text-gray-700">Title / Subject</label>
             <input
@@ -268,23 +305,38 @@ const BranchDiscrepancies = () => {
               name="title"
               value={formData.title}
               onChange={handleInputChange}
-              className="w-full rounded-2xl border border-gray-300 px-4 py-3"
+              aria-invalid={validationErrors.title ? 'true' : 'false'}
+              className={`w-full rounded-2xl border px-4 py-3 ${
+                validationErrors.title ? 'border-rose-400 bg-rose-50' : 'border-gray-300'
+              }`}
               placeholder="e.g., System Error - Queue Registration Failed, Payment Record Mismatch"
+              maxLength={DISCREPANCY_TITLE_MAX_LENGTH}
               required
             />
+            {validationErrors.title ? (
+              <p className="mt-2 text-xs font-medium text-rose-600">{validationErrors.title}</p>
+            ) : null}
           </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
               <label className="mb-2 block text-sm font-semibold text-gray-700">Report Date</label>
               <input
-                type="date"
+                type="text"
                 name="report_date"
                 value={formData.report_date}
-                onChange={handleInputChange}
-                className="w-full rounded-2xl border border-gray-300 px-4 py-3"
-                min={todayDate}
+                readOnly
+                aria-readonly="true"
+                aria-invalid={validationErrors.report_date ? 'true' : 'false'}
+                className={`w-full rounded-2xl border px-4 py-3 text-slate-700 ${
+                  validationErrors.report_date ? 'border-rose-400 bg-rose-50' : 'border-gray-300 bg-slate-50'
+                }`}
                 required
               />
+              {validationErrors.report_date ? (
+                <p className="mt-2 text-xs font-medium text-rose-600">{validationErrors.report_date}</p>
+              ) : (
+                <p className="mt-2 text-xs text-slate-500">Automatically generated from the WARDS system date.</p>
+              )}
             </div>
             <div>
               <label className="mb-2 block text-sm font-semibold text-gray-700">Discrepancy Type</label>
@@ -292,7 +344,10 @@ const BranchDiscrepancies = () => {
                 name="discrepancy_type"
                 value={formData.discrepancy_type}
                 onChange={handleInputChange}
-                className="w-full rounded-2xl border border-gray-300 px-4 py-3"
+                aria-invalid={validationErrors.discrepancy_type ? 'true' : 'false'}
+                className={`w-full rounded-2xl border px-4 py-3 ${
+                  validationErrors.discrepancy_type ? 'border-rose-400 bg-rose-50' : 'border-gray-300'
+                }`}
                 required
               >
                 <option value="">Select type</option>
@@ -303,6 +358,9 @@ const BranchDiscrepancies = () => {
                 <option value="Offline Collection Encoding">Offline Collection Encoding</option>
                 <option value="Other">Other</option>
               </select>
+              {validationErrors.discrepancy_type ? (
+                <p className="mt-2 text-xs font-medium text-rose-600">{validationErrors.discrepancy_type}</p>
+              ) : null}
             </div>
           </div>
 
@@ -314,10 +372,16 @@ const BranchDiscrepancies = () => {
                 value={formData.other_specification}
                 onChange={handleInputChange}
                 rows="3"
-                className="w-full rounded-2xl border border-gray-300 px-4 py-3"
+                aria-invalid={validationErrors.other_specification ? 'true' : 'false'}
+                className={`w-full rounded-2xl border px-4 py-3 ${
+                  validationErrors.other_specification ? 'border-rose-400 bg-rose-50' : 'border-gray-300'
+                }`}
                 placeholder="Provide the exact discrepancy category or special circumstance."
                 required
               ></textarea>
+              {validationErrors.other_specification ? (
+                <p className="mt-2 text-xs font-medium text-rose-600">{validationErrors.other_specification}</p>
+              ) : null}
             </div>
           )}
 
@@ -328,10 +392,16 @@ const BranchDiscrepancies = () => {
               value={formData.description}
               onChange={handleInputChange}
               rows="5"
-              className="w-full rounded-2xl border border-gray-300 px-4 py-3"
+              aria-invalid={validationErrors.description ? 'true' : 'false'}
+              className={`w-full rounded-2xl border px-4 py-3 ${
+                validationErrors.description ? 'border-rose-400 bg-rose-50' : 'border-gray-300'
+              }`}
               placeholder="Describe the discrepancy and the affected records..."
               required
             ></textarea>
+            {validationErrors.description ? (
+              <p className="mt-2 text-xs font-medium text-rose-600">{validationErrors.description}</p>
+            ) : null}
           </div>
 
           <div className="mt-4">
@@ -373,6 +443,7 @@ const BranchDiscrepancies = () => {
               onClick={() => {
                 setShowForm(false);
                 resetForm();
+                setError('');
               }}
               className="flex-1 rounded-2xl bg-gray-300 py-3 font-semibold text-gray-700 transition hover:bg-gray-400"
             >

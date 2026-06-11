@@ -339,10 +339,11 @@ export const memoAPI = {
 };
 
 export const discrepancyAPI = {
-  getBranchReports: () => api.get('/discrepancies/branch'),
-  getBranchUnreadCount: () => api.get('/discrepancies/branch/unread-count'),
-  createBranchReport: (data) => api.post('/discrepancies/branch', data, {
-    headers: { 'Content-Type': 'multipart/form-data' }
+    getBranchReports: () => api.get('/discrepancies/branch'),
+    getBranchReportDate: () => api.get('/discrepancies/branch/report-date'),
+    getBranchUnreadCount: () => api.get('/discrepancies/branch/unread-count'),
+    createBranchReport: (data) => api.post('/discrepancies/branch', data, {
+      headers: { 'Content-Type': 'multipart/form-data' }
   }),
   deleteBranchReport: (reportId) => api.delete(`/discrepancies/branch/${reportId}`),
   markBranchViewed: (reportId) => api.put(`/discrepancies/branch/${reportId}/mark-viewed`),

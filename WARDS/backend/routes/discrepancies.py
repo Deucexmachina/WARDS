@@ -297,17 +297,28 @@ def log_action(db: Session, action: str, user: str, details: str, log_type: str)
     db.add(ActivityLog(action=action, user=user, details=details, type=log_type))
 
 
-def validate_report_date(report_date: str) -> str:
+def get_trusted_report_date() -> str:
+    return datetime.now(MANILA_TZ).date().isoformat()
+
+
+def validate_locked_report_date(report_date: str | None) -> str:
+    trusted_report_date = get_trusted_report_date()
+    if report_date is None:
+        return trusted_report_date
+
+    normalized_report_date = report_date.strip()
+    if not normalized_report_date:
+        return trusted_report_date
+
     try:
-        parsed = date.fromisoformat(report_date)
+        parsed = date.fromisoformat(normalized_report_date)
     except ValueError as error:
-        raise HTTPException(status_code=400, detail="Report date must use YYYY-MM-DD format") from error
+        raise HTTPException(status_code=400, detail="Report Date must use YYYY-MM-DD format.") from error
 
-    today_in_manila = datetime.now(MANILA_TZ).date()
-    if parsed < today_in_manila:
-        raise HTTPException(status_code=400, detail="Report date cannot be earlier than today's date")
+    if parsed.isoformat() != trusted_report_date:
+        raise HTTPException(status_code=400, detail="Report Date is generated automatically and cannot be modified.")
 
-    return parsed.isoformat()
+    return trusted_report_date
 
 
 async def save_attachment(attachment: UploadFile | None) -> tuple[str | None, str | None]:
@@ -363,10 +374,17 @@ async def get_branch_discrepancies(
     return [serialize_discrepancy(report) for report in reports]
 
 
+@router.get("/branch/report-date")
+async def get_branch_discrepancy_report_date(
+    current_staff: BranchStaff = Depends(get_current_branch_staff),
+):
+    return {"report_date": get_trusted_report_date()}
+
+
 @router.post("/branch")
 async def create_branch_discrepancy(
     title: str = Form(...),
-    report_date: str = Form(...),
+    report_date: str | None = Form(None),
     discrepancy_type: str = Form(...),
     system_amount: float | None = Form(None),
     actual_amount: float | None = Form(None),
@@ -382,24 +400,26 @@ async def create_branch_discrepancy(
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
 
-    normalized_report_date = validate_report_date(report_date)
+    trusted_report_date = validate_locked_report_date(report_date)
 
     normalized_title = title.strip()
     if not normalized_title:
-        raise HTTPException(status_code=400, detail="Discrepancy title is required")
+        raise HTTPException(status_code=400, detail="Please enter the Title / Subject.")
+    if len(normalized_title) > 255:
+        raise HTTPException(status_code=400, detail="Title / Subject must not exceed 255 characters.")
 
     description = description.strip()
     if not description:
-        raise HTTPException(status_code=400, detail="Discrepancy details are required")
+        raise HTTPException(status_code=400, detail="Please enter the Discrepancy Details.")
 
     normalized_discrepancy_type = discrepancy_type.strip()
     if not normalized_discrepancy_type:
-        raise HTTPException(status_code=400, detail="Discrepancy type is required")
+        raise HTTPException(status_code=400, detail="Please select the Discrepancy Type.")
     normalized_other_specification = (other_specification or "").strip()
     if normalized_discrepancy_type.lower() == "other" and not normalized_other_specification:
         raise HTTPException(
             status_code=400,
-            detail="Please provide additional details when discrepancy type is set to Other",
+            detail="Please provide additional details for the Other discrepancy type.",
         )
     if normalized_other_specification:
         description = f"{description}\n\nOther specification: {normalized_other_specification}"
@@ -410,7 +430,7 @@ async def create_branch_discrepancy(
     report = DiscrepancyReport(
         branch_id=current_staff.branch_id,
         title=normalized_title,
-        report_date=normalized_report_date,
+        report_date=trusted_report_date,
         discrepancy_type=normalized_discrepancy_type,
         system_amount=system_amount,
         actual_amount=actual_amount,
