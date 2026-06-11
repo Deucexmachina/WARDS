@@ -131,7 +131,7 @@ async def create_memo(
         validate_upload_file(
             attachment,
             file_bytes,
-            allowed_extensions={".pdf", ".png", ".jpg", ".jpeg"},
+            allowed_extensions={".pdf", ".png", ".jpg", ".jpeg", ".doc", ".docx", ".xls", ".xlsx"},
         )
 
         upload_dir = Path("uploads/memos")
@@ -215,7 +215,7 @@ async def update_memo(
         validate_upload_file(
             attachment,
             file_bytes,
-            allowed_extensions={".pdf", ".png", ".jpg", ".jpeg"},
+            allowed_extensions={".pdf", ".png", ".jpg", ".jpeg", ".doc", ".docx", ".xls", ".xlsx"},
         )
 
         upload_dir = Path("uploads/memos")

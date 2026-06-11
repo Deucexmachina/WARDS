@@ -3,6 +3,8 @@ import api from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
+import SystemMessageModal from '../../components/SystemMessageModal';
+import ActionConfirmationModal from '../../components/ActionConfirmationModal';
 import { UNREAD_CARD_HIGHLIGHT_CLASS, UNREAD_STATUS_BADGE_CLASS } from '../../utils/notificationUI';
 
 const EMPTY_FORM = {
@@ -33,6 +35,11 @@ const BranchMemos = () => {
   const [memoToDelete, setMemoToDelete] = useState(null);
   const [saving, setSaving] = useState(false);
   const [formState, setFormState] = useState(EMPTY_FORM);
+  const [fileErrorModal, setFileErrorModal] = useState({ open: false, title: '', message: '' });
+  const [validationErrors, setValidationErrors] = useState({});
+  const [showUpdateConfirm, setShowUpdateConfirm] = useState(false);
+  const [updateSuccessModal, setUpdateSuccessModal] = useState({ open: false, title: '', message: '' });
+  const [updateErrorModal, setUpdateErrorModal] = useState({ open: false, title: '', message: '' });
   const branchUser = JSON.parse(localStorage.getItem('branchUser') || '{}');
   const isBranchAdmin = branchUser?.role === 'branch_admin' || branchUser?.internal_role === 'branch_admin';
 
@@ -120,6 +127,8 @@ const BranchMemos = () => {
   const openCreateForm = () => {
     setEditingMemo(null);
     setFormState(EMPTY_FORM);
+    setValidationErrors({});
+    setError('');
     setShowFormModal(true);
   };
 
@@ -131,6 +140,8 @@ const BranchMemos = () => {
       priority: memo.priority || 'normal',
       attachment: null,
     });
+    setValidationErrors({});
+    setError('');
     setShowFormModal(true);
   };
 
@@ -138,27 +149,59 @@ const BranchMemos = () => {
     setShowFormModal(false);
     setEditingMemo(null);
     setFormState(EMPTY_FORM);
+    setValidationErrors({});
+    setError('');
   };
 
   const handleInputChange = (event) => {
     const { name, value } = event.target;
     setFormState((current) => ({ ...current, [name]: value }));
+    if (validationErrors[name]) {
+      setValidationErrors((current) => ({ ...current, [name]: '' }));
+    }
   };
+
+  const ALLOWED_MEMO_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.pdf', '.doc', '.docx', '.xls', '.xlsx'];
 
   const handleFileChange = (event) => {
     const file = event.target.files?.[0] || null;
+    if (file) {
+      const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
+      if (!ALLOWED_MEMO_EXTENSIONS.includes(ext)) {
+        setFileErrorModal({
+          open: true,
+          title: 'Invalid File Type',
+          message: 'Only JPG, PNG, Word, Excel, and PDF files are allowed.',
+        });
+        event.target.value = '';
+        return;
+      }
+    }
     setFormState((current) => ({ ...current, attachment: file }));
   };
 
-  const handleSaveMemo = async () => {
-    if (!formState.title.trim() || !formState.content.trim()) {
-      setError('Memo title and content are required.');
-      return;
+  const validateMemoForm = () => {
+    const errors = {};
+    if (!formState.title.trim()) {
+      errors.title = 'Please enter the Memo Title.';
     }
+    if (!formState.content.trim()) {
+      errors.content = 'Please enter the Memo Details.';
+    }
+    if (!formState.priority) {
+      errors.priority = 'Please select a priority level.';
+    }
+    setValidationErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
 
-    setSaving(true);
-    setError('');
+  const executeSave = async () => {
+    const isEditing = Boolean(editingMemo);
     try {
+      setSaving(true);
+      setError('');
+      setValidationErrors({});
+      setShowUpdateConfirm(false);
       const formData = new FormData();
       formData.append('title', formState.title.trim());
       formData.append('content', formState.content.trim());
@@ -166,18 +209,47 @@ const BranchMemos = () => {
       if (formState.attachment) {
         formData.append('attachment', formState.attachment);
       }
-      if (editingMemo) {
+      if (isEditing) {
         await api.put(`/branch/memos/${editingMemo.id}`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
       } else {
         await api.post('/branch/memos', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
       }
       closeFormModal();
       await fetchMemos();
+      if (isEditing) {
+        setUpdateSuccessModal({
+          open: true,
+          title: 'Memo Updated Successfully',
+          message: 'The memo has been updated successfully.',
+        });
+      }
     } catch (saveError) {
-      setError(saveError.response?.data?.detail || 'Failed to save internal memo.');
+      if (isEditing) {
+        setUpdateErrorModal({
+          open: true,
+          title: 'Unable to Update Memo',
+          message: 'An unexpected error occurred while updating the memo. Please try again.',
+        });
+      } else {
+        setError(saveError.response?.data?.detail || 'Failed to save internal memo.');
+      }
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSaveMemo = async () => {
+    if (!validateMemoForm()) {
+      setError('Please review the highlighted fields.');
+      return;
+    }
+
+    if (editingMemo) {
+      setShowUpdateConfirm(true);
+      return;
+    }
+
+    await executeSave();
   };
 
   const handleDeleteMemo = async (memoId) => {
@@ -482,9 +554,14 @@ const BranchMemos = () => {
                   name="title"
                   value={formState.title}
                   onChange={handleInputChange}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
+                  className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent ${
+                    validationErrors.title ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                  }`}
                   placeholder="Administrative policy, internal announcement, or operations memo"
                 />
+                {validationErrors.title && (
+                  <p className="mt-2 text-sm font-semibold text-red-600">{validationErrors.title}</p>
+                )}
               </div>
 
               <div>
@@ -494,9 +571,14 @@ const BranchMemos = () => {
                   value={formState.content}
                   onChange={handleInputChange}
                   rows="8"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
+                  className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent ${
+                    validationErrors.content ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                  }`}
                   placeholder="Write the full memo here..."
                 ></textarea>
+                {validationErrors.content && (
+                  <p className="mt-2 text-sm font-semibold text-red-600">{validationErrors.content}</p>
+                )}
               </div>
 
               <div>
@@ -505,12 +587,17 @@ const BranchMemos = () => {
                   name="priority"
                   value={formState.priority}
                   onChange={handleInputChange}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
+                  className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent ${
+                    validationErrors.priority ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                  }`}
                 >
                   <option value="low">Low</option>
                   <option value="normal">Normal</option>
                   <option value="high">High</option>
                 </select>
+                {validationErrors.priority && (
+                  <p className="mt-2 text-sm font-semibold text-red-600">{validationErrors.priority}</p>
+                )}
               </div>
 
               <div>
@@ -518,7 +605,7 @@ const BranchMemos = () => {
                 <input
                   type="file"
                   onChange={handleFileChange}
-                  accept=".pdf,.jpg,.jpeg,.png"
+                  accept=".jpg,.jpeg,.png,.pdf,.doc,.docx,.xls,.xlsx"
                   className="mb-4 w-full cursor-pointer rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm shadow-sm file:mr-4 file:rounded-xl file:border-0 file:bg-[#0f2f5f] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:border-blue-400 hover:bg-slate-50 focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-slate-200 transition"
                 />
                 {formState.attachment && (
@@ -532,7 +619,7 @@ const BranchMemos = () => {
                   </p>
                 )}
                 <p className="mt-2 text-xs text-gray-500">
-                  Supported formats: PDF, Word, Excel, Text, Images (Max 10MB)
+                  Supported formats: JPG, JPEG, PNG, PDF, Word, Excel (Max 10MB)
                 </p>
               </div>
             </div>
@@ -555,6 +642,46 @@ const BranchMemos = () => {
           </div>
         </div>
       )}
+
+      <SystemMessageModal
+        open={fileErrorModal.open}
+        tone="error"
+        title={fileErrorModal.title}
+        message={fileErrorModal.message}
+        buttonLabel="OK"
+        onClose={() => setFileErrorModal({ ...fileErrorModal, open: false })}
+      />
+
+      <ActionConfirmationModal
+        open={showUpdateConfirm}
+        title="Confirm Memo Update"
+        message="Are you sure you want to save the changes made to this memo?"
+        confirmLabel="Yes, Update Memo"
+        cancelLabel="Cancel"
+        tone="primary"
+        isLoading={saving}
+        loadingLabel="Updating..."
+        onCancel={() => setShowUpdateConfirm(false)}
+        onConfirm={executeSave}
+      />
+
+      <SystemMessageModal
+        open={updateSuccessModal.open}
+        tone="success"
+        title={updateSuccessModal.title}
+        message={updateSuccessModal.message}
+        buttonLabel="OK"
+        onClose={() => setUpdateSuccessModal({ ...updateSuccessModal, open: false })}
+      />
+
+      <SystemMessageModal
+        open={updateErrorModal.open}
+        tone="error"
+        title={updateErrorModal.title}
+        message={updateErrorModal.message}
+        buttonLabel="OK"
+        onClose={() => setUpdateErrorModal({ ...updateErrorModal, open: false })}
+      />
 
       <DeleteConfirmationModal
         open={Boolean(memoToDelete)}

@@ -2027,7 +2027,7 @@ def _store_memo_attachment(attachment: Optional[UploadFile]) -> tuple[str | None
     validate_upload_file(
         attachment,
         file_bytes,
-        allowed_extensions={".pdf", ".png", ".jpg", ".jpeg"},
+        allowed_extensions={".pdf", ".png", ".jpg", ".jpeg", ".doc", ".docx", ".xls", ".xlsx"},
     )
 
     upload_dir = Path("uploads/memos")

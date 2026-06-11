@@ -3,6 +3,8 @@ import api, { memoAPI } from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
+import SystemMessageModal from '../../components/SystemMessageModal';
+import ActionConfirmationModal from '../../components/ActionConfirmationModal';
 import { UNREAD_CARD_HIGHLIGHT_CLASS, UNREAD_STATUS_BADGE_CLASS } from '../../utils/notificationUI';
 
 const EMPTY_FORM = {
@@ -36,6 +38,11 @@ const Memos = () => {
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedContent, setExpandedContent] = useState(false);
+  const [fileErrorModal, setFileErrorModal] = useState({ open: false, title: '', message: '' });
+  const [validationErrors, setValidationErrors] = useState({});
+  const [showUpdateConfirm, setShowUpdateConfirm] = useState(false);
+  const [updateSuccessModal, setUpdateSuccessModal] = useState({ open: false, title: '', message: '' });
+  const [updateErrorModal, setUpdateErrorModal] = useState({ open: false, title: '', message: '' });
 
   const fetchMemoModule = async () => {
     try {
@@ -79,6 +86,8 @@ const Memos = () => {
   const openCreateModal = () => {
     setEditingMemo(null);
     setFormData(EMPTY_FORM);
+    setValidationErrors({});
+    setError('');
     setShowFormModal(true);
   };
 
@@ -92,6 +101,8 @@ const Memos = () => {
       priority: memo.priority || 'normal',
       attachment: null,
     });
+    setValidationErrors({});
+    setError('');
     setShowFormModal(true);
   };
 
@@ -121,6 +132,8 @@ const Memos = () => {
     setShowFormModal(false);
     setEditingMemo(null);
     setFormData(EMPTY_FORM);
+    setValidationErrors({});
+    setError('');
   };
 
   const closeViewModal = () => {
@@ -132,10 +145,30 @@ const Memos = () => {
   const handleInputChange = (event) => {
     const { name, value } = event.target;
     setFormData((previous) => ({ ...previous, [name]: value }));
+    if (validationErrors[name]) {
+      setValidationErrors((previous) => ({ ...previous, [name]: '' }));
+    }
+    if (name === 'recipient_type' && validationErrors.recipients) {
+      setValidationErrors((previous) => ({ ...previous, recipients: '' }));
+    }
   };
+
+  const ALLOWED_MEMO_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.pdf', '.doc', '.docx', '.xls', '.xlsx'];
 
   const handleFileChange = (event) => {
     const file = event.target.files?.[0] || null;
+    if (file) {
+      const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
+      if (!ALLOWED_MEMO_EXTENSIONS.includes(ext)) {
+        setFileErrorModal({
+          open: true,
+          title: 'Invalid File Type',
+          message: 'Only JPG, PNG, Word, Excel, and PDF files are allowed.',
+        });
+        event.target.value = '';
+        return;
+      }
+    }
     setFormData((previous) => ({ ...previous, attachment: file }));
   };
 
@@ -146,6 +179,27 @@ const Memos = () => {
         ? previous.recipient_branch_ids.filter((id) => id !== branchId)
         : [...previous.recipient_branch_ids, branchId],
     }));
+    if (validationErrors.recipients) {
+      setValidationErrors((previous) => ({ ...previous, recipients: '' }));
+    }
+  };
+
+  const validateMemoForm = () => {
+    const errors = {};
+    if (!formData.title.trim()) {
+      errors.title = 'Please enter the Memo Title.';
+    }
+    if (!formData.content.trim()) {
+      errors.content = 'Please enter the Memo Details.';
+    }
+    if (!formData.priority) {
+      errors.priority = 'Please select a priority level.';
+    }
+    if (formData.recipient_type === 'specific_branches' && !formData.recipient_branch_ids.length) {
+      errors.recipients = 'Please select a recipient.';
+    }
+    setValidationErrors(errors);
+    return Object.keys(errors).length === 0;
   };
 
   const buildPayload = () => {
@@ -163,33 +217,55 @@ const Memos = () => {
     return payload;
   };
 
-  const handleSaveMemo = async () => {
-    if (!formData.title.trim() || !formData.content.trim()) {
-      setError('Memo title and content are required.');
-      return;
-    }
-
-    if (formData.recipient_type === 'specific_branches' && !formData.recipient_branch_ids.length) {
-      setError('Select at least one branch recipient.');
-      return;
-    }
-
+  const executeSave = async () => {
+    const isEditing = Boolean(editingMemo);
     try {
       setSaving(true);
       setError('');
-      if (editingMemo) {
+      setValidationErrors({});
+      setShowUpdateConfirm(false);
+      if (isEditing) {
         await memoAPI.update(editingMemo.id, buildPayload());
       } else {
         await memoAPI.create(buildPayload());
       }
       closeFormModal();
       await fetchMemoModule();
+      if (isEditing) {
+        setUpdateSuccessModal({
+          open: true,
+          title: 'Memo Updated Successfully',
+          message: 'The memo has been updated successfully.',
+        });
+      }
     } catch (saveError) {
       console.error('Failed to save memo:', saveError);
-      setError(saveError.response?.data?.detail || 'Failed to save memo.');
+      if (isEditing) {
+        setUpdateErrorModal({
+          open: true,
+          title: 'Unable to Update Memo',
+          message: 'An unexpected error occurred while updating the memo. Please try again.',
+        });
+      } else {
+        setError(saveError.response?.data?.detail || 'Failed to save memo.');
+      }
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSaveMemo = async () => {
+    if (!validateMemoForm()) {
+      setError('Please review the highlighted fields.');
+      return;
+    }
+
+    if (editingMemo) {
+      setShowUpdateConfirm(true);
+      return;
+    }
+
+    await executeSave();
   };
 
   const handleDeleteMemo = async (memoId) => {
@@ -512,9 +588,14 @@ const Memos = () => {
                   name="title"
                   value={formData.title}
                   onChange={handleInputChange}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
+                  className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent ${
+                    validationErrors.title ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                  }`}
                   placeholder="Administrative policy, internal announcement, or operations memo"
                 />
+                {validationErrors.title && (
+                  <p className="mt-2 text-sm font-semibold text-red-600">{validationErrors.title}</p>
+                )}
               </div>
 
               <div>
@@ -524,9 +605,14 @@ const Memos = () => {
                   value={formData.content}
                   onChange={handleInputChange}
                   rows="8"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
+                  className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent ${
+                    validationErrors.content ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                  }`}
                   placeholder="Write the full memo here..."
                 ></textarea>
+                {validationErrors.content && (
+                  <p className="mt-2 text-sm font-semibold text-red-600">{validationErrors.content}</p>
+                )}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -536,12 +622,17 @@ const Memos = () => {
                     name="priority"
                     value={formData.priority}
                     onChange={handleInputChange}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
+                    className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent ${
+                      validationErrors.priority ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                    }`}
                   >
                     <option value="low">Low</option>
                     <option value="normal">Normal</option>
                     <option value="high">High</option>
                   </select>
+                  {validationErrors.priority && (
+                    <p className="mt-2 text-sm font-semibold text-red-600">{validationErrors.priority}</p>
+                  )}
                 </div>
 
                 <div>
@@ -561,7 +652,7 @@ const Memos = () => {
               {formData.recipient_type === 'specific_branches' && (
                 <div>
                   <label className="block text-gray-700 font-semibold mb-3">Select Branch Recipients</label>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className={`grid grid-cols-1 md:grid-cols-2 gap-3 ${validationErrors.recipients ? 'rounded-lg border border-red-500 bg-red-50 p-3' : ''}`}>
                     {branches.map((branch) => (
                       <label
                         key={branch.id}
@@ -580,6 +671,9 @@ const Memos = () => {
                       </label>
                     ))}
                   </div>
+                  {validationErrors.recipients && (
+                    <p className="mt-2 text-sm font-semibold text-red-600">{validationErrors.recipients}</p>
+                  )}
                 </div>
               )}
 
@@ -588,7 +682,7 @@ const Memos = () => {
                 <input
                   type="file"
                   onChange={handleFileChange}
-                  accept=".pdf,.jpg,.jpeg,.png"
+                  accept=".jpg,.jpeg,.png,.pdf,.doc,.docx,.xls,.xlsx"
                   className="mb-4 w-full cursor-pointer rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm shadow-sm file:mr-4 file:rounded-xl file:border-0 file:bg-[#0f2f5f] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:border-blue-400 hover:bg-slate-50 focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-slate-200 transition"
                 />
                 {formData.attachment && (
@@ -602,7 +696,7 @@ const Memos = () => {
                   </p>
                 )}
                 <p className="mt-2 text-xs text-gray-500">
-                  Supported formats: PDF, Word, Excel, Text, Images (Max 10MB)
+                  Supported formats: JPG, JPEG, PNG, PDF, Word, Excel (Max 10MB)
                 </p>
               </div>
             </div>
@@ -625,6 +719,46 @@ const Memos = () => {
           </div>
         </div>
       )}
+
+      <SystemMessageModal
+        open={fileErrorModal.open}
+        tone="error"
+        title={fileErrorModal.title}
+        message={fileErrorModal.message}
+        buttonLabel="OK"
+        onClose={() => setFileErrorModal({ ...fileErrorModal, open: false })}
+      />
+
+      <ActionConfirmationModal
+        open={showUpdateConfirm}
+        title="Confirm Memo Update"
+        message="Are you sure you want to save the changes made to this memo?"
+        confirmLabel="Yes, Update Memo"
+        cancelLabel="Cancel"
+        tone="primary"
+        isLoading={saving}
+        loadingLabel="Updating..."
+        onCancel={() => setShowUpdateConfirm(false)}
+        onConfirm={executeSave}
+      />
+
+      <SystemMessageModal
+        open={updateSuccessModal.open}
+        tone="success"
+        title={updateSuccessModal.title}
+        message={updateSuccessModal.message}
+        buttonLabel="OK"
+        onClose={() => setUpdateSuccessModal({ ...updateSuccessModal, open: false })}
+      />
+
+      <SystemMessageModal
+        open={updateErrorModal.open}
+        tone="error"
+        title={updateErrorModal.title}
+        message={updateErrorModal.message}
+        buttonLabel="OK"
+        onClose={() => setUpdateErrorModal({ ...updateErrorModal, open: false })}
+      />
 
       <DeleteConfirmationModal
         open={Boolean(memoToDelete)}
