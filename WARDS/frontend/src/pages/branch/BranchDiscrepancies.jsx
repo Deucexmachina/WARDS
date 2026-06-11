@@ -1,17 +1,16 @@
 import { useEffect, useState } from 'react';
+import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
+import WardsPageHero from '../../components/WardsPageHero';
+import {
+  DiscrepancyInfoCard,
+  DiscrepancySection,
+  DiscrepancyStatusBadge,
+  DiscrepancyTimelineEntry,
+  discrepancyModalHeaderClass,
+  discrepancyModalShellClass,
+} from '../../components/discrepancies/DiscrepancyUI';
 import { discrepancyAPI } from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
-import WardsPageHero from '../../components/WardsPageHero';
-
-const statusStyles = {
-  'Pending Review': 'bg-yellow-100 text-yellow-800',
-  'Under Review': 'bg-blue-100 text-blue-800',
-  Verified: 'bg-green-100 text-green-800',
-  Fixed: 'bg-teal-100 text-teal-800',
-  Responded: 'bg-purple-100 text-purple-800',
-  Solved: 'bg-emerald-100 text-emerald-800',
-  Rejected: 'bg-red-100 text-red-800',
-};
 
 const EMPTY_FORM = {
   title: '',
@@ -22,6 +21,7 @@ const EMPTY_FORM = {
   supporting_documents: '',
   submitted_offline: false,
 };
+
 const CLOSED_STATUSES = new Set(['Solved', 'Rejected']);
 
 const getTodayDate = () => {
@@ -32,24 +32,16 @@ const getTodayDate = () => {
 
 const formatDateTime = (value) => formatUtc8DateTime(value);
 
-const getThreadRoleLabel = (entry) => {
-  if (entry.label) return entry.label;
-  if (entry.sender_role === 'initial_report') return 'Branch Admin Reported';
-  if (entry.sender_role === 'main_admin') return 'Main Admin Reply';
-  if (entry.sender_role === 'branch_admin') return 'Branch Admin Reply';
-  return 'Branch Admin Reported';
-};
-
-const getThreadCardStyles = (entry) => {
-  if (entry.sender_role === 'main_admin') {
-    return 'border-blue-200 bg-blue-50';
+const formatCurrency = (value) => {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return 'Not provided';
   }
-  return 'border-green-200 bg-green-50';
-};
 
-const getThreadStatusLabel = (entry) => {
-  if (!entry.status) return null;
-  return entry.status;
+  return new Intl.NumberFormat('en-PH', {
+    style: 'currency',
+    currency: 'PHP',
+    minimumFractionDigits: 2,
+  }).format(Number(value));
 };
 
 const getLatestCounterpartyMessage = (report) => {
@@ -65,6 +57,7 @@ const getLatestCounterpartyMessage = (report) => {
 const BranchDiscrepancies = () => {
   const branchUser = JSON.parse(localStorage.getItem('branchUser') || '{}');
   const isBranchAdmin = branchUser?.role === 'branch_admin' || branchUser?.internal_role === 'branch_admin';
+  const branchRoleLabel = isBranchAdmin ? 'Branch Admin' : 'Branch Staff';
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -252,7 +245,7 @@ const BranchDiscrepancies = () => {
         actions={(
           <button
             onClick={() => setShowForm((previous) => !previous)}
-            className="rounded-lg bg-blue-900 px-5 py-3 font-semibold text-white transition hover:bg-blue-800"
+            className="rounded-2xl bg-blue-900 px-5 py-3 font-semibold text-white transition hover:bg-blue-800"
           >
             {showForm ? 'Cancel Report' : 'Report Discrepancy'}
           </button>
@@ -261,13 +254,13 @@ const BranchDiscrepancies = () => {
       />
 
       {error && (
-        <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-red-700">
+        <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-red-700">
           {error}
         </div>
       )}
 
       {showForm && (
-        <form onSubmit={handleSubmit} className="mb-8 rounded-xl border border-gray-200 bg-white p-6 shadow">
+        <form onSubmit={handleSubmit} className="mb-8 rounded-[2rem] border border-slate-200 bg-white p-6 shadow-lg">
           <div className="mb-4">
             <label className="mb-2 block text-sm font-semibold text-gray-700">Title / Subject</label>
             <input
@@ -275,7 +268,7 @@ const BranchDiscrepancies = () => {
               name="title"
               value={formData.title}
               onChange={handleInputChange}
-              className="w-full rounded-lg border border-gray-300 px-4 py-3"
+              className="w-full rounded-2xl border border-gray-300 px-4 py-3"
               placeholder="e.g., System Error - Queue Registration Failed, Payment Record Mismatch"
               required
             />
@@ -288,7 +281,7 @@ const BranchDiscrepancies = () => {
                 name="report_date"
                 value={formData.report_date}
                 onChange={handleInputChange}
-                className="w-full rounded-lg border border-gray-300 px-4 py-3"
+                className="w-full rounded-2xl border border-gray-300 px-4 py-3"
                 min={todayDate}
                 required
               />
@@ -299,7 +292,7 @@ const BranchDiscrepancies = () => {
                 name="discrepancy_type"
                 value={formData.discrepancy_type}
                 onChange={handleInputChange}
-                className="w-full rounded-lg border border-gray-300 px-4 py-3"
+                className="w-full rounded-2xl border border-gray-300 px-4 py-3"
                 required
               >
                 <option value="">Select type</option>
@@ -321,7 +314,7 @@ const BranchDiscrepancies = () => {
                 value={formData.other_specification}
                 onChange={handleInputChange}
                 rows="3"
-                className="w-full rounded-lg border border-gray-300 px-4 py-3"
+                className="w-full rounded-2xl border border-gray-300 px-4 py-3"
                 placeholder="Provide the exact discrepancy category or special circumstance."
                 required
               ></textarea>
@@ -335,7 +328,7 @@ const BranchDiscrepancies = () => {
               value={formData.description}
               onChange={handleInputChange}
               rows="5"
-              className="w-full rounded-lg border border-gray-300 px-4 py-3"
+              className="w-full rounded-2xl border border-gray-300 px-4 py-3"
               placeholder="Describe the discrepancy and the affected records..."
               required
             ></textarea>
@@ -348,7 +341,7 @@ const BranchDiscrepancies = () => {
               name="supporting_documents"
               value={formData.supporting_documents}
               onChange={handleInputChange}
-              className="w-full rounded-lg border border-gray-300 px-4 py-3"
+              className="w-full rounded-2xl border border-gray-300 px-4 py-3"
               placeholder="Receipt numbers, file names, batch notes, or collection sheet references"
             />
           </div>
@@ -359,7 +352,7 @@ const BranchDiscrepancies = () => {
               type="file"
               accept=".pdf,.png,.jpg,.jpeg"
               onChange={(event) => setAttachmentFile(event.target.files?.[0] || null)}
-              className="w-full rounded-lg border border-gray-300 px-4 py-3 file:mr-4 file:rounded-md file:border-0 file:bg-blue-100 file:px-4 file:py-2 file:font-semibold file:text-blue-900"
+              className="w-full rounded-2xl border border-gray-300 px-4 py-3 file:mr-4 file:rounded-xl file:border-0 file:bg-blue-100 file:px-4 file:py-2 file:font-semibold file:text-blue-900"
             />
             <p className="mt-2 text-xs text-gray-500">Accepted files: PDF, PNG, or JPEG only.</p>
           </div>
@@ -381,14 +374,14 @@ const BranchDiscrepancies = () => {
                 setShowForm(false);
                 resetForm();
               }}
-              className="flex-1 rounded-lg bg-gray-300 py-3 font-semibold text-gray-700 transition hover:bg-gray-400"
+              className="flex-1 rounded-2xl bg-gray-300 py-3 font-semibold text-gray-700 transition hover:bg-gray-400"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={submitting}
-              className="flex-1 rounded-lg bg-blue-900 py-3 font-semibold text-white transition hover:bg-blue-800 disabled:opacity-50"
+              className="flex-1 rounded-2xl bg-blue-900 py-3 font-semibold text-white transition hover:bg-blue-800 disabled:opacity-50"
             >
               {submitting ? 'Submitting...' : 'Submit Discrepancy'}
             </button>
@@ -396,7 +389,7 @@ const BranchDiscrepancies = () => {
         </form>
       )}
 
-      <div className="rounded-xl bg-white p-6 shadow">
+      <div className="rounded-[2rem] bg-white p-6 shadow-lg">
         {loading ? (
           <div className="py-8 text-center text-gray-500">Loading discrepancy reports...</div>
         ) : reports.length === 0 ? (
@@ -426,7 +419,7 @@ const BranchDiscrepancies = () => {
                           {hasUnreadUpdate(report) && (
                             <span className="flex h-2 w-2">
                               <span className="animate-ping absolute inline-flex h-2 w-2 rounded-full bg-blue-400 opacity-75"></span>
-                              <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                              <span className="relative inline-flex h-2 w-2 rounded-full bg-blue-500"></span>
                             </span>
                           )}
                         </div>
@@ -436,15 +429,13 @@ const BranchDiscrepancies = () => {
                       </td>
                       <td className="px-4 py-3">{report.discrepancy_type}</td>
                       <td className="px-4 py-3">
-                        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusStyles[report.status] || 'bg-slate-100 text-slate-700'}`}>
-                          {report.status}
-                        </span>
+                        <DiscrepancyStatusBadge status={report.status} />
                       </td>
                       <td className="px-4 py-3 text-gray-700">
                         {latestAdminMessage ? (
                           <div className="flex items-start gap-2">
-                            {hasUnreadUpdate(report) && <span className="text-blue-600 font-bold">NEW:</span>}
-                            <span className="line-clamp-2 max-w-xs block">
+                            {hasUnreadUpdate(report) && <span className="font-bold text-blue-600">NEW:</span>}
+                            <span className="block max-w-xs line-clamp-2">
                               {latestAdminMessage.message || `Status updated to ${latestAdminMessage.status || report.status}.`}
                             </span>
                           </div>
@@ -457,13 +448,13 @@ const BranchDiscrepancies = () => {
                         <div className="flex gap-2">
                           <button
                             onClick={() => handleOpenReport(report)}
-                            className="rounded-lg bg-blue-900 px-4 py-2 font-semibold text-white transition hover:bg-blue-800"
+                            className="rounded-xl bg-blue-900 px-4 py-2 font-semibold text-white transition hover:bg-blue-800"
                           >
                             View
                           </button>
                           <button
                             onClick={() => setDeleteConfirmId(report.id)}
-                            className="rounded-lg bg-red-500 px-4 py-2 font-semibold text-white transition hover:bg-red-600"
+                            className="rounded-xl bg-red-500 px-4 py-2 font-semibold text-white transition hover:bg-red-600"
                           >
                             Delete
                           </button>
@@ -482,192 +473,212 @@ const BranchDiscrepancies = () => {
       </div>
 
       {selectedReport && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-xl bg-white shadow-2xl">
-            <div className="sticky top-0 rounded-t-xl bg-primary px-8 py-6">
-              <h2 className="text-2xl font-bold text-white">Discrepancy Report Details</h2>
-              <p className="mt-1 text-sm text-blue-100">Report ID: DR-{selectedReport.id}</p>
-            </div>
-            <div className="p-8">
-              <div className="mb-6">
-                <h3 className="mb-4 flex items-center gap-2 text-lg font-bold text-gray-900">
-                  <svg className="h-5 w-5 text-blue-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                  </svg>
-                  {selectedReport.title}
-                </h3>
-                <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-3">
-                  <div className="rounded-lg border border-blue-200 bg-gradient-to-br from-blue-50 to-blue-100 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Status</p>
-                    <p className="mt-1 font-bold text-blue-900">{selectedReport.status}</p>
-                  </div>
-                  <div className="rounded-lg border border-gray-200 bg-gradient-to-br from-gray-50 to-gray-100 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-600">Reported By</p>
-                    <p className="mt-1 font-semibold text-gray-800">{selectedReport.reported_by}</p>
-                  </div>
-                  <div className="rounded-lg border border-green-200 bg-gradient-to-br from-green-50 to-green-100 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-green-700">Last Updated</p>
-                    <p className="mt-1 font-semibold text-green-900">{formatDateTime(selectedReport.updated_at || selectedReport.created_at)}</p>
-                  </div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+          <div className={discrepancyModalShellClass}>
+            <div className={discrepancyModalHeaderClass}>
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-100">Discrepancy Report Details</p>
+                  <h2 className="mt-2 text-2xl font-bold text-white sm:text-3xl">{selectedReport.title}</h2>
+                  <p className="mt-2 text-sm leading-6 text-blue-100">
+                    Review the full report, references, attachments, and the latest responses from the main office.
+                  </p>
                 </div>
-              </div>
-
-              <div className="mb-5">
-                <p className="mb-3 flex items-center gap-2 text-sm font-bold text-gray-800">
-                  <svg className="h-4 w-4 text-blue-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h7"></path>
-                  </svg>
-                  Discrepancy Type
-                </p>
-                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                  <span className="inline-block rounded-full bg-blue-900 px-3 py-1 text-sm font-semibold text-white">
-                    {selectedReport.discrepancy_type}
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="inline-flex items-center rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold text-white">
+                    {selectedReport.status}
+                  </span>
+                  <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold tracking-[0.18em] text-white">
+                    DR-{selectedReport.id}
                   </span>
                 </div>
               </div>
+            </div>
 
-              <div className="mb-5">
-                <p className="mb-3 flex items-center gap-2 text-sm font-bold text-gray-800">
-                  <svg className="h-4 w-4 text-blue-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path>
-                  </svg>
-                  Attached File
-                </p>
-                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-gray-700">
-                  {selectedReport.attachment_filename ? (
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="flex items-center gap-2">
-                        <svg className="h-5 w-5 text-blue-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path>
-                        </svg>
-                        <span className="font-medium">{selectedReport.attachment_filename}</span>
-                      </div>
+            <div className="overflow-y-auto bg-slate-50 p-6 sm:p-8">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <DiscrepancyInfoCard label="Report ID" value={`DR-${selectedReport.id}`} tone="blue" helper="Unique discrepancy tracking reference." />
+                <DiscrepancyInfoCard label="Date Submitted" value={formatDateTime(selectedReport.created_at)} tone="amber" helper={`Report date: ${selectedReport.report_date || 'Not provided'}`} />
+                  <DiscrepancyInfoCard
+                    label="Submitted By"
+                    value={selectedReport.reported_by || 'Unknown submitter'}
+                    tone="emerald"
+                    helper={selectedReport.reported_by_role || `${branchRoleLabel} account`}
+                  />
+                <DiscrepancyInfoCard
+                  label="Branch Information"
+                  value={selectedReport.branch_name || 'Current branch'}
+                  tone="violet"
+                  helper={selectedReport.submitted_offline ? 'Marked as offline collection discrepancy.' : 'Submitted through the branch discrepancy workflow.'}
+                />
+              </div>
+
+              <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+                <div className="space-y-6">
+                  <DiscrepancySection
+                    title="Report Information"
+                    description="Core submission details presented in a cleaner, audit-ready format."
+                  >
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <DiscrepancyInfoCard label="Discrepancy Type" value={selectedReport.discrepancy_type || 'Not specified'} />
+                      <DiscrepancyInfoCard label="Current Status" value={<DiscrepancyStatusBadge status={selectedReport.status} />} />
+                      <DiscrepancyInfoCard label="Last Updated" value={formatDateTime(selectedReport.updated_at || selectedReport.created_at)} />
+                      <DiscrepancyInfoCard label="Last Main Office Response" value={selectedReport.verified_at ? formatDateTime(selectedReport.verified_at) : 'No response yet'} />
+                    </div>
+                  </DiscrepancySection>
+
+                  <DiscrepancySection
+                    title="Queue Information"
+                    description="Reference details that help the branch reconcile the affected transaction or batch."
+                  >
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <DiscrepancyInfoCard
+                        label="Queue Number / Reference"
+                        value={selectedReport.supporting_documents || 'No queue number or reference was supplied.'}
+                        helper="Includes receipt numbers, batch notes, or collection references when available."
+                      />
+                      <DiscrepancyInfoCard
+                        label="Submission Channel"
+                        value={selectedReport.submitted_offline ? 'Offline collection discrepancy' : 'Standard discrepancy submission'}
+                      />
+                      <DiscrepancyInfoCard label="System Amount" value={formatCurrency(selectedReport.system_amount)} />
+                      <DiscrepancyInfoCard label="Actual Amount" value={formatCurrency(selectedReport.actual_amount)} />
+                    </div>
+                    <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Variance</p>
+                      <p className="mt-2 text-sm font-semibold text-slate-900">{formatCurrency(selectedReport.variance_amount)}</p>
+                    </div>
+                  </DiscrepancySection>
+
+                  <DiscrepancySection
+                    title="Reported Issue Details"
+                    description="The original discrepancy description submitted by the branch."
+                  >
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-sm leading-7 text-slate-700 whitespace-pre-line">
+                      {selectedReport.description}
+                    </div>
+                  </DiscrepancySection>
+                </div>
+
+                <div className="space-y-6">
+                  <DiscrepancySection
+                    title="Attachments"
+                    description="Supporting files linked to this discrepancy report."
+                    action={selectedReport.attachment_filename ? (
                       <button
                         type="button"
                         onClick={() => handleDownloadAttachment(selectedReport)}
-                        className="rounded-lg bg-blue-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-800"
+                        className="rounded-2xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-secondary"
                       >
-                        Download
+                        Download File
                       </button>
+                    ) : null}
+                  >
+                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-4">
+                      <p className="text-sm font-semibold text-slate-900">
+                        {selectedReport.attachment_filename || 'No attachment uploaded for this report.'}
+                      </p>
+                      <p className="mt-2 text-sm leading-6 text-slate-600">
+                        {selectedReport.attachment_filename
+                          ? 'Use the download action to review the original evidence submitted with this discrepancy.'
+                          : 'Historical records without file uploads remain supported and will continue to display correctly.'}
+                      </p>
                     </div>
-                  ) : (
-                    <span className="italic text-gray-500">No attachment uploaded.</span>
+                  </DiscrepancySection>
+
+                  <DiscrepancySection
+                    title="Review History / Responses"
+                    description="Chronological responses with clear administrator identity, role, timestamp, and status."
+                  >
+                    <div className="space-y-4">
+                      {(selectedReport.conversation_thread || []).map((entry, index) => (
+                        <DiscrepancyTimelineEntry
+                          key={`${entry.created_at || 'entry'}-${index}`}
+                          entry={entry}
+                          formatDateTime={formatDateTime}
+                        />
+                      ))}
+                    </div>
+                  </DiscrepancySection>
+
+                  {canReplyToAdmin(selectedReport) && !showReplyComposer && (
+                    <button
+                      onClick={() => setShowReplyComposer(true)}
+                      className="w-full rounded-2xl bg-green-700 py-3 font-semibold text-white transition hover:bg-green-800"
+                    >
+                      Reply to Main Office
+                    </button>
+                  )}
+
+                  {!isBranchAdmin && (
+                    <div className="rounded-2xl border border-slate-200 bg-slate-100 px-4 py-3 text-sm text-slate-600">
+                      Reply actions are restricted to the authenticated Branch Admin for this branch. You can still review the full discrepancy details and history.
+                    </div>
+                  )}
+
+                  {canReplyToAdmin(selectedReport) && showReplyComposer && (
+                    <DiscrepancySection
+                      title="Branch Response"
+                      description="Reply directly to the most recent administrative review without leaving the report."
+                    >
+                      <textarea
+                        value={replyDraft}
+                        onChange={(event) => setReplyDraft(event.target.value)}
+                        rows="5"
+                        className="w-full rounded-2xl border border-green-300 px-4 py-3 text-gray-800 focus:border-green-500 focus:ring-2 focus:ring-green-500"
+                        placeholder="Type your reply here..."
+                      ></textarea>
+                      <div className="mt-4 flex gap-3">
+                        <button
+                          onClick={handleSubmitReply}
+                          disabled={replying || !replyDraft.trim()}
+                          className="flex-1 rounded-2xl bg-green-700 py-3 font-semibold text-white transition hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {replying ? 'Sending Reply...' : 'Send Reply'}
+                        </button>
+                        <button
+                          onClick={handleReplyCancel}
+                          disabled={replying}
+                          className="flex-1 rounded-2xl bg-gray-300 py-3 font-semibold text-gray-700 transition hover:bg-gray-400 disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </DiscrepancySection>
+                  )}
+
+                  {isBranchAdmin && CLOSED_STATUSES.has(selectedReport.status) && (
+                    <div className="rounded-2xl border border-slate-200 bg-slate-100 px-4 py-3 text-sm text-slate-600">
+                      This discrepancy is closed because it is marked as {selectedReport.status}. Branch replies are disabled.
+                    </div>
                   )}
                 </div>
               </div>
 
-              <div className="mb-6">
-                <h4 className="mb-4 text-lg font-bold text-gray-900">Communication Thread</h4>
-                <div className="space-y-4">
-                  {(selectedReport.conversation_thread || []).map((entry, index) => (
-                    <div key={`${entry.created_at || 'entry'}-${index}`} className={`rounded-xl border p-5 ${getThreadCardStyles(entry)}`}>
-                      <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                        <div>
-                          <p className="text-sm font-bold text-gray-900">{getThreadRoleLabel(entry)}</p>
-                          <p className="text-xs font-medium text-gray-600">{entry.sender_name || 'System'}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-xs font-medium text-gray-600">{formatDateTime(entry.created_at)}</p>
-                          {getThreadStatusLabel(entry) && (
-                            <span className={`mt-1 inline-block rounded-full px-3 py-1 text-xs font-semibold ${statusStyles[getThreadStatusLabel(entry)] || 'bg-slate-100 text-slate-700'}`}>
-                              {getThreadStatusLabel(entry)}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <p className="whitespace-pre-line leading-relaxed text-gray-800">
-                        {entry.message || 'Status updated without additional message.'}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {canReplyToAdmin(selectedReport) && !showReplyComposer && (
+              <div className="mt-6 flex justify-end">
                 <button
-                  onClick={() => setShowReplyComposer(true)}
-                  className="mb-4 w-full rounded-lg bg-green-700 py-3 font-semibold text-white transition hover:bg-green-800"
+                  onClick={closeDetailsModal}
+                  className="rounded-2xl bg-slate-700 px-6 py-3 font-semibold text-white transition hover:bg-slate-800"
                 >
-                  Reply
+                  Close
                 </button>
-              )}
-
-              {canReplyToAdmin(selectedReport) && showReplyComposer && (
-                <div className="mb-6 rounded-lg border-2 border-green-300 bg-gradient-to-br from-green-50 to-green-100 p-6 shadow-sm">
-                  <p className="mb-3 text-sm font-bold text-green-900">Reply to Main Admin</p>
-                  <textarea
-                    value={replyDraft}
-                    onChange={(event) => setReplyDraft(event.target.value)}
-                    rows="5"
-                    className="w-full rounded-lg border border-green-300 px-4 py-3 text-gray-800 focus:border-green-500 focus:ring-2 focus:ring-green-500"
-                    placeholder="Type your reply here..."
-                  ></textarea>
-                  <div className="mt-4 flex gap-3">
-                    <button
-                      onClick={handleSubmitReply}
-                      disabled={replying || !replyDraft.trim()}
-                      className="flex-1 rounded-lg bg-green-700 py-3 font-semibold text-white transition hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {replying ? 'Sending Reply...' : 'Send Reply'}
-                    </button>
-                    <button
-                      onClick={handleReplyCancel}
-                      disabled={replying}
-                      className="flex-1 rounded-lg bg-gray-300 py-3 font-semibold text-gray-700 transition hover:bg-gray-400 disabled:opacity-50"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {isBranchAdmin && selectedReport && CLOSED_STATUSES.has(selectedReport.status) && (
-                <div className="mb-6 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                  This discrepancy is closed because it is marked as {selectedReport.status}. Branch replies are disabled.
-                </div>
-              )}
-
-              <button
-                onClick={closeDetailsModal}
-                className="w-full rounded-lg bg-gray-600 py-3 font-semibold text-white transition hover:bg-gray-700"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {deleteConfirmId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-8 shadow-2xl">
-            <div className="mb-6 text-center">
-              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-100">
-                <svg className="h-6 w-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
-                </svg>
               </div>
-              <h3 className="mb-2 text-xl font-bold text-gray-900">Confirm Deletion</h3>
-              <p className="text-gray-600">Are you sure you want to delete this discrepancy report?</p>
-              <p className="mt-2 text-sm text-gray-500">This action cannot be undone.</p>
-            </div>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setDeleteConfirmId(null)}
-                className="flex-1 rounded-lg bg-gray-300 py-3 font-semibold text-gray-700 transition hover:bg-gray-400"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => handleDeleteReport(deleteConfirmId)}
-                className="flex-1 rounded-lg bg-red-600 py-3 font-semibold text-white transition hover:bg-red-700"
-              >
-                Confirm Delete
-              </button>
             </div>
           </div>
         </div>
       )}
+
+      <DeleteConfirmationModal
+        open={Boolean(deleteConfirmId)}
+        title="Delete discrepancy report?"
+        message="This removes the discrepancy record and its uploaded attachment from the branch view."
+        details={deleteConfirmId ? [
+          { label: 'Report ID', value: `DR-${deleteConfirmId}` },
+          { label: 'Module', value: 'Discrepancy Reports' },
+        ] : []}
+        onCancel={() => setDeleteConfirmId(null)}
+        onConfirm={() => handleDeleteReport(deleteConfirmId)}
+      />
     </div>
   );
 };

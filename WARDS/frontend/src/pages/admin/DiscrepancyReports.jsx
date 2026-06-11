@@ -1,43 +1,58 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
+import WardsPageHero from '../../components/WardsPageHero';
+import {
+  DiscrepancyInfoCard,
+  DiscrepancySection,
+  DiscrepancyStatusBadge,
+  DiscrepancyTimelineEntry,
+  discrepancyModalHeaderClass,
+  discrepancyModalShellClass,
+} from '../../components/discrepancies/DiscrepancyUI';
 import { discrepancyAPI } from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
-import WardsPageHero from '../../components/WardsPageHero';
 
-const statusStyles = {
-  'Pending Review': 'bg-yellow-100 text-yellow-800',
-  'Under Review': 'bg-blue-100 text-blue-800',
-  Verified: 'bg-green-100 text-green-800',
-  Responded: 'bg-purple-100 text-purple-800',
-  Solved: 'bg-emerald-100 text-emerald-800',
-  Rejected: 'bg-red-100 text-red-800',
-};
 const CLOSED_STATUSES = new Set(['Solved', 'Rejected']);
 
 const formatDateTime = (value) => formatUtc8DateTime(value);
 
-const getThreadRoleLabel = (entry) => {
-  if (entry.label) return entry.label;
-  if (entry.sender_role === 'initial_report') return 'Branch Admin Reported';
-  if (entry.sender_role === 'main_admin') return 'Main Admin Reply';
-  if (entry.sender_role === 'branch_admin') return 'Branch Admin Reply';
-  return 'Branch Admin Reported';
-};
-
-const getThreadCardStyles = (entry) => {
-  if (entry.sender_role === 'main_admin') {
-    return 'border-blue-200 bg-blue-50';
+const formatCurrency = (value) => {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return 'Not provided';
   }
-  return 'border-green-200 bg-green-50';
+
+  return new Intl.NumberFormat('en-PH', {
+    style: 'currency',
+    currency: 'PHP',
+    minimumFractionDigits: 2,
+  }).format(Number(value));
 };
 
 const getLatestBranchReply = (report) => {
   const thread = report.conversation_thread || [];
   for (let index = thread.length - 1; index >= 0; index -= 1) {
-    if (thread[index].sender_role === 'branch_admin') {
+    if (thread[index].sender_role === 'branch_admin' || thread[index].sender_role === 'branch_staff') {
       return thread[index];
     }
   }
   return null;
+};
+
+const buildPendingActionMessage = (report) => {
+  if (!report) return 'Review the discrepancy details and determine the next resolution step.';
+  if (CLOSED_STATUSES.has(report.status)) {
+    return `This report is already ${report.status}. Historical responses remain available for audit review.`;
+  }
+  if (report.has_unread_for_admin) {
+    return 'A new branch update is waiting for administrative review.';
+  }
+  if (report.status === 'Pending Review') {
+    return 'Initial assessment is needed. Confirm the issue and move it into the appropriate resolution stage.';
+  }
+  if (report.status === 'Under Review') {
+    return 'Continue investigating the discrepancy and communicate the next required action to the branch if needed.';
+  }
+  return 'Review the current status, add resolution notes if needed, and save the updated administrative action.';
 };
 
 const DiscrepancyReports = () => {
@@ -133,6 +148,7 @@ const DiscrepancyReports = () => {
         verification_notes: showReplyComposer ? replyDraft : verificationNotes,
       });
       setSelectedReport(response.data);
+      setVerificationStatus(response.data.status || verificationStatus);
       setVerificationNotes(response.data.verification_notes || '');
       setReplyDraft('');
       setShowReplyComposer(false);
@@ -171,6 +187,11 @@ const DiscrepancyReports = () => {
 
   const isClosedReport = Boolean(selectedReport && CLOSED_STATUSES.has(selectedReport.status));
 
+  const pendingActionMessage = useMemo(
+    () => buildPendingActionMessage(selectedReport),
+    [selectedReport],
+  );
+
   return (
     <div>
       <WardsPageHero
@@ -181,12 +202,12 @@ const DiscrepancyReports = () => {
       />
 
       {error && (
-        <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-red-700">
+        <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-red-700">
           {error}
         </div>
       )}
 
-      <div className="rounded-xl bg-white p-6 shadow-lg">
+      <div className="rounded-[2rem] bg-white p-6 shadow-lg">
         {loading ? (
           <div className="py-12 text-center">
             <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
@@ -221,31 +242,32 @@ const DiscrepancyReports = () => {
                           {hasUnreadUpdate(report) && (
                             <span className="flex h-2 w-2">
                               <span className="animate-ping absolute inline-flex h-2 w-2 rounded-full bg-blue-400 opacity-75"></span>
-                              <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                              <span className="relative inline-flex h-2 w-2 rounded-full bg-blue-500"></span>
                             </span>
                           )}
                         </div>
                       </td>
                       <td className="px-4 py-3">{report.branch_name}</td>
                       <td className="px-4 py-3">{report.discrepancy_type}</td>
-                      <td className="px-4 py-3">{report.reported_by}</td>
                       <td className="px-4 py-3">
-                        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusStyles[report.status] || 'bg-slate-100 text-slate-700'}`}>
-                          {report.status}
-                        </span>
+                        <div className="font-medium text-slate-900">{report.reported_by}</div>
+                        <div className="text-xs text-slate-500">{report.reported_by_role || 'Branch personnel'}</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <DiscrepancyStatusBadge status={report.status} />
                       </td>
                       <td className="px-4 py-3 text-gray-500">{formatDateTime(report.updated_at || report.created_at)}</td>
                       <td className="px-4 py-3">
                         <div className="flex gap-2">
                           <button
                             onClick={() => openVerifyModal(report)}
-                            className="rounded-lg bg-primary px-4 py-2 font-semibold text-white transition hover:bg-secondary"
+                            className="rounded-xl bg-primary px-4 py-2 font-semibold text-white transition hover:bg-secondary"
                           >
                             Review
                           </button>
                           <button
                             onClick={() => setDeleteConfirmId(report.id)}
-                            className="rounded-lg bg-red-500 px-4 py-2 font-semibold text-white transition hover:bg-red-600"
+                            className="rounded-xl bg-red-500 px-4 py-2 font-semibold text-white transition hover:bg-red-600"
                           >
                             Delete
                           </button>
@@ -266,214 +288,262 @@ const DiscrepancyReports = () => {
       </div>
 
       {selectedReport && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-xl bg-white shadow-2xl">
-            <div className="sticky top-0 rounded-t-xl bg-primary px-8 py-6">
-              <h2 className="text-2xl font-bold text-white">Review Discrepancy Report</h2>
-              <p className="mt-1 text-sm text-blue-100">
-                Report ID: DR-{selectedReport.id} | {selectedReport.branch_name}
-              </p>
-            </div>
-            <div className="p-8">
-              <div className="mb-6">
-                <h3 className="mb-4 flex items-center gap-2 text-lg font-bold text-gray-900">
-                  <svg className="h-5 w-5 text-blue-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                  </svg>
-                  {selectedReport.title}
-                </h3>
-                <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
-                  <div className="rounded-lg border border-blue-200 bg-gradient-to-br from-blue-50 to-blue-100 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Reported By</p>
-                    <p className="mt-1 font-bold text-blue-900">{selectedReport.reported_by}</p>
-                  </div>
-                  <div className="rounded-lg border border-gray-200 bg-gradient-to-br from-gray-50 to-gray-100 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-600">Discrepancy Type</p>
-                    <p className="mt-1 font-semibold text-gray-800">{selectedReport.discrepancy_type}</p>
-                  </div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+          <div className={discrepancyModalShellClass}>
+            <div className={discrepancyModalHeaderClass}>
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-100">Review Discrepancy Report</p>
+                  <h2 className="mt-2 text-2xl font-bold text-white sm:text-3xl">{selectedReport.title}</h2>
+                  <p className="mt-2 text-sm leading-6 text-blue-100">
+                    Review the original submission, understand prior responses, and apply the next administrative action with clear audit context.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="inline-flex items-center rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold text-white">
+                    {selectedReport.status}
+                  </span>
+                  <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold tracking-[0.18em] text-white">
+                    DR-{selectedReport.id}
+                  </span>
                 </div>
               </div>
+            </div>
 
-              <div className="mb-5">
-                <p className="mb-3 flex items-center gap-2 text-sm font-bold text-gray-800">
-                  <svg className="h-4 w-4 text-blue-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path>
-                  </svg>
-                  Attached File
-                </p>
-                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-gray-700">
-                  {selectedReport.attachment_filename ? (
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="flex items-center gap-2">
-                        <svg className="h-5 w-5 text-blue-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path>
-                        </svg>
-                        <span className="font-medium">{selectedReport.attachment_filename}</span>
-                      </div>
+            <div className="overflow-y-auto bg-slate-50 p-6 sm:p-8">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <DiscrepancyInfoCard label="Branch" value={selectedReport.branch_name} tone="blue" helper="Origin of the discrepancy report." />
+                <DiscrepancyInfoCard
+                  label="Submitted By"
+                  value={selectedReport.reported_by || 'Unknown submitter'}
+                  tone="emerald"
+                  helper={selectedReport.reported_by_role || 'Branch personnel'}
+                />
+                <DiscrepancyInfoCard
+                  label="Date Submitted"
+                  value={formatDateTime(selectedReport.created_at)}
+                  tone="amber"
+                  helper={`Report date: ${selectedReport.report_date || 'Not provided'}`}
+                />
+                <DiscrepancyInfoCard
+                  label="Pending Action"
+                  value={isClosedReport ? 'Audit only' : 'Review required'}
+                  tone="violet"
+                  helper={pendingActionMessage}
+                />
+              </div>
+
+              <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.95fr)]">
+                <div className="space-y-6">
+                  <DiscrepancySection
+                    title="Original Report Details"
+                    description="What was reported, who submitted it, and the primary discrepancy context."
+                  >
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <DiscrepancyInfoCard label="Discrepancy Type" value={selectedReport.discrepancy_type || 'Not specified'} />
+                      <DiscrepancyInfoCard label="Current Status" value={<DiscrepancyStatusBadge status={selectedReport.status} />} />
+                      <DiscrepancyInfoCard label="Submitted Offline" value={selectedReport.submitted_offline ? 'Yes' : 'No'} />
+                      <DiscrepancyInfoCard label="Last Updated" value={formatDateTime(selectedReport.updated_at || selectedReport.created_at)} />
+                    </div>
+                    <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-sm leading-7 text-slate-700 whitespace-pre-line">
+                      {selectedReport.description}
+                    </div>
+                  </DiscrepancySection>
+
+                  <DiscrepancySection
+                    title="Supporting Information"
+                    description="References, amounts, and attachments relevant to the review."
+                    action={selectedReport.attachment_filename ? (
                       <button
                         type="button"
                         onClick={() => handleDownloadAttachment(selectedReport)}
-                        className="rounded-lg bg-blue-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-800"
+                        className="rounded-2xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-secondary"
                       >
-                        Download
+                        Download File
                       </button>
+                    ) : null}
+                  >
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <DiscrepancyInfoCard
+                        label="Queue Number / Reference"
+                        value={selectedReport.supporting_documents || 'No queue or reference details supplied.'}
+                        helper="Includes receipt numbers, collection sheet references, or other branch notes."
+                      />
+                      <DiscrepancyInfoCard
+                        label="Attachment"
+                        value={selectedReport.attachment_filename || 'No attachment uploaded'}
+                        helper={selectedReport.attachment_filename ? 'Use the download button to inspect the submitted evidence.' : 'Older reports remain fully readable even without uploaded files.'}
+                      />
+                      <DiscrepancyInfoCard label="System Amount" value={formatCurrency(selectedReport.system_amount)} />
+                      <DiscrepancyInfoCard label="Actual Amount" value={formatCurrency(selectedReport.actual_amount)} />
                     </div>
-                  ) : (
-                    <span className="italic text-gray-500">No attachment uploaded.</span>
-                  )}
+                    <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Variance</p>
+                      <p className="mt-2 text-sm font-semibold text-slate-900">{formatCurrency(selectedReport.variance_amount)}</p>
+                    </div>
+                  </DiscrepancySection>
+
+                  <DiscrepancySection
+                    title="Review History"
+                    description="Chronological responses showing the exact administrator or branch participant involved."
+                  >
+                    <div className="space-y-4">
+                      {(selectedReport.conversation_thread || []).map((entry, index) => (
+                        <DiscrepancyTimelineEntry
+                          key={`${entry.created_at || 'entry'}-${index}`}
+                          entry={entry}
+                          formatDateTime={formatDateTime}
+                        />
+                      ))}
+                    </div>
+                  </DiscrepancySection>
                 </div>
-              </div>
 
-              <div className="mb-5 rounded-lg border-2 border-blue-200 bg-blue-50 p-5">
-                <label className="mb-3 block font-bold text-blue-900">Status / Resolution</label>
-                <select
-                  value={verificationStatus}
-                  onChange={(event) => setVerificationStatus(event.target.value)}
-                  disabled={isClosedReport}
-                  className="w-full rounded-lg border-2 border-blue-300 px-4 py-3 font-semibold focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="Pending Review">Pending Review</option>
-                  <option value="Under Review">Under Review</option>
-                  <option value="Verified">Verified</option>
-                  <option value="Responded">Responded</option>
-                  <option value="Solved">Solved</option>
-                  <option value="Rejected">Rejected</option>
-                </select>
-                <p className="mt-2 text-xs text-blue-700">
-                  Update the status to reflect the current resolution stage of this discrepancy.
-                </p>
-                {isClosedReport && (
-                  <p className="mt-2 text-xs font-semibold text-red-700">
-                    This discrepancy is closed. Main Admin can no longer change the status.
-                  </p>
-                )}
-              </div>
+                <div className="space-y-6">
+                  <DiscrepancySection
+                    title="Administrative Actions"
+                    description="Update the resolution stage and communicate next steps to the branch."
+                  >
+                    <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-900">
+                      {pendingActionMessage}
+                    </div>
+                    <div className="mt-4">
+                      <label className="mb-2 block text-sm font-semibold text-slate-700">Status / Resolution</label>
+                      <select
+                        value={verificationStatus}
+                        onChange={(event) => setVerificationStatus(event.target.value)}
+                        disabled={isClosedReport}
+                        className="w-full rounded-2xl border border-slate-300 px-4 py-3 font-semibold focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="Pending Review">Pending Review</option>
+                        <option value="Under Review">Under Review</option>
+                        <option value="Verified">Verified</option>
+                        <option value="Responded">Responded</option>
+                        <option value="Solved">Solved</option>
+                        <option value="Rejected">Rejected</option>
+                      </select>
+                    </div>
 
-              <div className="mb-6">
-                <h4 className="mb-4 text-lg font-bold text-gray-900">Communication Thread</h4>
-                <div className="space-y-4">
-                  {(selectedReport.conversation_thread || []).map((entry, index) => (
-                    <div key={`${entry.created_at || 'entry'}-${index}`} className={`rounded-xl border p-5 ${getThreadCardStyles(entry)}`}>
-                      <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                        <div>
-                          <p className="text-sm font-bold text-gray-900">{getThreadRoleLabel(entry)}</p>
-                          <p className="text-xs font-medium text-gray-600">{entry.sender_name || 'System'}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-xs font-medium text-gray-600">{formatDateTime(entry.created_at)}</p>
-                          {entry.status && (
-                            <span className={`mt-1 inline-block rounded-full px-3 py-1 text-xs font-semibold ${statusStyles[entry.status] || 'bg-slate-100 text-slate-700'}`}>
-                              {entry.status}
-                            </span>
-                          )}
+                    {!showReplyComposer && (
+                      <div className="mt-4">
+                        <label className="mb-2 block text-sm font-semibold text-slate-700">Resolution Notes</label>
+                        <textarea
+                          value={verificationNotes}
+                          onChange={(event) => setVerificationNotes(event.target.value)}
+                          rows="6"
+                          disabled={isClosedReport || saving}
+                          className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-800 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100"
+                          placeholder="Document the review findings, instructions to the branch, or final resolution notes."
+                        ></textarea>
+                      </div>
+                    )}
+
+                    {!showReplyComposer && !isClosedReport && (
+                      <div className="mt-4 flex flex-col gap-3">
+                        <button
+                          onClick={handleVerify}
+                          disabled={saving}
+                          className="w-full rounded-2xl bg-primary py-3 font-semibold text-white transition hover:bg-secondary disabled:opacity-50"
+                        >
+                          {saving ? 'Saving...' : 'Save Administrative Update'}
+                        </button>
+                        <button
+                          onClick={() => {
+                            setReplyDraft('');
+                            setShowReplyComposer(true);
+                          }}
+                          className="w-full rounded-2xl bg-green-600 py-3 font-semibold text-white transition hover:bg-green-700"
+                        >
+                          Send Reply to Branch
+                        </button>
+                      </div>
+                    )}
+
+                    {showReplyComposer && !isClosedReport && (
+                      <div className="mt-4 rounded-2xl border border-blue-200 bg-white p-4 shadow-sm">
+                        <label className="mb-2 block text-sm font-semibold text-slate-700">Administrative Reply</label>
+                        <textarea
+                          value={replyDraft}
+                          onChange={(event) => setReplyDraft(event.target.value)}
+                          rows="6"
+                          className="w-full rounded-2xl border border-slate-300 px-4 py-3 focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+                          placeholder="Type the response that should appear in the discrepancy history."
+                        ></textarea>
+                        <div className="mt-4 flex gap-3">
+                          <button
+                            onClick={handleVerify}
+                            disabled={saving || !replyDraft.trim()}
+                            className="flex-1 rounded-2xl bg-primary py-3 font-semibold text-white transition hover:bg-secondary disabled:opacity-50"
+                          >
+                            {saving ? 'Saving...' : 'Send Reply'}
+                          </button>
+                          <button
+                            onClick={handleReplyCancel}
+                            disabled={saving}
+                            className="flex-1 rounded-2xl bg-gray-300 py-3 font-semibold text-gray-700 transition hover:bg-gray-400 disabled:opacity-50"
+                          >
+                            Cancel
+                          </button>
                         </div>
                       </div>
-                      <p className="whitespace-pre-line leading-relaxed text-gray-800">
-                        {entry.message || 'Status updated without additional message.'}
-                      </p>
+                    )}
+
+                    {isClosedReport && (
+                      <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-100 px-4 py-3 text-sm text-slate-600">
+                        This discrepancy is closed because it is marked as {selectedReport.status}. Main Admin replies and status updates are disabled.
+                      </div>
+                    )}
+                  </DiscrepancySection>
+
+                  <DiscrepancySection
+                    title="Resolution Notes"
+                    description="Current administrative resolution details and latest accountable reviewer."
+                  >
+                    <div className="space-y-4">
+                      <DiscrepancyInfoCard
+                        label="Last Reviewed By"
+                        value={selectedReport.verified_by || 'No administrator response yet'}
+                        helper={selectedReport.verified_by_role || 'Administrative response pending'}
+                      />
+                      <DiscrepancyInfoCard
+                        label="Last Review Timestamp"
+                        value={selectedReport.verified_at ? formatDateTime(selectedReport.verified_at) : 'No review timestamp yet'}
+                      />
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Current Notes</p>
+                        <p className="mt-2 whitespace-pre-line text-sm leading-7 text-slate-700">
+                          {selectedReport.verification_notes || 'No administrative resolution notes have been saved yet.'}
+                        </p>
+                      </div>
                     </div>
-                  ))}
+                  </DiscrepancySection>
                 </div>
               </div>
 
-              {!showReplyComposer && !isClosedReport && (
+              <div className="mt-6 flex justify-end">
                 <button
-                  onClick={() => {
-                    setReplyDraft('');
-                    setShowReplyComposer(true);
-                  }}
-                  className="mb-4 w-full rounded-lg bg-green-600 py-3 font-semibold text-white transition hover:bg-green-700"
+                  onClick={closeVerifyModal}
+                  className="rounded-2xl bg-slate-700 px-6 py-3 font-semibold text-white transition hover:bg-slate-800"
                 >
-                  Reply
+                  Close
                 </button>
-              )}
-
-              {showReplyComposer && !isClosedReport && (
-                <div className="mb-6 rounded-lg border-2 border-blue-300 bg-gradient-to-br from-blue-50 to-blue-100 p-6 shadow-sm">
-                  <p className="mb-3 text-sm font-bold text-blue-900">Main Admin Reply</p>
-                  <textarea
-                    value={replyDraft}
-                    onChange={(event) => setReplyDraft(event.target.value)}
-                    rows="6"
-                    className="w-full rounded-lg border-2 border-gray-300 px-4 py-3 focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
-                    placeholder="Type your response here..."
-                  ></textarea>
-                  <div className="mt-4 flex gap-3">
-                    <button
-                      onClick={handleVerify}
-                      disabled={saving || !replyDraft.trim()}
-                      className="flex-1 rounded-lg bg-primary py-3 font-semibold text-white transition hover:bg-secondary disabled:opacity-50"
-                    >
-                      {saving ? 'Saving...' : 'Send Reply'}
-                    </button>
-                    <button
-                      onClick={handleReplyCancel}
-                      disabled={saving}
-                      className="flex-1 rounded-lg bg-gray-300 py-3 font-semibold text-gray-700 transition hover:bg-gray-400 disabled:opacity-50"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {!showReplyComposer && !isClosedReport && (
-                <button
-                  onClick={handleVerify}
-                  disabled={saving}
-                  className="mb-4 w-full rounded-lg bg-primary py-3 font-semibold text-white transition hover:bg-secondary disabled:opacity-50"
-                >
-                  {saving ? 'Saving...' : 'Save Status Update'}
-                </button>
-              )}
-
-              {isClosedReport && (
-                <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                  This discrepancy is closed because it is marked as {selectedReport.status}. Main Admin replies and status updates are disabled.
-                </div>
-              )}
-
-              <button
-                onClick={closeVerifyModal}
-                className="w-full rounded-lg bg-gray-600 py-3 font-semibold text-white transition hover:bg-gray-700"
-              >
-                Close
-              </button>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {deleteConfirmId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-8 shadow-2xl">
-            <div className="mb-6 text-center">
-              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-100">
-                <svg className="h-6 w-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
-                </svg>
-              </div>
-              <h3 className="mb-2 text-xl font-bold text-gray-900">Confirm Deletion</h3>
-              <p className="text-gray-600">Are you sure you want to delete this discrepancy report?</p>
-              <p className="mt-2 text-sm text-gray-500">This action cannot be undone.</p>
-            </div>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setDeleteConfirmId(null)}
-                className="flex-1 rounded-lg bg-gray-300 py-3 font-semibold text-gray-700 transition hover:bg-gray-400"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => handleDeleteReport(deleteConfirmId)}
-                className="flex-1 rounded-lg bg-red-600 py-3 font-semibold text-white transition hover:bg-red-700"
-              >
-                Confirm Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <DeleteConfirmationModal
+        open={Boolean(deleteConfirmId)}
+        title="Delete discrepancy report?"
+        message="This removes the report from the administrative discrepancy archive and deletes any uploaded attachment."
+        details={deleteConfirmId ? [
+          { label: 'Report ID', value: `DR-${deleteConfirmId}` },
+          { label: 'Module', value: 'Discrepancy Reports' },
+        ] : []}
+        onCancel={() => setDeleteConfirmId(null)}
+        onConfirm={() => handleDeleteReport(deleteConfirmId)}
+      />
     </div>
   );
 };

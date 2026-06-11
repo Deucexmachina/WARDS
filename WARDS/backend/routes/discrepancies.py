@@ -8,8 +8,9 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.session import object_session
 
-from database.models import ActivityLog, Branch, BranchStaff, DiscrepancyReport, get_db
+from database.models import ActivityLog, Admin, Branch, BranchStaff, DiscrepancyReport, get_db
 from middleware.admin_auth import require_main_admin
 from middleware.branch_auth import get_current_branch_staff, require_branch_admin
 from utils.file_delivery import deliver_file_response
@@ -62,6 +63,97 @@ def clean_display_value(value: str | None, fallback: str | None = None) -> str |
     if REDACTED_PATTERN.match(normalized):
         return fallback
     return value
+
+
+def format_actor_role(role: str | None, fallback: str = "System") -> str:
+    normalized = (role or "").strip().lower()
+    if normalized == "superadmin":
+        return "Super Admin"
+    if normalized == "main_admin":
+        return "Main Admin"
+    if normalized == "branch_admin":
+        return "Branch Admin"
+    if normalized == "branch_staff":
+        return "Branch Staff"
+    if normalized == "initial_report":
+        return "Initial Report"
+    return fallback
+
+
+def resolve_actor_metadata(
+    report: DiscrepancyReport,
+    sender_name: str | None,
+    sender_role: str | None,
+    actor_cache: dict[tuple[str | None, str | None], dict],
+) -> dict:
+    cache_key = (sender_name, sender_role)
+    cached = actor_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    default_name = clean_display_value(sender_name, "System") or "System"
+    default_role = format_actor_role(
+        "branch_admin" if sender_role == "initial_report" else sender_role,
+        "System",
+    )
+    resolved = {
+        "sender_name": default_name,
+        "sender_role": sender_role,
+        "sender_display_name": default_name,
+        "sender_display_role": default_role,
+    }
+
+    db = object_session(report)
+    if db is None or not sender_name:
+        actor_cache[cache_key] = resolved
+        return resolved
+
+    normalized_name = sender_name.strip()
+    if not normalized_name:
+        actor_cache[cache_key] = resolved
+        return resolved
+
+    admin = db.query(Admin).filter(Admin.username == normalized_name).first()
+    if admin is not None:
+        resolved.update({
+            "sender_name": admin.username,
+            "sender_display_name": admin.username,
+            "sender_display_role": format_actor_role(admin.role, "Administrator"),
+            "sender_role": "main_admin",
+        })
+        actor_cache[cache_key] = resolved
+        return resolved
+
+    branch_staff = db.query(BranchStaff).filter(BranchStaff.username == normalized_name).first()
+    if branch_staff is not None:
+        display_name = clean_display_value(branch_staff.full_name, branch_staff.username) or branch_staff.username
+        resolved.update({
+            "sender_name": branch_staff.username,
+            "sender_display_name": display_name,
+            "sender_display_role": format_actor_role(branch_staff.role, "Branch Staff"),
+            "sender_role": "branch_admin" if branch_staff.role == "branch_admin" else "branch_staff",
+        })
+
+    actor_cache[cache_key] = resolved
+    return resolved
+
+
+def normalize_thread_entries(report: DiscrepancyReport, thread_entries: list[dict]) -> list[dict]:
+    actor_cache: dict[tuple[str | None, str | None], dict] = {}
+    normalized_entries: list[dict] = []
+
+    for entry in thread_entries:
+        entry_copy = dict(entry)
+        actor_metadata = resolve_actor_metadata(
+            report,
+            entry_copy.get("sender_name"),
+            entry_copy.get("sender_role"),
+            actor_cache,
+        )
+        entry_copy.update(actor_metadata)
+        normalized_entries.append(entry_copy)
+
+    return normalized_entries
 
 
 def save_conversation_thread(report: DiscrepancyReport, thread_entries: list[dict]):
@@ -158,6 +250,11 @@ def serialize_discrepancy(report: DiscrepancyReport) -> dict:
         variance = float(report.actual_amount - report.system_amount)
 
     thread_entries = parse_conversation_thread(discrepancy_value(report, "conversation_thread")) or build_fallback_thread(report)
+    normalized_thread_entries = normalize_thread_entries(report, thread_entries)
+    actor_cache: dict[tuple[str | None, str | None], dict] = {}
+    reported_by_metadata = resolve_actor_metadata(report, discrepancy_value(report, "reported_by"), "branch_admin", actor_cache)
+    verified_by_metadata = resolve_actor_metadata(report, discrepancy_value(report, "verified_by"), "main_admin", actor_cache)
+    branch_replied_by_metadata = resolve_actor_metadata(report, discrepancy_value(report, "branch_replied_by"), "branch_admin", actor_cache)
 
     branch_name = clean_display_value(discrepancy_value(report.branch, "name") if report.branch else None, f"Branch {report.branch_id}")
 
@@ -178,10 +275,13 @@ def serialize_discrepancy(report: DiscrepancyReport) -> dict:
         "status": report.status,
         "verification_notes": clean_display_value(discrepancy_value(report, "verification_notes"), report.verification_notes),
         "branch_reply_notes": clean_display_value(discrepancy_value(report, "branch_reply_notes"), report.branch_reply_notes),
-        "conversation_thread": thread_entries,
-        "reported_by": clean_display_value(discrepancy_value(report, "reported_by"), "Branch Staff"),
-        "verified_by": clean_display_value(discrepancy_value(report, "verified_by"), None),
-        "branch_replied_by": clean_display_value(discrepancy_value(report, "branch_replied_by"), None),
+        "conversation_thread": normalized_thread_entries,
+        "reported_by": reported_by_metadata["sender_display_name"],
+        "reported_by_role": reported_by_metadata["sender_display_role"],
+        "verified_by": verified_by_metadata["sender_display_name"] if discrepancy_value(report, "verified_by") else None,
+        "verified_by_role": verified_by_metadata["sender_display_role"] if discrepancy_value(report, "verified_by") else None,
+        "branch_replied_by": branch_replied_by_metadata["sender_display_name"] if discrepancy_value(report, "branch_replied_by") else None,
+        "branch_replied_by_role": branch_replied_by_metadata["sender_display_role"] if discrepancy_value(report, "branch_replied_by") else None,
         "verified_at": report.verified_at.isoformat() if report.verified_at else None,
         "branch_replied_at": report.branch_replied_at.isoformat() if report.branch_replied_at else None,
         "last_viewed_by_branch": report.last_viewed_by_branch.isoformat() if report.last_viewed_by_branch else None,
