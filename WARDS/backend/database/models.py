@@ -141,11 +141,12 @@ class BranchStaff(Base):
     service_window = Column(String, nullable=True)
     service_window_label = Column(String, nullable=True)
     assigned_window_number = Column(Integer, nullable=True)
+    contact_number = Column(String, nullable=True)
     is_verified = Column(Boolean, default=False)
     status = Column(String, default="Active")
     last_login = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-    
+
     branch = relationship("Branch", backref="branch_staff")
 
 class CitizenUser(Base):

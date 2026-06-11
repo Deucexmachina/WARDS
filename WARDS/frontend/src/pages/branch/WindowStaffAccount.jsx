@@ -7,6 +7,8 @@ import {
   getEmailValidationMessage,
   validateCitizenFullName,
   validateStrongPassword,
+  validatePhilippineContactDigits,
+  normalizePhilippineContactDigits,
   PASSWORD_RULE_MESSAGE,
 } from '../../utils/validation';
 
@@ -37,19 +39,57 @@ function Field({ label, id, type = 'text', value, onChange, error, disabled = fa
 }
 
 // ---------------------------------------------------------------------------
-// Edit Profile Modal
+// Inline modal shell (matches existing design)
 // ---------------------------------------------------------------------------
-const EMPTY_PROFILE = { full_name: '', email: '', current_password: '' };
+function ModalShell({ eyebrow, title, onClose, closeDisabled, children }) {
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
+        <div className="sticky top-0 bg-white border-b border-gray-200 px-8 py-5 flex items-center justify-between rounded-t-xl">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">{eyebrow}</p>
+            <h3 className="text-xl font-bold text-gray-900 mt-0.5">{title}</h3>
+          </div>
+          {onClose && (
+            <button onClick={onClose} disabled={closeDisabled} className="text-gray-400 hover:text-gray-600 transition">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
+        <div className="px-8 py-6">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Edit Profile Modal
+// 3-step: edit → confirm changes → verify password
+// ---------------------------------------------------------------------------
+const EMPTY_EDIT = { full_name: '', email: '', contact_number: '' };
 
 function EditProfileModal({ open, profile, onClose, onSuccess }) {
-  const [form, setForm] = useState(EMPTY_PROFILE);
+  // step: 'edit' | 'confirm' | 'verify'
+  const [step, setStep] = useState('edit');
+  const [form, setForm] = useState(EMPTY_EDIT);
   const [errors, setErrors] = useState({});
+  const [password, setPassword] = useState('');
+  const [passwordError, setPasswordError] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (open && profile) {
-      setForm({ full_name: profile.full_name || '', email: profile.email || '', current_password: '' });
+      setForm({
+        full_name: profile.full_name || '',
+        email: profile.email || '',
+        contact_number: profile.contact_number || '',
+      });
       setErrors({});
+      setPassword('');
+      setPasswordError('');
+      setStep('edit');
     }
   }, [open, profile]);
 
@@ -58,37 +98,59 @@ function EditProfileModal({ open, profile, onClose, onSuccess }) {
     setErrors((prev) => ({ ...prev, [field]: '' }));
   };
 
-  const validate = () => {
+  const validateEdit = () => {
     const e = {};
     const nameErr = validateCitizenFullName(form.full_name);
     if (nameErr) e.full_name = nameErr;
     const emailErr = getEmailValidationMessage(form.email);
     if (emailErr) e.email = emailErr;
-    if (!form.current_password.trim()) e.current_password = 'Current password is required.';
+    if (!form.contact_number.trim()) {
+      e.contact_number = 'Please enter your Contact Number.';
+    } else {
+      const digits = normalizePhilippineContactDigits(form.contact_number);
+      const contactErr = validatePhilippineContactDigits(digits);
+      if (contactErr) e.contact_number = contactErr;
+    }
     return e;
   };
 
-  const handleSubmit = async (ev) => {
+  const handleSaveClick = (ev) => {
     ev.preventDefault();
-    const errs = validate();
+    const errs = validateEdit();
     if (Object.keys(errs).length) { setErrors(errs); return; }
+    setStep('confirm');
+  };
+
+  const handleVerify = async (ev) => {
+    ev.preventDefault();
+    if (!password.trim()) { setPasswordError('Current password is required.'); return; }
 
     setSaving(true);
     try {
+      const contactDigits = form.contact_number.trim()
+        ? normalizePhilippineContactDigits(form.contact_number)
+        : '';
       await windowStaffAccountAPI.updateProfile({
         full_name: form.full_name.trim(),
         email: form.email.trim(),
-        current_password: form.current_password,
+        contact_number: contactDigits || null,
+        current_password: password,
       });
-      onSuccess({ full_name: form.full_name.trim(), email: form.email.trim() });
+      onSuccess({
+        full_name: form.full_name.trim(),
+        email: form.email.trim(),
+        contact_number: contactDigits || '',
+      });
     } catch (err) {
       const detail = err?.response?.data?.detail || '';
       if (detail.toLowerCase().includes('incorrect') || detail.toLowerCase().includes('password')) {
-        setErrors({ current_password: 'The password you entered is incorrect. Please try again.' });
+        setPasswordError('The password you entered is incorrect. Please try again.');
       } else if (detail.toLowerCase().includes('email')) {
+        // Go back to edit step to show email error
+        setStep('edit');
         setErrors({ email: detail });
       } else {
-        setErrors({ current_password: detail || 'An error occurred. Please try again.' });
+        setPasswordError(detail || 'An error occurred. Please try again.');
       }
     } finally {
       setSaving(false);
@@ -97,65 +159,190 @@ function EditProfileModal({ open, profile, onClose, onSuccess }) {
 
   if (!open) return null;
 
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
-        <div className="sticky top-0 bg-white border-b border-gray-200 px-8 py-5 flex items-center justify-between rounded-t-xl">
-          <div>
+  // ---- Step: Confirm Changes ----
+  if (step === 'confirm') {
+    const prevContact = profile?.contact_number || '—';
+    const nextContact = form.contact_number.trim()
+      ? normalizePhilippineContactDigits(form.contact_number) || '—'
+      : '—';
+
+    const fields = [
+      {
+        label: 'Full Name',
+        prev: profile?.full_name || '—',
+        next: form.full_name.trim() || '—',
+      },
+      {
+        label: 'Email Address',
+        prev: profile?.email || '—',
+        next: form.email.trim() || '—',
+      },
+      {
+        label: 'Contact Number',
+        prev: prevContact,
+        next: nextContact,
+      },
+    ];
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl">
+          {/* Header */}
+          <div className="border-b border-gray-200 px-8 py-5 rounded-t-xl">
             <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">Account Settings</p>
-            <h3 className="text-xl font-bold text-gray-900 mt-0.5">Edit Profile</h3>
+            <h3 className="text-xl font-bold text-gray-900 mt-0.5">Confirm Profile Changes</h3>
           </div>
-          <button onClick={onClose} disabled={saving} className="text-gray-400 hover:text-gray-600 transition">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+
+          <div className="px-8 py-6 space-y-6">
+            <p className="text-sm text-gray-600">
+              Please review the following changes before proceeding:
+            </p>
+
+            {/* Two-column info panels */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Current Information */}
+              <div className="rounded-xl border border-gray-200 overflow-hidden">
+                <div className="bg-gray-50 px-5 py-3 border-b border-gray-200">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    Current Information
+                  </p>
+                </div>
+                <div className="px-5 py-4 space-y-4">
+                  {fields.map(({ label, prev }) => (
+                    <div key={label}>
+                      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-0.5">
+                        {label}
+                      </p>
+                      <p className="text-sm text-gray-700 break-all">{prev}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Updated Information */}
+              <div className="rounded-xl border border-primary/30 overflow-hidden">
+                <div className="bg-blue-50 px-5 py-3 border-b border-primary/20">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-primary">
+                    Updated Information
+                  </p>
+                </div>
+                <div className="px-5 py-4 space-y-4">
+                  {fields.map(({ label, prev, next }) => {
+                    const changed = next !== prev;
+                    return (
+                      <div key={label}>
+                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-0.5">
+                          {label}
+                        </p>
+                        <p className={`text-sm break-all ${changed ? 'text-primary font-semibold' : 'text-gray-700'}`}>
+                          {next}
+                          {changed && (
+                            <span className="ml-1.5 inline-block align-middle">
+                              <svg className="w-3.5 h-3.5 text-primary inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                              </svg>
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <p className="text-sm text-gray-600">Are you sure you want to save these changes?</p>
+
+            {/* Buttons */}
+            <div className="flex flex-col-reverse sm:flex-row justify-end gap-3 pt-1">
+              <button type="button" onClick={() => setStep('edit')}
+                className="px-5 py-2.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-sm font-semibold text-gray-700 transition">
+                Cancel
+              </button>
+              <button type="button" onClick={() => { setPassword(''); setPasswordError(''); setStep('verify'); }}
+                className="px-5 py-2.5 rounded-lg bg-primary hover:bg-secondary text-white text-sm font-semibold transition">
+                Confirm Changes
+              </button>
+            </div>
+          </div>
         </div>
+      </div>
+    );
+  }
 
-        <form onSubmit={handleSubmit} className="px-8 py-6 space-y-4">
-          <Field label="Full Name" id="ep-name" value={form.full_name} onChange={set('full_name')} error={errors.full_name} />
-          <Field label="Email Address" id="ep-email" type="email" value={form.email} onChange={set('email')} error={errors.email} />
-
-          <div className="border-t border-gray-100 pt-4">
-            <Field
-              label="Current Password"
-              id="ep-pw"
-              type="password"
-              value={form.current_password}
-              onChange={set('current_password')}
-              error={errors.current_password}
-              hint="Enter your current password to confirm changes."
-            />
-          </div>
-
+  // ---- Step: Verify Identity ----
+  if (step === 'verify') {
+    return (
+      <ModalShell eyebrow="Identity Verification" title="Verify Identity" onClose={() => setStep('confirm')} closeDisabled={saving}>
+        <form onSubmit={handleVerify} className="space-y-4">
+          <p className="text-sm text-gray-600">Please enter your current password to confirm these changes.</p>
+          <Field
+            label="Current Password"
+            id="ep-verify-pw"
+            type="password"
+            value={password}
+            onChange={(e) => { setPassword(e.target.value); setPasswordError(''); }}
+            error={passwordError}
+          />
           <div className="flex justify-end gap-3 pt-2">
-            <button type="button" onClick={onClose} disabled={saving}
+            <button type="button" onClick={() => setStep('confirm')} disabled={saving}
               className="px-5 py-2.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-sm font-semibold text-gray-700 transition disabled:opacity-60">
               Cancel
             </button>
             <button type="submit" disabled={saving}
               className="px-5 py-2.5 rounded-lg bg-primary hover:bg-secondary text-white text-sm font-semibold transition disabled:opacity-60">
-              {saving ? 'Saving...' : 'Save Changes'}
+              {saving ? 'Verifying...' : 'Verify'}
             </button>
           </div>
         </form>
-      </div>
-    </div>
+      </ModalShell>
+    );
+  }
+
+  // ---- Step: Edit ----
+  return (
+    <ModalShell eyebrow="Account Settings" title="Edit Profile" onClose={onClose}>
+      <form onSubmit={handleSaveClick} className="space-y-4">
+        <Field label="Full Name" id="ep-name" value={form.full_name} onChange={set('full_name')} error={errors.full_name} />
+        <Field label="Email Address" id="ep-email" type="email" value={form.email} onChange={set('email')} error={errors.email} />
+        <Field
+          label="Contact Number"
+          id="ep-contact"
+          value={form.contact_number}
+          onChange={set('contact_number')}
+          error={errors.contact_number}
+          hint="Philippine mobile number — digits only, starting with 9 (e.g. 9171234567)."
+        />
+        <div className="flex justify-end gap-3 pt-2">
+          <button type="button" onClick={onClose}
+            className="px-5 py-2.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-sm font-semibold text-gray-700 transition">
+            Cancel
+          </button>
+          <button type="submit"
+            className="px-5 py-2.5 rounded-lg bg-primary hover:bg-secondary text-white text-sm font-semibold transition">
+            Save Changes
+          </button>
+        </div>
+      </form>
+    </ModalShell>
   );
 }
 
 // ---------------------------------------------------------------------------
 // Change Password Modal
+// 2-step: fill form → confirm → submit
 // ---------------------------------------------------------------------------
 const EMPTY_PW = { current_password: '', new_password: '', confirm_new_password: '' };
 
 function ChangePasswordModal({ open, onClose, onSuccess }) {
+  // step: 'form' | 'confirm'
+  const [step, setStep] = useState('form');
   const [form, setForm] = useState(EMPTY_PW);
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (open) { setForm(EMPTY_PW); setErrors({}); }
+    if (open) { setForm(EMPTY_PW); setErrors({}); setStep('form'); }
   }, [open]);
 
   const set = (field) => (e) => {
@@ -180,11 +367,14 @@ function ChangePasswordModal({ open, onClose, onSuccess }) {
     return e;
   };
 
-  const handleSubmit = async (ev) => {
+  const handleUpdateClick = (ev) => {
     ev.preventDefault();
     const errs = validate();
     if (Object.keys(errs).length) { setErrors(errs); return; }
+    setStep('confirm');
+  };
 
+  const handleConfirm = async () => {
     setSaving(true);
     try {
       await windowStaffAccountAPI.changePassword({
@@ -194,6 +384,7 @@ function ChangePasswordModal({ open, onClose, onSuccess }) {
       });
       onSuccess();
     } catch (err) {
+      setStep('form');
       const detail = err?.response?.data?.detail || '';
       if (detail.toLowerCase().includes('incorrect') || detail.toLowerCase().includes('password')) {
         setErrors({ current_password: 'The password you entered is incorrect. Please try again.' });
@@ -209,70 +400,91 @@ function ChangePasswordModal({ open, onClose, onSuccess }) {
 
   if (!open) return null;
 
+  // ---- Step: Confirm ----
+  if (step === 'confirm') {
+    return (
+      <ActionConfirmationModal
+        open
+        tone="primary"
+        title="Confirm Password Change"
+        message="You are about to change your account password. Are you sure you want to proceed?"
+        confirmLabel={saving ? 'Processing...' : 'Confirm Password Change'}
+        cancelLabel="Cancel"
+        isLoading={saving}
+        onCancel={() => setStep('form')}
+        onConfirm={handleConfirm}
+      />
+    );
+  }
+
+  // ---- Step: Form ----
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
-        <div className="sticky top-0 bg-white border-b border-gray-200 px-8 py-5 flex items-center justify-between rounded-t-xl">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">Security</p>
-            <h3 className="text-xl font-bold text-gray-900 mt-0.5">Change Password</h3>
-          </div>
-          <button onClick={onClose} disabled={saving} className="text-gray-400 hover:text-gray-600 transition">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
+    <ModalShell eyebrow="Security" title="Change Password" onClose={onClose}>
+      <form onSubmit={handleUpdateClick} className="space-y-4">
+        <Field label="Current Password" id="cp-current" type="password" value={form.current_password} onChange={set('current_password')} error={errors.current_password} />
+        <Field
+          label="New Password"
+          id="cp-new"
+          type="password"
+          value={form.new_password}
+          onChange={set('new_password')}
+          error={errors.new_password}
+          hint={PASSWORD_RULE_MESSAGE}
+        />
+        <Field label="Confirm New Password" id="cp-confirm" type="password" value={form.confirm_new_password} onChange={set('confirm_new_password')} error={errors.confirm_new_password} />
+        <div className="flex justify-end gap-3 pt-2">
+          <button type="button" onClick={onClose}
+            className="px-5 py-2.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-sm font-semibold text-gray-700 transition">
+            Cancel
+          </button>
+          <button type="submit"
+            className="px-5 py-2.5 rounded-lg bg-primary hover:bg-secondary text-white text-sm font-semibold transition">
+            Update Password
           </button>
         </div>
-
-        <form onSubmit={handleSubmit} className="px-8 py-6 space-y-4">
-          <Field label="Current Password" id="cp-current" type="password" value={form.current_password} onChange={set('current_password')} error={errors.current_password} />
-          <Field
-            label="New Password"
-            id="cp-new"
-            type="password"
-            value={form.new_password}
-            onChange={set('new_password')}
-            error={errors.new_password}
-            hint={PASSWORD_RULE_MESSAGE}
-          />
-          <Field label="Confirm New Password" id="cp-confirm" type="password" value={form.confirm_new_password} onChange={set('confirm_new_password')} error={errors.confirm_new_password} />
-
-          <div className="flex justify-end gap-3 pt-2">
-            <button type="button" onClick={onClose} disabled={saving}
-              className="px-5 py-2.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-sm font-semibold text-gray-700 transition disabled:opacity-60">
-              Cancel
-            </button>
-            <button type="submit" disabled={saving}
-              className="px-5 py-2.5 rounded-lg bg-primary hover:bg-secondary text-white text-sm font-semibold transition disabled:opacity-60">
-              {saving ? 'Updating...' : 'Update Password'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+      </form>
+    </ModalShell>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Reset MFA Modal — confirmation step then password step
+// Reset MFA Modal
+// 4-step: confirm → verify password → QR/setup → enter code
 // ---------------------------------------------------------------------------
 function ResetMFAModal({ open, onClose, onSuccess }) {
+  // step: 'confirm' | 'password' | 'setup' | 'verify'
   const [step, setStep] = useState('confirm');
   const [password, setPassword] = useState('');
   const [passwordError, setPasswordError] = useState('');
+  const [qrCode, setQrCode] = useState('');
+  const [manualKey, setManualKey] = useState('');
+  const [totpCode, setTotpCode] = useState('');
+  const [totpError, setTotpError] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (open) { setStep('confirm'); setPassword(''); setPasswordError(''); }
+    if (open) {
+      setStep('confirm');
+      setPassword('');
+      setPasswordError('');
+      setQrCode('');
+      setManualKey('');
+      setTotpCode('');
+      setTotpError('');
+    }
   }, [open]);
 
-  const handleVerify = async (ev) => {
+  const handlePasswordSubmit = async (ev) => {
     ev.preventDefault();
     if (!password.trim()) { setPasswordError('Current password is required.'); return; }
     setSaving(true);
     try {
-      await windowStaffAccountAPI.resetMfa({ current_password: password });
-      onSuccess();
+      const res = await windowStaffAccountAPI.resetMfa({ current_password: password });
+      setQrCode(res.data.qr_code);
+      setManualKey(res.data.manual_entry_key);
+      setTotpCode('');
+      setTotpError('');
+      setStep('setup');
     } catch (err) {
       const detail = err?.response?.data?.detail || '';
       if (detail.toLowerCase().includes('incorrect') || detail.toLowerCase().includes('password')) {
@@ -285,40 +497,49 @@ function ResetMFAModal({ open, onClose, onSuccess }) {
     }
   };
 
+  const handleVerifyTotp = async (ev) => {
+    ev.preventDefault();
+    if (!totpCode.trim()) { setTotpError('Verification code is required.'); return; }
+    setSaving(true);
+    try {
+      await windowStaffAccountAPI.verifyMfa({ totp_code: totpCode.trim() });
+      onSuccess();
+    } catch (err) {
+      const detail = err?.response?.data?.detail || '';
+      if (detail.toLowerCase().includes('invalid') || detail.toLowerCase().includes('code')) {
+        setTotpError('The authentication code entered is invalid. Please try again.');
+      } else {
+        setTotpError(detail || 'Verification failed. Please try again.');
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (!open) return null;
 
+  // ---- Step: Confirm ----
   if (step === 'confirm') {
     return (
       <ActionConfirmationModal
         open
         tone="danger"
         title="Reset Multi-Factor Authentication"
-        message="Are you sure you want to reset your MFA settings? You will need to set up MFA again during your next login."
-        confirmLabel="Confirm"
+        message="Are you sure you want to reset your Multi-Factor Authentication? Your current MFA configuration will be removed and replaced with a new one."
+        confirmLabel="Reset MFA"
         cancelLabel="Cancel"
         onCancel={onClose}
-        onConfirm={() => setStep('verify')}
+        onConfirm={() => setStep('password')}
       />
     );
   }
 
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
-        <div className="sticky top-0 bg-white border-b border-gray-200 px-8 py-5 flex items-center justify-between rounded-t-xl">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">Identity Verification</p>
-            <h3 className="text-xl font-bold text-gray-900 mt-0.5">Confirm Your Password</h3>
-          </div>
-          <button onClick={onClose} disabled={saving} className="text-gray-400 hover:text-gray-600 transition">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        <form onSubmit={handleVerify} className="px-8 py-6 space-y-4">
-          <p className="text-sm text-gray-600">Enter your current password to complete the MFA reset.</p>
+  // ---- Step: Password Verification ----
+  if (step === 'password') {
+    return (
+      <ModalShell eyebrow="Identity Verification" title="Verify Identity" onClose={onClose} closeDisabled={saving}>
+        <form onSubmit={handlePasswordSubmit} className="space-y-4">
+          <p className="text-sm text-gray-600">Please enter your current password to confirm these changes.</p>
           <Field
             label="Current Password"
             id="mfa-pw"
@@ -327,7 +548,6 @@ function ResetMFAModal({ open, onClose, onSuccess }) {
             onChange={(e) => { setPassword(e.target.value); setPasswordError(''); }}
             error={passwordError}
           />
-
           <div className="flex justify-end gap-3 pt-2">
             <button type="button" onClick={onClose} disabled={saving}
               className="px-5 py-2.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-sm font-semibold text-gray-700 transition disabled:opacity-60">
@@ -335,12 +555,86 @@ function ResetMFAModal({ open, onClose, onSuccess }) {
             </button>
             <button type="submit" disabled={saving}
               className="px-5 py-2.5 rounded-lg bg-red-500 hover:bg-red-600 text-white text-sm font-semibold transition disabled:opacity-60">
-              {saving ? 'Resetting...' : 'Reset MFA'}
+              {saving ? 'Resetting...' : 'Verify'}
             </button>
           </div>
         </form>
+      </ModalShell>
+    );
+  }
+
+  // ---- Step: QR / Setup ----
+  if (step === 'setup') {
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+          <div className="sticky top-0 bg-white border-b border-gray-200 px-8 py-5 rounded-t-xl">
+            <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">MFA Setup</p>
+            <h3 className="text-xl font-bold text-gray-900 mt-0.5">Configure Authenticator</h3>
+          </div>
+          <div className="px-8 py-6 space-y-5">
+            <ol className="space-y-1 text-sm text-gray-600 list-decimal list-inside">
+              <li>Open your authenticator application.</li>
+              <li>Scan the QR Code below.</li>
+              <li>Enter the generated verification code to complete setup.</li>
+            </ol>
+
+            {qrCode && (
+              <div className="flex justify-center">
+                <img src={qrCode} alt="MFA QR Code" className="w-48 h-48 border border-gray-200 rounded-lg" />
+              </div>
+            )}
+
+            {manualKey && (
+              <div className="rounded-lg bg-gray-50 border border-gray-200 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-1">Manual Setup Key</p>
+                <p className="text-sm font-mono text-gray-800 break-all select-all">{manualKey}</p>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button type="button" onClick={onClose}
+                className="px-5 py-2.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-sm font-semibold text-gray-700 transition">
+                Cancel
+              </button>
+              <button type="button" onClick={() => { setTotpCode(''); setTotpError(''); setStep('verify'); }}
+                className="px-5 py-2.5 rounded-lg bg-primary hover:bg-secondary text-white text-sm font-semibold transition">
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
+    );
+  }
+
+  // ---- Step: Verify TOTP ----
+  return (
+    <ModalShell eyebrow="MFA Setup" title="Complete MFA Setup" onClose={() => setStep('setup')} closeDisabled={saving}>
+      <form onSubmit={handleVerifyTotp} className="space-y-4">
+        <p className="text-sm text-gray-600">
+          Enter the 6-digit code generated by your authenticator app to complete setup.
+        </p>
+        <Field
+          label="Verification Code"
+          id="mfa-totp"
+          value={totpCode}
+          onChange={(e) => { setTotpCode(e.target.value); setTotpError(''); }}
+          error={totpError}
+          hint="Enter the 6-digit code from your authenticator app."
+        />
+        <div className="flex justify-end gap-3 pt-2">
+          <button type="button" onClick={() => setStep('setup')} disabled={saving}
+            className="px-5 py-2.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-sm font-semibold text-gray-700 transition disabled:opacity-60">
+            Back
+          </button>
+          <button type="submit" disabled={saving}
+            className="px-5 py-2.5 rounded-lg bg-primary hover:bg-secondary text-white text-sm font-semibold transition disabled:opacity-60">
+            {saving ? 'Verifying...' : 'Verify and Complete Setup'}
+          </button>
+        </div>
+      </form>
+    </ModalShell>
   );
 }
 
@@ -373,7 +667,6 @@ const WindowStaffAccount = () => {
   const showSuccess = (title, message) => setSystemMessage({ tone: 'success', title, message });
 
   const handleProfileSuccess = (updated) => {
-    // Update localStorage so the sidebar name reflects the change immediately
     try {
       const stored = JSON.parse(localStorage.getItem('branchUser') || '{}');
       localStorage.setItem('branchUser', JSON.stringify({ ...stored, ...updated }));
@@ -390,10 +683,9 @@ const WindowStaffAccount = () => {
 
   const handleMFASuccess = () => {
     setShowResetMFA(false);
-    showSuccess('MFA Reset Successfully', 'Your Multi-Factor Authentication has been reset. You will be required to configure MFA during your next login.');
+    showSuccess('MFA Configured Successfully', 'Your Multi-Factor Authentication has been successfully reconfigured.');
   };
 
-  // Derive display values from profile
   const initials = (profile?.full_name || profile?.username || 'W').charAt(0).toUpperCase();
   const staff = JSON.parse(localStorage.getItem('branchUser') || '{}');
   const rawLabel = staff?.window_label || staff?.service_window_label || staff?.service_window || '';
@@ -446,6 +738,10 @@ const WindowStaffAccount = () => {
             <p className="text-sm font-medium text-gray-800">{profile?.email || '—'}</p>
           </div>
           <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-1">Contact Number</p>
+            <p className="text-sm font-medium text-gray-800">{profile?.contact_number || '—'}</p>
+          </div>
+          <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-1">Service Window</p>
             <p className="text-sm font-medium text-gray-800">{roleDisplay || '—'}</p>
           </div>
@@ -471,7 +767,7 @@ const WindowStaffAccount = () => {
             </div>
             <h3 className="font-bold text-gray-900">Edit Profile</h3>
           </div>
-          <p className="text-sm text-gray-500">Update your name and email address.</p>
+          <p className="text-sm text-gray-500">Update your name, email address, and contact number.</p>
         </button>
 
         {/* Change Password */}
