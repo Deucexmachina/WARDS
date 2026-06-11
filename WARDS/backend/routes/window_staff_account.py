@@ -6,6 +6,7 @@ Forbidden: viewing or modifying any other account.
 """
 import base64
 import io
+import logging
 
 import pyotp
 import qrcode
@@ -17,6 +18,7 @@ from typing import Optional
 
 from database.models import ActivityLog, BranchStaff, MFASecret, get_db
 from middleware.branch_auth import get_current_branch_staff
+from services.email_service import send_account_change_notification_email
 from utils.field_crypto import find_mfa_secret_record
 from utils.security_validation import (
     ensure_email_is_unique,
@@ -24,6 +26,8 @@ from utils.security_validation import (
     normalize_email,
     validate_strong_password,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -157,6 +161,14 @@ async def update_own_profile(
 
     ensure_email_is_unique(db, normalized_email, exclude_branch_staff_id=current_staff.id)
 
+    changed_fields = []
+    if normalized_full_name != (current_staff.full_name or ""):
+        changed_fields.append("Full Name")
+    if normalized_email != (current_staff.email or ""):
+        changed_fields.append("Email Address")
+    if payload.contact_number.strip() != (current_staff.contact_number or ""):
+        changed_fields.append("Contact Number")
+
     current_staff.full_name = normalized_full_name
     current_staff.email = normalized_email
     current_staff.contact_number = payload.contact_number.strip()
@@ -165,7 +177,20 @@ async def update_own_profile(
     client_ip = request.client.host if request.client else "unknown"
     _log(db, "Window Staff Profile Updated", current_staff.username, f"IP: {client_ip}")
 
-    return {"message": "Profile updated successfully."}
+    email_result = send_account_change_notification_email(
+        recipient_email=normalized_email,
+        display_name=normalized_full_name or current_staff.username,
+        account_type="branch_staff",
+        change_summary="Your WARDS account profile information was updated.",
+        changed_fields=changed_fields or ["Profile Information"],
+        subject="WARDS Security Notification: Profile Information Updated",
+    )
+    if email_result.get("sent"):
+        _log(db, "Window Staff Profile Updated", current_staff.username, "Security notification email sent after profile update.")
+    else:
+        logger.warning("Profile update notification email not sent for %s: %s", current_staff.username, email_result.get("message"))
+
+    return {"message": "Profile updated successfully.", "email_sent": email_result.get("sent", False)}
 
 
 @router.put("/password")
@@ -193,7 +218,20 @@ async def change_own_password(
     client_ip = request.client.host if request.client else "unknown"
     _log(db, "Window Staff Password Changed", current_staff.username, f"IP: {client_ip}")
 
-    return {"message": "Password changed successfully."}
+    email_result = send_account_change_notification_email(
+        recipient_email=current_staff.email,
+        display_name=current_staff.full_name or current_staff.username,
+        account_type="branch_staff",
+        change_summary="Your WARDS account password was successfully changed.",
+        changed_fields=["Password"],
+        subject="WARDS Security Notification: Password Changed",
+    )
+    if email_result.get("sent"):
+        _log(db, "Window Staff Password Changed", current_staff.username, "Security notification email sent after password change.")
+    else:
+        logger.warning("Password change notification email not sent for %s: %s", current_staff.username, email_result.get("message"))
+
+    return {"message": "Password changed successfully.", "email_sent": email_result.get("sent", False)}
 
 
 @router.post("/reset-mfa")
@@ -263,4 +301,17 @@ async def verify_own_mfa(
     client_ip = request.client.host if request.client else "unknown"
     _log(db, "Window Staff MFA Configured", current_staff.username, f"IP: {client_ip}")
 
-    return {"message": "MFA configured successfully."}
+    email_result = send_account_change_notification_email(
+        recipient_email=current_staff.email,
+        display_name=current_staff.full_name or current_staff.username,
+        account_type="branch_staff",
+        change_summary="Your WARDS account Multi-Factor Authentication (MFA) settings were successfully updated.",
+        changed_fields=["Multi-Factor Authentication"],
+        subject="WARDS Security Notification: MFA Settings Updated",
+    )
+    if email_result.get("sent"):
+        _log(db, "Window Staff MFA Configured", current_staff.username, "Security notification email sent after MFA reset.")
+    else:
+        logger.warning("MFA reset notification email not sent for %s: %s", current_staff.username, email_result.get("message"))
+
+    return {"message": "MFA configured successfully.", "email_sent": email_result.get("sent", False)}

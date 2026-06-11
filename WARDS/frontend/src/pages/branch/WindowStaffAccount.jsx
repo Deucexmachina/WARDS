@@ -130,17 +130,20 @@ function EditProfileModal({ open, profile, onClose, onSuccess }) {
       const contactDigits = form.contact_number.trim()
         ? normalizePhilippineContactDigits(form.contact_number)
         : '';
-      await windowStaffAccountAPI.updateProfile({
+      const res = await windowStaffAccountAPI.updateProfile({
         full_name: form.full_name.trim(),
         email: form.email.trim(),
         contact_number: contactDigits || null,
         current_password: password,
       });
-      onSuccess({
-        full_name: form.full_name.trim(),
-        email: form.email.trim(),
-        contact_number: contactDigits || '',
-      });
+      onSuccess(
+        {
+          full_name: form.full_name.trim(),
+          email: form.email.trim(),
+          contact_number: contactDigits || '',
+        },
+        res?.data?.email_sent,
+      );
     } catch (err) {
       const detail = err?.response?.data?.detail || '';
       if (detail.toLowerCase().includes('incorrect') || detail.toLowerCase().includes('password')) {
@@ -377,12 +380,12 @@ function ChangePasswordModal({ open, onClose, onSuccess }) {
   const handleConfirm = async () => {
     setSaving(true);
     try {
-      await windowStaffAccountAPI.changePassword({
+      const res = await windowStaffAccountAPI.changePassword({
         current_password: form.current_password,
         new_password: form.new_password,
         confirm_new_password: form.confirm_new_password,
       });
-      onSuccess();
+      onSuccess(res?.data?.email_sent);
     } catch (err) {
       setStep('form');
       const detail = err?.response?.data?.detail || '';
@@ -502,8 +505,8 @@ function ResetMFAModal({ open, onClose, onSuccess }) {
     if (!totpCode.trim()) { setTotpError('Verification code is required.'); return; }
     setSaving(true);
     try {
-      await windowStaffAccountAPI.verifyMfa({ totp_code: totpCode.trim() });
-      onSuccess();
+      const res = await windowStaffAccountAPI.verifyMfa({ totp_code: totpCode.trim() });
+      onSuccess(res?.data?.email_sent);
     } catch (err) {
       const detail = err?.response?.data?.detail || '';
       if (detail.toLowerCase().includes('invalid') || detail.toLowerCase().includes('code')) {
@@ -666,24 +669,48 @@ const WindowStaffAccount = () => {
 
   const showSuccess = (title, message) => setSystemMessage({ tone: 'success', title, message });
 
-  const handleProfileSuccess = (updated) => {
+  const handleProfileSuccess = (updated, emailSent) => {
     try {
       const stored = JSON.parse(localStorage.getItem('branchUser') || '{}');
       localStorage.setItem('branchUser', JSON.stringify({ ...stored, ...updated }));
     } catch { /* ignore */ }
     setProfile((prev) => ({ ...prev, ...updated }));
     setShowEditProfile(false);
-    showSuccess('Profile Updated Successfully', 'Your profile information has been updated successfully.');
+    if (emailSent === false) {
+      setSystemMessage({
+        tone: 'info',
+        title: 'Profile Updated Successfully',
+        message: 'Your profile information has been updated successfully.\n\nNotification Email Not Sent: Your changes were successfully saved, but the notification email could not be delivered.',
+      });
+    } else {
+      showSuccess('Profile Updated Successfully', 'Your profile information has been updated successfully.');
+    }
   };
 
-  const handlePasswordSuccess = () => {
+  const handlePasswordSuccess = (emailSent) => {
     setShowChangePassword(false);
-    showSuccess('Password Updated Successfully', 'Your password has been changed successfully.');
+    if (emailSent === false) {
+      setSystemMessage({
+        tone: 'info',
+        title: 'Password Updated Successfully',
+        message: 'Your password has been changed successfully.\n\nNotification Email Not Sent: Your changes were successfully saved, but the notification email could not be delivered.',
+      });
+    } else {
+      showSuccess('Password Updated Successfully', 'Your password has been changed successfully.');
+    }
   };
 
-  const handleMFASuccess = () => {
+  const handleMFASuccess = (emailSent) => {
     setShowResetMFA(false);
-    showSuccess('MFA Configured Successfully', 'Your Multi-Factor Authentication has been successfully reconfigured.');
+    if (emailSent === false) {
+      setSystemMessage({
+        tone: 'info',
+        title: 'MFA Configured Successfully',
+        message: 'Your Multi-Factor Authentication has been successfully reconfigured.\n\nNotification Email Not Sent: Your changes were successfully saved, but the notification email could not be delivered.',
+      });
+    } else {
+      showSuccess('MFA Configured Successfully', 'Your Multi-Factor Authentication has been successfully reconfigured.');
+    }
   };
 
   const initials = (profile?.full_name || profile?.username || 'W').charAt(0).toUpperCase();

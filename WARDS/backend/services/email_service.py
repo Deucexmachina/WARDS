@@ -1385,6 +1385,7 @@ def send_account_change_notification_email(
     account_type: str,
     change_summary: str,
     changed_fields: list[str],
+    subject: str | None = None,
 ) -> dict:
     if not recipient_email:
         return {
@@ -1403,7 +1404,7 @@ def send_account_change_notification_email(
     smtp_from_email = os.getenv("SMTP_FROM_EMAIL")
     smtp_from_name = os.getenv("SMTP_FROM_NAME", "WARDS Admin")
     message = EmailMessage()
-    message["Subject"] = "Account Change Notice | WARDS"
+    message["Subject"] = subject or "Account Change Notice | WARDS"
     message["From"] = f"{smtp_from_name} <{smtp_from_email}>"
     message["To"] = recipient_email
     message.set_content(_build_account_change_text(display_name, account_type, change_summary, changed_fields))
