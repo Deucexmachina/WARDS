@@ -73,7 +73,6 @@ RECEIPT_REQUEST_REASON_OPTIONS = {
     "Government compliance",
     "Other",
 }
-OCR_EXTRACTION_FAILED_MESSAGE = "Unable to extract all required receipt information. Please verify the uploaded receipt and try again."
 UNSUPPORTED_RECEIPT_FORMAT_MESSAGE = "The uploaded receipt format is not recognized by the OCR engine."
 OCR_REQUIRED_RECEIPT_CATEGORIES = {"RPT", "BUSINESS", "MISC", "PTR", "MARKET"}
 MARKET_OCR_METADATA_PREFIX = "__MARKET_OCR_METADATA__"
@@ -1096,7 +1095,7 @@ def get_missing_required_receipt_fields(
 ) -> list[str]:
     missing_fields = []
     if not (ref_number or "").strip():
-        missing_fields.append("reference")
+        missing_fields.append("ref_number")
     if not (taxpayer_name or "").strip():
         missing_fields.append("taxpayer_name")
     if amount in (None, ""):
@@ -1104,11 +1103,52 @@ def get_missing_required_receipt_fields(
     return missing_fields
 
 
+def get_receipt_field_label(field: str, category: str) -> str:
+    normalized_category = normalize_receipt_category(category)
+    if normalized_category == "MARKET":
+        labels = {
+            "taxpayer_name": "Name",
+            "transaction_date": "Date of Issue",
+            "market_purpose_of_renewal": "Purpose of Renewal",
+            "market_valid_until": "Valid Until",
+        }
+    elif normalized_category == "CTC":
+        labels = {
+            "transaction_date": "Date",
+        }
+    else:
+        labels = {
+            "ref_number": "Reference Number",
+            "taxpayer_name": "Taxpayer Name",
+            "transaction_date": "Transaction Date",
+            "amount": "Amount",
+        }
+    return labels.get(field, field.replace("_", " ").title())
+
+
+def build_extraction_warning_message(missing_fields: list[str], category: str) -> str:
+    if not missing_fields:
+        return ""
+    field_labels = [get_receipt_field_label(field, category) for field in missing_fields]
+    if len(field_labels) == 1:
+        return (
+            f"Unable to extract the following required field from the receipt: "
+            f"{field_labels[0]}. Please review and enter the information manually."
+        )
+    all_but_last = ", ".join(field_labels[:-1])
+    last = field_labels[-1]
+    return (
+        f"Unable to extract the following required fields from the receipt: "
+        f"{all_but_last}, and {last}. Please review and complete these fields manually."
+    )
+
+
 def validate_required_receipt_fields(
     *,
     ref_number: str | None,
     taxpayer_name: str | None,
     amount: float | None,
+    category: str = "",
 ):
     missing_fields = get_missing_required_receipt_fields(
         ref_number=ref_number,
@@ -1116,7 +1156,25 @@ def validate_required_receipt_fields(
         amount=amount,
     )
     if missing_fields:
-        raise HTTPException(status_code=400, detail=OCR_EXTRACTION_FAILED_MESSAGE)
+        raise HTTPException(
+            status_code=400,
+            detail=build_extraction_warning_message(missing_fields, category),
+        )
+
+
+def validate_receipt_amount(amount: float | None) -> None:
+    if amount is not None and amount != "":
+        try:
+            if float(amount) <= 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Amount must be greater than zero.",
+                )
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=400,
+                detail="Amount must be a valid number greater than zero.",
+            )
 
 
 def compare_taxpayer_names(left: str | None, right: str | None) -> bool:
@@ -1353,8 +1411,17 @@ def save_receipt_record_payload(
             market_purpose_of_renewal=payload.market_purpose_of_renewal,
             market_valid_until=payload.market_valid_until,
         )
-        if not (payload.taxpayer_name or "").strip() or not effective_transaction_date:
-            raise HTTPException(status_code=400, detail=OCR_EXTRACTION_FAILED_MESSAGE)
+        market_missing_fields = get_missing_market_required_receipt_fields(
+            taxpayer_name=payload.taxpayer_name,
+            transaction_date=effective_transaction_date,
+            market_purpose_of_renewal=payload.market_purpose_of_renewal,
+            market_valid_until=payload.market_valid_until,
+        )
+        if market_missing_fields:
+            raise HTTPException(
+                status_code=400,
+                detail=build_extraction_warning_message(market_missing_fields, normalized_tax_type),
+            )
         market_metadata = {
             "market_purpose_of_renewal": (payload.market_purpose_of_renewal or "").strip() or None,
             "market_valid_until": (payload.market_valid_until or "").strip() or None,
@@ -1364,7 +1431,9 @@ def save_receipt_record_payload(
             ref_number=normalized_ref_number,
             taxpayer_name=payload.taxpayer_name,
             amount=payload.amount,
+            category=normalized_tax_type,
         )
+    validate_receipt_amount(payload.amount)
     if normalized_ref_number:
         existing_reference_record = (
             db.query(ReceiptRecord)
@@ -1560,6 +1629,14 @@ def build_receipt_ocr_result(
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    ocr_amount = result.get("amount")
+    if ocr_amount is not None and ocr_amount != "":
+        try:
+            if float(ocr_amount) <= 0:
+                result["amount"] = None
+        except (ValueError, TypeError):
+            result["amount"] = None
+
     raw_detected_category = (result.get("detected_category") or "UNKNOWN").strip().upper()
     detected_category = normalize_receipt_category(raw_detected_category)
     category_match = result.get("category_match", True)
@@ -1644,7 +1721,7 @@ def build_receipt_ocr_result(
             taxpayer_name=result.get("taxpayer_name"),
             amount=result.get("amount"),
         )
-    extraction_warning = OCR_EXTRACTION_FAILED_MESSAGE if missing_required_fields else ""
+    extraction_warning = build_extraction_warning_message(missing_required_fields, normalized_category)
     if missing_required_fields:
         save_blocked = True
 

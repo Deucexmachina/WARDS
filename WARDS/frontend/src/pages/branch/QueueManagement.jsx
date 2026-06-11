@@ -43,7 +43,6 @@ const getQueueWindowLabel = (queueOrKey) => {
 
 const BRANCH_QUEUE_UPDATED_EVENT = 'branch-queue-updated';
 const OCR_REQUIRED_RECEIPT_CATEGORIES = new Set(['RPT', 'BUSINESS', 'MISC', 'PTR', 'MARKET']);
-const OCR_EXTRACTION_FAILED_MESSAGE = 'Unable to extract all required receipt information. Please verify the uploaded receipt and try again.';
 const MARKET_PURPOSE_OPTIONS = [
   'Renewal of Business Permit',
   'New Business Permit Application',
@@ -165,6 +164,45 @@ const buildSuggestedReceiptFilename = (filename, taxpayerName) => {
   return `${baseName}${extension}`;
 };
 
+const getReceiptFieldLabel = (field, category) => {
+  const normalizedCategory = (category || '').trim().toUpperCase();
+  if (normalizedCategory === 'MARKET') {
+    const labels = {
+      taxpayer_name: 'Name',
+      transaction_date: 'Date of Issue',
+      market_purpose_of_renewal: 'Purpose of Renewal',
+      market_valid_until: 'Valid Until',
+    };
+    return labels[field] || field.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+  if (normalizedCategory === 'CTC') {
+    const labels = {
+      transaction_date: 'Date',
+    };
+    return labels[field] || field.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+  const labels = {
+    ref_number: 'Reference Number',
+    taxpayer_name: 'Taxpayer Name',
+    transaction_date: 'Transaction Date',
+    amount: 'Amount',
+  };
+  return labels[field] || field.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+};
+
+const buildExtractionWarningMessage = (missingFields, category) => {
+  if (!missingFields || missingFields.length === 0) {
+    return '';
+  }
+  const fieldLabels = missingFields.map((field) => getReceiptFieldLabel(field, category));
+  if (fieldLabels.length === 1) {
+    return `Unable to extract the following required field from the receipt: ${fieldLabels[0]}. Please review and enter the information manually.`;
+  }
+  const allButLast = fieldLabels.slice(0, -1).join(', ');
+  const last = fieldLabels[fieldLabels.length - 1];
+  return `Unable to extract the following required fields from the receipt: ${allButLast}, and ${last}. Please review and complete these fields manually.`;
+};
+
 const getReceiptDraftMissingFields = (draft, category) => {
   const normalizedCategory = (category || '').trim().toUpperCase();
   if (!OCR_REQUIRED_RECEIPT_CATEGORIES.has(normalizedCategory)) {
@@ -203,10 +241,17 @@ const getReceiptDraftMissingFields = (draft, category) => {
   if (!(draft?.taxpayer_name || '').trim()) {
     missingFields.push('taxpayer_name');
   }
-  if (draft?.amount === '' || draft?.amount === null || draft?.amount === undefined || Number.isNaN(Number(draft?.amount))) {
+  if (draft?.amount === '' || draft?.amount === null || draft?.amount === undefined || Number.isNaN(Number(draft?.amount)) || Number(draft?.amount) <= 0) {
     missingFields.push('amount');
   }
   return missingFields;
+};
+
+const isAmountInvalid = (amount) => {
+  if (amount === '' || amount === null || amount === undefined || Number.isNaN(Number(amount))) {
+    return false;
+  }
+  return Number(amount) <= 0;
 };
 
 const normalizeReceiptDraftReviewState = (draft) => {
@@ -928,17 +973,19 @@ const QueueManagement = () => {
   const completionReceiptCategory = resolveReceiptCategory(completionQueue);
   const isCtcFileOnlyCompletion = completionReceiptCategory === 'CTC';
   const receiptDraftMissingFields = getReceiptDraftMissingFields(receiptDraft, receiptDraftCategory);
-  const receiptDraftExtractionWarning = receiptDraftMissingFields.length ? OCR_EXTRACTION_FAILED_MESSAGE : '';
+  const receiptDraftExtractionWarning = buildExtractionWarningMessage(receiptDraftMissingFields, receiptDraftCategory);
   const receiptDraftFilenameMismatchBlocked = Boolean(
     receiptDraft?.taxpayer_name &&
     receiptDraft?.filename_matches_taxpayer === false &&
     !receiptDraft?.auto_rename_source_image
   );
+  const receiptDraftAmountInvalid = isAmountInvalid(receiptDraft?.amount);
   const receiptDraftSaveBlocked = Boolean(
     receiptDraft?.duplicate_detected ||
     receiptDraft?.category_warning ||
     receiptDraftMissingFields.length ||
-    receiptDraftFilenameMismatchBlocked
+    receiptDraftFilenameMismatchBlocked ||
+    receiptDraftAmountInvalid
   );
 
   const dispatchQueueStateUpdate = (nextQueues) => {
@@ -1246,6 +1293,7 @@ const QueueManagement = () => {
       reviewedDraft?.duplicate_detected ||
       reviewedDraft?.category_warning ||
       getReceiptDraftMissingFields(reviewedDraft, receiptDraftCategory).length ||
+      isAmountInvalid(reviewedDraft?.amount) ||
       (
         reviewedDraft?.taxpayer_name &&
         reviewedDraft?.filename_matches_taxpayer === false &&
@@ -2130,8 +2178,14 @@ const QueueManagement = () => {
               <div className="mt-6 space-y-5">
                 {receiptDraftExtractionWarning ? (
                   <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-                    <p className="font-semibold">OCR Extraction Failed</p>
-                    <p className="mt-1">{receiptDraftExtractionWarning}</p>
+                    <p className="font-semibold">Unable to Extract Required Information</p>
+                    <p className="mt-1">The following fields could not be automatically extracted from the uploaded receipt:</p>
+                    <ul className="mt-1 list-inside list-disc">
+                      {receiptDraftMissingFields.map((field) => (
+                        <li key={field}>{getReceiptFieldLabel(field, receiptDraftCategory)}</li>
+                      ))}
+                    </ul>
+                    <p className="mt-1">Please review and complete the highlighted fields before proceeding.</p>
                   </div>
                 ) : null}
                 {receiptDraft.duplicate_warning || receiptDraft.category_warning ? (
@@ -2178,12 +2232,34 @@ const QueueManagement = () => {
                       {completionReceiptCategory !== 'MARKET' ? (
                         <label className="block">
                           <span className="mb-2 block text-sm font-semibold text-slate-700">Reference Number</span>
-                          <input name="ref_number" value={receiptDraft.ref_number || ''} onChange={handleReceiptDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none" />
+                          <input
+                            name="ref_number"
+                            value={receiptDraft.ref_number || ''}
+                            onChange={handleReceiptDraftChange}
+                            aria-invalid={receiptDraftMissingFields.includes('ref_number') ? 'true' : 'false'}
+                            className={`w-full rounded-xl border px-4 py-3 text-sm outline-none ${
+                              receiptDraftMissingFields.includes('ref_number') ? 'border-red-500 bg-red-50' : 'border-slate-300'
+                            }`}
+                          />
+                          {receiptDraftMissingFields.includes('ref_number') ? (
+                            <p className="mt-1 text-xs font-semibold text-red-600">{getReceiptFieldLabel('ref_number', receiptDraftCategory)} could not be extracted. Please enter a value.</p>
+                          ) : null}
                         </label>
                       ) : null}
                       <label className="block">
                         <span className="mb-2 block text-sm font-semibold text-slate-700">{completionReceiptCategory === 'MARKET' ? 'Name' : 'Taxpayer Name'}</span>
-                        <input name="taxpayer_name" value={receiptDraft.taxpayer_name || ''} onChange={handleReceiptDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none" />
+                        <input
+                          name="taxpayer_name"
+                          value={receiptDraft.taxpayer_name || ''}
+                          onChange={handleReceiptDraftChange}
+                          aria-invalid={receiptDraftMissingFields.includes('taxpayer_name') ? 'true' : 'false'}
+                          className={`w-full rounded-xl border px-4 py-3 text-sm outline-none ${
+                            receiptDraftMissingFields.includes('taxpayer_name') ? 'border-red-500 bg-red-50' : 'border-slate-300'
+                          }`}
+                        />
+                        {receiptDraftMissingFields.includes('taxpayer_name') ? (
+                          <p className="mt-1 text-xs font-semibold text-red-600">{getReceiptFieldLabel('taxpayer_name', receiptDraftCategory)} could not be extracted. Please enter a value.</p>
+                        ) : null}
                       </label>
                       <label className="block">
                         <span className="mb-2 block text-sm font-semibold text-slate-700">{completionReceiptCategory === 'MARKET' ? 'Date of Issue' : 'Transaction Date'}</span>
@@ -2194,8 +2270,14 @@ const QueueManagement = () => {
                           max={completionReceiptCategory === 'MARKET' ? getTodayDateInputValue() : undefined}
                           value={completionReceiptCategory === 'MARKET' ? formatDateInputValue(receiptDraft.transaction_date) : (receiptDraft.transaction_date || '')}
                           onChange={completionReceiptCategory === 'MARKET' ? handleMarketDateChange : handleReceiptDraftChange}
-                          className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none"
+                          aria-invalid={receiptDraftMissingFields.includes('transaction_date') ? 'true' : 'false'}
+                          className={`w-full rounded-xl border px-4 py-3 text-sm outline-none ${
+                            receiptDraftMissingFields.includes('transaction_date') ? 'border-red-500 bg-red-50' : 'border-slate-300'
+                          }`}
                         />
+                        {receiptDraftMissingFields.includes('transaction_date') ? (
+                          <p className="mt-1 text-xs font-semibold text-red-600">{getReceiptFieldLabel('transaction_date', receiptDraftCategory)} could not be extracted. Please enter a value.</p>
+                        ) : null}
                       </label>
                       {completionReceiptCategory === 'MARKET' ? (
                         <>
@@ -2210,7 +2292,10 @@ const QueueManagement = () => {
                                   market_purpose_of_renewal: nextValue === 'Other' ? '' : nextValue,
                                 }));
                               }}
-                              className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none"
+                              aria-invalid={receiptDraftMissingFields.includes('market_purpose_of_renewal') ? 'true' : 'false'}
+                              className={`w-full rounded-xl border bg-white px-4 py-3 text-sm outline-none ${
+                                receiptDraftMissingFields.includes('market_purpose_of_renewal') ? 'border-red-500 bg-red-50' : 'border-slate-300'
+                              }`}
                             >
                               {MARKET_PURPOSE_OPTIONS.map((option) => (
                                 <option key={option} value={option}>{option}</option>
@@ -2223,8 +2308,14 @@ const QueueManagement = () => {
                                 value={receiptDraft.market_purpose_of_renewal || ''}
                                 onChange={handleReceiptDraftChange}
                                 placeholder="Type the purpose of renewal"
-                                className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none"
+                                aria-invalid={receiptDraftMissingFields.includes('market_purpose_of_renewal') ? 'true' : 'false'}
+                                className={`mt-2 w-full rounded-xl border px-4 py-3 text-sm outline-none ${
+                                  receiptDraftMissingFields.includes('market_purpose_of_renewal') ? 'border-red-500 bg-red-50' : 'border-slate-300'
+                                }`}
                               />
+                            ) : null}
+                            {receiptDraftMissingFields.includes('market_purpose_of_renewal') ? (
+                              <p className="mt-1 text-xs font-semibold text-red-600">{getReceiptFieldLabel('market_purpose_of_renewal', receiptDraftCategory)} could not be extracted. Please enter a value.</p>
                             ) : null}
                           </label>
                           <label className="block">
@@ -2235,14 +2326,38 @@ const QueueManagement = () => {
                               min={getTodayDateInputValue()}
                               value={formatDateInputValue(receiptDraft.market_valid_until)}
                               onChange={handleMarketDateChange}
-                              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none"
+                              aria-invalid={receiptDraftMissingFields.includes('market_valid_until') ? 'true' : 'false'}
+                              className={`w-full rounded-xl border px-4 py-3 text-sm outline-none ${
+                                receiptDraftMissingFields.includes('market_valid_until') ? 'border-red-500 bg-red-50' : 'border-slate-300'
+                              }`}
                             />
+                            {receiptDraftMissingFields.includes('market_valid_until') ? (
+                              <p className="mt-1 text-xs font-semibold text-red-600">{getReceiptFieldLabel('market_valid_until', receiptDraftCategory)} could not be extracted. Please enter a value.</p>
+                            ) : null}
                           </label>
                         </>
                       ) : (
                         <label className="block">
                           <span className="mb-2 block text-sm font-semibold text-slate-700">Amount</span>
-                          <input name="amount" type="number" step="0.01" value={receiptDraft.amount ?? ''} onChange={handleReceiptDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none" />
+                          <input
+                            name="amount"
+                            type="number"
+                            step="0.01"
+                            min="0.01"
+                            value={receiptDraft.amount ?? ''}
+                            onChange={handleReceiptDraftChange}
+                            aria-invalid={receiptDraftMissingFields.includes('amount') || receiptDraftAmountInvalid ? 'true' : 'false'}
+                            className={`w-full rounded-xl border px-4 py-3 text-sm outline-none ${
+                              receiptDraftMissingFields.includes('amount') || receiptDraftAmountInvalid ? 'border-red-500 bg-red-50' : 'border-slate-300'
+                            }`}
+                          />
+                          {receiptDraftMissingFields.includes('amount') || receiptDraftAmountInvalid ? (
+                            <p className="mt-1 text-xs font-semibold text-red-600">
+                              {receiptDraftAmountInvalid
+                                ? 'Amount must be greater than zero.'
+                                : `${getReceiptFieldLabel('amount', receiptDraftCategory)} could not be extracted. Please enter a value.`}
+                            </p>
+                          ) : null}
                         </label>
                       )}
                     </>
