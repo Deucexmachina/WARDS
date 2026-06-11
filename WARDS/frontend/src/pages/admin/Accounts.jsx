@@ -721,6 +721,7 @@ const Accounts = () => {
         ) : null}
       />
 
+      <div className="mt-6">
       {error && !authModal.mode && (
         <div className="mb-6 rounded border-l-4 border-red-500 bg-red-100 p-4 text-red-700">
           <p className="font-semibold">{error}</p>
@@ -736,6 +737,7 @@ const Accounts = () => {
       {!isBranchPortal && renderAccountTable('Main Admin Accounts', adminAccounts)}
       {renderBranchAccountTable()}
       {renderAccountTable('Citizen Accounts', citizenAccounts, 'Full Name')}
+      </div>
 
       <div className="flex flex-col gap-3 border-t border-gray-100 px-2 py-4 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-gray-500">
