@@ -7,7 +7,6 @@ const TaxpayerGuide = () => {
   const [loading, setLoading] = useState(true);
   const [language] = usePublicLanguage();
   const [activeCategory, setActiveCategory] = useState('all');
-  const [expandedGuide, setExpandedGuide] = useState(null);
 
   useEffect(() => {
     const fetchGuideContent = async () => {
@@ -30,7 +29,6 @@ const TaxpayerGuide = () => {
 
   useEffect(() => {
     setActiveCategory('all');
-    setExpandedGuide(null);
   }, [language]);
 
   const guideIcons = {
@@ -101,59 +99,33 @@ const TaxpayerGuide = () => {
 
         {/* Guide Cards Grid */}
         {filteredGuides.length > 0 ? (
-          <div className="mb-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {filteredGuides.map((guide, index) => {
-              const isExpanded = expandedGuide === index;
-              return (
-                <div
-                  key={`${guide.title || 'guide'}-${index}`}
-                  className="flex flex-col rounded-2xl bg-white shadow-sm transition-shadow hover:shadow-md"
-                >
-                  <div className="flex flex-1 flex-col p-6">
-                    <div className="mb-4 flex items-start gap-3">
-                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-accent">
-                        {guideIcons.default}
-                      </div>
-                      <div className="flex-1">
-                        {guide.category && (
-                          <span className="mb-1.5 inline-block rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-semibold text-accent">
-                            {guide.category}
-                          </span>
-                        )}
-                        <h2 className="text-base font-bold leading-snug text-gray-800">{guide.title}</h2>
-                      </div>
+          <div className={activeCategory === 'all' ? 'mb-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3' : 'mb-10 flex flex-wrap justify-center gap-6'}>
+            {filteredGuides.map((guide, index) => (
+              <div
+                key={`${guide.title || 'guide'}-${index}`}
+                className={`flex flex-col rounded-2xl bg-white shadow-sm transition-shadow hover:shadow-md ${activeCategory !== 'all' ? 'w-full sm:w-[calc(50%-12px)] lg:w-[calc(33.333%-16px)]' : ''}`}
+              >
+                <div className="flex flex-1 flex-col p-6">
+                  <div className="mb-4 flex items-start gap-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-accent">
+                      {guideIcons.default}
                     </div>
-
-                    <div
-                      className={`flex-1 overflow-hidden text-sm leading-relaxed text-gray-600 transition-all duration-300 ${
-                        isExpanded ? '' : 'line-clamp-3'
-                      }`}
-                    >
-                      <div className="whitespace-pre-line">{guide.content}</div>
+                    <div className="flex-1">
+                      {guide.category && (
+                        <span className="mb-1.5 inline-block rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-semibold text-accent">
+                          {guide.category}
+                        </span>
+                      )}
+                      <h2 className="text-base font-bold leading-snug text-gray-800">{guide.title}</h2>
                     </div>
                   </div>
 
-                  <div className="border-t border-gray-100 px-6 py-4">
-                    <button
-                      onClick={() => setExpandedGuide(isExpanded ? null : index)}
-                      className="flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-primary"
-                    >
-                      {isExpanded
-                        ? (language === 'en' ? 'Show Less' : 'Ipakita ang Mas Kaunti')
-                        : (language === 'en' ? 'Read More' : 'Basahin Pa')}
-                      <svg
-                        className={`h-4 w-4 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path>
-                      </svg>
-                    </button>
+                  <div className="flex-1 text-sm leading-relaxed text-gray-600">
+                    <div className="whitespace-pre-line">{guide.content}</div>
                   </div>
                 </div>
-              );
-            })}
+              </div>
+            ))}
           </div>
         ) : (
           <div className="mb-10 rounded-2xl bg-white p-12 text-center shadow-sm">
