@@ -340,64 +340,100 @@ const Home = () => {
 
   return (
     <>
+      {/* ── Hero ── */}
       <section
-        className="relative py-16 bg-cover bg-center bg-no-repeat"
+        className="relative min-h-[520px] flex items-center bg-cover bg-center bg-no-repeat overflow-hidden"
         style={{ backgroundImage: "url('/Images/hero-bg.jpg')" }}
       >
-        <div className="absolute inset-0 bg-black/50"></div>
-        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">
+        {/* Dark base overlay */}
+        <div className="absolute inset-0 bg-primary/80"></div>
+
+
+        <div className="relative w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
+          {/* Eyebrow */}
+          <div className="flex items-center gap-2 mb-5">
+            <span className="h-px w-8 bg-blue-400 opacity-70"></span>
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-300">
+              City Treasurer&rsquo;s Office
+            </span>
+          </div>
+
+          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold text-white leading-tight mb-5 max-w-3xl">
             {heroText.title}
           </h1>
-          <p className="text-blue-200 text-lg md:text-xl mb-8 max-w-3xl mx-auto">
+          <p className="text-blue-200/90 text-base sm:text-lg mb-10 max-w-xl leading-relaxed">
             {heroText.subtitle}
           </p>
-          <div className="flex flex-wrap justify-center gap-4">
+
+          {/* Action buttons — 2×2 on mobile, 4-col on md+ */}
+          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-3 max-w-3xl">
             <Link
               to="/get-queue"
-              className="bg-purple-500 text-white hover:bg-purple-600 px-8 py-4 rounded-lg font-semibold shadow-lg transition duration-300 inline-flex items-center"
+              className="group relative flex flex-col items-center gap-2 rounded-2xl bg-white/10 hover:bg-white/20 border border-white/15 hover:border-white/30 backdrop-blur-sm px-4 py-5 text-white transition duration-200 text-center"
             >
-              <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path>
-              </svg>
-              {heroText.getQueueNumber}
+              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-secondary/90 group-hover:bg-secondary transition duration-200 shadow-lg">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path>
+                </svg>
+              </span>
+              <span className="text-sm font-semibold leading-tight">{heroText.getQueueNumber}</span>
             </Link>
+
             <button
               onClick={() => setShowTicketModal(true)}
-              className="bg-yellow-500 text-white hover:bg-yellow-600 px-8 py-4 rounded-lg font-semibold shadow-lg transition duration-300 inline-flex items-center"
+              className="group relative flex flex-col items-center gap-2 rounded-2xl bg-white/10 hover:bg-white/20 border border-white/15 hover:border-white/30 backdrop-blur-sm px-4 py-5 text-white transition duration-200 text-center"
             >
-              <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z"></path>
-              </svg>
-              {heroText.viewMyTicket}
+              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-accent/80 group-hover:bg-accent transition duration-200 shadow-lg">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z"></path>
+                </svg>
+              </span>
+              <span className="text-sm font-semibold leading-tight">{heroText.viewMyTicket}</span>
             </button>
+
             <Link
               to="/pay-taxes"
-              className="bg-green-500 text-white hover:bg-green-600 px-8 py-4 rounded-lg font-semibold shadow-lg transition duration-300 inline-flex items-center"
+              className="group relative flex flex-col items-center gap-2 rounded-2xl bg-white/10 hover:bg-white/20 border border-white/15 hover:border-white/30 backdrop-blur-sm px-4 py-5 text-white transition duration-200 text-center"
             >
-              <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path>
-              </svg>
-              {heroText.payTaxesOnline}
+              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/80 group-hover:bg-primary transition duration-200 shadow-lg border border-white/10">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path>
+                </svg>
+              </span>
+              <span className="text-sm font-semibold leading-tight">{heroText.payTaxesOnline}</span>
             </Link>
+
             <Link
               to="/request-receipt"
-              className="bg-accent text-white hover:bg-blue-600 px-8 py-4 rounded-lg font-semibold shadow-lg transition duration-300 inline-flex items-center"
+              className="group relative flex flex-col items-center gap-2 rounded-2xl bg-white/10 hover:bg-white/20 border border-white/15 hover:border-white/30 backdrop-blur-sm px-4 py-5 text-white transition duration-200 text-center"
             >
-              <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-              </svg>
-              {heroText.requestReceipt}
+              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-accent/80 group-hover:bg-accent transition duration-200 shadow-lg">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                </svg>
+              </span>
+              <span className="text-sm font-semibold leading-tight">{heroText.requestReceipt}</span>
             </Link>
           </div>
         </div>
       </section>
 
+      {/* ── Announcements ── */}
       <section className="py-16 bg-lightbg">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-10">
-            <h2 className="text-3xl font-bold text-primary mb-3">{heroText.latestAnnouncements}</h2>
-            <p className="text-gray-600">{heroText.latestAnnouncementsSubtitle}</p>
+          {/* Section header */}
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2 mb-10">
+            <div>
+              <span className="inline-block text-xs font-bold uppercase tracking-[0.18em] text-accent mb-2">
+                Updates
+              </span>
+              <h2 className="text-2xl sm:text-3xl font-extrabold text-primary leading-tight">
+                {heroText.latestAnnouncements}
+              </h2>
+            </div>
+            <p className="text-sm text-slate-500 sm:text-right max-w-xs sm:max-w-[220px] leading-relaxed">
+              {heroText.latestAnnouncementsSubtitle}
+            </p>
           </div>
 
           {announcements.length === 0 ? (
@@ -405,7 +441,7 @@ const Home = () => {
               <p className="text-gray-500">No announcements at this time.</p>
             </div>
           ) : (
-            <div className="flex flex-col gap-6">
+            <div className="flex flex-col gap-5">
               {paginatedAnnouncements.map((announcement) => {
                 const colorClass = getIconColorClass(announcement.icon_color);
                 const attachments = announcement.attachments || [];
@@ -413,84 +449,87 @@ const Home = () => {
                 const fileAttachments = attachments.filter((att) => !isImageAttachment(att));
                 const sourceName = announcement.branch_name || "Main Admin";
                 const sourceSubtitle = announcement.branch_name ? 'Branch advisory' : 'Office-wide update';
+
                 return (
                   <article
                     key={announcement.id}
-                    className="rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-md transition duration-300"
+                    className="relative rounded-2xl bg-white shadow-sm hover:shadow-md transition duration-300 overflow-hidden"
                   >
-                    {/* Header */}
-                    <header className="flex items-start justify-between gap-3 px-5 sm:px-6 pt-5">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className={`${colorClass.bg} flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full`}>
-                          <svg className={`w-5 h-5 ${colorClass.text}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={getIconPath(announcement.icon_type)}></path>
+                    <div className="flex-1 min-w-0">
+                      {/* Header */}
+                      <header className="flex items-start justify-between gap-3 px-5 sm:px-6 pt-5">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className={`${colorClass.bg} flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl`}>
+                            <svg className={`w-4 h-4 ${colorClass.text}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={getIconPath(announcement.icon_type)}></path>
+                            </svg>
+                          </div>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-slate-800">{sourceName}</p>
+                            <p className="text-xs text-slate-400">
+                              <span>{sourceSubtitle}</span>
+                              <span className="mx-1.5">&middot;</span>
+                              <time dateTime={announcement.publish_date}>{formatDate(announcement.publish_date)}</time>
+                            </p>
+                          </div>
+                        </div>
+                        <span
+                          className={`flex-shrink-0 inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+                            announcement.branch_name
+                              ? 'border border-blue-100 bg-blue-50 text-blue-700'
+                              : 'border border-slate-100 bg-slate-50 text-slate-500'
+                          }`}
+                        >
+                          {announcement.branch_name ? 'Branch' : 'Main Admin'}
+                        </span>
+                      </header>
+
+                      {/* Content */}
+                      <div className="px-5 sm:px-6 pt-4">
+                        <h3 className="text-lg sm:text-xl font-bold text-primary leading-snug mb-2">
+                          {announcement.title}
+                        </h3>
+                        <p className="whitespace-pre-line text-[15px] leading-7 text-slate-600">
+                          {announcement.content}
+                        </p>
+                      </div>
+
+                      {/* Image gallery */}
+                      {imageAttachments.length > 0 && (
+                        <div className="px-5 sm:px-6">
+                          <ImageGallery
+                            images={imageAttachments}
+                            onImageClick={() => setSelectedAnnouncement(announcement)}
+                          />
+                        </div>
+                      )}
+
+                      {/* File attachments */}
+                      {fileAttachments.length > 0 && (
+                        <div className="px-5 sm:px-6 mt-4 space-y-2">
+                          {fileAttachments.map((att) => (
+                            <FileAttachmentRow key={att.id} attachment={att} />
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Footer */}
+                      <footer className="mt-4 flex items-center justify-between gap-3 border-t border-slate-100 px-5 sm:px-6 py-3">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+                          {sourceSubtitle}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedAnnouncement(announcement)}
+                          className="inline-flex items-center gap-1.5 rounded-full bg-lightbg hover:bg-blue-50 px-4 py-1.5 text-xs font-semibold text-accent hover:text-blue-700 transition duration-200"
+                        >
+                          Read more
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7"></path>
                           </svg>
-                        </div>
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-slate-800">{sourceName}</p>
-                          <p className="text-xs text-slate-500">
-                            <span>{sourceSubtitle}</span>
-                            <span className="mx-1.5 text-slate-300">&middot;</span>
-                            <time dateTime={announcement.publish_date}>{formatDate(announcement.publish_date)}</time>
-                          </p>
-                        </div>
-                      </div>
-                      <span
-                        className={`flex-shrink-0 inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
-                          announcement.branch_name
-                            ? 'border border-blue-100 bg-blue-50 text-blue-700'
-                            : 'border border-slate-100 bg-slate-50 text-slate-600'
-                        }`}
-                      >
-                        {announcement.branch_name ? 'Branch' : 'Main Admin'}
-                      </span>
-                    </header>
-
-                    {/* Content */}
-                    <div className="px-5 sm:px-6 pt-4">
-                      <h3 className="text-xl sm:text-2xl font-bold text-primary leading-snug mb-2">
-                        {announcement.title}
-                      </h3>
-                      <p className="whitespace-pre-line text-[15px] leading-7 text-slate-700">
-                        {announcement.content}
-                      </p>
+                        </button>
+                      </footer>
                     </div>
-
-                    {/* Image gallery */}
-                    {imageAttachments.length > 0 && (
-                      <div className="px-5 sm:px-6">
-                        <ImageGallery
-                          images={imageAttachments}
-                          onImageClick={() => setSelectedAnnouncement(announcement)}
-                        />
-                      </div>
-                    )}
-
-                    {/* File attachments */}
-                    {fileAttachments.length > 0 && (
-                      <div className="px-5 sm:px-6 mt-4 space-y-2">
-                        {fileAttachments.map((att) => (
-                          <FileAttachmentRow key={att.id} attachment={att} />
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Footer */}
-                    <footer className="mt-5 flex items-center justify-between gap-3 border-t border-slate-100 px-5 sm:px-6 py-3">
-                      <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                        {sourceSubtitle}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedAnnouncement(announcement)}
-                        className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm font-semibold text-accent transition hover:bg-blue-50 hover:text-blue-700"
-                      >
-                        Read more
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path>
-                        </svg>
-                      </button>
-                    </footer>
                   </article>
                 );
               })}
@@ -551,7 +590,7 @@ const Home = () => {
                 </button>
               </nav>
               <p className="text-xs text-slate-500">
-                Showing {(activePage - 1) * announcementsPerPage + 1}-{Math.min(activePage * announcementsPerPage, announcements.length)} of {announcements.length}
+                Showing {(activePage - 1) * announcementsPerPage + 1}–{Math.min(activePage * announcementsPerPage, announcements.length)} of {announcements.length}
               </p>
             </div>
           )}
