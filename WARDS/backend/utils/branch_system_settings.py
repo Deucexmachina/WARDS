@@ -30,6 +30,32 @@ BRANCH_SCOPED_SETTING_KEYS = {
 }
 
 
+def cleanup_duplicate_branch_system_settings(db: Session) -> int:
+    """Remove duplicate BranchSystemSetting rows, keeping only the newest per (branch_id, key).
+    Returns the number of rows deleted."""
+    from sqlalchemy import func
+
+    subq = (
+        db.query(
+            func.max(BranchSystemSetting.id).label("max_id")
+        )
+        .group_by(BranchSystemSetting.branch_id, BranchSystemSetting.key)
+        .subquery()
+    )
+
+    ids_to_keep = [r.max_id for r in db.query(subq.c.max_id).all()]
+    if not ids_to_keep:
+        return 0
+
+    result = (
+        db.query(BranchSystemSetting)
+        .filter(~BranchSystemSetting.id.in_(ids_to_keep))
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return result
+
+
 def _get_branch_override_rows(db: Session, branch_id: int) -> list[BranchSystemSetting]:
     return (
         db.query(BranchSystemSetting)
@@ -37,6 +63,7 @@ def _get_branch_override_rows(db: Session, branch_id: int) -> list[BranchSystemS
             BranchSystemSetting.branch_id == branch_id,
             BranchSystemSetting.key.in_(list(BRANCH_SCOPED_SETTING_KEYS)),
         )
+        .order_by(BranchSystemSetting.id.asc())
         .all()
     )
 
@@ -76,7 +103,7 @@ def get_branch_settings_payload(db: Session, branch_id: int) -> dict:
 
     if not payload["queueEnabled"]:
         payload["enabledServices"] = []
-    elif not payload.get("enabledServices"):
+    elif "enabledServices" not in payload:
         payload["enabledServices"] = branch_service_names
 
     payload["serviceOptions"] = branch_service_names
@@ -147,6 +174,25 @@ def update_branch_system_settings(
             normalized_value = bool(normalized_value)
 
         row = existing_rows.get(key)
+
+        # Deduplicate FIRST so previous_value is read from the newest row.
+        if row:
+            all_rows_for_key = (
+                db.query(BranchSystemSetting)
+                .filter(
+                    BranchSystemSetting.branch_id == branch.id,
+                    BranchSystemSetting.key == key,
+                )
+                .order_by(BranchSystemSetting.id.asc())
+                .all()
+            )
+            if len(all_rows_for_key) > 1:
+                for stale_row in all_rows_for_key[:-1]:
+                    db.delete(stale_row)
+                row = all_rows_for_key[-1]
+                existing_rows[key] = row
+                changed = True
+
         previous_value = _deserialize_value(row.value_type, row.value) if row else global_payload.get(key, SETTINGS_METADATA[key]["default"])
 
         if previous_value == normalized_value:

@@ -614,7 +614,8 @@ async def analyze_queue(branch_id: int, service_type: str, db: Session = Depends
     branch = db.query(Branch).filter(Branch.id == branch_id).first()
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
-    if service_type not in get_branch_configured_service_names(db, branch.id):
+    normalized_service_type = infer_service_window(service_type)
+    if normalized_service_type not in get_branch_configured_service_names(db, branch.id):
         raise HTTPException(status_code=400, detail=SYSTEM_DISABLED_MESSAGE)
     window_capacity = get_window_capacity_snapshot(db, branch_id=branch.id, service_type=service_type)
     if window_capacity and window_capacity["is_full"]:
@@ -756,7 +757,8 @@ async def register_queue(
     configured_services = get_branch_configured_service_names(db, branch.id)
     if not configured_services:
         raise HTTPException(status_code=403, detail=BRANCH_QUEUE_DISABLED_MESSAGE)
-    if registration.service_type not in configured_services:
+    normalized_service_type = infer_service_window(registration.service_type)
+    if normalized_service_type not in configured_services:
         raise HTTPException(status_code=400, detail=SYSTEM_DISABLED_MESSAGE)
     queue_type = normalize_queue_type(registration.queue_type)
     service = db.query(Service).filter(hash_aware_match(Service, "name", registration.service_type), Service.is_active == True).first()

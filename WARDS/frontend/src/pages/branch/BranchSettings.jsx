@@ -63,6 +63,14 @@ const normalizeServiceWindowCode = (value) => {
   if (SERVICE_WINDOW_ALIASES[normalized]) {
     return SERVICE_WINDOW_ALIASES[normalized];
   }
+  const withoutWindowSuffix = normalized.replace(/_WINDOW$/, '');
+  if (SERVICE_WINDOW_ALIASES[withoutWindowSuffix]) {
+    return SERVICE_WINDOW_ALIASES[withoutWindowSuffix];
+  }
+  const compactWithoutSuffix = withoutWindowSuffix.replace(/[^A-Z0-9]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+  if (SERVICE_WINDOW_ALIASES[compactWithoutSuffix]) {
+    return SERVICE_WINDOW_ALIASES[compactWithoutSuffix];
+  }
   const compact = normalized.replace(/[^A-Z0-9]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
   if (SERVICE_WINDOW_ALIASES[compact]) {
     return SERVICE_WINDOW_ALIASES[compact];
@@ -598,36 +606,53 @@ const BranchSettings = () => {
     () => (Array.isArray(branchUser?.window_accounts) ? branchUser.window_accounts : []),
     [branchUser],
   );
-  const enabledPublicServices = useMemo(() => (
-    (() => {
-      const seen = new Set();
-      const services = [];
-      const enabledServices = new Set((systemSettings?.enabledServices || []).map((serviceName) => normalizeServiceWindowCode(serviceName)).filter(Boolean));
-      const addService = (serviceValue) => {
-        const serviceName = normalizeServiceWindowCode(serviceValue);
-        if (!serviceName || seen.has(serviceName)) {
-          return;
-        }
-        seen.add(serviceName);
-        services.push({
-          name: serviceName,
-          label: getServiceWindowLabel(serviceName),
-          enabled: Boolean(systemSettings?.queueEnabled) && enabledServices.has(serviceName),
-        });
-      };
+  const branchQueueWindows = useMemo(() => {
+    const windowCount = branchUser?.branch_window_count || 0;
+    if (!windowCount) return [];
 
-      (systemSettings?.serviceOptions || []).forEach(addService);
-      branchWindowAccounts.forEach((account) => addService(account?.service_window || account?.service_window_label));
-      return services;
-    })()
-  ), [branchWindowAccounts, systemSettings]);
+    const enabledServices = new Set((systemSettings?.enabledServices || []).map((serviceName) => normalizeServiceWindowCode(serviceName)).filter(Boolean));
+
+    const windowAssignments = new Map();
+    branchWindowAccounts.forEach((account) => {
+      const windowNum = account?.assigned_window_number;
+      if (!windowNum || windowNum < 1 || windowNum > windowCount) return;
+      const rawService = account?.service_window || account?.service_window_label || '';
+      const serviceName = normalizeServiceWindowCode(rawService);
+      if (!serviceName) return;
+      windowAssignments.set(windowNum, serviceName);
+    });
+
+    return Array.from({ length: windowCount }, (_, i) => {
+      const windowNum = i + 1;
+      const serviceName = windowAssignments.get(windowNum) || null;
+      return {
+        windowNumber: windowNum,
+        serviceName,
+        serviceLabel: serviceName ? getServiceWindowLabel(serviceName) : 'Unassigned',
+        enabled: Boolean(systemSettings?.queueEnabled) && serviceName && enabledServices.has(serviceName),
+      };
+    });
+  }, [branchWindowAccounts, branchUser, systemSettings]);
 
   useEffect(() => {
-    if (!systemSettings?.queueEnabled || !enabledPublicServices.length) {
+    if (!systemSettings?.queueEnabled) {
       return;
     }
 
-    const visibleServiceNames = enabledPublicServices.map((service) => service.name).filter(Boolean);
+    const windowCount = branchUser?.branch_window_count || 0;
+    if (!windowCount) return;
+
+    const windowAssignments = new Map();
+    branchWindowAccounts.forEach((account) => {
+      const windowNum = account?.assigned_window_number;
+      if (!windowNum || windowNum < 1 || windowNum > windowCount) return;
+      const rawService = account?.service_window || account?.service_window_label || '';
+      const serviceName = normalizeServiceWindowCode(rawService);
+      if (!serviceName) return;
+      windowAssignments.set(windowNum, serviceName);
+    });
+    const visibleServiceNames = Array.from({ length: windowCount }, (_, i) => windowAssignments.get(i + 1)).filter(Boolean);
+
     const currentEnabledServices = (systemSettings.enabledServices || []).map((serviceName) => normalizeServiceWindowCode(serviceName)).filter(Boolean);
     const missingServices = visibleServiceNames.filter((serviceName) => !currentEnabledServices.includes(serviceName));
 
@@ -642,7 +667,7 @@ const BranchSettings = () => {
 
       const nextEnabledServices = Array.from(new Set([
         ...(current.enabledServices || []),
-        ...visibleServiceNames,
+        ...missingServices,
       ].map((serviceName) => normalizeServiceWindowCode(serviceName)).filter(Boolean))).sort();
 
       return {
@@ -650,7 +675,7 @@ const BranchSettings = () => {
         enabledServices: nextEnabledServices,
       };
     });
-  }, [enabledPublicServices, systemSettings?.queueEnabled, systemSettings?.enabledServices]);
+  }, [branchWindowAccounts, branchUser, systemSettings?.queueEnabled, systemSettings?.enabledServices]);
 
   const latestPublishedHistoryId = useMemo(
     () => historyState.items.find((item) => item.action === 'published')?.id || null,
@@ -667,12 +692,18 @@ const BranchSettings = () => {
     setSystemSettings((current) => {
       if (fieldName === 'queueEnabled') {
         const nextQueueEnabled = Boolean(value);
+        const windowCount = branchUser?.branch_window_count || 0;
+        const windowAssignments = new Map();
+        branchWindowAccounts.forEach((account) => {
+          const windowNum = account?.assigned_window_number;
+          if (!windowNum || windowNum < 1 || windowNum > windowCount) return;
+          const rawService = account?.service_window || account?.service_window_label || '';
+          const serviceName = normalizeServiceWindowCode(rawService);
+          if (!serviceName) return;
+          windowAssignments.set(windowNum, serviceName);
+        });
         const nextEnabledServices = nextQueueEnabled
-          ? Array.from(new Set([
-            ...(current.serviceOptions || []),
-            ...branchWindowAccounts.map((account) => account?.service_window || account?.service_window_label),
-            ...enabledPublicServices.map((service) => service?.name),
-          ].map((serviceName) => normalizeServiceWindowCode(serviceName)).filter(Boolean)))
+          ? Array.from({ length: windowCount }, (_, i) => windowAssignments.get(i + 1)).filter(Boolean)
           : current.enabledServices;
 
         return {
@@ -864,23 +895,26 @@ const BranchSettings = () => {
             <div className="space-y-4 p-6">
               <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4">
                 <div className="mb-4 flex flex-col gap-2 border-b border-slate-200 pb-4">
-                  <p className="font-semibold text-slate-800">Enabled Public Services</p>
-                  <p className="text-sm text-slate-500">Service names available for public queueing and branch-facing service listings.</p>
+                  <p className="font-semibold text-slate-800">Enabled Queue Windows</p>
+                  <p className="text-sm text-slate-500">Queue windows and their assigned services available for public queueing.</p>
                 </div>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                  {enabledPublicServices.map((service) => (
+                  {branchQueueWindows.map((window) => (
                     <div
-                      key={service.name}
-                      onClick={() => toggleBranchService(service.name)}
+                      key={window.windowNumber}
+                      onClick={() => window.serviceName && toggleBranchService(window.serviceName)}
                       className={`flex items-center justify-between rounded-xl border px-4 py-3 ${
-                        service.enabled
+                        window.enabled
                           ? 'border-emerald-200 bg-emerald-50'
                           : 'border-slate-200 bg-white'
-                      } ${isBranchAdmin && systemSettings.queueEnabled ? 'cursor-pointer' : 'cursor-not-allowed opacity-75'}`}
+                      } ${isBranchAdmin && systemSettings.queueEnabled && window.serviceName ? 'cursor-pointer' : 'cursor-not-allowed opacity-75'}`}
                     >
-                      <span className="text-sm font-medium text-slate-700">{service.label || service.name}</span>
-                      <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${service.enabled ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-600'}`}>
-                        {service.enabled ? 'On' : 'Off'}
+                      <div className="flex flex-col">
+                        <span className="text-sm font-bold text-slate-800">Window {window.windowNumber}</span>
+                        <span className="text-xs text-slate-500">{window.serviceLabel}</span>
+                      </div>
+                      <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${window.enabled ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-600'}`}>
+                        {window.enabled ? 'On' : 'Off'}
                       </span>
                     </div>
                   ))}

@@ -28,6 +28,7 @@ from database.models import Base, engine, SessionLocal, Admin, Announcement, Ann
 from utils.field_crypto import apply_citizen_user_security, apply_discrepancy_report_security, apply_email_otp_security, apply_email_verification_token_security, apply_faq_security, apply_invite_security, apply_memo_security, apply_memo_view_security, apply_mfa_secret_security, apply_payment_security, apply_queue_activity_security, apply_queue_security, apply_receipt_record_security, apply_receipt_request_history_security, apply_receipt_request_security, apply_rpt_property_record_security, apply_service_security, apply_service_window_config_security, apply_system_setting_security, apply_tax_assessment_record_security, apply_taxpayer_guide_security, apply_taxpayer_identifier_submission_security, build_redacted_text, get_decrypted_or_raw, hash_optional_value, set_encrypted_hash_companions
 from utils import log_integrity  # noqa: F401 - registers tamper-evident log signing hooks
 from utils.system_settings import seed_system_settings
+from utils.branch_system_settings import cleanup_duplicate_branch_system_settings
 from middleware.dos_protection import RequestSizeMiddleware, RequestTimeoutMiddleware, ConnectionLimitMiddleware, AbuseDetectionMiddleware
 
 
@@ -1328,6 +1329,7 @@ def ensure_auth_extensions():
 
     db = SessionLocal()
     try:
+        cleanup_duplicate_branch_system_settings(db)
         seed_system_settings(db)
     finally:
         db.close()

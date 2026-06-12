@@ -45,6 +45,12 @@ for window_number in range(4, LEGACY_QUEUE_WINDOW_ALIAS_MAX + 1):
     SERVICE_WINDOW_ALIASES[f"QW{window_number}"] = f"QW{window_number}"
     SERVICE_WINDOW_ALIASES[f"QUEUE_WINDOW_{window_number}"] = f"QW{window_number}"
 
+for alias, target in list(SERVICE_WINDOW_ALIASES.items()):
+    if not alias.endswith("_WINDOW"):
+        window_alias = f"{alias}_WINDOW"
+        if window_alias not in SERVICE_WINDOW_ALIASES:
+            SERVICE_WINDOW_ALIASES[window_alias] = target
+
 SERVICE_WINDOW_KEYWORDS = {
     "RPT": ("rpt", "real property", "amilyar", "property tax", "assessment"),
     "BUSINESS": ("business", "mayor", "permit", "bt", "city tax", "garbage fee", "sanitary", "zoning", "occupancy"),

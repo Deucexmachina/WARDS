@@ -240,7 +240,7 @@ const GetQueue = () => {
     appointment_slot: '',
   });
   const selectedService = useMemo(
-    () => services.find((service) => service.name === formData.service_type) || null,
+    () => services.find((service) => (service.code || service.service_window || service.name) === formData.service_type) || null,
     [services, formData.service_type],
   );
 
@@ -251,6 +251,19 @@ const GetQueue = () => {
   useEffect(() => {
     fetchBranchSystemStatus(selectedBranch?.id || null);
   }, [selectedBranch]);
+
+  useEffect(() => {
+    if (systemStatus && !systemStatus.queueEnabled) {
+      setQueueAnalysis(null);
+      setFormData((current) => ({
+        ...current,
+        service_type: '',
+        queue_type: 'immediate',
+        appointment_date: '',
+        appointment_slot: '',
+      }));
+    }
+  }, [systemStatus]);
 
   useEffect(() => {
     const syncStoredUser = () => {
@@ -433,13 +446,12 @@ const GetQueue = () => {
       setSystemStatus(response.data);
     } catch (error) {
       console.error('Failed to fetch branch system status:', error);
-      if (error.response?.status === 503 || error.response?.status === 403) {
-        setSystemStatus({
-          queueEnabled: false,
-          maintenanceMode: true,
-          disabledMessage: error.response?.data?.detail || DEFAULT_DISABLED_MESSAGE,
-        });
-      }
+      setSystemStatus({
+        queueEnabled: false,
+        maintenanceMode: false,
+        enabledServices: [],
+        disabledMessage: error.response?.data?.detail || DEFAULT_DISABLED_MESSAGE,
+      });
     }
   };
 
@@ -513,7 +525,7 @@ const GetQueue = () => {
       setAppointmentError('');
       setFormData((current) => ({
         ...current,
-        service_type: (response.data.services || []).some((service) => service.name === current.service_type) ? current.service_type : '',
+        service_type: (response.data.services || []).some((service) => (service.code || service.service_window || service.name) === current.service_type) ? current.service_type : '',
         appointment_date: '',
         appointment_slot: '',
       }));
@@ -728,7 +740,7 @@ const GetQueue = () => {
   const currentServingQueueLabel = queueAnalysis?.current_serving_queue || statusLabels.noActiveQueue;
   const currentServingStatusLabel = queueAnalysis?.current_serving_status || statusLabels.waitingForNextCall;
 
-  const queueUnavailable = systemStatus && (!systemStatus.queueEnabled || !systemStatus.enabledServices?.length || systemStatus.maintenanceMode);
+  const queueUnavailable = !systemStatus || !systemStatus.queueEnabled || !systemStatus.enabledServices?.length || systemStatus.maintenanceMode;
   const disabledMessage = systemStatus?.disabledMessage || loadError || DEFAULT_DISABLED_MESSAGE;
 
   if (loading) {
@@ -963,12 +975,12 @@ const GetQueue = () => {
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                     {services.map((service) => (
                       <button
-                        key={service.id}
+                        key={service.code || service.service_window || service.name}
                         type="button"
-                        onClick={() => setFormData({ ...formData, service_type: service.name })}
+                        onClick={() => setFormData({ ...formData, service_type: (service.code || service.service_window || service.name) })}
                         disabled={queueUnavailable}
                         className={`p-4 rounded-lg border-2 transition ${
-                          formData.service_type === service.name
+                          formData.service_type === (service.code || service.service_window || service.name)
                             ? 'border-blue-600 bg-blue-50 text-blue-700'
                             : 'border-gray-300 bg-white text-gray-700 hover:border-blue-400'
                         } disabled:cursor-not-allowed disabled:opacity-50`}
