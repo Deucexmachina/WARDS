@@ -269,7 +269,7 @@ const OutlineCard = ({ title, children, className = '' }) => (
 );
 
 const DetailStat = ({ label, value, tone = 'default' }) => (
-  <div className="flex h-full min-h-[96px] flex-col rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+  <div className="flex h-full min-h-[96px] flex-col rounded-2xl border border-slate-200 bg-white px-4 py-3">
     <p className="min-h-[2.5rem] text-[11px] font-semibold uppercase leading-5 tracking-[0.16em] text-slate-400">{label}</p>
     <p className={`mt-auto pt-2 text-sm font-semibold ${tone === 'success' ? 'text-emerald-700' : tone === 'primary' ? 'text-[#0f5b83]' : 'text-slate-900'}`}>{value}</p>
   </div>
@@ -318,7 +318,7 @@ const PayTaxesRPT = () => {
   const [searchedProperty, setSearchedProperty] = useState(emptyPropertySearch);
   const [cartItems, setCartItems] = useState([]);
   const [formData, setFormData] = useState({
-    taxpayerName: '',
+    taxpayerName: publicUser?.full_name || '',
     email: publicUser?.email || '',
     contactNumber: publicUser?.contact_number || '',
   });
@@ -1021,13 +1021,13 @@ const PayTaxesRPT = () => {
 
                     <div className="text-center">
                       {linkedAssessments.length ? (
-                        <div className="mx-auto mb-6 max-w-[980px] rounded-[26px] border border-[#d6e5ef] bg-[#f7fbfe] px-5 py-5 text-left">
+                        <div className="mx-auto mb-6 max-w-[980px] rounded-[26px] border border-[#203e63] bg-[#203e63] px-5 py-5 text-left">
                           <div className="flex flex-wrap items-center justify-between gap-3">
                             <div>
-                              <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#0f5b83]">{text.verifiedAssessmentsTitle}</p>
-                              <p className="mt-2 text-sm text-slate-500">{text.verifiedAssessmentsBody}</p>
+                              <p className="text-xs font-bold uppercase tracking-[0.18em] text-white">{text.verifiedAssessmentsTitle}</p>
+                              <p className="mt-2 text-sm text-blue-100">{text.verifiedAssessmentsBody}</p>
                             </div>
-                            <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600">{text.linkedRecords(linkedAssessments.length)}</span>
+                            <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#203e63]">{text.linkedRecords(linkedAssessments.length)}</span>
                           </div>
                           <div className="mt-4 grid gap-3 md:grid-cols-2">
                             {linkedAssessments.map((assessment) => (
@@ -1072,7 +1072,7 @@ const PayTaxesRPT = () => {
                           type="button"
                           onClick={handleSearchProperty}
                           disabled={searchingProperty || isSystemDisabled || isBlockedByPendingPayment}
-                          className="rounded-full bg-[#6f98ad] px-10 py-4 text-base font-bold uppercase tracking-[0.08em] text-white transition hover:bg-[#5b859a] disabled:opacity-50"
+                          className="rounded-full bg-[#203e63] px-10 py-4 text-base font-bold uppercase tracking-[0.08em] text-white transition hover:bg-[#13315c] disabled:opacity-50"
                         >
                           {searchingProperty ? text.searching : text.search}
                         </button>
@@ -1132,7 +1132,7 @@ const PayTaxesRPT = () => {
                       <div className="overflow-hidden rounded-[24px] border border-slate-200">
                         <div className="overflow-x-auto">
                           <table className="min-w-full divide-y divide-slate-200 text-sm">
-                            <thead className="bg-[#f8fbfe] text-slate-500">
+                            <thead className="bg-white text-slate-500">
                               <tr>
                                 <th className="px-4 py-3 text-left font-semibold">
                                   <input
@@ -1237,7 +1237,7 @@ const PayTaxesRPT = () => {
                       <div className="overflow-hidden rounded-[24px] border border-slate-200">
                         <div className="overflow-x-auto">
                           <table className="min-w-full divide-y divide-slate-200 text-sm">
-                            <thead className="bg-[#f8fbfe] text-slate-500">
+                            <thead className="bg-white text-slate-500">
                               <tr>
                                 <th className="px-4 py-3 text-left font-semibold">{language === 'en' ? 'Tax Declaration No.' : 'Tax Declaration No.'}</th>
                                 <th className="px-4 py-3 text-left font-semibold">{language === 'en' ? 'Name of Owner' : 'Pangalan ng May-ari'}</th>
@@ -1293,12 +1293,12 @@ const PayTaxesRPT = () => {
                   <OutlineCard title={text.cartButton}>
                     {validationErrors.cart ? <p className="mb-4 text-sm text-red-500">{validationErrors.cart}</p> : null}
                     {!cartItems.length ? (
-                      <div className="rounded-[26px] border border-dashed border-[#b7cfde] bg-[#fbfdff] px-6 py-12 text-center text-sm text-slate-500">
+                      <div className="rounded-[26px] border border-dashed border-[#b7cfde] bg-white px-6 py-12 text-center text-sm text-slate-500">
                         {language === 'en' ? 'Search for a TDN and add it to your cart to continue.' : 'Maghanap ng TDN at idagdag ito sa cart upang magpatuloy.'}
                       </div>
                     ) : (
                       <div className="space-y-5">
-                        <div className="rounded-[24px] border border-slate-200 bg-[#fbfdff] p-5">
+                        <div className="rounded-[24px] border border-slate-200 bg-white p-5">
                           <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#0f5b83]">{language === 'en' ? 'Group Bill Set:' : 'Pangkat ng Billing:'} ({cartItems.length} TDN)</p>
                           <div className="mt-4 space-y-4">
                             {cartItems.map((item) => (
@@ -1397,7 +1397,7 @@ const PayTaxesRPT = () => {
                       amount={cartTotal}
                       bankCode={selectedBank}
                       customer={{
-                        name: formData.taxpayerName,
+                        name: publicUser?.full_name || formData.taxpayerName,
                         email: formData.email,
                         mobile: formData.contactNumber,
                       }}
@@ -1604,8 +1604,8 @@ const PayTaxesRPT = () => {
                 onClick={() => setStagedPaymentOption('quarterly')}
                 className={`rounded-[28px] border px-6 py-6 text-left transition ${
                   stagedPaymentOption === 'quarterly'
-                    ? 'border-[#0f5b83] bg-[#f7fbfe] shadow-[0_14px_32px_rgba(15,91,131,0.14)]'
-                    : 'border-slate-200 hover:border-[#0f5b83]'
+                    ? 'border-[#0f5b83] bg-white shadow-[0_14px_32px_rgba(15,91,131,0.14)]'
+                    : 'border-slate-200 bg-white hover:border-[#0f5b83]'
                 }`}
               >
                 <p className="text-sm font-bold uppercase tracking-[0.14em] text-[#0f5b83]">{language === 'en' ? 'Payment Option 1: Quarterly' : 'Payment Option 1: Kada quarter'}</p>
@@ -1625,8 +1625,8 @@ const PayTaxesRPT = () => {
                 onClick={() => setStagedPaymentOption('full')}
                 className={`rounded-[28px] border px-6 py-6 text-left transition ${
                   stagedPaymentOption === 'full'
-                    ? 'border-[#0f5b83] bg-[#f7fbfe] shadow-[0_14px_32px_rgba(15,91,131,0.14)]'
-                    : 'border-slate-200 hover:border-[#0f5b83]'
+                    ? 'border-[#0f5b83] bg-white shadow-[0_14px_32px_rgba(15,91,131,0.14)]'
+                    : 'border-slate-200 bg-white hover:border-[#0f5b83]'
                 }`}
               >
                 <p className="text-sm font-bold uppercase tracking-[0.14em] text-[#0f5b83]">{language === 'en' ? 'Payment Option 2: Full' : 'Payment Option 2: Buo'}</p>

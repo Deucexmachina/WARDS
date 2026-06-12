@@ -98,7 +98,7 @@ const PayTaxes = () => {
                     key={service.key}
                     type="button"
                     onClick={() => navigate(service.path)}
-                    className={`group relative isolate rounded-[30px] border border-[#0f5b83]/35 bg-[#f7fbfe] p-7 text-left shadow-[0_0_0_1px_rgba(15,91,131,0.08),0_0_28px_rgba(15,91,131,0.10)] transition duration-300 before:pointer-events-none before:absolute before:inset-0 before:-z-10 before:rounded-[30px] before:bg-[#0f5b83] before:opacity-10 before:blur-2xl ${
+                    className={`group relative isolate rounded-[30px] border border-[#0f5b83]/35 bg-white p-7 text-left shadow-[0_0_0_1px_rgba(15,91,131,0.08),0_0_28px_rgba(15,91,131,0.10)] transition duration-300 before:pointer-events-none before:absolute before:inset-0 before:-z-10 before:rounded-[30px] before:bg-[#0f5b83] before:opacity-10 before:blur-2xl ${
                       isAvailable
                         ? 'hover:-translate-y-1 hover:bg-white hover:shadow-[0_0_0_1px_rgba(15,91,131,0.14),0_0_34px_rgba(15,91,131,0.16)]'
                         : 'border-slate-200 bg-slate-50 hover:border-slate-300'

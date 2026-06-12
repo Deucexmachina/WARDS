@@ -505,12 +505,20 @@ const PaymentStatus = () => {
                       ? 'Upload a payment proof document in PDF, PNG, or JPEG format. Maximum file size is 5MB.'
                       : 'Mag-upload ng dokumento ng patunay ng bayad sa format na PDF, PNG, o JPEG. Ang maximum na laki ng file ay 5MB.'}
                   </p>
-                  <input
-                    type="file"
-                    accept=".pdf,.png,.jpg,.jpeg"
-                    onChange={(event) => setSelectedProofFile(event.target.files?.[0] || null)}
-                    className="block w-full text-sm text-slate-700"
-                  />
+                  <div className="flex items-center gap-3 rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3">
+                    <label className="shrink-0 cursor-pointer rounded-2xl bg-[#0f5b83] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#0c4d6f]">
+                      Choose File
+                      <input
+                        type="file"
+                        accept=".pdf,.png,.jpg,.jpeg"
+                        onChange={(event) => setSelectedProofFile(event.target.files?.[0] || null)}
+                        className="hidden"
+                      />
+                    </label>
+                    <span className="truncate text-sm text-slate-600">
+                      {selectedProofFile ? selectedProofFile.name : 'No file chosen'}
+                    </span>
+                  </div>
                   <button
                     type="button"
                     onClick={handleUploadProof}

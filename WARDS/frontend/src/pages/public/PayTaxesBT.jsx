@@ -496,8 +496,7 @@ const PayTaxesBT = () => {
     <section className="min-h-screen bg-[linear-gradient(180deg,#eef4fb_0%,#f8fbff_38%,#edf3fa_100%)] py-14">
       <div className="mx-auto max-w-[1480px] px-4 sm:px-6 lg:px-8">
         <div className="overflow-hidden rounded-[36px] border border-[#d8e4f5] bg-white shadow-[0_28px_70px_rgba(15,52,108,0.10)]">
-          <div className="relative border-b border-slate-200 bg-[linear-gradient(135deg,#0f2f5f_0%,#18437f_52%,#2d69b3_100%)] px-8 py-10 text-white sm:px-10">
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_24%,rgba(255,255,255,0.14),transparent_24%),radial-gradient(circle_at_82%_18%,rgba(255,255,255,0.10),transparent_20%),linear-gradient(90deg,transparent_0%,rgba(255,255,255,0.06)_50%,transparent_100%)]" />
+          <div className="relative border-b border-slate-200 bg-[#203e63] px-8 py-10 text-white sm:px-10">
             <div className="relative">
               <p className="text-[11px] font-semibold uppercase tracking-[0.34em] text-blue-100">{text.headerTag}</p>
               <div className="mt-5 flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
@@ -555,13 +554,13 @@ const PayTaxesBT = () => {
             {!isDashboardView ? (
               <>
                 {linkedAssessments.length ? (
-                  <div className="mb-6 rounded-[28px] border border-[#d6e5ef] bg-[#f7fbfe] p-5">
+                  <div className="mb-6 rounded-[28px] border border-[#203e63] bg-[#203e63] p-5">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
-                        <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#123f8f]">{text.verifiedAssessments}</p>
-                        <p className="mt-2 text-sm text-slate-500">{text.verifiedAssessmentsDesc}</p>
+                        <p className="text-xs font-bold uppercase tracking-[0.18em] text-white">{text.verifiedAssessments}</p>
+                        <p className="mt-2 text-sm text-blue-100">{text.verifiedAssessmentsDesc}</p>
                       </div>
-                      <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600">{linkedAssessments.length} linked record{linkedAssessments.length === 1 ? '' : 's'}</span>
+                      <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#203e63]">{linkedAssessments.length} linked record{linkedAssessments.length === 1 ? '' : 's'}</span>
                     </div>
                     <div className="mt-4 grid gap-3 lg:grid-cols-2">
                       {linkedAssessments.map((assessment) => (
@@ -631,7 +630,7 @@ const PayTaxesBT = () => {
                     <button
                       type="button"
                       onClick={handleSearch}
-                      className="w-full rounded-2xl bg-[#123f8f] px-5 py-3 text-sm font-bold text-white transition hover:bg-[#0f2f5f]"
+                      className="w-full rounded-2xl bg-[#203e63] px-5 py-3 text-sm font-bold text-white transition hover:bg-[#13315c]"
                     >
                       {text.searchButton}
                     </button>
@@ -640,7 +639,7 @@ const PayTaxesBT = () => {
 
                 <div className="mt-4 overflow-x-auto rounded-[28px] border border-slate-200">
                   <table className="min-w-[1100px] w-full text-sm">
-                    <thead className="bg-[#123f8f] text-white">
+                    <thead className="bg-[#203e63] text-white">
                       <tr>
                         <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">{text.tableTracking}</th>
                         <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">{text.tableBusinessName}</th>
@@ -690,7 +689,7 @@ const PayTaxesBT = () => {
             {isDashboardView && selectedApplication ? (
               <div className={`mt-8 grid gap-7 ${shouldShowPaymentPanels ? '' : 'max-w-[860px] mx-auto'}`}>
                 <div className="space-y-6">
-                  <div className="rounded-[30px] border border-[#d9e7f9] bg-[linear-gradient(180deg,#f8fbff_0%,#eef5ff_100%)] p-7 shadow-[0_12px_28px_rgba(15,52,108,0.05)]">
+                  <div className="rounded-[30px] border border-[#d9e7f9] bg-white p-7 shadow-[0_12px_28px_rgba(15,52,108,0.05)]">
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                       <div>
                         <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-500">{text.dashboardViewLabel}</p>
@@ -743,7 +742,20 @@ const PayTaxesBT = () => {
                       <div className="mt-6 grid gap-5 md:grid-cols-2">
                         <div>
                           <label className="mb-2 block text-sm font-semibold text-slate-700">{text.salesDeclarationFile}</label>
-                          <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(event) => setDocumentFiles((current) => ({ ...current, salesDeclaration: event.target.files?.[0] || null }))} className="w-full rounded-[18px] border border-slate-300 px-4 py-3 text-sm shadow-sm" />
+                          <div className="flex items-center gap-3 rounded-[18px] border border-dashed border-slate-300 bg-white px-4 py-3 shadow-sm">
+                            <label className="shrink-0 cursor-pointer rounded-2xl bg-[#203e63] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#1a3352]">
+                              Choose File
+                              <input
+                                type="file"
+                                accept=".pdf,.jpg,.jpeg,.png"
+                                onChange={(event) => setDocumentFiles((current) => ({ ...current, salesDeclaration: event.target.files?.[0] || null }))}
+                                className="hidden"
+                              />
+                            </label>
+                            <span className="truncate text-sm text-slate-600">
+                              {documentFiles.salesDeclaration ? documentFiles.salesDeclaration.name : 'No file chosen'}
+                            </span>
+                          </div>
                           {selectedApplication.sales_declaration_name ? (
                             <a href={buildApiAssetUrl(selectedApplication.sales_declaration_download_url)} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs font-semibold text-[#123f8f] underline underline-offset-4">
                               {text.viewCurrentFile} {selectedApplication.sales_declaration_name}
@@ -752,7 +764,20 @@ const PayTaxesBT = () => {
                         </div>
                         <div>
                           <label className="mb-2 block text-sm font-semibold text-slate-700">{text.financialStatements}</label>
-                          <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(event) => setDocumentFiles((current) => ({ ...current, financialStatements: event.target.files?.[0] || null }))} className="w-full rounded-[18px] border border-slate-300 px-4 py-3 text-sm shadow-sm" />
+                          <div className="flex items-center gap-3 rounded-[18px] border border-dashed border-slate-300 bg-white px-4 py-3 shadow-sm">
+                            <label className="shrink-0 cursor-pointer rounded-2xl bg-[#203e63] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#1a3352]">
+                              Choose File
+                              <input
+                                type="file"
+                                accept=".pdf,.jpg,.jpeg,.png"
+                                onChange={(event) => setDocumentFiles((current) => ({ ...current, financialStatements: event.target.files?.[0] || null }))}
+                                className="hidden"
+                              />
+                            </label>
+                            <span className="truncate text-sm text-slate-600">
+                              {documentFiles.financialStatements ? documentFiles.financialStatements.name : 'No file chosen'}
+                            </span>
+                          </div>
                           {selectedApplication.financial_statements_name ? (
                             <a href={buildApiAssetUrl(selectedApplication.financial_statements_download_url)} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs font-semibold text-[#123f8f] underline underline-offset-4">
                               {text.viewCurrentFile} {selectedApplication.financial_statements_name}
@@ -761,7 +786,20 @@ const PayTaxesBT = () => {
                         </div>
                         <div className="md:col-span-2">
                           <label className="mb-2 block text-sm font-semibold text-slate-700">{text.supportingDocuments}</label>
-                          <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(event) => setDocumentFiles((current) => ({ ...current, supportingDocuments: event.target.files?.[0] || null }))} className="w-full rounded-[18px] border border-slate-300 px-4 py-3 text-sm shadow-sm" />
+                          <div className="flex items-center gap-3 rounded-[18px] border border-dashed border-slate-300 bg-white px-4 py-3 shadow-sm">
+                            <label className="shrink-0 cursor-pointer rounded-2xl bg-[#203e63] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#1a3352]">
+                              Choose File
+                              <input
+                                type="file"
+                                accept=".pdf,.jpg,.jpeg,.png"
+                                onChange={(event) => setDocumentFiles((current) => ({ ...current, supportingDocuments: event.target.files?.[0] || null }))}
+                                className="hidden"
+                              />
+                            </label>
+                            <span className="truncate text-sm text-slate-600">
+                              {documentFiles.supportingDocuments ? documentFiles.supportingDocuments.name : 'No file chosen'}
+                            </span>
+                          </div>
                           {selectedApplication.supporting_documents_name ? (
                             <a href={buildApiAssetUrl(selectedApplication.supporting_documents_download_url)} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs font-semibold text-[#123f8f] underline underline-offset-4">
                               {text.viewCurrentFile} {selectedApplication.supporting_documents_name}

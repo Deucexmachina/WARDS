@@ -375,7 +375,7 @@ const PaymentGatewayExperience = ({
                       <input
                         value={details.name}
                         onChange={(event) => updateDetail('name', event.target.value)}
-                        placeholder="Juan Dela Cruz"
+                        placeholder=""
                         disabled={disabled || processing}
                         className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none focus:ring-4 ${
                           errors.name ? 'border-rose-400 bg-rose-50 focus:ring-rose-100' : 'border-slate-300 bg-white focus:ring-sky-100'
