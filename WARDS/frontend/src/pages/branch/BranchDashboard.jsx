@@ -10,6 +10,14 @@ import {
   getDiscrepancyValidationErrors,
   getInitialDiscrepancyForm,
 } from '../../utils/discrepancyValidation';
+import {
+  DiscrepancyInfoCard,
+  DiscrepancySection,
+  DiscrepancyStatusBadge,
+  DiscrepancyTimelineEntry,
+  discrepancyModalHeaderClass,
+  discrepancyModalShellClass,
+} from '../../components/discrepancies/DiscrepancyUI';
 
 const MetricCard = ({ label, value, color }) => (
   <div className="bg-white rounded-xl shadow p-6">
@@ -158,6 +166,11 @@ const BranchDashboard = () => {
   const verifiedDiscrepancies = discrepancies.filter((report) => report.status === 'Verified').length;
   const offlineDiscrepancies = discrepancies.filter((report) => report.submitted_offline).length;
   const formatCurrency = (value) => value === null || value === undefined ? 'N/A' : `PHP ${Number(value).toLocaleString()}`;
+  const formatDateTime = (value) => formatUtc8DateTime(value);
+  const formatDiscrepancyCurrency = (value) => {
+    if (value === null || value === undefined || Number.isNaN(Number(value))) return 'Not provided';
+    return new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP', minimumFractionDigits: 2 }).format(Number(value));
+  };
 
   return (
     <div>
@@ -530,60 +543,162 @@ const BranchDashboard = () => {
       </div>
 
       {selectedDiscrepancy && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-          <div className="mx-4 max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl bg-white p-8 shadow-2xl">
-            <h2 className="mb-6 text-2xl font-bold text-gray-900">Discrepancy Report Details</h2>
-
-            <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2 text-sm">
-              <div className="rounded-lg bg-slate-50 p-4">
-                <p className="text-xs uppercase tracking-wide text-gray-400">Report ID</p>
-                <p className="mt-1 font-mono font-semibold text-gray-800">DR-{selectedDiscrepancy.id}</p>
-              </div>
-              <div className="rounded-lg bg-slate-50 p-4">
-                <p className="text-xs uppercase tracking-wide text-gray-400">Status</p>
-                <p className="mt-1 font-semibold text-gray-800">{selectedDiscrepancy.status}</p>
-              </div>
-            </div>
-
-            <div className="mb-5">
-              <p className="mb-2 text-sm font-semibold text-gray-700">Branch Report Details</p>
-              <div className="rounded-lg border border-gray-200 p-4 whitespace-pre-line text-gray-700">
-                {selectedDiscrepancy.description}
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+          <div className={discrepancyModalShellClass}>
+            <div className={discrepancyModalHeaderClass}>
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-100">Discrepancy Report Details</p>
+                  <h2 className="mt-2 text-2xl font-bold text-white sm:text-3xl">{selectedDiscrepancy.title}</h2>
+                  <p className="mt-2 text-sm leading-6 text-blue-100">
+                    Review the full report, references, attachments, and the latest responses from the main office.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <DiscrepancyStatusBadge status={selectedDiscrepancy.status} className="border-white/20 bg-white/10 text-white" />
+                  <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold tracking-[0.18em] text-white">
+                    DR-{selectedDiscrepancy.id}
+                  </span>
+                </div>
               </div>
             </div>
 
-            <div className="mb-5">
-              <p className="mb-2 text-sm font-semibold text-gray-700">Supporting References</p>
-              <div className="rounded-lg border border-gray-200 p-4 text-gray-700">
-                {selectedDiscrepancy.supporting_documents || 'No supporting references provided.'}
+            <div className="overflow-y-auto bg-slate-50 p-6 sm:p-8">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <DiscrepancyInfoCard label="Report ID" value={`DR-${selectedDiscrepancy.id}`} tone="blue" helper="Unique discrepancy tracking reference." />
+                <DiscrepancyInfoCard label="Date Submitted" value={formatDateTime(selectedDiscrepancy.created_at)} tone="amber" helper={`Report date: ${selectedDiscrepancy.report_date || 'Not provided'}`} />
+                <DiscrepancyInfoCard
+                  label="Submitted By"
+                  value={selectedDiscrepancy.reported_by || 'Unknown submitter'}
+                  tone="emerald"
+                  helper={selectedDiscrepancy.reported_by_role || 'Branch personnel'}
+                />
+                <DiscrepancyInfoCard
+                  label="Branch Information"
+                  value={selectedDiscrepancy.branch_name || 'Current branch'}
+                  tone="violet"
+                  helper={selectedDiscrepancy.submitted_offline ? 'Marked as offline collection discrepancy.' : 'Submitted through the branch discrepancy workflow.'}
+                />
+              </div>
+
+              <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+                <div className="space-y-6">
+                  <DiscrepancySection
+                    title="Report Information"
+                    description="Core submission details presented in a cleaner, audit-ready format."
+                  >
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <DiscrepancyInfoCard label="Discrepancy Type" value={selectedDiscrepancy.discrepancy_type || 'Not specified'} />
+                      <DiscrepancyInfoCard label="Current Status" value={<DiscrepancyStatusBadge status={selectedDiscrepancy.status} />} />
+                      <DiscrepancyInfoCard label="Last Updated" value={formatDateTime(selectedDiscrepancy.updated_at || selectedDiscrepancy.created_at)} />
+                      <DiscrepancyInfoCard label="Last Main Office Response" value={selectedDiscrepancy.verified_at ? formatDateTime(selectedDiscrepancy.verified_at) : 'No response yet'} />
+                    </div>
+                  </DiscrepancySection>
+
+                  <DiscrepancySection
+                    title="Queue Information"
+                    description="Reference details that help the branch reconcile the affected transaction or batch."
+                  >
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <DiscrepancyInfoCard
+                        label="Queue Number / Reference"
+                        value={selectedDiscrepancy.supporting_documents || 'No queue number or reference was supplied.'}
+                        helper="Includes receipt numbers, batch notes, or collection references when available."
+                      />
+                      <DiscrepancyInfoCard
+                        label="Submission Channel"
+                        value={selectedDiscrepancy.submitted_offline ? 'Offline collection discrepancy' : 'Standard discrepancy submission'}
+                      />
+                      <DiscrepancyInfoCard label="System Amount" value={formatDiscrepancyCurrency(selectedDiscrepancy.system_amount)} />
+                      <DiscrepancyInfoCard label="Actual Amount" value={formatDiscrepancyCurrency(selectedDiscrepancy.actual_amount)} />
+                    </div>
+                    <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Variance</p>
+                      <p className="mt-2 text-sm font-semibold text-slate-900">{formatDiscrepancyCurrency(selectedDiscrepancy.variance_amount)}</p>
+                    </div>
+                  </DiscrepancySection>
+
+                  <DiscrepancySection
+                    title="Reported Issue Details"
+                    description="The original discrepancy description submitted by the branch."
+                  >
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-sm leading-7 text-slate-700 whitespace-pre-line">
+                      {selectedDiscrepancy.description}
+                    </div>
+                  </DiscrepancySection>
+                </div>
+
+                <div className="space-y-6">
+                  <DiscrepancySection
+                    title="Attachments"
+                    description="Supporting files linked to this discrepancy report."
+                    action={selectedDiscrepancy.attachment_filename ? (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            const response = await discrepancyAPI.downloadBranchAttachment(selectedDiscrepancy.id);
+                            const fileUrl = window.URL.createObjectURL(new Blob([response.data]));
+                            const link = document.createElement('a');
+                            link.href = fileUrl;
+                            link.download = selectedDiscrepancy.attachment_filename || `discrepancy-${selectedDiscrepancy.id}-attachment`;
+                            document.body.appendChild(link);
+                            link.click();
+                            link.remove();
+                            window.URL.revokeObjectURL(fileUrl);
+                          } catch (downloadError) {
+                            console.error('Failed to download discrepancy attachment:', downloadError);
+                            setDiscrepancyError(downloadError.response?.data?.detail || 'Failed to download attachment.');
+                          }
+                        }}
+                        className="rounded-2xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-secondary"
+                      >
+                        Download File
+                      </button>
+                    ) : null}
+                  >
+                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-4">
+                      <p className="text-sm font-semibold text-slate-900">
+                        {selectedDiscrepancy.attachment_filename || 'No attachment uploaded for this report.'}
+                      </p>
+                      <p className="mt-2 text-sm leading-6 text-slate-600">
+                        {selectedDiscrepancy.attachment_filename
+                          ? 'Use the download action to review the original evidence submitted with this discrepancy.'
+                          : 'Historical records without file uploads remain supported and will continue to display correctly.'}
+                      </p>
+                    </div>
+                  </DiscrepancySection>
+
+                  <DiscrepancySection
+                    title="Review History / Responses"
+                    description="Chronological responses with clear administrator identity, role, timestamp, and status."
+                  >
+                    <div className="space-y-4">
+                      {(selectedDiscrepancy.conversation_thread || []).length > 0 ? (
+                        (selectedDiscrepancy.conversation_thread || []).map((entry, index) => (
+                          <DiscrepancyTimelineEntry
+                            key={`${entry.created_at || 'entry'}-${index}`}
+                            entry={entry}
+                            formatDateTime={formatDateTime}
+                          />
+                        ))
+                      ) : (
+                        <p className="text-sm text-slate-500">No responses yet.</p>
+                      )}
+                    </div>
+                  </DiscrepancySection>
+                </div>
+              </div>
+
+              <div className="mt-6 flex justify-end">
+                <button
+                  onClick={closeDiscrepancyDetails}
+                  className="rounded-2xl bg-slate-700 px-6 py-3 font-semibold text-white transition hover:bg-slate-800"
+                >
+                  Close
+                </button>
               </div>
             </div>
-
-            <div className="mb-5">
-              <p className="mb-2 text-sm font-semibold text-gray-700">Attached File</p>
-              <div className="rounded-lg border border-gray-200 p-4 text-gray-700">
-                {selectedDiscrepancy.attachment_filename || 'No attachment uploaded.'}
-              </div>
-            </div>
-
-            <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 p-5">
-              <p className="mb-2 text-sm font-semibold text-blue-900">Main Office Response</p>
-              <p className="whitespace-pre-line text-blue-900">
-                {selectedDiscrepancy.verification_notes || 'Main Office has not sent a response yet.'}
-              </p>
-              <p className="mt-3 text-xs text-blue-700">
-                {selectedDiscrepancy.verified_by
-                  ? `Responded by ${selectedDiscrepancy.verified_by} on ${formatDateTime(selectedDiscrepancy.verified_at || selectedDiscrepancy.updated_at)}`
-                  : 'Waiting for main office review.'}
-              </p>
-            </div>
-
-            <button
-              onClick={closeDiscrepancyDetails}
-              className="w-full rounded-lg bg-gray-300 py-3 font-semibold text-gray-700 transition hover:bg-gray-400"
-            >
-              Close
-            </button>
           </div>
         </div>
       )}
