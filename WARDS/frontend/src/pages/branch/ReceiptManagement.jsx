@@ -1469,7 +1469,7 @@ const ReceiptManagement = () => {
                 ? 'Receipt copy release stays locked until Branch Admin verifies the paid receipt request in Payment Management.'
                 : 'Receipt copy release stays locked until Payment Management marks the request fee as verified.'
             : request.releaseStatus === 'Ready for Release'
-              ? 'Payment is verified and the request is ready for branch release.'
+              ? 'Payment is verified and release copy is uploaded. Receipt validation will be performed when releasing.'
               : 'Payment is verified. Upload the finished copy to continue the release flow.'}
         </div>
         <div className="basis-full text-xs text-slate-500">
