@@ -1,6 +1,7 @@
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useEffect, useMemo, useState } from 'react';
 import api from '../../services/api';
+import { publicContentAPI } from '../../services/api';
 import { buildAttachmentUrl } from '../../components/AnnouncementAttachments';
 import ViewMyTicket from '../../components/ViewMyTicket';
 import { appendLanguageParam, usePublicLanguage } from '../../utils/publicLanguage';
@@ -236,34 +237,29 @@ const Home = () => {
   const [searchParams] = useSearchParams();
   const [language] = usePublicLanguage();
   const [announcements, setAnnouncements] = useState([]);
+  const [homeSettings, setHomeSettings] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedAnnouncement, setSelectedAnnouncement] = useState(null);
   const [showTicketModal, setShowTicketModal] = useState(false);
 
-  const heroText = language === 'tl'
-    ? {
-        title: 'Maligayang Pagdating sa Online Tax Services',
-        subtitle: 'Magbayad ng iyong buwis online at humingi ng opisyal na resibo sa pamamagitan ng aming ligtas at maaasahang government portal.',
-        getQueueNumber: 'Kumuha ng Queue Number',
-        viewMyTicket: 'Tingnan ang Aking Ticket',
-        payTaxesOnline: 'Magbayad ng Buwis Online',
-        requestReceipt: 'Humiling ng Resibo',
-        latestAnnouncements: 'Mga Pinakabagong Anunsyo',
-        latestAnnouncementsSubtitle: "Manatiling updated sa mahahalagang anunsyo at abiso mula sa City Treasurer's Office.",
-      }
-    : {
-        title: 'Welcome to Online Tax Services',
-        subtitle: 'Pay your taxes online and request official receipts through our secure government portal.',
-        getQueueNumber: 'Get Queue Number',
-        viewMyTicket: 'View My Ticket',
-        payTaxesOnline: 'Pay Taxes Online',
-        requestReceipt: 'Request Receipt',
-        latestAnnouncements: 'Latest Announcements',
-        latestAnnouncementsSubtitle: "Stay updated with important notices from the City Treasurer's Office.",
-      };
+  const s = homeSettings;
+  const isTl = language === 'tl';
+  const heroText = {
+    title: (isTl ? s?.hero_title_tl : s?.hero_title_en) || (isTl ? 'Maligayang Pagdating sa Online Tax Services' : 'Welcome to Online Tax Services'),
+    subtitle: (isTl ? s?.hero_subtitle_tl : s?.hero_subtitle_en) || (isTl ? 'Magbayad ng iyong buwis online at humingi ng opisyal na resibo sa pamamagitan ng aming ligtas at maaasahang government portal.' : 'Pay your taxes online and request official receipts through our secure government portal.'),
+    getQueueNumber: (isTl ? s?.btn_get_queue_tl : s?.btn_get_queue_en) || (isTl ? 'Kumuha ng Queue Number' : 'Get Queue Number'),
+    viewMyTicket: (isTl ? s?.btn_view_ticket_tl : s?.btn_view_ticket_en) || (isTl ? 'Tingnan ang Aking Ticket' : 'View My Ticket'),
+    payTaxesOnline: (isTl ? s?.btn_pay_taxes_tl : s?.btn_pay_taxes_en) || (isTl ? 'Magbayad ng Buwis Online' : 'Pay Taxes Online'),
+    requestReceipt: (isTl ? s?.btn_request_receipt_tl : s?.btn_request_receipt_en) || (isTl ? 'Humiling ng Resibo' : 'Request Receipt'),
+    latestAnnouncements: (isTl ? s?.announcements_title_tl : s?.announcements_title_en) || (isTl ? 'Mga Pinakabagong Anunsyo' : 'Latest Announcements'),
+    latestAnnouncementsSubtitle: (isTl ? s?.announcements_subtitle_tl : s?.announcements_subtitle_en) || (isTl ? "Manatiling updated sa mahahalagang anunsyo at abiso mula sa City Treasurer's Office." : "Stay updated with important notices from the City Treasurer's Office."),
+  };
 
   useEffect(() => {
     fetchAnnouncements();
+    publicContentAPI.getPublicHome()
+      .then((res) => setHomeSettings(res.data || null))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -343,7 +339,7 @@ const Home = () => {
       {/* ── Hero ── */}
       <section
         className="relative min-h-[520px] flex items-center bg-cover bg-center bg-no-repeat overflow-hidden"
-        style={{ backgroundImage: "url('/Images/hero-bg.jpg')" }}
+        style={{ backgroundImage: homeSettings?.hero_bg_image ? `url('${homeSettings.hero_bg_image}')` : "url('/Images/hero-bg.jpg')" }}
       >
         {/* Dark base overlay */}
         <div className="absolute inset-0 bg-primary/80"></div>
@@ -419,142 +415,205 @@ const Home = () => {
       </section>
 
       {/* ── Announcements ── */}
-      <section className="py-16 bg-lightbg">
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+      <section className="py-10 bg-lightbg">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+
           {/* Section header */}
-          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2 mb-10">
+          <div className="flex items-center justify-between mb-6">
             <div>
-              <span className="inline-block text-xs font-bold uppercase tracking-[0.18em] text-accent mb-2">
-                Updates
-              </span>
-              <h2 className="text-2xl sm:text-3xl font-extrabold text-primary leading-tight">
-                {heroText.latestAnnouncements}
-              </h2>
+              <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-accent mb-0.5">Updates</p>
+              <h2 className="text-2xl font-extrabold text-primary leading-none">{heroText.latestAnnouncements}</h2>
             </div>
-            <p className="text-sm text-slate-500 sm:text-right max-w-xs sm:max-w-[220px] leading-relaxed">
+            <p className="hidden sm:block text-xs text-slate-400 text-right max-w-[200px] leading-relaxed">
               {heroText.latestAnnouncementsSubtitle}
             </p>
           </div>
 
           {announcements.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-slate-200 bg-white py-16 text-center">
-              <p className="text-gray-500">No announcements at this time.</p>
+            <div className="rounded-2xl border border-dashed border-slate-200 bg-white py-12 text-center">
+              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 mx-auto mb-2">
+                <svg className="h-5 w-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" />
+                </svg>
+              </span>
+              <p className="text-sm font-medium text-slate-400">No announcements at this time.</p>
             </div>
           ) : (
-            <div className="flex flex-col gap-5">
-              {paginatedAnnouncements.map((announcement) => {
-                const colorClass = getIconColorClass(announcement.icon_color);
-                const attachments = announcement.attachments || [];
-                const imageAttachments = attachments.filter(isImageAttachment);
-                const fileAttachments = attachments.filter((att) => !isImageAttachment(att));
-                const sourceName = announcement.branch_name || "Main Admin";
-                const sourceSubtitle = announcement.branch_name ? 'Branch advisory' : 'Office-wide update';
+            (() => {
+              const featured = paginatedAnnouncements[0];
+              const rest = paginatedAnnouncements.slice(1);
 
-                return (
+              const renderMeta = (announcement, colorClass, isBranch, sourceName, sourceSubtitle) => (
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className={`${colorClass.bg} flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md`}>
+                    <svg className={`w-3 h-3 ${colorClass.text}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={getIconPath(announcement.icon_type)} />
+                    </svg>
+                  </div>
+                  <span className="text-[11px] font-semibold truncate">{sourceName}</span>
+                  <span className="text-current opacity-30">·</span>
+                  <time className="text-[11px] opacity-60 flex-shrink-0" dateTime={announcement.publish_date}>
+                    {formatDate(announcement.publish_date)}
+                  </time>
+                  <span className={`ml-auto flex-shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
+                    isBranch ? 'bg-white/20 text-current' : 'bg-white/15 text-current'
+                  }`}>
+                    {isBranch ? 'Branch' : 'Office-wide'}
+                  </span>
+                </div>
+              );
+
+              const featuredColorClass = getIconColorClass(featured.icon_color);
+              const featuredAttachments = featured.attachments || [];
+              const featuredImages = featuredAttachments.filter(isImageAttachment);
+              const featuredFiles = featuredAttachments.filter((att) => !isImageAttachment(att));
+              const featuredSource = featured.branch_name || 'Main Admin';
+              const featuredSubtitle = featured.branch_name ? 'Branch advisory' : 'Office-wide update';
+              const featuredIsBranch = !!featured.branch_name;
+
+              return (
+                <div className="flex flex-col gap-3">
+                  {/* Featured card — full width, dark bg */}
                   <article
-                    key={announcement.id}
-                    className="relative rounded-2xl bg-white shadow-sm hover:shadow-md transition duration-300 overflow-hidden"
+                    className="group rounded-2xl bg-primary overflow-hidden cursor-pointer hover:shadow-xl transition-all duration-200"
+                    onClick={() => setSelectedAnnouncement(featured)}
                   >
-                    <div className="flex-1 min-w-0">
-                      {/* Header */}
-                      <header className="flex items-start justify-between gap-3 px-5 sm:px-6 pt-5">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className={`${colorClass.bg} flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl`}>
-                            <svg className={`w-4 h-4 ${colorClass.text}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={getIconPath(announcement.icon_type)}></path>
-                            </svg>
-                          </div>
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-slate-800">{sourceName}</p>
-                            <p className="text-xs text-slate-400">
-                              <span>{sourceSubtitle}</span>
-                              <span className="mx-1.5">&middot;</span>
-                              <time dateTime={announcement.publish_date}>{formatDate(announcement.publish_date)}</time>
-                            </p>
-                          </div>
-                        </div>
-                        <span
-                          className={`flex-shrink-0 inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
-                            announcement.branch_name
-                              ? 'border border-blue-100 bg-blue-50 text-blue-700'
-                              : 'border border-slate-100 bg-slate-50 text-slate-500'
-                          }`}
-                        >
-                          {announcement.branch_name ? 'Branch' : 'Main Admin'}
-                        </span>
-                      </header>
-
-                      {/* Content */}
-                      <div className="px-5 sm:px-6 pt-4">
-                        <h3 className="text-lg sm:text-xl font-bold text-primary leading-snug mb-2">
-                          {announcement.title}
-                        </h3>
-                        <p className="whitespace-pre-line text-[15px] leading-7 text-slate-600">
-                          {announcement.content}
-                        </p>
+                    <div className="p-5 sm:p-6">
+                      {/* Meta */}
+                      <div className="text-white mb-3">
+                        {renderMeta(featured, featuredColorClass, featuredIsBranch, featuredSource, featuredSubtitle)}
                       </div>
-
-                      {/* Image gallery */}
-                      {imageAttachments.length > 0 && (
-                        <div className="px-5 sm:px-6">
-                          <ImageGallery
-                            images={imageAttachments}
-                            onImageClick={() => setSelectedAnnouncement(announcement)}
-                          />
+                      {/* Title + content side by side on md+ */}
+                      <div className="sm:flex sm:gap-6 sm:items-start">
+                        <div className="flex-1 min-w-0">
+                          <h3 className="text-2xl sm:text-3xl font-extrabold text-white leading-snug mb-2 group-hover:text-blue-200 transition-colors duration-200">
+                            {featured.title}
+                          </h3>
+                          <p className="text-sm leading-relaxed text-white/75 line-clamp-3">
+                            {featured.content}
+                          </p>
+                        </div>
+                        {featuredImages.length > 0 && (
+                          <div className="mt-3 sm:mt-0 sm:w-44 sm:flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                            <ImageGallery images={featuredImages} onImageClick={() => setSelectedAnnouncement(featured)} />
+                          </div>
+                        )}
+                      </div>
+                      {featuredFiles.length > 0 && (
+                        <div className="mt-3 space-y-1.5" onClick={(e) => e.stopPropagation()}>
+                          {featuredFiles.map((att) => <FileAttachmentRow key={att.id} attachment={att} />)}
                         </div>
                       )}
-
-                      {/* File attachments */}
-                      {fileAttachments.length > 0 && (
-                        <div className="px-5 sm:px-6 mt-4 space-y-2">
-                          {fileAttachments.map((att) => (
-                            <FileAttachmentRow key={att.id} attachment={att} />
-                          ))}
-                        </div>
-                      )}
-
                       {/* Footer */}
-                      <footer className="mt-4 flex items-center justify-between gap-3 border-t border-slate-100 px-5 sm:px-6 py-3">
-                        <span className="text-xs font-semibold uppercase tracking-wide text-slate-300">
-                          {sourceSubtitle}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setSelectedAnnouncement(announcement)}
-                          className="inline-flex items-center gap-1.5 rounded-full bg-lightbg hover:bg-blue-50 px-4 py-1.5 text-xs font-semibold text-accent hover:text-blue-700 transition duration-200"
-                        >
+                      <div className="mt-4 flex items-center justify-between">
+                        <span className="text-[11px] font-bold uppercase tracking-widest text-white/30">{featuredSubtitle}</span>
+                        <span className="inline-flex items-center gap-1 text-xs font-bold text-white/60 group-hover:text-white transition-colors duration-200">
                           Read more
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7"></path>
+                          <svg className="w-3 h-3 transition-transform duration-200 group-hover:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" />
                           </svg>
-                        </button>
-                      </footer>
+                        </span>
+                      </div>
                     </div>
                   </article>
-                );
-              })}
-            </div>
+
+                  {/* Rest — 2-col grid */}
+                  {rest.length > 0 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {rest.map((announcement, idx) => {
+                        const colorClass = getIconColorClass(announcement.icon_color);
+                        const attachments = announcement.attachments || [];
+                        const imageAttachments = attachments.filter(isImageAttachment);
+                        const fileAttachments = attachments.filter((att) => !isImageAttachment(att));
+                        const sourceName = announcement.branch_name || 'Main Admin';
+                        const sourceSubtitle = announcement.branch_name ? 'Branch advisory' : 'Office-wide update';
+                        const isBranch = !!announcement.branch_name;
+
+                        return (
+                          <article
+                            key={announcement.id}
+                            className="group relative bg-white rounded-2xl border border-slate-100 hover:border-primary/25 hover:shadow-md transition-all duration-200 overflow-hidden cursor-pointer flex flex-col"
+                            onClick={() => setSelectedAnnouncement(announcement)}
+                          >
+                            <div className="p-4 flex flex-col flex-1">
+                              {/* Meta */}
+                              <div className="flex items-center gap-2 mb-2.5 text-slate-500">
+                                <div className={`${colorClass.bg} flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md`}>
+                                  <svg className={`w-3 h-3 ${colorClass.text}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={getIconPath(announcement.icon_type)} />
+                                  </svg>
+                                </div>
+                                <span className="text-xs font-semibold text-slate-600 truncate">{sourceName}</span>
+                                <span className="text-slate-200">·</span>
+                                <time className="text-xs text-slate-400 flex-shrink-0" dateTime={announcement.publish_date}>
+                                  {formatDate(announcement.publish_date)}
+                                </time>
+                                <span className={`ml-auto flex-shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
+                                  isBranch ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-400'
+                                }`}>
+                                  {isBranch ? 'Branch' : 'Office-wide'}
+                                </span>
+                              </div>
+
+                              {/* Title */}
+                              <h3 className="text-base font-bold text-slate-800 leading-snug mb-1.5 group-hover:text-primary transition-colors duration-200">
+                                {announcement.title}
+                              </h3>
+                              <p className="text-sm leading-relaxed text-slate-500 line-clamp-2 flex-1">
+                                {announcement.content}
+                              </p>
+
+                              {imageAttachments.length > 0 && (
+                                <div className="mt-2.5" onClick={(e) => e.stopPropagation()}>
+                                  <ImageGallery images={imageAttachments} onImageClick={() => setSelectedAnnouncement(announcement)} />
+                                </div>
+                              )}
+                              {fileAttachments.length > 0 && (
+                                <div className="mt-2.5 space-y-1.5" onClick={(e) => e.stopPropagation()}>
+                                  {fileAttachments.map((att) => <FileAttachmentRow key={att.id} attachment={att} />)}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Footer */}
+                            <div className="flex items-center justify-between border-t border-slate-50 px-4 py-2 mt-auto">
+                              <span className="text-[10px] font-bold uppercase tracking-widest text-slate-300">{sourceSubtitle}</span>
+                              <span className="inline-flex items-center gap-1 text-xs font-semibold text-primary/60 group-hover:text-primary transition-colors duration-200">
+                                Read more
+                                <svg className="w-3 h-3 transition-transform duration-200 group-hover:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" />
+                                </svg>
+                              </span>
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })()
           )}
 
           {announcements.length > announcementsPerPage && (
-            <div className="mt-10 flex flex-col items-center gap-3">
-              <nav className="inline-flex items-center gap-1.5" aria-label="Announcements pagination">
+            <div className="mt-6 flex flex-col items-center gap-2">
+              <nav className="inline-flex items-center gap-1" aria-label="Announcements pagination">
                 <button
                   type="button"
                   onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
                   disabled={activePage === 1}
-                  className="inline-flex h-9 items-center gap-1 rounded-full px-3 text-sm font-medium text-slate-600 transition hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                  className="inline-flex h-8 items-center gap-1 rounded-full px-3 text-xs font-medium text-slate-500 transition hover:bg-white hover:shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
                   aria-label="Previous page"
                 >
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path>
+                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
                   </svg>
-                  <span className="hidden sm:inline">Previous</span>
+                  <span className="hidden sm:inline">Prev</span>
                 </button>
                 {paginationItems.map((item) => {
                   if (typeof item === 'string') {
                     return (
-                      <span key={item} className="flex h-9 w-9 items-center justify-center text-sm text-slate-400" aria-hidden>
+                      <span key={item} className="flex h-8 w-8 items-center justify-center text-xs text-slate-300" aria-hidden>
                         &hellip;
                       </span>
                     );
@@ -566,10 +625,10 @@ const Home = () => {
                       type="button"
                       onClick={() => setCurrentPage(item)}
                       aria-current={isActive ? 'page' : undefined}
-                      className={`h-9 min-w-[2.25rem] rounded-full px-2 text-sm font-semibold transition ${
+                      className={`h-8 min-w-[2rem] rounded-full px-2 text-xs font-bold transition ${
                         isActive
                           ? 'bg-primary text-white shadow-sm'
-                          : 'text-slate-600 hover:bg-slate-100'
+                          : 'text-slate-500 hover:bg-white hover:shadow-sm'
                       }`}
                     >
                       {item}
@@ -580,17 +639,17 @@ const Home = () => {
                   type="button"
                   onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
                   disabled={activePage === totalPages}
-                  className="inline-flex h-9 items-center gap-1 rounded-full px-3 text-sm font-medium text-slate-600 transition hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                  className="inline-flex h-8 items-center gap-1 rounded-full px-3 text-xs font-medium text-slate-500 transition hover:bg-white hover:shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
                   aria-label="Next page"
                 >
                   <span className="hidden sm:inline">Next</span>
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path>
+                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
                   </svg>
                 </button>
               </nav>
-              <p className="text-xs text-slate-500">
-                Showing {(activePage - 1) * announcementsPerPage + 1}–{Math.min(activePage * announcementsPerPage, announcements.length)} of {announcements.length}
+              <p className="text-[11px] text-slate-400">
+                {(activePage - 1) * announcementsPerPage + 1}–{Math.min(activePage * announcementsPerPage, announcements.length)} of {announcements.length}
               </p>
             </div>
           )}

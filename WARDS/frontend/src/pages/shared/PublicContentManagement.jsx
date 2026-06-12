@@ -4,6 +4,7 @@ import WardsPageHero from '../../components/WardsPageHero';
 import { publicContentAPI } from '../../services/api';
 import { notifyActivityLogsUpdated } from '../../utils/activityLogNotifications';
 
+const HOME_PAGE = 'home';
 const GUIDE_PAGE = 'taxpayer-guide';
 const CONTACT_PAGE = 'contact';
 const ABOUT_PAGE = 'about-us';
@@ -16,6 +17,26 @@ const makeMissionItem = () => ({ letter: '', text: '', text_tl: '' });
 const makeServicePledge = () => ({ number: '', text: '', text_tl: '' });
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
+
+const normalizeHomeContent = (content = {}) => ({
+  hero_bg_image: content.hero_bg_image || '',
+  hero_title_en: content.hero_title_en || 'Welcome to Online Tax Services',
+  hero_title_tl: content.hero_title_tl || 'Maligayang Pagdating sa Online Tax Services',
+  hero_subtitle_en: content.hero_subtitle_en || 'Pay your taxes online and request official receipts through our secure government portal.',
+  hero_subtitle_tl: content.hero_subtitle_tl || 'Magbayad ng iyong buwis online at humingi ng opisyal na resibo sa pamamagitan ng aming ligtas at maaasahang government portal.',
+  btn_get_queue_en: content.btn_get_queue_en || 'Get Queue Number',
+  btn_get_queue_tl: content.btn_get_queue_tl || 'Kumuha ng Queue Number',
+  btn_view_ticket_en: content.btn_view_ticket_en || 'View My Ticket',
+  btn_view_ticket_tl: content.btn_view_ticket_tl || 'Tingnan ang Aking Ticket',
+  btn_pay_taxes_en: content.btn_pay_taxes_en || 'Pay Taxes Online',
+  btn_pay_taxes_tl: content.btn_pay_taxes_tl || 'Magbayad ng Buwis Online',
+  btn_request_receipt_en: content.btn_request_receipt_en || 'Request Receipt',
+  btn_request_receipt_tl: content.btn_request_receipt_tl || 'Humiling ng Resibo',
+  announcements_title_en: content.announcements_title_en || 'Latest Announcements',
+  announcements_title_tl: content.announcements_title_tl || 'Mga Pinakabagong Anunsyo',
+  announcements_subtitle_en: content.announcements_subtitle_en || "Stay updated with important notices from the City Treasurer's Office.",
+  announcements_subtitle_tl: content.announcements_subtitle_tl || "Manatiling updated sa mahahalagang anunsyo at abiso mula sa City Treasurer's Office.",
+});
 
 const normalizeGuideContent = (content = {}) => ({
   page_title_en: content.page_title_en || '',
@@ -710,14 +731,80 @@ const FaqsPreview = ({ content, language }) => {
   );
 };
 
+const HomePreview = ({ content, language }) => {
+  const l = language === 'tl' ? 'tl' : 'en';
+  const title = content[`hero_title_${l}`];
+  const subtitle = content[`hero_subtitle_${l}`];
+  const buttons = [
+    content[`btn_get_queue_${l}`],
+    content[`btn_view_ticket_${l}`],
+    content[`btn_pay_taxes_${l}`],
+    content[`btn_request_receipt_${l}`],
+  ];
+  const annTitle = content[`announcements_title_${l}`];
+  const annSubtitle = content[`announcements_subtitle_${l}`];
+
+  return (
+    <PreviewShell>
+      {/* Hero */}
+      <div
+        className="relative flex items-end overflow-hidden bg-cover bg-center"
+        style={{
+          backgroundImage: content.hero_bg_image ? `url('${content.hero_bg_image}')` : "url('/Images/hero-bg.jpg')",
+          minHeight: 200,
+        }}
+      >
+        <div className="absolute inset-0 bg-primary/80" />
+        <div className="relative px-5 py-6 w-full">
+          <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-blue-300 mb-1">City Treasurer's Office</p>
+          <h2 className="text-base font-extrabold text-white leading-tight mb-1">{title}</h2>
+          <p className="text-[10px] text-blue-200/80 leading-relaxed mb-3 max-w-xs">{subtitle}</p>
+          <div className="grid grid-cols-4 gap-1.5 max-w-xs">
+            {buttons.map((label) => (
+              <div key={label} className="flex flex-col items-center gap-1 rounded-xl bg-white/10 border border-white/15 px-1.5 py-2.5">
+                <span className="h-5 w-5 rounded-md bg-white/20 block flex-shrink-0" />
+                <span className="text-[8px] font-semibold text-white text-center leading-tight">{label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Announcements section */}
+      <div className="bg-lightbg px-4 py-4">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <p className="text-[9px] font-bold uppercase tracking-widest text-accent mb-0.5">Updates</p>
+            <p className="text-sm font-extrabold text-primary leading-none">{annTitle}</p>
+          </div>
+          <p className="text-[9px] text-slate-400 text-right max-w-[100px] leading-relaxed">{annSubtitle}</p>
+        </div>
+        <div className="rounded-xl bg-primary p-3 mb-2">
+          <p className="text-xs font-bold text-white">Featured Announcement</p>
+          <p className="text-[9px] text-white/60 mt-0.5">Announcement content preview…</p>
+        </div>
+        <div className="grid grid-cols-2 gap-1.5">
+          {[1, 2].map((i) => (
+            <div key={i} className="rounded-xl bg-white border border-slate-100 p-2">
+              <p className="text-[9px] font-bold text-slate-700">Announcement {i + 1}</p>
+              <p className="text-[8px] text-slate-400 mt-0.5">Content preview…</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </PreviewShell>
+  );
+};
+
 const PublicContentManagement = ({ portal = 'admin' }) => {
   const location = useLocation();
   const [loading, setLoading] = useState(true);
   const [isAuthorized, setIsAuthorized] = useState(true);
-  const [activePage, setActivePage] = useState(GUIDE_PAGE);
+  const [activePage, setActivePage] = useState(HOME_PAGE);
   const [previewLanguage, setPreviewLanguage] = useState('en');
   const [editorLanguage, setEditorLanguage] = useState('en');
   const switchLanguage = (lang) => { setEditorLanguage(lang); setPreviewLanguage(lang); };
+  const [homeContent, setHomeContent] = useState(normalizeHomeContent());
   const [guideContent, setGuideContent] = useState(normalizeGuideContent());
   const [contactContent, setContactContent] = useState(normalizeContactContent());
   const [aboutUsContent, setAboutUsContent] = useState(normalizeAboutUsContent());
@@ -725,7 +812,7 @@ const PublicContentManagement = ({ portal = 'admin' }) => {
   const [notice, setNotice] = useState({ tone: '', message: '' });
   const [savingPage, setSavingPage] = useState('');
   const [publishModal, setPublishModal] = useState(null);
-  const publishedSnapshots = useRef({ guide: null, contact: null, about: null, faqs: null });
+  const publishedSnapshots = useRef({ home: null, guide: null, contact: null, about: null, faqs: null });
 
   useEffect(() => {
     const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}');
@@ -743,21 +830,25 @@ const PublicContentManagement = ({ portal = 'admin' }) => {
     const loadContent = async () => {
       try {
         setLoading(true);
-        const [guideResponse, contactResponse, aboutUsResponse, faqsResponse] = await Promise.all([
+        const [homeResponse, guideResponse, contactResponse, aboutUsResponse, faqsResponse] = await Promise.all([
+          publicContentAPI.getHomeEditor(portal),
           publicContentAPI.getTaxpayerGuideEditor(portal),
           publicContentAPI.getContactEditor(portal),
           publicContentAPI.getAboutUsEditor(portal),
           publicContentAPI.getFaqsEditor(portal),
         ]);
+        const home = normalizeHomeContent(homeResponse.data || {});
         const guide = normalizeGuideContent(guideResponse.data || {});
         const contact = normalizeContactContent(contactResponse.data || {});
         const about = normalizeAboutUsContent(aboutUsResponse.data || {});
         const faqs = normalizeFaqsContent(faqsResponse.data || {});
+        setHomeContent(home);
         setGuideContent(guide);
         setContactContent(contact);
         setAboutUsContent(about);
         setFaqsContent(faqs);
         publishedSnapshots.current = {
+          home: JSON.stringify(home),
           guide: JSON.stringify(guide),
           contact: JSON.stringify(contact),
           about: JSON.stringify(about),
@@ -778,6 +869,42 @@ const PublicContentManagement = ({ portal = 'admin' }) => {
   }, [portal, location.pathname]);
 
   const showNotice = (tone, message) => setNotice({ tone, message });
+
+  // ── Home handlers ──
+  const saveHomeDraft = async () => {
+    try {
+      setSavingPage('home-draft');
+      await publicContentAPI.saveHomeDraft(homeContent, portal);
+      notifyActivityLogsUpdated();
+      showNotice('success', 'Home page draft saved.');
+    } catch (error) {
+      showNotice('error', error.response?.data?.detail || 'Failed to save Home page draft.');
+    } finally {
+      setSavingPage('');
+    }
+  };
+
+  const publishHome = () => {
+    const noChanges = publishedSnapshots.current.home === JSON.stringify(homeContent);
+    setPublishModal({
+      label: 'Publish Home Page',
+      noChanges,
+      onConfirm: async () => {
+        try {
+          setSavingPage('home-publish');
+          await publicContentAPI.publishHome(homeContent, portal);
+          notifyActivityLogsUpdated();
+          publishedSnapshots.current.home = JSON.stringify(homeContent);
+          showNotice('success', 'Home page published and live on the public site.');
+        } catch (error) {
+          showNotice('error', error.response?.data?.detail || 'Failed to publish Home page.');
+        } finally {
+          setSavingPage('');
+          setPublishModal(null);
+        }
+      },
+    });
+  };
 
   // ── Taxpayer Guide handlers ──
   const updateGuideValue = (key, value) => {
@@ -1032,6 +1159,7 @@ const PublicContentManagement = ({ portal = 'admin' }) => {
   }
 
   const tabs = [
+    { key: HOME_PAGE, label: 'Home Page' },
     { key: GUIDE_PAGE, label: 'Tax Payer Guide Page' },
     { key: CONTACT_PAGE, label: 'Contact Page' },
     { key: ABOUT_PAGE, label: 'About Us Page' },
@@ -1097,8 +1225,108 @@ const PublicContentManagement = ({ portal = 'admin' }) => {
         </div>
       ) : null}
 
-      {/* ── Taxpayer Guide ── */}
-      {activePage === GUIDE_PAGE ? (
+      {/* ── Home Page ── */}
+      {activePage === HOME_PAGE ? (
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.5fr)_minmax(360px,1fr)]">
+          <div className="space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Home Page Editor</h2>
+                <p className="text-sm text-slate-500">Customize the hero section, action button labels, and announcements heading shown on the public Home page.</p>
+              </div>
+              {makePageActions('home-draft', 'home-publish', saveHomeDraft, publishHome, 'Publish Home Page')}
+            </div>
+
+            <EditorLangBanner value={editorLanguage} onChange={switchLanguage} />
+
+            <SectionCard
+              title="Hero Background Image"
+              description='Upload a photo for the "Welcome to Online Tax Services" hero background. Leave blank to keep the default city hall photo.'
+            >
+              <ImageUploadField
+                label="Hero Background"
+                value={homeContent.hero_bg_image}
+                onChange={(val) => setHomeContent((c) => ({ ...c, hero_bg_image: val }))}
+                hint="Recommended: landscape photo, at least 1280×520px. Max 2 MB."
+              />
+            </SectionCard>
+
+            <SectionCard title="Hero Text" description="The main headline and supporting subtitle shown over the hero background.">
+              <div className="space-y-4">
+                <Field label="Title">
+                  <input
+                    value={homeContent[`hero_title_${editorLanguage}`]}
+                    onChange={(e) => setHomeContent((c) => ({ ...c, [`hero_title_${editorLanguage}`]: e.target.value }))}
+                    className={textInputClass}
+                  />
+                </Field>
+                <Field label="Subtitle">
+                  <textarea
+                    value={homeContent[`hero_subtitle_${editorLanguage}`]}
+                    onChange={(e) => setHomeContent((c) => ({ ...c, [`hero_subtitle_${editorLanguage}`]: e.target.value }))}
+                    className={textAreaClass}
+                    style={{ minHeight: 80 }}
+                  />
+                </Field>
+              </div>
+            </SectionCard>
+
+            <SectionCard title="Action Button Labels" description="Labels for the four quick-action buttons in the hero section.">
+              <div className="grid gap-4 sm:grid-cols-2">
+                {[
+                  { key: `btn_get_queue_${editorLanguage}`, label: 'Get Queue Number' },
+                  { key: `btn_view_ticket_${editorLanguage}`, label: 'View My Ticket' },
+                  { key: `btn_pay_taxes_${editorLanguage}`, label: 'Pay Taxes Online' },
+                  { key: `btn_request_receipt_${editorLanguage}`, label: 'Request Receipt' },
+                ].map(({ key, label }) => (
+                  <Field key={key} label={label}>
+                    <input
+                      value={homeContent[key]}
+                      onChange={(e) => setHomeContent((c) => ({ ...c, [key]: e.target.value }))}
+                      className={textInputClass}
+                    />
+                  </Field>
+                ))}
+              </div>
+            </SectionCard>
+
+            <SectionCard title="Announcements Section" description="The heading and subtitle shown above the Latest Announcements cards.">
+              <div className="space-y-4">
+                <Field label="Section Title">
+                  <input
+                    value={homeContent[`announcements_title_${editorLanguage}`]}
+                    onChange={(e) => setHomeContent((c) => ({ ...c, [`announcements_title_${editorLanguage}`]: e.target.value }))}
+                    className={textInputClass}
+                  />
+                </Field>
+                <Field label="Section Subtitle">
+                  <textarea
+                    value={homeContent[`announcements_subtitle_${editorLanguage}`]}
+                    onChange={(e) => setHomeContent((c) => ({ ...c, [`announcements_subtitle_${editorLanguage}`]: e.target.value }))}
+                    className={textAreaClass}
+                    style={{ minHeight: 72 }}
+                  />
+                </Field>
+              </div>
+            </SectionCard>
+          </div>
+
+          <div className="space-y-6">
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900">Live Preview</h2>
+                  <p className="mt-1 text-sm text-slate-500">Preview how the Home page will look publicly.</p>
+                </div>
+                <LanguageToggle value={previewLanguage} onChange={switchLanguage} />
+              </div>
+            </div>
+            <HomePreview content={homeContent} language={previewLanguage} />
+          </div>
+        </div>
+
+      /* ── Taxpayer Guide ── */
+      ) : activePage === GUIDE_PAGE ? (
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.5fr)_minmax(360px,1fr)]">
           <div className="space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">

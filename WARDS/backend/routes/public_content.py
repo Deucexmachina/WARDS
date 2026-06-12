@@ -132,8 +132,11 @@ def _resolve_editor_content(db: Session, page_key: str) -> dict[str, Any]:
     if page_key == PAGE_TAXPAYER_GUIDE:
         record = _get_page_record(db, page_key)
         default_settings = _default_taxpayer_guide_page_settings()
-        base_settings = _read_json_blob(record.published_content_json if record else None, default_settings)
-        editor_content = _read_json_blob(record.draft_content_json if record else None, base_settings)
+        # Strip any stale guide rows that may exist in legacy blobs before merging
+        raw_published = _read_json_blob(record.published_content_json if record else None, default_settings)
+        base_settings = {k: v for k, v in raw_published.items() if k not in ("guides_en", "guides_tl")}
+        raw_draft = _read_json_blob(record.draft_content_json if record else None, base_settings)
+        editor_content = {k: v for k, v in raw_draft.items() if k not in ("guides_en", "guides_tl")}
         return _merge_taxpayer_guide_page_content(db, editor_content)
 
     record = _get_page_record(db, page_key)
@@ -416,6 +419,16 @@ async def get_taxpayer_guide_editor_content(
     return _resolve_editor_content(db, PAGE_TAXPAYER_GUIDE)
 
 
+def _strip_guide_rows(normalized: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy of the normalized dict without the guide row lists.
+
+    Guides are stored in the TaxpayerGuide table, not in the JSON blob.
+    Keeping them in the blob causes duplication when the editor GET merges
+    both sources on the next load.
+    """
+    return {k: v for k, v in normalized.items() if k not in ("guides_en", "guides_tl")}
+
+
 @router.put("/taxpayer-guide/draft")
 async def save_taxpayer_guide_draft(
     payload: PublicContentPayload,
@@ -425,8 +438,13 @@ async def save_taxpayer_guide_draft(
 ):
     _authorize_content_manager(current_user)
     normalized = _normalize_taxpayer_guide_content(payload.content or {})
+    # Write the guide rows to the DB so they survive as-of-draft
+    _write_taxpayer_guides(db, normalized["guides_en"], "en")
+    _write_taxpayer_guides(db, normalized["guides_tl"], "tl")
+    # Store only page-level settings in the JSON blob — never the row lists
+    blob = _strip_guide_rows(normalized)
     record = _get_page_record(db, PAGE_TAXPAYER_GUIDE)
-    _save_record(db, record=record, page_key=PAGE_TAXPAYER_GUIDE, draft_content=normalized, actor=current_user.username)
+    _save_record(db, record=record, page_key=PAGE_TAXPAYER_GUIDE, draft_content=blob, actor=current_user.username)
     _log_public_content_activity(db, request=request, current_user=current_user, page_label="Tax Payer Guide", action_type="Update Draft")
     db.commit()
     return {"message": "Taxpayer Guide draft saved successfully."}
@@ -443,13 +461,14 @@ async def publish_taxpayer_guide(
     normalized = _normalize_taxpayer_guide_content(payload.content or {})
     _write_taxpayer_guides(db, normalized["guides_en"], "en")
     _write_taxpayer_guides(db, normalized["guides_tl"], "tl")
+    blob = _strip_guide_rows(normalized)
     record = _get_page_record(db, PAGE_TAXPAYER_GUIDE)
     _save_record(
         db,
         record=record,
         page_key=PAGE_TAXPAYER_GUIDE,
-        draft_content=normalized,
-        published_content=normalized,
+        draft_content=blob,
+        published_content=blob,
         actor=current_user.username,
     )
     _log_public_content_activity(db, request=request, current_user=current_user, page_label="Tax Payer Guide", action_type="Publish")
@@ -565,7 +584,8 @@ async def publish_about_us(
 @router.get("/public/faqs")
 async def get_public_faqs_content(db: Session = Depends(get_db)):
     record = _get_page_record(db, PAGE_FAQS)
-    page_settings = _read_json_blob(record.published_content_json if record else None, _default_faqs_page_settings())
+    raw = _read_json_blob(record.published_content_json if record else None, _default_faqs_page_settings())
+    page_settings = {k: v for k, v in raw.items() if k not in ("faqs_en", "faqs_tl")}
     return {
         **page_settings,
         "faqs_en": _serialize_faq_rows(db, "en"),
@@ -581,13 +601,24 @@ async def get_faqs_editor_content(
     _authorize_content_manager(current_user)
     record = _get_page_record(db, PAGE_FAQS)
     default_settings = _default_faqs_page_settings()
-    published = _read_json_blob(record.published_content_json if record else None, default_settings)
-    draft = _read_json_blob(record.draft_content_json if record else None, published)
+    raw_published = _read_json_blob(record.published_content_json if record else None, default_settings)
+    published = {k: v for k, v in raw_published.items() if k not in ("faqs_en", "faqs_tl")}
+    raw_draft = _read_json_blob(record.draft_content_json if record else None, published)
+    draft = {k: v for k, v in raw_draft.items() if k not in ("faqs_en", "faqs_tl")}
     return {
         **draft,
         "faqs_en": _serialize_faq_rows(db, "en"),
         "faqs_tl": _serialize_faq_rows(db, "tl"),
     }
+
+
+def _strip_faq_rows(normalized: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy without the faq row lists.
+
+    FAQs are stored in the FAQ table, not in the JSON blob. Keeping them in
+    the blob causes duplication when the editor GET merges both sources.
+    """
+    return {k: v for k, v in normalized.items() if k not in ("faqs_en", "faqs_tl")}
 
 
 @router.put("/faqs/draft")
@@ -599,8 +630,12 @@ async def save_faqs_draft(
 ):
     _authorize_content_manager(current_user)
     normalized = _normalize_faqs_content(payload.content or {})
+    # Write FAQ rows to DB so the draft reflects the current editor state
+    _write_faqs(db, normalized["faqs_en"], "en")
+    _write_faqs(db, normalized["faqs_tl"], "tl")
+    blob = _strip_faq_rows(normalized)
     record = _get_page_record(db, PAGE_FAQS)
-    _save_record(db, record=record, page_key=PAGE_FAQS, draft_content=normalized, actor=current_user.username)
+    _save_record(db, record=record, page_key=PAGE_FAQS, draft_content=blob, actor=current_user.username)
     _log_public_content_activity(db, request=request, current_user=current_user, page_label="FAQs", action_type="Update Draft")
     db.commit()
     return {"message": "FAQs page draft saved successfully."}
@@ -617,15 +652,110 @@ async def publish_faqs(
     normalized = _normalize_faqs_content(payload.content or {})
     _write_faqs(db, normalized["faqs_en"], "en")
     _write_faqs(db, normalized["faqs_tl"], "tl")
+    blob = _strip_faq_rows(normalized)
     record = _get_page_record(db, PAGE_FAQS)
     _save_record(
         db,
         record=record,
         page_key=PAGE_FAQS,
-        draft_content=normalized,
-        published_content=normalized,
+        draft_content=blob,
+        published_content=blob,
         actor=current_user.username,
     )
     _log_public_content_activity(db, request=request, current_user=current_user, page_label="FAQs", action_type="Publish")
     db.commit()
     return {"message": "FAQs page published successfully."}
+
+
+# ── Home Page ──────────────────────────────────────────────────────────────────
+
+PAGE_HOME = "home"
+
+
+def _default_home_content() -> dict[str, Any]:
+    return {
+        "hero_bg_image": "",
+        "hero_title_en": "Welcome to Online Tax Services",
+        "hero_title_tl": "Maligayang Pagdating sa Online Tax Services",
+        "hero_subtitle_en": "Pay your taxes online and request official receipts through our secure government portal.",
+        "hero_subtitle_tl": "Magbayad ng iyong buwis online at humingi ng opisyal na resibo sa pamamagitan ng aming ligtas at maaasahang government portal.",
+        "btn_get_queue_en": "Get Queue Number",
+        "btn_get_queue_tl": "Kumuha ng Queue Number",
+        "btn_view_ticket_en": "View My Ticket",
+        "btn_view_ticket_tl": "Tingnan ang Aking Ticket",
+        "btn_pay_taxes_en": "Pay Taxes Online",
+        "btn_pay_taxes_tl": "Magbayad ng Buwis Online",
+        "btn_request_receipt_en": "Request Receipt",
+        "btn_request_receipt_tl": "Humiling ng Resibo",
+        "announcements_title_en": "Latest Announcements",
+        "announcements_title_tl": "Mga Pinakabagong Anunsyo",
+        "announcements_subtitle_en": "Stay updated with important notices from the City Treasurer's Office.",
+        "announcements_subtitle_tl": "Manatiling updated sa mahahalagang anunsyo at abiso mula sa City Treasurer's Office.",
+    }
+
+
+def _normalize_home_content(content: dict[str, Any]) -> dict[str, Any]:
+    defaults = _default_home_content()
+    normalized: dict[str, Any] = {"hero_bg_image": str(content.get("hero_bg_image", "")).strip()}
+    text_keys = [k for k in defaults if k != "hero_bg_image"]
+    for key in text_keys:
+        value = str(content.get(key, "")).strip()
+        normalized[key] = value if value else defaults[key]
+    return normalized
+
+
+@router.get("/public/home")
+async def get_public_home_content(db: Session = Depends(get_db)):
+    record = _get_page_record(db, PAGE_HOME)
+    return _read_json_blob(record.published_content_json if record else None, _default_home_content())
+
+
+@router.get("/home")
+async def get_home_editor_content(
+    current_user=Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    _authorize_content_manager(current_user)
+    record = _get_page_record(db, PAGE_HOME)
+    default_content = _default_home_content()
+    published = _read_json_blob(record.published_content_json if record else None, default_content)
+    return _read_json_blob(record.draft_content_json if record else None, published)
+
+
+@router.put("/home/draft")
+async def save_home_draft(
+    payload: PublicContentPayload,
+    request: Request,
+    current_user=Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    _authorize_content_manager(current_user)
+    normalized = _normalize_home_content(payload.content or {})
+    record = _get_page_record(db, PAGE_HOME)
+    _save_record(db, record=record, page_key=PAGE_HOME, draft_content=normalized, actor=current_user.username)
+    _log_public_content_activity(db, request=request, current_user=current_user, page_label="Home", action_type="Update Draft")
+    db.commit()
+    return {"message": "Home page draft saved successfully."}
+
+
+@router.post("/home/publish")
+async def publish_home(
+    payload: PublicContentPayload,
+    request: Request,
+    current_user=Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    _authorize_content_manager(current_user)
+    normalized = _normalize_home_content(payload.content or {})
+    record = _get_page_record(db, PAGE_HOME)
+    _save_record(
+        db,
+        record=record,
+        page_key=PAGE_HOME,
+        draft_content=normalized,
+        published_content=normalized,
+        actor=current_user.username,
+    )
+    _log_public_content_activity(db, request=request, current_user=current_user, page_label="Home", action_type="Publish")
+    db.commit()
+    return {"message": "Home page published successfully."}

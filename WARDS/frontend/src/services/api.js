@@ -407,6 +407,10 @@ export const publicContentAPI = {
   getFaqsEditor: (portal = 'admin') => api.get('/public-content/faqs', { headers: buildPortalAuthHeaders(portal) }),
   saveFaqsDraft: (content, portal = 'admin') => api.put('/public-content/faqs/draft', { content }, { headers: buildPortalAuthHeaders(portal) }),
   publishFaqs: (content, portal = 'admin') => api.post('/public-content/faqs/publish', { content }, { headers: buildPortalAuthHeaders(portal) }),
+  getPublicHome: () => api.get('/public-content/public/home'),
+  getHomeEditor: (portal = 'admin') => api.get('/public-content/home', { headers: buildPortalAuthHeaders(portal) }),
+  saveHomeDraft: (content, portal = 'admin') => api.put('/public-content/home/draft', { content }, { headers: buildPortalAuthHeaders(portal) }),
+  publishHome: (content, portal = 'admin') => api.post('/public-content/home/publish', { content }, { headers: buildPortalAuthHeaders(portal) }),
 };
 
 export const backupAPI = {
