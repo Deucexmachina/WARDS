@@ -38,7 +38,6 @@ class SettingsUpdateRequest(BaseModel):
     maintenanceMode: bool
     sessionTimeout: int = Field(ge=5)
     maxLoginAttempts: int = Field(ge=1)
-    emailNotifications: bool
     reason: str | None = None
 
 

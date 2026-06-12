@@ -79,13 +79,6 @@ SETTINGS_METADATA = {
         "description": "Maximum failed login attempts before temporary account lockout is applied.",
         "default": 5,
     },
-    "emailNotifications": {
-        "label": "Email Notifications",
-        "category": "Notifications",
-        "type": "boolean",
-        "description": "Enables email-based operational notifications for supported workflows.",
-        "default": True,
-    },
 }
 
 SYSTEM_CONFIGURATION_UPDATE_CATEGORY = "System Configuration Updates"
@@ -236,8 +229,6 @@ def get_operational_effects(change_entries: list[dict]) -> list[str]:
         effect_lines.append("Public-facing workflows now follow the updated maintenance mode status.")
     if any(entry["key"] in {"sessionTimeout", "maxLoginAttempts"} for entry in change_entries):
         effect_lines.append("Authentication and session handling now use the updated security defaults for new sessions.")
-    if any(entry["key"] in {"emailNotifications"} for entry in change_entries):
-        effect_lines.append("Supported notification workflows now follow the updated email notification default.")
     return effect_lines or ["Dependent workflows now use the latest approved system configuration values."]
 
 

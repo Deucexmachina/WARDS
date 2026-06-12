@@ -15,21 +15,17 @@ const defaultSettings = {
   maintenanceMode: false,
   sessionTimeout: 30,
   maxLoginAttempts: 5,
-  emailNotifications: true,
 };
 
 const sectionDescription = {
   'Queue Operations': 'Control public queue access, limits, and timing defaults used across branch workflows.',
   Services: 'Define which services stay available to the public, including online payments and receipt copy requests.',
   'Authentication & Security': 'Apply security defaults for new sessions and login lockout behavior.',
-  Notifications: 'Set the default communication channels used by enabled workflows.',
   'Operational Defaults': 'Manage system-wide operational mode switches.',
 };
 
 const formatManilaDate = (value) => formatUtc8Date(value);
 const formatManilaTime = (value) => formatUtc8Time(value);
-
-const countConfiguredServices = (settings) => settings.enabledServices?.length || 0;
 
 const SERVICE_LABELS = {
   RPT: 'Real Property Tax',
@@ -156,7 +152,6 @@ const Settings = () => {
       maintenanceMode: Boolean(settingsData.maintenanceMode),
       sessionTimeout: Number(settingsData.sessionTimeout || 30),
       maxLoginAttempts: Number(settingsData.maxLoginAttempts || 5),
-      emailNotifications: Boolean(settingsData.emailNotifications),
     });
     setMetadata(settingsData.metadata || {});
     setServiceOptions(settingsData.serviceOptions || []);
@@ -353,9 +348,9 @@ const Settings = () => {
 
       <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <div className="rounded-2xl bg-white p-5 shadow">
-          <p className="text-sm font-medium text-slate-500">Enabled Public Services</p>
-          <p className="mt-2 text-3xl font-bold text-primary">{countConfiguredServices(settings)}</p>
-          <p className="mt-2 text-sm text-slate-500">Active services currently visible in public-facing workflows.</p>
+          <p className="text-sm font-medium text-slate-500">Session Timeout</p>
+          <p className="mt-2 text-3xl font-bold text-primary">{settings.sessionTimeout || 30} <span className="text-lg font-medium text-slate-400">min</span></p>
+          <p className="mt-2 text-sm text-slate-500">Authenticated session expiration window applied system-wide.</p>
         </div>
         <div className="rounded-2xl bg-white p-5 shadow">
           <p className="text-sm font-medium text-slate-500">Queue Status</p>
@@ -419,35 +414,6 @@ const Settings = () => {
                               Public services are automatically turned off while Queue System Availability is disabled.
                             </div>
                           )}
-                        </div>
-                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                          {serviceOptions.map((serviceName) => {
-                            const isChecked = settings.queueEnabled && settings.enabledServices.includes(serviceName);
-                            return (
-                              <label
-                                key={serviceName}
-                                className={`flex items-center justify-between rounded-xl border px-4 py-3 transition ${
-                                  isChecked
-                                    ? 'border-emerald-200 bg-emerald-50'
-                                    : settings.queueEnabled
-                                      ? 'cursor-pointer border-slate-200 bg-white hover:border-slate-300'
-                                      : 'cursor-not-allowed border-slate-200 bg-slate-100 opacity-75'
-                                }`}
-                              >
-                                <span className="text-sm font-medium text-slate-700">{serviceName}</span>
-                                <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${isChecked ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-600'}`}>
-                                  {isChecked ? 'On' : 'Off'}
-                                </span>
-                                <input
-                                  type="checkbox"
-                                  checked={isChecked}
-                                  onChange={() => handleServiceToggle(serviceName)}
-                                  disabled={!settings.queueEnabled}
-                                  className="sr-only"
-                                />
-                              </label>
-                            );
-                          })}
                         </div>
                         <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white">
                           <div className="border-b border-slate-100 px-5 py-4">
@@ -535,7 +501,7 @@ const Settings = () => {
                               name={entry.key}
                               value={settings[entry.key]}
                               onChange={handleInputChange}
-                              min={isNumber ? 1 : undefined}
+                              min={isNumber ? (entry.key === 'sessionTimeout' ? 30 : 1) : undefined}
                               className="w-full rounded-xl border-0 bg-transparent px-3 py-2 text-sm text-gray-700 outline-none focus:ring-0"
                             />
                           </div>

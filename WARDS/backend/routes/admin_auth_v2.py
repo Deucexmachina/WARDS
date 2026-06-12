@@ -83,7 +83,8 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
 
 
 def get_session_timeout_minutes(db: Session) -> int:
-    return int(get_setting_value(db, "sessionTimeout") or ACCESS_TOKEN_EXPIRE_MINUTES)
+    configured_timeout = int(get_setting_value(db, "sessionTimeout") or ACCESS_TOKEN_EXPIRE_MINUTES)
+    return max(configured_timeout, 30)
 
 
 def get_max_login_attempts(db: Session) -> int:
