@@ -642,7 +642,7 @@ const RequestReceipt = () => {
     <section className="min-h-screen bg-slate-50 py-16">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-xl shadow-slate-200/60">
-          <div className="bg-gradient-to-r from-[#0f2f5f] via-[#17457f] to-[#2b6cb0] px-8 py-10 text-white">
+          <div className="bg-primary px-8 py-10 text-white">
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-100">{text.onlineServices}</p>
             <h2 className="mt-3 text-3xl font-bold">{text.title}</h2>
             <p className="mt-3 max-w-3xl text-sm leading-7 text-blue-50">{text.heroDescription}</p>

@@ -248,7 +248,7 @@ const PaymentGatewayExperience = ({
   return (
     <div className={`overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-[0_24px_70px_rgba(15,23,42,0.10)] ${className}`}>
       <div className="grid min-h-[520px] lg:grid-cols-[0.92fr_1.08fr]">
-        <aside className="relative overflow-hidden bg-gradient-to-br from-[#061a33] via-[#0f2f5f] to-[#123f8f] p-6 text-white sm:p-8">
+        <aside className="relative overflow-hidden bg-primary p-6 text-white sm:p-8">
           <div className="absolute -left-16 -top-16 h-44 w-44 rounded-full bg-white/10 blur-2xl" />
           <div className="absolute -bottom-20 right-0 h-56 w-56 rounded-full bg-white/10 blur-2xl" />
           <div className="relative">
