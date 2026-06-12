@@ -465,34 +465,16 @@ const ContactPreview = ({ content, language }) => {
           <p className="mt-0.5 text-xs font-semibold text-accent">{content.office_name || "Quezon City Treasurer's Office"}</p>
         </div>
 
-        {/* Two-column card — form left, contact info right */}
+        {/* Two-column card — branch offices left, contact info right */}
         <div className="overflow-hidden rounded-xl shadow-sm flex flex-col sm:flex-row">
-          {/* Left: form stub */}
+          {/* Left: branch offices */}
           <div className="flex-1 bg-white p-4">
-            <p className="text-xs font-bold text-gray-800">{content[`form_title_${suffix}`] || 'Send Us a Message'}</p>
-            <p className="mt-0.5 text-xs text-gray-400">{language === 'en' ? "We'll get back to you as soon as possible." : 'Tutugon kami sa lalong madaling panahon.'}</p>
-            <div className="mt-3 space-y-2">
-              <div className="grid gap-2 grid-cols-2">
-                <div>
-                  <p className="mb-1 text-xs font-semibold text-gray-600">{language === 'en' ? 'Full Name' : 'Buong Pangalan'}</p>
-                  <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-300">Juan Dela Cruz</div>
-                </div>
-                <div>
-                  <p className="mb-1 text-xs font-semibold text-gray-600">{language === 'en' ? 'Email Address' : 'Email Address'}</p>
-                  <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-300">juan@example.com</div>
-                </div>
-              </div>
-              <div>
-                <p className="mb-1 text-xs font-semibold text-gray-600">{language === 'en' ? 'Subject' : 'Paksa'}</p>
-                <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-300">{language === 'en' ? 'How can we help you?' : 'Paano namin kayo matutulungan?'}</div>
-              </div>
-              <div>
-                <p className="mb-1 text-xs font-semibold text-gray-600">{language === 'en' ? 'Message' : 'Mensahe'}</p>
-                <div className="h-12 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-300">{language === 'en' ? 'Type your message here...' : 'Ilagay ang inyong mensahe dito...'}</div>
-              </div>
-              <div className="inline-flex items-center gap-1.5 rounded-xl bg-accent px-4 py-2 text-xs font-semibold text-white">
-                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
-                {language === 'en' ? 'Send Message' : 'Ipadala ang Mensahe'}
+            <p className="text-xs font-bold text-gray-800">{content[`branch_section_title_${suffix}`] || (language === 'en' ? 'Branch Offices' : 'Mga Sangay na Tanggapan')}</p>
+            <p className="mt-0.5 mb-3 text-xs text-gray-400">{language === 'en' ? 'Visit any of our branch offices near you.' : 'Bisitahin ang alinman sa aming mga sangay na tanggapan.'}</p>
+            <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-3 text-center">
+              <div className="flex items-center justify-center gap-2">
+                <svg className="h-4 w-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>
+                <p className="text-xs text-gray-400">{language === 'en' ? 'Branch cards are pulled from Branch Settings.' : 'Ang mga sangay ay kinukuha mula sa Branch Settings.'}</p>
               </div>
             </div>
           </div>
@@ -520,13 +502,32 @@ const ContactPreview = ({ content, language }) => {
           </div>
         </div>
 
-        {/* Branch offices section */}
-        <div>
-          <h3 className="mb-2 text-xs font-bold text-gray-700">{content[`branch_section_title_${suffix}`] || (language === 'en' ? 'Branch Offices' : 'Mga Sangay na Tanggapan')}</h3>
-          <div className="rounded-xl border border-dashed border-gray-200 bg-white px-4 py-3 text-center">
-            <div className="flex items-center justify-center gap-2 text-gray-300">
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>
-              <p className="text-xs text-gray-400">{language === 'en' ? 'Branch cards are pulled from Branch Settings.' : 'Ang mga sangay ay kinukuha mula sa Branch Settings.'}</p>
+        {/* Send Us a Message — full width below */}
+        <div className="overflow-hidden rounded-xl bg-white p-4 shadow-sm">
+          <p className="text-xs font-bold text-gray-800">{content[`form_title_${suffix}`] || 'Send Us a Message'}</p>
+          <p className="mt-0.5 text-xs text-gray-400">{language === 'en' ? "We'll get back to you as soon as possible." : 'Tutugon kami sa lalong madaling panahon.'}</p>
+          <div className="mt-3 space-y-2">
+            <div className="grid gap-2 grid-cols-2">
+              <div>
+                <p className="mb-1 text-xs font-semibold text-gray-600">{language === 'en' ? 'Full Name' : 'Buong Pangalan'}</p>
+                <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-300">Juan Dela Cruz</div>
+              </div>
+              <div>
+                <p className="mb-1 text-xs font-semibold text-gray-600">{language === 'en' ? 'Email Address' : 'Email Address'}</p>
+                <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-300">juan@example.com</div>
+              </div>
+            </div>
+            <div>
+              <p className="mb-1 text-xs font-semibold text-gray-600">{language === 'en' ? 'Subject' : 'Paksa'}</p>
+              <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-300">{language === 'en' ? 'How can we help you?' : 'Paano namin kayo matutulungan?'}</div>
+            </div>
+            <div>
+              <p className="mb-1 text-xs font-semibold text-gray-600">{language === 'en' ? 'Message' : 'Mensahe'}</p>
+              <div className="h-12 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-300">{language === 'en' ? 'Type your message here...' : 'Ilagay ang inyong mensahe dito...'}</div>
+            </div>
+            <div className="inline-flex items-center gap-1.5 rounded-xl bg-accent px-4 py-2 text-xs font-semibold text-white">
+              <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+              {language === 'en' ? 'Send Message' : 'Ipadala ang Mensahe'}
             </div>
           </div>
         </div>

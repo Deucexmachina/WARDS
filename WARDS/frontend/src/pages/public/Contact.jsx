@@ -102,110 +102,72 @@ const Contact = () => {
           <p className="mt-1 text-base font-semibold text-accent">{pageContent?.office_name || "Quezon City Treasurer's Office"}</p>
         </div>
 
-        {/* Two-Column Contact Container */}
+        {/* Two-Column Top Container: Branch Offices + Contact Information */}
         <div className="mb-10 overflow-hidden rounded-2xl shadow-md lg:flex">
-          {/* Left: Contact Form */}
+          {/* Left: Branch Offices */}
           <div className="flex-1 bg-white p-8">
             <h3 className="mb-1 text-xl font-bold text-gray-800">
-              {language === 'en' ? (pageContent?.form_title_en || 'Send Us a Message') : (pageContent?.form_title_tl || 'Magpadala ng Mensahe')}
+              {language === 'en' ? (pageContent?.branch_section_title_en || 'Branch Offices') : (pageContent?.branch_section_title_tl || 'Mga Sangay na Tanggapan')}
             </h3>
             <p className="mb-6 text-sm text-gray-500">
-              {language === 'en' ? "We'll get back to you as soon as possible." : 'Tutugon kami sa lalong madaling panahon.'}
+              {language === 'en' ? 'Visit any of our branch offices near you.' : 'Bisitahin ang alinman sa aming mga sangay na tanggapan.'}
             </p>
-
-            <form onSubmit={handleContactSubmit} className="space-y-5">
-              {formNotice ? (
-                <div
-                  className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-sm font-medium ${
-                    emailError
-                      ? 'border-red-200 bg-red-50 text-red-700'
-                      : 'border-blue-200 bg-blue-50 text-blue-700'
-                  }`}
-                >
-                  <svg className="mt-0.5 h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={emailError ? 'M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' : 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'}></path>
-                  </svg>
-                  {formNotice}
-                </div>
-              ) : null}
-
+            {branches.length > 0 ? (
               <div className="grid gap-4 md:grid-cols-2">
-                <div>
-                  <label className="mb-1.5 block text-sm font-semibold text-gray-700">
-                    {language === 'en' ? 'Full Name' : 'Buong Pangalan'}
-                  </label>
-                  <input
-                    type="text"
-                    name="fullName"
-                    value={contactForm.fullName}
-                    onChange={handleContactInputChange}
-                    className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm transition focus:border-transparent focus:bg-white focus:ring-2 focus:ring-accent"
-                    placeholder={language === 'en' ? 'Juan Dela Cruz' : 'Juan Dela Cruz'}
-                  />
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-sm font-semibold text-gray-700">
-                    {language === 'en' ? 'Email Address' : 'Email Address'}
-                  </label>
-                  <input
-                    type="email"
-                    name="email"
-                    value={contactForm.email}
-                    onChange={handleContactInputChange}
-                    className={`w-full rounded-xl border px-4 py-3 text-sm transition focus:border-transparent focus:ring-2 focus:ring-accent ${
-                      emailError ? 'border-red-400 bg-red-50' : 'border-gray-200 bg-gray-50 focus:bg-white'
-                    }`}
-                    placeholder="juan@example.com"
-                  />
-                  {emailError ? (
-                    <p className="mt-1.5 flex items-center gap-1 text-xs font-semibold text-red-600">
-                      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                      </svg>
-                      {emailError}
-                    </p>
-                  ) : null}
-                </div>
-              </div>
+                {branches.map((branch) => (
+                  <div key={branch.id} className="rounded-2xl border border-gray-100 p-4 shadow-sm transition-shadow hover:shadow-md">
+                    <div className="mb-3 flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-accent">
+                        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
+                        </svg>
+                      </div>
+                      <h3 className="font-bold text-gray-800">{branch.name}</h3>
+                    </div>
 
-              <div>
-                <label className="mb-1.5 block text-sm font-semibold text-gray-700">
-                  {language === 'en' ? 'Subject' : 'Paksa'}
-                </label>
-                <input
-                  type="text"
-                  name="subject"
-                  value={contactForm.subject}
-                  onChange={handleContactInputChange}
-                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm transition focus:border-transparent focus:bg-white focus:ring-2 focus:ring-accent"
-                  placeholder={language === 'en' ? 'How can we help you?' : 'Paano namin kayo matutulungan?'}
-                />
-              </div>
+                    <div className="space-y-3">
+                      <div className="flex items-start gap-2">
+                        <svg className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
+                        </svg>
+                        <p className="text-sm text-gray-600">{branch.location}</p>
+                      </div>
 
-              <div>
-                <label className="mb-1.5 block text-sm font-semibold text-gray-700">
-                  {language === 'en' ? 'Message' : 'Mensahe'}
-                </label>
-                <textarea
-                  rows="5"
-                  name="message"
-                  value={contactForm.message}
-                  onChange={handleContactInputChange}
-                  className="w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm transition focus:border-transparent focus:bg-white focus:ring-2 focus:ring-accent"
-                  placeholder={language === 'en' ? 'Type your message here...' : 'Ilagay ang inyong mensahe dito...'}
-                ></textarea>
-              </div>
+                      <div className="flex items-start gap-2">
+                        <svg className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"></path>
+                        </svg>
+                        <p className="text-sm text-gray-600">{branch.contact}</p>
+                      </div>
 
-              <button
-                type="submit"
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-8 py-3 font-semibold text-white transition hover:bg-primary sm:w-auto"
-              >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path>
-                </svg>
-                {language === 'en' ? 'Send Message' : 'Ipadala ang Mensahe'}
-              </button>
-            </form>
+                      {branch.operating_hours && branch.operating_hours.length > 0 ? (
+                        <div className="flex items-start gap-2">
+                          <svg className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                          </svg>
+                          <div className="text-sm">
+                            {branch.operating_hours.filter((hour) => hour.is_open).slice(0, 2).map((hour, index) => (
+                              <p key={`${branch.id}-hour-${index}`} className="text-gray-600">
+                                {hour.day}: {hour.opening} - {hour.closing}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="mt-4 flex items-center justify-between rounded-xl bg-blue-50 px-4 py-3">
+                      <span className="text-xs font-semibold text-gray-500">
+                        {language === 'en' ? 'Current Queue' : 'Kasalukuyang Pila'}
+                      </span>
+                      <span className="text-sm font-bold text-accent">{branch.current_waiting} {language === 'en' ? 'waiting' : 'naghihintay'}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500">{language === 'en' ? 'No branch offices available.' : 'Walang available na sangay na tanggapan.'}</p>
+            )}
           </div>
 
           {/* Right: Contact Information */}
@@ -311,66 +273,109 @@ const Contact = () => {
           </div>
         </div>
 
-        {/* Branch Offices */}
-        {branches.length > 0 && (
-          <div>
-            <h2 className="mb-6 text-2xl font-bold text-gray-800">
-              {language === 'en' ? (pageContent?.branch_section_title_en || 'Branch Offices') : (pageContent?.branch_section_title_tl || 'Mga Sangay na Tanggapan')}
-            </h2>
-            <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
-              {branches.map((branch) => (
-                <div key={branch.id} className="rounded-2xl bg-white p-6 shadow-sm transition-shadow hover:shadow-md">
-                  <div className="mb-4 flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-accent">
-                      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
-                      </svg>
-                    </div>
-                    <h3 className="font-bold text-gray-800">{branch.name}</h3>
-                  </div>
+        {/* Send Us a Message — full width below */}
+        <div className="mb-10 overflow-hidden rounded-2xl bg-white p-8 shadow-md">
+          <h3 className="mb-1 text-xl font-bold text-gray-800">
+            {language === 'en' ? (pageContent?.form_title_en || 'Send Us a Message') : (pageContent?.form_title_tl || 'Magpadala ng Mensahe')}
+          </h3>
+          <p className="mb-6 text-sm text-gray-500">
+            {language === 'en' ? "We'll get back to you as soon as possible." : 'Tutugon kami sa lalong madaling panahon.'}
+          </p>
 
-                  <div className="space-y-3">
-                    <div className="flex items-start gap-2">
-                      <svg className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
-                      </svg>
-                      <p className="text-sm text-gray-600">{branch.location}</p>
-                    </div>
+          <form onSubmit={handleContactSubmit} className="space-y-5">
+            {formNotice ? (
+              <div
+                className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-sm font-medium ${
+                  emailError
+                    ? 'border-red-200 bg-red-50 text-red-700'
+                    : 'border-blue-200 bg-blue-50 text-blue-700'
+                }`}
+              >
+                <svg className="mt-0.5 h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={emailError ? 'M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' : 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'}></path>
+                </svg>
+                {formNotice}
+              </div>
+            ) : null}
 
-                    <div className="flex items-start gap-2">
-                      <svg className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"></path>
-                      </svg>
-                      <p className="text-sm text-gray-600">{branch.contact}</p>
-                    </div>
-
-                    {branch.operating_hours && branch.operating_hours.length > 0 ? (
-                      <div className="flex items-start gap-2">
-                        <svg className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                        </svg>
-                        <div className="text-sm">
-                          {branch.operating_hours.filter((hour) => hour.is_open).slice(0, 2).map((hour, index) => (
-                            <p key={`${branch.id}-hour-${index}`} className="text-gray-600">
-                              {hour.day}: {hour.opening} - {hour.closing}
-                            </p>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="mt-4 flex items-center justify-between rounded-xl bg-blue-50 px-4 py-3">
-                    <span className="text-xs font-semibold text-gray-500">
-                      {language === 'en' ? 'Current Queue' : 'Kasalukuyang Pila'}
-                    </span>
-                    <span className="text-sm font-bold text-accent">{branch.current_waiting} {language === 'en' ? 'waiting' : 'naghihintay'}</span>
-                  </div>
-                </div>
-              ))}
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <label className="mb-1.5 block text-sm font-semibold text-gray-700">
+                  {language === 'en' ? 'Full Name' : 'Buong Pangalan'}
+                </label>
+                <input
+                  type="text"
+                  name="fullName"
+                  value={contactForm.fullName}
+                  onChange={handleContactInputChange}
+                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm transition focus:border-transparent focus:bg-white focus:ring-2 focus:ring-accent"
+                  placeholder={language === 'en' ? 'Juan Dela Cruz' : 'Juan Dela Cruz'}
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-semibold text-gray-700">
+                  {language === 'en' ? 'Email Address' : 'Email Address'}
+                </label>
+                <input
+                  type="email"
+                  name="email"
+                  value={contactForm.email}
+                  onChange={handleContactInputChange}
+                  className={`w-full rounded-xl border px-4 py-3 text-sm transition focus:border-transparent focus:ring-2 focus:ring-accent ${
+                    emailError ? 'border-red-400 bg-red-50' : 'border-gray-200 bg-gray-50 focus:bg-white'
+                  }`}
+                  placeholder="juan@example.com"
+                />
+                {emailError ? (
+                  <p className="mt-1.5 flex items-center gap-1 text-xs font-semibold text-red-600">
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    {emailError}
+                  </p>
+                ) : null}
+              </div>
             </div>
-          </div>
-        )}
+
+            <div>
+              <label className="mb-1.5 block text-sm font-semibold text-gray-700">
+                {language === 'en' ? 'Subject' : 'Paksa'}
+              </label>
+              <input
+                type="text"
+                name="subject"
+                value={contactForm.subject}
+                onChange={handleContactInputChange}
+                className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm transition focus:border-transparent focus:bg-white focus:ring-2 focus:ring-accent"
+                placeholder={language === 'en' ? 'How can we help you?' : 'Paano namin kayo matutulungan?'}
+              />
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-sm font-semibold text-gray-700">
+                {language === 'en' ? 'Message' : 'Mensahe'}
+              </label>
+              <textarea
+                rows="5"
+                name="message"
+                value={contactForm.message}
+                onChange={handleContactInputChange}
+                className="w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm transition focus:border-transparent focus:bg-white focus:ring-2 focus:ring-accent"
+                placeholder={language === 'en' ? 'Type your message here...' : 'Ilagay ang inyong mensahe dito...'}
+              ></textarea>
+            </div>
+
+            <button
+              type="submit"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-8 py-3 font-semibold text-white transition hover:bg-primary sm:w-auto"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path>
+              </svg>
+              {language === 'en' ? 'Send Message' : 'Ipadala ang Mensahe'}
+            </button>
+          </form>
+        </div>
       </div>
     </div>
   );
