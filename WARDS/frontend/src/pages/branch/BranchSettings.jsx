@@ -822,11 +822,13 @@ const BranchSettings = () => {
 
     setSystemSettings((current) => {
       const isEnabled = current.enabledServices.includes(serviceName);
+      const newEnabledServices = isEnabled
+        ? current.enabledServices.filter((service) => service !== serviceName)
+        : [...current.enabledServices, serviceName].sort();
       return {
         ...current,
-        enabledServices: isEnabled
-          ? current.enabledServices.filter((service) => service !== serviceName)
-          : [...current.enabledServices, serviceName].sort(),
+        enabledServices: newEnabledServices,
+        queueEnabled: newEnabledServices.length > 0,
       };
     });
   };
@@ -911,24 +913,6 @@ const BranchSettings = () => {
               <p className="mt-2 text-sm text-gray-500">Shared queue controls from Main Admin that directly affect branch admin and branch staff queue workflows.</p>
             </div>
             <div className="space-y-4 p-6">
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="flex-1">
-                    <p className="font-semibold text-slate-800">Queue System Availability</p>
-                    <p className="mt-1 text-sm text-slate-500">Controls whether the public can register for queue services in this branch.</p>
-                  </div>
-                  <label className={`inline-flex min-w-[132px] items-center justify-between rounded-full border px-4 py-3 text-sm font-semibold ${systemSettings.queueEnabled ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-300 bg-white text-slate-600'}`}>
-                    <span>{systemSettings.queueEnabled ? 'Enabled' : 'Disabled'}</span>
-                    <input
-                      type="checkbox"
-                      checked={Boolean(systemSettings.queueEnabled)}
-                      disabled={!isBranchAdmin}
-                      onChange={(event) => updateBranchSystemSetting('queueEnabled', event.target.checked)}
-                      className="h-5 w-5 accent-emerald-500"
-                    />
-                  </label>
-                </div>
-              </div>
               {[
                 ['maxQueuePerBranch', 'Maximum Queue Per Branch', 'Caps the number of active waiting and serving queue entries per branch.'],
                 ['maxQueuePerWindow', 'Maximum Queue Per Window', 'Caps the number of active queue entries allowed for each staff service window before that window automatically closes to new queue registrations.'],
@@ -966,6 +950,16 @@ const BranchSettings = () => {
                 <div className="mb-4 flex flex-col gap-2 border-b border-slate-200 pb-4">
                   <p className="font-semibold text-slate-800">Service Window Availability</p>
                   <p className="text-sm text-slate-500">Enable or disable individual Service Windows for this branch. Disabled windows will not accept new queue assignments and assigned window staff will not be able to call new queues through those windows.</p>
+                  <label className={`inline-flex min-w-[132px] cursor-pointer items-center justify-between rounded-full border px-4 py-3 text-sm font-semibold ${systemSettings.queueEnabled ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-300 bg-white text-slate-600'}`}>
+                    <span>Queue System Availability: {systemSettings.queueEnabled ? 'Enabled' : 'Disabled'}</span>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(systemSettings.queueEnabled)}
+                      disabled={!isBranchAdmin}
+                      onChange={(event) => updateBranchSystemSetting('queueEnabled', event.target.checked)}
+                      className="h-5 w-5 accent-emerald-500"
+                    />
+                  </label>
                 </div>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                   {branchQueueWindows.map((window) => (

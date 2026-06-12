@@ -31,8 +31,7 @@ OVERRIDE_STATUSES = {"available", "unavailable", "holiday", "special_operations"
 APPOINTMENT_POLICY_CATEGORY = "Branch Appointment Schedule Updates"
 NO_VISIBLE_CHANGES_MESSAGE = "No visible scheduling changes were detected."
 ACTIVE_WINDOW_QUEUE_STATUSES = ("Pending", "Waiting", "Called", "Serving")
-WINDOW_MAX_ACTIVE_CLIENTS = 5
-TRANSACTION_DURATION_MINUTES = 30
+DEFAULT_APPOINTMENT_SLOT_INTERVAL = 30
 
 
 def _current_ph_date() -> date:
@@ -90,11 +89,15 @@ def get_service_window_label(service_window: str) -> str:
 
 
 def get_window_capacity_limit(db: Session, branch_id: int | None = None) -> int:
-    return WINDOW_MAX_ACTIVE_CLIENTS
+    if branch_id is not None:
+        return get_branch_setting_value(db, "maxQueuePerWindow", branch_id)
+    return get_setting_value(db, "maxQueuePerWindow")
 
 
-def get_transaction_duration_minutes() -> int:
-    return TRANSACTION_DURATION_MINUTES
+def get_transaction_duration_minutes(db: Session, branch_id: int | None = None) -> int:
+    if branch_id is not None:
+        return get_branch_setting_value(db, "queueTimeSlot", branch_id)
+    return get_setting_value(db, "queueTimeSlot")
 
 
 def normalize_appointment_service_key(service_type: Optional[str]) -> str:
@@ -192,7 +195,7 @@ def default_branch_schedule_config() -> dict:
             "break_start": "",
             "break_end": "",
             "last_appointment_time": "17:00",
-            "slot_interval_minutes": TRANSACTION_DURATION_MINUTES,
+            "slot_interval_minutes": DEFAULT_APPOINTMENT_SLOT_INTERVAL,
         },
     }
 
@@ -231,7 +234,7 @@ def normalize_schedule_config(config: dict) -> dict:
         "break_start": (time_settings.get("break_start") or "").strip(),
         "break_end": (time_settings.get("break_end") or "").strip(),
         "last_appointment_time": (time_settings.get("last_appointment_time") or defaults["time_settings"]["last_appointment_time"]).strip(),
-        "slot_interval_minutes": TRANSACTION_DURATION_MINUTES,
+        "slot_interval_minutes": DEFAULT_APPOINTMENT_SLOT_INTERVAL,
     }
 
     effective_date = (config.get("effective_date") or defaults["effective_date"]).strip()
@@ -287,7 +290,7 @@ def validate_schedule_config(config: dict) -> dict:
         break_start = None
         break_end = None
 
-    normalized["time_settings"]["slot_interval_minutes"] = TRANSACTION_DURATION_MINUTES
+    normalized["time_settings"]["slot_interval_minutes"] = DEFAULT_APPOINTMENT_SLOT_INTERVAL
 
     seen_dates = set()
     for override in normalized["date_overrides"]:

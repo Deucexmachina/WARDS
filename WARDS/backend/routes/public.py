@@ -75,11 +75,11 @@ def serialize_queue_schedule_datetime(value: Optional[datetime], queue_type: Opt
     return serialize_manila_datetime(value)
 
 
-def get_service_processing_time_minutes(service: Optional[Service]) -> int:
+def get_service_processing_time_minutes(service: Optional[Service], db: Session, branch_id: int | None = None) -> int:
     configured_minutes = getattr(service, "average_processing_time", None)
     if isinstance(configured_minutes, int) and configured_minutes > 0:
         return configured_minutes
-    return get_transaction_duration_minutes()
+    return get_transaction_duration_minutes(db, branch_id)
 
 
 def get_current_utc_naive() -> datetime:
@@ -391,7 +391,7 @@ async def get_all_public_branches(request: Request, db: Session = Depends(get_db
         hours = db.query(BranchOperatingHours).filter(
             BranchOperatingHours.branch_id == branch.id
         ).all()
-        queue_time_slot = get_transaction_duration_minutes()
+        queue_time_slot = get_transaction_duration_minutes(db, branch.id)
         
         result.append({
             "id": branch.id,
@@ -417,7 +417,7 @@ async def get_all_public_branches(request: Request, db: Session = Depends(get_db
 @router.get("/branches/{branch_id}")
 async def get_branch_details(branch_id: int, db: Session = Depends(get_db)):
     """Get detailed branch information"""
-    queue_time_slot = get_transaction_duration_minutes()
+    queue_time_slot = get_transaction_duration_minutes(db, branch_id)
     branch = db.query(Branch).filter(Branch.id == branch_id).first()
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
@@ -480,7 +480,7 @@ async def get_all_queue_status(request: Request, db: Session = Depends(get_db)):
     
     result = []
     for branch in branches:
-        queue_time_slot = get_transaction_duration_minutes()
+        queue_time_slot = get_transaction_duration_minutes(db, branch.id)
         waiting = db.query(Queue).filter(
             and_(Queue.branch_id == branch.id, hash_aware_match(Queue, "status", "Waiting"))
         ).count()
@@ -631,7 +631,7 @@ async def analyze_queue(branch_id: int, service_type: str, db: Session = Depends
     
     # Get service processing time
     service = db.query(Service).filter(hash_aware_match(Service, "name", service_type)).first()
-    avg_processing_time = get_service_processing_time_minutes(service)
+    avg_processing_time = get_service_processing_time_minutes(service, db, branch_id)
 
     queue_snapshot = get_window_scoped_queue_snapshot(db, branch_id, service_type)
     waiting = queue_snapshot["waiting_count"]
@@ -818,7 +818,7 @@ async def register_queue(
     queue_number = generate_next_queue_number(db, branch_name, queue_type)
     
     # Get service processing time
-    avg_processing_time = get_service_processing_time_minutes(service)
+    avg_processing_time = get_service_processing_time_minutes(service, db, registration.branch_id)
     
     queue_snapshot = get_window_scoped_queue_snapshot(db, registration.branch_id, registration.service_type)
     waiting = queue_snapshot["waiting_count"]

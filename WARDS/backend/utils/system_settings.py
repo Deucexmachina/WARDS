@@ -11,7 +11,7 @@ from utils.field_crypto import apply_system_setting_security, service_value, sys
 SETTINGS_METADATA = {
     "queueEnabled": {
         "label": "Queue System Availability",
-        "category": "Queue Operations",
+        "category": "Services",
         "type": "boolean",
         "description": "Controls whether the public can register for queue services.",
         "default": True,

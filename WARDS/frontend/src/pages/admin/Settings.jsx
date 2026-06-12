@@ -230,11 +230,13 @@ const Settings = () => {
 
     setSettings((current) => {
       const isEnabled = current.enabledServices.includes(serviceName);
+      const newEnabledServices = isEnabled
+        ? current.enabledServices.filter((service) => service !== serviceName)
+        : [...current.enabledServices, serviceName].sort();
       return {
         ...current,
-        enabledServices: isEnabled
-          ? current.enabledServices.filter((service) => service !== serviceName)
-          : [...current.enabledServices, serviceName].sort(),
+        enabledServices: newEnabledServices,
+        queueEnabled: newEnabledServices.length > 0,
       };
     });
   };
@@ -393,12 +395,25 @@ const Settings = () => {
 
               <div className="space-y-4 p-6">
                 {entries.map((entry) => {
+                  const queueEntry = entries.find((e) => e.key === 'queueEnabled');
                   if (entry.key === 'enabledServices') {
                     return (
                       <div key={entry.key} className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4">
                         <div className="mb-4 flex flex-col gap-2 border-b border-slate-200 pb-4">
                           <p className="font-semibold text-slate-800">{entry.label}</p>
                           <p className="mt-1 text-sm text-slate-500">{entry.description}</p>
+                          {queueEntry && (
+                            <label className={`inline-flex min-w-[132px] cursor-pointer items-center justify-between rounded-full border px-4 py-3 text-sm font-semibold transition ${settings.queueEnabled ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-300 bg-white text-slate-600'}`}>
+                              <span>{queueEntry.label}: {settings.queueEnabled ? 'Enabled' : 'Disabled'}</span>
+                              <input
+                                type="checkbox"
+                                name="queueEnabled"
+                                checked={Boolean(settings.queueEnabled)}
+                                onChange={handleInputChange}
+                                className="h-5 w-5 accent-emerald-500"
+                              />
+                            </label>
+                          )}
                           {!settings.queueEnabled && (
                             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                               Public services are automatically turned off while Queue System Availability is disabled.
@@ -485,6 +500,10 @@ const Settings = () => {
                         </div>
                       </div>
                     );
+                  }
+
+                  if (entry.key === 'queueEnabled') {
+                    return null;
                   }
 
                   const isBoolean = entry.type === 'boolean';

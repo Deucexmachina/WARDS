@@ -614,6 +614,7 @@ const WindowMonitoringSection = ({
   serviceTypeFilter,
   queueUnavailable,
   isSuperadminBranch,
+  isBranchAdmin,
   onWindowCallNext,
   onWindowRecall,
   onWindowSkip,
@@ -849,7 +850,7 @@ const WindowMonitoringSection = ({
                             );
                           })()}
                         </div>
-                        {queueTypeKey === 'immediate' && isSuperadminBranch && (
+                        {queueTypeKey === 'immediate' && (isSuperadminBranch || isBranchAdmin) && (
                           <div className="mt-5 flex flex-wrap gap-2">
                             <button
                               onClick={() => onWindowCallNext(window.service_window)}
@@ -2458,6 +2459,7 @@ const QueueManagement = () => {
           serviceTypeFilter={serviceTypeFilter}
           queueUnavailable={queueUnavailable}
           isSuperadminBranch={isSuperadminManagedBranch}
+          isBranchAdmin={isBranchAdmin}
           onWindowCallNext={handleWindowCallNext}
           onWindowRecall={handleWindowRecall}
           onWindowSkip={handleWindowSkip}
@@ -2483,7 +2485,7 @@ const QueueManagement = () => {
         onDeleteRequest={openDeleteModal}
         now={now}
         skippedOnly
-        canManageQueues={canManageQueueOperations || isSuperadminManagedBranch}
+        canManageQueues={canManageQueueOperations || isSuperadminManagedBranch || isBranchAdmin}
       />
 
       <CompletedTransactionsSection
