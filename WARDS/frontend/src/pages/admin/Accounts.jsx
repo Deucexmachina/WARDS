@@ -503,7 +503,12 @@ const Accounts = () => {
           current_admin_password: authModal.password,
         });
         await fetchAccounts(pagination.page);
-        setSuccessMessage('Account deactivated successfully.');
+        openActionModal({
+          tone: 'success',
+          title: 'Account Deactivated Successfully',
+          message: 'The selected account has been successfully deactivated.',
+          buttonLabel: 'OK',
+        });
         window.dispatchEvent(new Event('wards-accounts-refresh'));
       }
 
@@ -512,7 +517,12 @@ const Accounts = () => {
           current_admin_password: authModal.password,
         });
         await fetchAccounts(pagination.page);
-        setSuccessMessage('Account activated successfully.');
+        openActionModal({
+          tone: 'success',
+          title: 'Account Activated Successfully',
+          message: 'The selected account has been successfully activated.',
+          buttonLabel: 'OK',
+        });
         window.dispatchEvent(new Event('wards-accounts-refresh'));
       }
 
