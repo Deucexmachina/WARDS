@@ -1636,7 +1636,7 @@ def send_verified_payment_receipt_if_needed(db: Session, payment: Payment, trigg
             "payment_method": payment_value(payment, "payment_method"),
             "amount": format_currency(payment.amount),
             "status": email_status,
-            "branch": payment_value(payment, "branch"),
+            "branch": resolve_payment_branch_name(payment) or payment_value(payment, "branch"),
             "email_context": email_context,
         },
     )

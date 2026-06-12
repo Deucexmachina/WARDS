@@ -1926,7 +1926,7 @@ async def verify_branch_payment(
                 "payment_method": payment.payment_method,
                 "amount": format_currency(payment.amount),
                 "status": "Payment Verified",
-                "branch": payment.branch,
+                "branch": branch.name if branch else payment.branch,
                 "email_context": "branch_verified",
             },
         )
