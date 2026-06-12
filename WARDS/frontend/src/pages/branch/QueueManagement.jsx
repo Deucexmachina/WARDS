@@ -23,6 +23,11 @@ const queueTypeLabels = {
   appointment: 'Appointment',
 };
 
+const completedStatusClasses = {
+  completed: 'bg-emerald-100 text-emerald-800',
+  skipped: 'bg-rose-100 text-rose-800',
+};
+
 const queueWindowLabels = {
   RPT: 'RPT',
   BUSINESS: 'BT',
@@ -914,13 +919,185 @@ const QueueHistorySection = ({
   </section>
 );
 
+const CompletedTransactionsSection = ({
+  items,
+  filters,
+  onFilterChange,
+  onOpenView,
+  onDeleteHistory,
+  deletingHistoryId,
+  canDeleteHistory,
+  windowOptions,
+  maxCompletionDate,
+}) => (
+  <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <div className="border-b border-slate-100 bg-slate-50 px-6 py-5">
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Audit Visibility</p>
+            <h2 className="mt-2 text-2xl font-bold text-primary">Completed Queue Transactions</h2>
+            <p className="mt-2 text-sm text-slate-500">
+              Review completed branch queue transactions with dynamic branch-based service and window context.
+            </p>
+          </div>
+          <div className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-slate-700">
+            {items.length} completed entr{items.length === 1 ? 'y' : 'ies'}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">
+          <input
+            type="text"
+            value={filters.queueNumber}
+            onChange={(event) => onFilterChange('queueNumber', event.target.value)}
+            placeholder="Filter by queue number"
+            className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none"
+          />
+          <input
+            type="text"
+            value={filters.taxpayer}
+            onChange={(event) => onFilterChange('taxpayer', event.target.value)}
+            placeholder="Search taxpayer or customer"
+            className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none"
+          />
+          <select
+            value={filters.queueType}
+            onChange={(event) => onFilterChange('queueType', event.target.value)}
+            className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none"
+          >
+            <option value="all">All queue types</option>
+            <option value="immediate">Immediate</option>
+            <option value="appointment">Appointment</option>
+          </select>
+          <select
+            value={filters.window}
+            onChange={(event) => onFilterChange('window', event.target.value)}
+            className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none"
+          >
+            <option value="all">All windows</option>
+            {windowOptions.map((option) => (
+              <option key={option.key} value={option.key}>{option.label}</option>
+            ))}
+          </select>
+          <input
+            type="text"
+            value={filters.servedBy}
+            onChange={(event) => onFilterChange('servedBy', event.target.value)}
+            placeholder="Filter by served by"
+            className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none"
+          />
+          <input
+            type="date"
+            value={filters.completionDate}
+            onChange={(event) => onFilterChange('completionDate', event.target.value)}
+            max={maxCompletionDate}
+            className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none"
+          />
+          <select
+            value={filters.status}
+            onChange={(event) => onFilterChange('status', event.target.value)}
+            className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none"
+          >
+            <option value="all">All statuses</option>
+            <option value="completed">Completed</option>
+            <option value="skipped">Skipped</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    {items.length === 0 ? (
+      <div className="px-6 py-10 text-center text-sm text-slate-500">
+        No completed queue transactions match the current filters.
+      </div>
+    ) : (
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead className="bg-white">
+            <tr className="border-b border-slate-100 text-left text-slate-500">
+              <th className="px-6 py-3 font-semibold">Queue No.</th>
+              <th className="px-6 py-3 font-semibold">Taxpayer</th>
+              <th className="px-6 py-3 font-semibold">Queue Type</th>
+              <th className="px-6 py-3 font-semibold">Assigned Window</th>
+              <th className="px-6 py-3 font-semibold">Service</th>
+              <th className="px-6 py-3 font-semibold">Status</th>
+              <th className="px-6 py-3 font-semibold">Served At</th>
+              <th className="px-6 py-3 font-semibold">Completed At</th>
+              <th className="px-6 py-3 font-semibold">Served By</th>
+              <th className="px-6 py-3 font-semibold">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {items.map((queue) => (
+              <tr key={queue.id} className="align-top hover:bg-slate-50/80">
+                <td className="px-6 py-4">
+                  <p className="font-semibold text-primary">{queue.queue_number}</p>
+                  <p className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-400">
+                    {queue.document_processing_status}
+                  </p>
+                </td>
+                <td className="px-6 py-4">
+                  <p className="font-medium text-slate-800">{queue.taxpayer_name || 'Walk-in'}</p>
+                  <p className="mt-1 text-xs text-slate-500">{queue.email || queue.contact_number || 'No contact provided'}</p>
+                </td>
+                <td className="px-6 py-4 text-slate-700">
+                  {queueTypeLabels[queue.queue_type] || 'Immediate'}
+                </td>
+                <td className="px-6 py-4 text-slate-700">
+                  <p className="font-medium text-slate-800">{queue.window_label}</p>
+                  <p className="mt-1 text-xs text-slate-500">{queue.window_assignment}</p>
+                </td>
+                <td className="px-6 py-4 text-slate-700">{queue.service_type || 'N/A'}</td>
+                <td className="px-6 py-4">
+                  <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${completedStatusClasses[queue.status] || 'bg-slate-100 text-slate-700'}`}>
+                    {queue.status_label || 'Completed'}
+                  </span>
+                </td>
+                <td className="px-6 py-4 text-slate-600">
+                  {queue.served_at ? formatUtc8DateTime(queue.served_at) : 'N/A'}
+                </td>
+                <td className="px-6 py-4 text-slate-600">
+                  {queue.completed_at ? formatUtc8DateTime(queue.completed_at) : 'N/A'}
+                </td>
+                <td className="px-6 py-4 text-slate-700">{queue.completed_by || 'N/A'}</td>
+                <td className="px-6 py-4">
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={() => onOpenView(queue)}
+                      className="rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white transition hover:bg-blue-700"
+                    >
+                      View
+                    </button>
+                    <button
+                      onClick={() => onDeleteHistory(queue)}
+                      disabled={!canDeleteHistory || deletingHistoryId === queue.id}
+                      className="rounded-lg bg-rose-600 px-3 py-1.5 font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-40"
+                      title={canDeleteHistory ? 'Delete completed transaction' : 'You do not have permission to delete completed transactions'}
+                    >
+                      {deletingHistoryId === queue.id ? 'Deleting...' : 'Delete'}
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </section>
+);
+
 const QueueManagement = () => {
   const { branchSlug } = useParams();
   const navigate = useNavigate();
   const branchUser = JSON.parse(localStorage.getItem('branchUser') || '{}');
   const isSuperadminManagedBranch = Boolean(branchUser?.superadmin_managed_branch);
   const isQueueWindowAccount = branchUser?.account_scope === 'queue_window';
-  const isBranchAdmin = !isSuperadminManagedBranch && (branchUser?.role === 'branch_admin' || branchUser?.internal_role === 'branch_admin');
+  const isBranchAdmin = branchUser?.role === 'branch_admin' || branchUser?.internal_role === 'branch_admin';
+  const isMonitorOnlyRole = !isQueueWindowAccount && (isSuperadminManagedBranch || isBranchAdmin);
+  const canManageQueueOperations = !isMonitorOnlyRole;
+  const canDeleteCompletedTransactions = isSuperadminManagedBranch || isBranchAdmin || !isMonitorOnlyRole;
   const assignedWindowLabel = branchUser?.window_label || branchUser?.service_window_label || (branchUser?.service_window === 'BUSINESS' ? 'BT' : (branchUser?.service_window || ''));
   const assignedPhysicalWindowLabel = branchUser?.assigned_window_number ? `Window ${branchUser.assigned_window_number}` : '';
   const assignedWindowKey = branchUser?.service_window || 'MISC';
@@ -952,6 +1129,17 @@ const QueueManagement = () => {
     QW4: '',
     QW5: '',
   });
+  const [currentDateInputValue, setCurrentDateInputValue] = useState(getTodayDateInputValue);
+  const [completedTransactionFilters, setCompletedTransactionFilters] = useState({
+    queueNumber: '',
+    taxpayer: '',
+    queueType: 'all',
+    window: 'all',
+    servedBy: '',
+    completionDate: '',
+    status: 'all',
+  });
+  const [selectedCompletedTransaction, setSelectedCompletedTransaction] = useState(null);
   const [completionQueue, setCompletionQueue] = useState(null);
   const [completionMode, setCompletionMode] = useState('options');
   const [completionError, setCompletionError] = useState('');
@@ -1047,6 +1235,17 @@ const QueueManagement = () => {
     return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    setCurrentDateInputValue(getTodayDateInputValue());
+    const interval = setInterval(() => {
+      setCurrentDateInputValue((current) => {
+        const next = getTodayDateInputValue();
+        return current === next ? current : next;
+      });
+    }, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
   // Auto-clear invalid recall state - monitors queue list and clears stale lastCalledQueue
   useEffect(() => {
     const checkRecallValidity = () => {
@@ -1091,6 +1290,13 @@ const QueueManagement = () => {
     });
     return fromAccounts;
   }, [managedWindowAccounts, queues]);
+
+  const windowMetadataByKey = useMemo(() => (
+    windowOptions.reduce((accumulator, option) => {
+      accumulator[option.key] = option;
+      return accumulator;
+    }, {})
+  ), [windowOptions]);
 
   const selectedCallNextWindow = isQueueWindowAccount
     ? assignedWindowKey
@@ -1559,6 +1765,59 @@ const QueueManagement = () => {
     return byWindow;
   }, [queueHistory, historySearch]);
 
+  const completedTransactions = useMemo(() => (
+    queueHistory
+      .map((queue) => {
+        const windowKey = queue.service_window || 'MISC';
+        const windowMetadata = windowMetadataByKey[windowKey];
+        const completedAt = queue.completed_at || queue.archived_at || null;
+        const completionDate = formatDateInputValue(completedAt);
+        const servedBy = queue.completed_by || '';
+        return {
+          ...queue,
+          window_key: windowKey,
+          window_label: windowMetadata?.label || getQueueWindowLabel(windowKey),
+          window_assignment: windowMetadata?.assigned_window_number ? `Window ${windowMetadata.assigned_window_number}` : 'Window not assigned',
+          completion_date_value: completionDate,
+          served_by_search: servedBy.toLowerCase(),
+          document_processing_status: queue.document_processing_status || 'No linked OCR / document status',
+        };
+      })
+      .filter((queue) => {
+        const queueNumberMatch = !completedTransactionFilters.queueNumber
+          || (queue.queue_number || '').toLowerCase().includes(completedTransactionFilters.queueNumber.toLowerCase());
+        const taxpayerMatch = !completedTransactionFilters.taxpayer
+          || [
+            queue.taxpayer_name,
+            queue.email,
+            queue.contact_number,
+          ].filter(Boolean).join(' ').toLowerCase().includes(completedTransactionFilters.taxpayer.toLowerCase());
+        const queueTypeMatch = completedTransactionFilters.queueType === 'all'
+          || queue.queue_type === completedTransactionFilters.queueType;
+        const windowMatch = completedTransactionFilters.window === 'all'
+          || queue.window_key === completedTransactionFilters.window;
+        const servedByMatch = !completedTransactionFilters.servedBy
+          || queue.served_by_search.includes(completedTransactionFilters.servedBy.toLowerCase());
+        const completionDateMatch = !completedTransactionFilters.completionDate
+          || queue.completion_date_value === completedTransactionFilters.completionDate;
+        const statusMatch = completedTransactionFilters.status === 'all'
+          || (queue.status || '').toLowerCase() === completedTransactionFilters.status;
+
+        return queueNumberMatch
+          && taxpayerMatch
+          && queueTypeMatch
+          && windowMatch
+          && servedByMatch
+          && completionDateMatch
+          && statusMatch;
+      })
+      .sort((left, right) => {
+        const rightDate = parseDate(right.completed_at || right.archived_at)?.getTime() || 0;
+        const leftDate = parseDate(left.completed_at || left.archived_at)?.getTime() || 0;
+        return rightDate - leftDate;
+      })
+  ), [queueHistory, windowMetadataByKey, completedTransactionFilters]);
+
   const monitoredWindows = useMemo(() => {
     const sourceWindows = windowOptions.length > 0
       ? windowOptions
@@ -1696,8 +1955,8 @@ const QueueManagement = () => {
         subtitle={
           isQueueWindowAccount && assignedWindowLabel
             ? `Manage only the ${assignedWindowLabel} service queue for this branch${assignedPhysicalWindowLabel ? ` at ${assignedPhysicalWindowLabel}` : ''}.`
-            : isBranchAdmin
-              ? 'Monitor queue activity across all active service windows with live, filter-driven visibility and no queue controls.'
+            : isMonitorOnlyRole
+              ? 'Monitor queue activity across all active service windows with live, filter-driven visibility and branch-context consistency.'
               : 'Manage immediate and appointment queues in separate sections with quick status visibility, search tools, and clean paging.'
         }
       />
@@ -1739,56 +1998,26 @@ const QueueManagement = () => {
         </div>
       ) : null}
 
-      {isSuperadminManagedBranch ? (
-        <section className="rounded-2xl border border-purple-200 bg-purple-50 p-5 text-purple-950 shadow-sm">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-purple-500">Window Staff Accounts</p>
-              <h2 className="mt-2 text-xl font-bold">Superadmin Window Queue Selector</h2>
-              <p className="mt-1 text-sm text-purple-800">
-                Select a generated window staff account to focus this branch queue view on that service window.
-              </p>
-            </div>
-            <select
-              value={windowFilter}
-              onChange={(event) => setWindowFilter(event.target.value)}
-              className="min-w-[18rem] rounded-xl border border-purple-200 bg-white px-4 py-3 text-sm font-semibold text-purple-950 outline-none"
-            >
-              <option value="all">All window staff queues</option>
-              {windowOptions.map((account) => (
-                <option key={account.key} value={account.key}>
-                  {account.label}{account.username ? ` - ${account.username}` : ''}
-                </option>
-              ))}
-            </select>
-          </div>
-        </section>
-      ) : null}
-
-      {isBranchAdmin ? (
+      {isMonitorOnlyRole ? (
         <div className="rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-800 shadow-sm">
-          <p className="font-semibold">Immediate Queue and Appointment Queue are hidden for branch admin accounts.</p>
+          <p className="font-semibold">Queue operations are shown in read-only mode for this branch context.</p>
           <p className="mt-1 text-sm text-slate-600">
-            These sections are reserved for branch staff handling active queue operations.
+            Queue windows, skipped queues, and completed transactions remain visible, while operational controls stay limited to authorized queue operators.
           </p>
         </div>
       ) : null}
 
       <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {!isBranchAdmin ? (
-          <div className="rounded-2xl bg-white p-5 shadow">
-            <p className="text-sm font-medium text-slate-500">Immediate Queue</p>
-            <p className="mt-2 text-3xl font-bold text-primary">{summary.immediate}</p>
-            <p className="mt-2 text-sm text-slate-500">Immediate queue records after filters.</p>
-          </div>
-        ) : null}
-        {!isBranchAdmin ? (
-          <div className="rounded-2xl bg-white p-5 shadow">
-            <p className="text-sm font-medium text-slate-500">Appointment Queue</p>
-            <p className="mt-2 text-3xl font-bold text-primary">{summary.appointment}</p>
-            <p className="mt-2 text-sm text-slate-500">Appointment queue records after filters.</p>
-          </div>
-        ) : null}
+        <div className="rounded-2xl bg-white p-5 shadow">
+          <p className="text-sm font-medium text-slate-500">Immediate Queue</p>
+          <p className="mt-2 text-3xl font-bold text-primary">{summary.immediate}</p>
+          <p className="mt-2 text-sm text-slate-500">Immediate queue records after filters.</p>
+        </div>
+        <div className="rounded-2xl bg-white p-5 shadow">
+          <p className="text-sm font-medium text-slate-500">Appointment Queue</p>
+          <p className="mt-2 text-3xl font-bold text-primary">{summary.appointment}</p>
+          <p className="mt-2 text-sm text-slate-500">Appointment queue records after filters.</p>
+        </div>
         <div className="rounded-2xl bg-white p-5 shadow">
           <p className="text-sm font-medium text-slate-500">Ready / Active</p>
           <p className="mt-2 text-3xl font-bold text-primary">{summary.active}</p>
@@ -1840,9 +2069,9 @@ const QueueManagement = () => {
               <option key={serviceType} value={serviceType}>{serviceType}</option>
             ))}
           </select>
-          {isSuperadminManagedBranch ? (
+          {isMonitorOnlyRole ? (
             <select value={windowFilter} onChange={(event) => setWindowFilter(event.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none">
-              <option value="all">All window staff queues</option>
+              <option value="all">All branch windows</option>
               {windowOptions.map((account) => (
                 <option key={account.key} value={account.key}>
                   {account.label}{account.username ? ` - ${account.username}` : ''}
@@ -1882,7 +2111,7 @@ const QueueManagement = () => {
         </div>
       </section>
 
-      {!isBranchAdmin ? (
+      {canManageQueueOperations ? (
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
@@ -1937,7 +2166,7 @@ const QueueManagement = () => {
           <p className="font-semibold">
             Active queue: {activeQueue.queue_number} is currently {getStatusLabel(activeQueue, now)}.
           </p>
-          {!isBranchAdmin ? (
+          {canManageQueueOperations ? (
             <p className="mt-1 text-sm text-blue-700">
               Complete or skip the current active queue before calling the next taxpayer.
             </p>
@@ -1949,39 +2178,40 @@ const QueueManagement = () => {
         </div>
       ) : null}
 
-      {!isBranchAdmin ? (
-        <div className="space-y-6">
-          <QueueSection
-            title="Appointment Queue"
-            description="Appointment queue taxpayers stay separate so branch admins can clearly distinguish scheduled appointments from ready, called, serving, completed, or skipped records."
-            queues={appointmentQueues}
-            page={appointmentPage}
-            onPageChange={setAppointmentPage}
-            queueUnavailable={queueUnavailable}
-            onAction={performAction}
-            onDeleteRequest={openDeleteModal}
-            now={now}
-          />
-          <QueueSection
-            title="Immediate Queue"
-            description="Immediate queue taxpayers are grouped here with active records shown first and completed history moved below them."
-            queues={immediateQueues}
-            page={immediatePage}
-            onPageChange={setImmediatePage}
-            queueUnavailable={queueUnavailable}
-            onAction={performAction}
-            onDeleteRequest={openDeleteModal}
-            now={now}
-          />
-        </div>
-      ) : null}
+      <div className="space-y-6">
+        <QueueSection
+          title="Appointment Queue"
+          description="Appointment queue taxpayers stay separate so branch users can clearly distinguish scheduled appointments from ready, called, serving, completed, or skipped records."
+          queues={appointmentQueues}
+          page={appointmentPage}
+          onPageChange={setAppointmentPage}
+          queueUnavailable={queueUnavailable}
+          onAction={performAction}
+          onDeleteRequest={openDeleteModal}
+          now={now}
+          canManageQueues={canManageQueueOperations}
+        />
+        <QueueSection
+          title="Immediate Queue"
+          description="Immediate queue taxpayers are grouped here with active records shown first and completed history moved below them."
+          queues={immediateQueues}
+          page={immediatePage}
+          onPageChange={setImmediatePage}
+          queueUnavailable={queueUnavailable}
+          onAction={performAction}
+          onDeleteRequest={openDeleteModal}
+          now={now}
+          canManageQueues={canManageQueueOperations}
+        />
+      </div>
 
-      {isBranchAdmin ? (
+      {!isQueueWindowAccount ? (
         <WindowMonitoringSection
           windowsByQueueType={windowsByQueueType}
           totalFilteredCount={filteredQueues.length}
           lastRefreshedAt={lastRefreshedAt}
           now={now}
+          serviceTypeFilter={serviceTypeFilter}
         />
       ) : null}
 
@@ -2000,23 +2230,69 @@ const QueueManagement = () => {
         onDeleteRequest={openDeleteModal}
         now={now}
         skippedOnly
-        canManageQueues={!isBranchAdmin}
+        canManageQueues={canManageQueueOperations}
       />
 
-      {!isBranchAdmin ? (
-        <div className="space-y-6">
-          {visibleHistorySections.map((section) => (
-            <QueueHistorySection
-              key={section.key}
-              title={section.title}
-              description={section.description}
-              items={section.items}
-              searchValue={historySearch[section.key] || ''}
-              onSearchChange={(value) => setHistorySearch((current) => ({ ...current, [section.key]: value }))}
-              onDeleteHistory={openDeleteHistoryModal}
-              deletingHistoryId={deletingHistoryId}
-            />
-          ))}
+      <CompletedTransactionsSection
+        items={completedTransactions}
+        filters={completedTransactionFilters}
+        onFilterChange={(field, value) => setCompletedTransactionFilters((current) => ({ ...current, [field]: value }))}
+        onOpenView={setSelectedCompletedTransaction}
+        onDeleteHistory={openDeleteHistoryModal}
+        deletingHistoryId={deletingHistoryId}
+        canDeleteHistory={canDeleteCompletedTransactions}
+        windowOptions={windowOptions}
+        maxCompletionDate={currentDateInputValue}
+      />
+
+      {selectedCompletedTransaction ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4">
+          <div className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl md:p-8">
+            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">Completed Transaction</p>
+                <h3 className="mt-2 text-2xl font-bold text-primary">{selectedCompletedTransaction.queue_number}</h3>
+                <p className="mt-2 text-sm text-slate-600">
+                  {selectedCompletedTransaction.taxpayer_name || 'Walk-in'} | {selectedCompletedTransaction.service_type || 'N/A'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedCompletedTransaction(null)}
+                className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-6 grid gap-4 md:grid-cols-2">
+              {[
+                ['Queue Number', selectedCompletedTransaction.queue_number],
+                ['Queue Type', queueTypeLabels[selectedCompletedTransaction.queue_type] || 'Immediate'],
+                ['Taxpayer / Customer', selectedCompletedTransaction.taxpayer_name || 'Walk-in'],
+                ['Email', selectedCompletedTransaction.email || 'N/A'],
+                ['Contact Number', selectedCompletedTransaction.contact_number || 'N/A'],
+                ['Assigned Window', selectedCompletedTransaction.window_label || 'N/A'],
+                ['Window Assignment', selectedCompletedTransaction.window_assignment || 'N/A'],
+                ['Service Type', selectedCompletedTransaction.service_type || 'N/A'],
+                ['Transaction Status', selectedCompletedTransaction.status_label || 'Completed'],
+                ['OCR / Document Processing Status', selectedCompletedTransaction.document_processing_status || 'No linked OCR / document status'],
+                ['Created At', selectedCompletedTransaction.created_at ? formatUtc8DateTime(selectedCompletedTransaction.created_at) : 'N/A'],
+                ['Served At', selectedCompletedTransaction.served_at ? formatUtc8DateTime(selectedCompletedTransaction.served_at) : 'N/A'],
+                ['Completed At', selectedCompletedTransaction.completed_at ? formatUtc8DateTime(selectedCompletedTransaction.completed_at) : 'N/A'],
+                ['Archived At', selectedCompletedTransaction.archived_at ? formatUtc8DateTime(selectedCompletedTransaction.archived_at) : 'N/A'],
+                ['Served By', selectedCompletedTransaction.completed_by || 'N/A'],
+                ['Estimated Wait Time', selectedCompletedTransaction.estimated_wait_time ? `${selectedCompletedTransaction.estimated_wait_time} min` : 'N/A'],
+                ['Recommended Arrival', selectedCompletedTransaction.recommended_arrival ? formatUtc8DateTime(selectedCompletedTransaction.recommended_arrival) : 'N/A'],
+                ['Appointment Time', selectedCompletedTransaction.appointment_time ? formatUtc8DateTime(selectedCompletedTransaction.appointment_time) : 'N/A'],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{label}</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-800">{value || 'N/A'}</p>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       ) : null}
 
