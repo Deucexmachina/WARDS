@@ -3,6 +3,7 @@ import { branchSettingsAPI } from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 import ActionConfirmationModal from '../../components/ActionConfirmationModal';
+import { useUnsavedChanges } from '../../contexts/UnsavedChangesContext';
 
 const PAGE_SIZE = 5;
 const STATUS_OPTIONS = [
@@ -404,6 +405,8 @@ const BranchSettings = () => {
   const [mfaError, setMfaError] = useState('');
   const [settingUpMfa, setSettingUpMfa] = useState(false);
   const initialServicesSeeded = useRef(false);
+  const navSaveRef = useRef(() => {});
+  const { registerDirty } = useUnsavedChanges();
   const [viewedPublishedHistoryIds, setViewedPublishedHistoryIds] = useState(() => {
     try {
       const rawValue = window.localStorage.getItem(getViewedPublishedHistoryStorageKey(JSON.parse(localStorage.getItem('branchUser') || '{}')));
@@ -659,6 +662,26 @@ const BranchSettings = () => {
       setPublishing(false);
     }
   };
+
+  navSaveRef.current = async () => {
+    await handlePublish();
+  };
+
+  const isSettingsDirty = useMemo(() => {
+    if (loading) return false;
+    const scheduleChanged = JSON.stringify(schedule) !== JSON.stringify(publishedSchedule);
+    const systemChanged = JSON.stringify(systemSettings) !== JSON.stringify(publishedSystemSettings);
+    const reasonChanged = reason.trim().length > 0;
+    return scheduleChanged || systemChanged || reasonChanged;
+  }, [schedule, publishedSchedule, systemSettings, publishedSystemSettings, reason, loading]);
+
+  useEffect(() => {
+    if (isSettingsDirty) {
+      registerDirty(true, () => navSaveRef.current());
+    } else {
+      registerDirty(false, null);
+    }
+  }, [isSettingsDirty, registerDirty]);
 
   const handlePublishRequested = () => {
     if (!isBranchAdmin || publishing) {

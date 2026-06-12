@@ -4,6 +4,7 @@ import wardsLogo from '../assets/branding/wards_logo.png';
 import qcLogo from '../assets/branding/qclogo_main.png';
 import galasLogo from '../assets/branding/galas_logo.png';
 import ActionConfirmationModal from '../components/ActionConfirmationModal';
+import { useUnsavedChanges } from '../contexts/UnsavedChangesContext';
 import api from '../services/api';
 import { branchAnnouncementAPI, discrepancyAPI } from '../services/api';
 import { getBranchPortalPath } from '../utils/auth';
@@ -45,6 +46,10 @@ const BranchLayout = () => {
   const [reportCount, setReportCount] = useState(0);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const { isDirty, saveRef, registerDirty } = useUnsavedChanges();
+  const [showUnsavedModal, setShowUnsavedModal] = useState(false);
+  const [pendingPath, setPendingPath] = useState(null);
+  const [isSavingNav, setIsSavingNav] = useState(false);
   const fetchAllBranchReports = async () => {
     const firstResponse = await api.get('/branch/reports', { params: { page: 1, page_size: 5 } });
     const firstPageData = firstResponse.data || {};
@@ -294,6 +299,60 @@ const BranchLayout = () => {
     };
   }, [isQueueWindowAccount]);
 
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (isDirty) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isDirty]);
+
+  const handleNavClick = (e, path) => {
+    if (isDirty && path !== location.pathname) {
+      e.preventDefault();
+      setPendingPath(path);
+      setShowUnsavedModal(true);
+    }
+  };
+
+  const handleDiscardAndNavigate = () => {
+    registerDirty(false, null);
+    setShowUnsavedModal(false);
+    if (pendingPath) {
+      navigate(pendingPath);
+      setPendingPath(null);
+    }
+  };
+
+  const handleSaveAndNavigate = async () => {
+    if (saveRef.current) {
+      setIsSavingNav(true);
+      try {
+        await saveRef.current();
+      } catch (err) {
+        console.error('Save failed during navigation:', err);
+        setIsSavingNav(false);
+        return;
+      }
+      setIsSavingNav(false);
+    }
+    registerDirty(false, null);
+    setShowUnsavedModal(false);
+    if (pendingPath) {
+      navigate(pendingPath);
+      setPendingPath(null);
+    }
+  };
+
+  const handleCancelUnsaved = () => {
+    setShowUnsavedModal(false);
+    setPendingPath(null);
+    setIsSavingNav(false);
+  };
+
   const handleLogout = async () => {
     if (isLoggingOut) {
       return;
@@ -356,6 +415,7 @@ const BranchLayout = () => {
               key={item.path}
               to={item.path}
               end={item.path === basePath}
+              onClick={(e) => handleNavClick(e, item.path)}
               className={({ isActive }) =>
                 `flex items-center justify-between rounded-lg px-4 py-3 font-semibold transition ${
                   (isActive || (item.label === 'System Settings' && location.pathname.startsWith(`${basePath}/settings`)))
@@ -446,6 +506,53 @@ const BranchLayout = () => {
         }}
         onConfirm={handleLogout}
       />
+
+      {showUnsavedModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/60 px-4 py-6">
+          <div className="w-full max-w-lg rounded-[28px] bg-white p-6 shadow-[0_30px_80px_rgba(15,23,42,0.28)] md:p-8">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-100 text-amber-600">
+                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.69-1.333-3.46 0L3.232 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Unsaved Changes</p>
+                <h2 className="mt-2 text-2xl font-bold text-slate-900">You have unsaved changes</h2>
+                <p className="mt-3 text-sm leading-6 text-slate-600">
+                  If you leave this page without saving, your current changes will be lost. Would you like to save them before switching modules?
+                </p>
+              </div>
+            </div>
+            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={handleCancelUnsaved}
+                disabled={isSavingNav}
+                className="rounded-2xl bg-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-300 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDiscardAndNavigate}
+                disabled={isSavingNav}
+                className="rounded-2xl bg-rose-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                No
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveAndNavigate}
+                disabled={isSavingNav}
+                className="rounded-2xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {isSavingNav ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

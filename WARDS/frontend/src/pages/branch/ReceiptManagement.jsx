@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { receiptAPI } from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
 import ProcessingModal from '../../components/ProcessingModal';
+import { useUnsavedChanges } from '../../contexts/UnsavedChangesContext';
 
 const SECTION_PAGE_SIZE = 5;
 const MAX_RELEASE_IMAGE_SIZE = 5 * 1024 * 1024;
@@ -398,6 +399,9 @@ const ReceiptManagement = () => {
   const [releaseTarget, setReleaseTarget] = useState(null);
   const [releasing, setReleasing] = useState(false);
   const [releaseUploadDrafts, setReleaseUploadDrafts] = useState({});
+  const { registerDirty } = useUnsavedChanges();
+  const navSaveRef = useRef(() => {});
+
   const [sectionPages, setSectionPages] = useState({
     online: 1,
     completedRPT: 1,
@@ -492,6 +496,21 @@ const ReceiptManagement = () => {
       URL.revokeObjectURL(selectedReleaseCopyPreview.imageUrl);
     }
   }, [selectedReleaseCopyPreview]);
+
+  navSaveRef.current = async () => {
+    if (!ocrDraft || saveBlocked) {
+      throw new Error(saveBlocked ? 'Please fix validation errors before saving.' : 'No draft to save.');
+    }
+    await handleSaveRecord();
+  };
+
+  useEffect(() => {
+    if (ocrDraft) {
+      registerDirty(true, () => navSaveRef.current());
+    } else {
+      registerDirty(false, null);
+    }
+  }, [ocrDraft, registerDirty]);
 
   useEffect(() => {
     const handleBranchPaymentUpdated = () => {

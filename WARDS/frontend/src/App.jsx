@@ -66,6 +66,7 @@ import PaymentManagement from './pages/admin/PaymentManagement'
 import DiscrepancyReports from './pages/admin/DiscrepancyReports'
 import TaxAssessment from './pages/admin/TaxAssessment'
 import PublicContentManagement from './pages/shared/PublicContentManagement'
+import { UnsavedChangesProvider } from './contexts/UnsavedChangesContext'
 
 const BackupRecovery = lazy(() => import('./pages/admin/BackupRecovery'))
 
@@ -110,7 +111,7 @@ function App() {
         <Route path="/branch/login" element={<Navigate to="/login" replace />} />
         <Route path="/branch-dashboard" element={<BranchProtectedRoute><BranchPortalRedirect /></BranchProtectedRoute>} />
         <Route path="/branch-dashboard/:branchSlug/settings/login" element={<BranchProtectedRoute><BranchSystemSettingsLogin /></BranchProtectedRoute>} />
-        <Route path="/branch-dashboard/:branchSlug" element={<BranchProtectedRoute><BranchLayout /></BranchProtectedRoute>}>
+        <Route path="/branch-dashboard/:branchSlug" element={<BranchProtectedRoute><UnsavedChangesProvider><BranchLayout /></UnsavedChangesProvider></BranchProtectedRoute>}>
           <Route index element={<BranchDashboard />} />
           <Route path="queue" element={<BranchQueueManagement />} />
           <Route path="queue/live-monitor" element={<LiveQueueMonitor />} />
