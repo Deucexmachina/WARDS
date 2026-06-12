@@ -326,274 +326,246 @@ const UserRegister = () => {
 
   return (
     <>
-      <div className="min-h-screen bg-[radial-gradient(circle_at_top,#86efac_0%,#166534_28%,#0f172a_100%)] px-4 py-6 sm:px-6 lg:px-8">
-        <div className="mx-auto max-w-4xl">
-          <section className="rounded-[30px] bg-white p-6 shadow-[0_28px_90px_rgba(15,23,42,0.24)] sm:p-7 lg:min-h-[760px]">
-            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 pb-5">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-600">Citizen Account Setup</p>
-                <h2 className="mt-2 text-2xl font-bold text-slate-900 sm:text-3xl">Create Account</h2>
-                <p className="mt-2 text-sm leading-6 text-slate-500">
-                  Complete your information, finish the privacy review, verify reCAPTCHA, then submit your registration.
-                </p>
-              </div>
-            </div>
+      <div className="min-h-screen bg-emerald-700 px-4 py-10 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-2xl">
 
+          {/* Header */}
+          <div className="mb-6 text-center">
+            <p className="text-xs font-semibold uppercase tracking-widest text-emerald-300">Citizen Account Setup</p>
+            <h1 className="mt-2 text-3xl font-bold text-white">Create your account</h1>
+            <p className="mt-2 text-sm text-emerald-100/70">Fill in your details below to get started.</p>
+          </div>
+
+          {/* Card */}
+          <div className="rounded-3xl bg-white shadow-2xl shadow-black/20">
+
+            {/* Error banner */}
             {error ? (
-              <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm font-semibold text-rose-700">
+              <div className="rounded-t-3xl border-b border-rose-100 bg-rose-50 px-6 py-4 text-sm font-medium text-rose-700">
                 {error}
               </div>
             ) : null}
 
-            <form onSubmit={handleSubmit} noValidate className="mt-5 flex flex-col gap-5">
-              <div className="grid gap-5 lg:grid-cols-[1.02fr_0.98fr]">
-                <div className="rounded-[26px] border border-slate-200 bg-slate-50/70 px-4 py-5 sm:px-5">
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Personal Information</p>
-                  <div className="mt-4 grid gap-4">
-                    <div>
-                      <label className="mb-2 block text-sm font-semibold text-slate-700">Full Name</label>
+            <form onSubmit={handleSubmit} noValidate className="divide-y divide-slate-100">
+
+              {/* Personal Information */}
+              <div className="px-6 py-6 sm:px-8">
+                <p className="mb-5 text-xs font-semibold uppercase tracking-widest text-slate-400">Personal Information</p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="sm:col-span-2">
+                    <label className="mb-1.5 block text-sm font-medium text-slate-700">Full Name</label>
+                    <input
+                      type="text"
+                      name="full_name"
+                      value={formData.full_name}
+                      onChange={handleChange}
+                      placeholder="Juan Dela Cruz"
+                      aria-invalid={fullNameError ? 'true' : 'false'}
+                      className={`w-full rounded-xl border px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:ring-2 focus:ring-emerald-500/30 ${fullNameError ? 'border-rose-300 bg-rose-50 focus:border-rose-400' : 'border-slate-200 bg-white focus:border-emerald-400'}`}
+                      required
+                    />
+                    {fullNameError ? <p className="mt-1.5 text-xs font-medium text-rose-600">{fullNameError}</p> : null}
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="mb-1.5 block text-sm font-medium text-slate-700">Email Address</label>
+                    <input
+                      type="email"
+                      name="email"
+                      value={formData.email}
+                      onChange={handleChange}
+                      placeholder="you@example.com"
+                      aria-invalid={emailError ? 'true' : 'false'}
+                      className={`w-full rounded-xl border px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:ring-2 focus:ring-emerald-500/30 ${emailError ? 'border-rose-300 bg-rose-50 focus:border-rose-400' : 'border-slate-200 bg-white focus:border-emerald-400'}`}
+                      required
+                    />
+                    {emailError ? <p className="mt-1.5 text-xs font-medium text-rose-600">{emailError}</p> : null}
+                  </div>
+
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-slate-700">Contact Number</label>
+                    <div className={`flex overflow-hidden rounded-xl border transition focus-within:ring-2 focus-within:ring-emerald-500/30 ${contactError ? 'border-rose-300 bg-rose-50 focus-within:border-rose-400' : 'border-slate-200 bg-white focus-within:border-emerald-400'}`}>
+                      <span className="flex items-center border-r border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-500">+63</span>
                       <input
-                        type="text"
-                        name="full_name"
-                        value={formData.full_name}
+                        type="tel"
+                        name="contact_number"
+                        value={formData.contact_number}
                         onChange={handleChange}
-                        placeholder="Juan Dela Cruz"
-                        aria-invalid={fullNameError ? 'true' : 'false'}
-                        className={`w-full rounded-2xl border px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 ${fullNameError ? 'border-rose-400 bg-rose-50' : 'border-slate-200 bg-white'}`}
+                        inputMode="numeric"
+                        maxLength={10}
+                        placeholder="9123456789"
+                        aria-invalid={contactError ? 'true' : 'false'}
+                        className="w-full bg-transparent px-4 py-2.5 text-sm text-slate-900 outline-none"
                         required
                       />
-                      {fullNameError ? <p className="mt-2 text-sm font-semibold text-rose-600">{fullNameError}</p> : null}
                     </div>
+                    {contactError ? <p className="mt-1.5 text-xs font-medium text-rose-600">{contactError}</p> : null}
+                  </div>
 
-                    <div>
-                      <label className="mb-2 block text-sm font-semibold text-slate-700">Email Address</label>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                      Address <span className="text-slate-400">(Optional)</span>
+                    </label>
+                    <input
+                      type="text"
+                      name="address"
+                      value={formData.address}
+                      onChange={handleChange}
+                      placeholder="Street, barangay, city"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/30"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Account Security */}
+              <div className="px-6 py-6 sm:px-8">
+                <p className="mb-5 text-xs font-semibold uppercase tracking-widest text-slate-400">Account Security</p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-slate-700">Password</label>
+                    <div className="relative">
                       <input
-                        type="email"
-                        name="email"
-                        value={formData.email}
+                        type={showPassword ? 'text' : 'password'}
+                        name="password"
+                        value={formData.password}
                         onChange={handleChange}
-                        placeholder="your.email@example.com"
-                        aria-invalid={emailError ? 'true' : 'false'}
-                        className={`w-full rounded-2xl border px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 ${emailError ? 'border-rose-400 bg-rose-50' : 'border-slate-200 bg-white'}`}
+                        placeholder="Create a strong password"
+                        aria-invalid={passwordError ? 'true' : 'false'}
+                        className={`w-full rounded-xl border px-4 py-2.5 pr-11 text-sm text-slate-900 outline-none transition focus:ring-2 focus:ring-emerald-500/30 ${passwordError ? 'border-rose-300 bg-rose-50 focus:border-rose-400' : 'border-slate-200 bg-white focus:border-emerald-400'}`}
                         required
                       />
-                      {emailError ? <p className="mt-2 text-sm font-semibold text-rose-600">{emailError}</p> : null}
-                    </div>
-
-                    <div>
-                      <label className="mb-2 block text-sm font-semibold text-slate-700">Contact Number</label>
-                      <div className={`flex overflow-hidden rounded-2xl border ${contactError ? 'border-rose-400 bg-rose-50' : 'border-slate-200 bg-white'} focus-within:border-emerald-500 focus-within:ring-4 focus-within:ring-emerald-100`}>
-                        <span className="flex items-center border-r border-slate-200 px-4 text-sm font-semibold text-slate-600">+63</span>
-                        <input
-                          type="tel"
-                          name="contact_number"
-                          value={formData.contact_number}
-                          onChange={handleChange}
-                          inputMode="numeric"
-                          maxLength={10}
-                          placeholder="9123456789"
-                          aria-invalid={contactError ? 'true' : 'false'}
-                          className="w-full bg-transparent px-4 py-3 text-sm text-slate-900 outline-none"
-                          required
-                        />
-                      </div>
-                      {contactError ? (
-                        <p className="mt-2 text-sm font-semibold text-rose-600">{contactError}</p>
+                      {formData.password ? (
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword((c) => !c)}
+                          className="absolute inset-y-0 right-0 flex items-center px-3 text-slate-400 transition hover:text-slate-600"
+                          aria-label={showPassword ? 'Hide password' : 'Show password'}
+                        >
+                          <EyeIcon open={showPassword} />
+                        </button>
                       ) : null}
                     </div>
-
-                    <div>
-                      <label className="mb-2 block text-sm font-semibold text-slate-700">Address (Optional)</label>
-                      <input
-                        type="text"
-                        name="address"
-                        value={formData.address}
-                        onChange={handleChange}
-                        placeholder="House number, street, barangay, city"
-                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
-                      />
-                    </div>
-
-                    <div className={`rounded-[26px] border px-4 py-5 sm:px-5 ${hasAcceptedAgreement ? 'border-sky-100 bg-sky-50/70' : 'border-slate-200 bg-slate-50/70'}`}>
-                      <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${hasAcceptedAgreement ? 'text-sky-700' : 'text-slate-400'}`}>
-                        reCAPTCHA Verification
-                      </p>
-                      <p className="mt-3 text-sm text-slate-500">
-                        {hasAcceptedAgreement
-                          ? 'Complete the reCAPTCHA challenge to confirm this registration is being submitted by a real person.'
-                          : 'Finish the Data Privacy Agreement step first to unlock reCAPTCHA verification.'}
-                      </p>
-                      <div className="mt-4 flex justify-center rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-5">
-                        {hasAcceptedAgreement ? (
-                          <ReCAPTCHA
-                            ref={recaptchaRef}
-                            sitekey={RECAPTCHA_SITE_KEY}
-                            onChange={(token) => {
-                              setRecaptchaToken(token || '');
-                              setError('');
-                            }}
-                            onExpired={() => setRecaptchaToken('')}
-                            onErrored={() => {
-                              setRecaptchaToken('');
-                              setError('reCAPTCHA verification failed. Please try again.');
-                            }}
-                          />
-                        ) : (
-                          <p className="text-sm font-semibold text-slate-400">reCAPTCHA will appear here after the DPA review is completed.</p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-5">
-                  <div className="rounded-[26px] border border-slate-200 bg-slate-50/70 px-4 py-5 sm:px-5">
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Account Security</p>
-                    <div className="mt-4 grid gap-4">
-                      <div>
-                        <label className="mb-2 block text-sm font-semibold text-slate-700">Password</label>
-                        <div className="relative">
-                          <input
-                            type={showPassword ? 'text' : 'password'}
-                            name="password"
-                            value={formData.password}
-                            onChange={handleChange}
-                            placeholder="Create a strong password"
-                            aria-invalid={passwordError ? 'true' : 'false'}
-                            className={`w-full rounded-2xl border px-4 py-3 pr-12 text-sm text-slate-900 outline-none transition focus:ring-4 ${passwordError ? 'border-rose-400 bg-rose-50 focus:border-rose-500 focus:ring-rose-100' : 'border-slate-200 bg-white focus:border-emerald-500 focus:ring-emerald-100'}`}
-                            required
-                          />
-                          {formData.password ? (
-                            <button
-                              type="button"
-                              onClick={() => setShowPassword((current) => !current)}
-                              className="absolute inset-y-0 right-0 flex items-center px-4 text-slate-500 transition hover:text-slate-700"
-                              aria-label={showPassword ? 'Hide password' : 'Show password'}
-                            >
-                              <EyeIcon open={showPassword} />
-                            </button>
-                          ) : null}
-                        </div>
-                        {passwordError ? (
-                          <p className="mt-2 text-sm font-semibold text-rose-600">{passwordError}</p>
-                        ) : (
-                          <p className="mt-2 text-sm text-slate-500">Use more than 12 characters with uppercase, lowercase, and a number or special character.</p>
-                        )}
-                      </div>
-
-                      <div>
-                        <label className="mb-2 block text-sm font-semibold text-slate-700">Confirm Password</label>
-                        <div className="relative">
-                          <input
-                            type={showConfirmPassword ? 'text' : 'password'}
-                            name="confirmPassword"
-                            value={formData.confirmPassword}
-                            onChange={handleChange}
-                            placeholder="Re-enter your password"
-                            aria-invalid={confirmPasswordError ? 'true' : 'false'}
-                            className={`w-full rounded-2xl border px-4 py-3 pr-12 text-sm text-slate-900 outline-none transition focus:ring-4 ${confirmPasswordError ? 'border-rose-400 bg-rose-50 focus:border-rose-500 focus:ring-rose-100' : 'border-slate-200 bg-white focus:border-emerald-500 focus:ring-emerald-100'}`}
-                            required
-                          />
-                          {formData.confirmPassword ? (
-                            <button
-                              type="button"
-                              onClick={() => setShowConfirmPassword((current) => !current)}
-                              className="absolute inset-y-0 right-0 flex items-center px-4 text-slate-500 transition hover:text-slate-700"
-                              aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
-                            >
-                              <EyeIcon open={showConfirmPassword} />
-                            </button>
-                          ) : null}
-                        </div>
-                        {confirmPasswordError ? <p className="mt-2 text-sm font-semibold text-rose-600">{confirmPasswordError}</p> : null}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-[26px] border border-emerald-100 bg-emerald-50/80 px-4 py-5 sm:px-5">
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-700">Data Privacy Agreement</p>
-                    <p className="mt-3 text-sm text-slate-500">
-                      Complete the required privacy review first. After that, the reCAPTCHA step will be enabled.
-                    </p>
-                    <p className="mt-3 text-sm text-slate-500">
-                      You can also view the full agreement anytime at{' '}
-                      <Link to="/data-privacy-agreement" className="font-semibold text-emerald-700 hover:text-emerald-800">
-                        the Data Privacy Agreement page
-                      </Link>.
-                    </p>
-
-                    {agreementLoading ? (
-                      <p className="mt-4 text-sm font-semibold text-emerald-800">Loading the Data Privacy Agreement...</p>
-                    ) : agreementError ? (
-                      <p className="mt-4 text-sm font-semibold text-rose-700">{agreementError}</p>
+                    {passwordError ? (
+                      <p className="mt-1.5 text-xs font-medium text-rose-600">{passwordError}</p>
                     ) : (
-                      <button
-                        type="button"
-                        onClick={handleConsentIntent}
-                        className={`mt-4 flex w-full items-start gap-3 rounded-2xl border px-4 py-4 text-left text-sm transition ${hasAcceptedAgreement ? 'border-emerald-300 bg-white text-slate-700 hover:border-emerald-400' : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-300 hover:bg-emerald-50/60'}`}
-                      >
-                        <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border ${hasAcceptedAgreement ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-300 bg-white text-transparent'}`}>
-                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="m5 13 4 4L19 7" />
-                          </svg>
-                        </span>
-                        <span>
-                          <span className="block font-semibold">
-                            I agree to the Data Privacy Agreement
-                          </span>
-                          <span className="mt-1 block text-slate-500">
-                            {hasAcceptedAgreement
-                              ? 'Completed. Select this again if you want to reset the consent step before submitting.'
-                              : 'Selecting this will open the agreement modal for required review.'}
-                          </span>
-                        </span>
-                      </button>
+                      <p className="mt-1.5 text-xs text-slate-400">12+ chars, uppercase, lowercase, number or symbol.</p>
                     )}
                   </div>
+
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-slate-700">Confirm Password</label>
+                    <div className="relative">
+                      <input
+                        type={showConfirmPassword ? 'text' : 'password'}
+                        name="confirmPassword"
+                        value={formData.confirmPassword}
+                        onChange={handleChange}
+                        placeholder="Re-enter your password"
+                        aria-invalid={confirmPasswordError ? 'true' : 'false'}
+                        className={`w-full rounded-xl border px-4 py-2.5 pr-11 text-sm text-slate-900 outline-none transition focus:ring-2 focus:ring-emerald-500/30 ${confirmPasswordError ? 'border-rose-300 bg-rose-50 focus:border-rose-400' : 'border-slate-200 bg-white focus:border-emerald-400'}`}
+                        required
+                      />
+                      {formData.confirmPassword ? (
+                        <button
+                          type="button"
+                          onClick={() => setShowConfirmPassword((c) => !c)}
+                          className="absolute inset-y-0 right-0 flex items-center px-3 text-slate-400 transition hover:text-slate-600"
+                          aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+                        >
+                          <EyeIcon open={showConfirmPassword} />
+                        </button>
+                      ) : null}
+                    </div>
+                    {confirmPasswordError ? <p className="mt-1.5 text-xs font-medium text-rose-600">{confirmPasswordError}</p> : null}
+                  </div>
                 </div>
               </div>
 
-              <div className="flex flex-col gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-end">
-                <div className="order-1 flex flex-col gap-3 sm:flex-row">
-                  <Link
-                    to="/login"
-                    className="rounded-2xl border border-emerald-200 px-5 py-3 text-center text-sm font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-50"
-                  >
-                    Back to Login
-                  </Link>
-                  <button
-                    type="submit"
-                    disabled={loading || !canSubmit}
-                    className="rounded-2xl bg-emerald-600 px-7 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-900/15 transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-300"
-                  >
-                    {loading ? 'Creating Account...' : 'Register'}
-                  </button>
-                </div>
+              {/* DPA + reCAPTCHA */}
+              <div className="px-6 py-6 sm:px-8">
+                {agreementLoading ? (
+                  <p className="text-sm font-medium text-emerald-700">Loading Data Privacy Agreement...</p>
+                ) : agreementError ? (
+                  <p className="text-sm font-medium text-rose-600">{agreementError}</p>
+                ) : (
+                  <div className="flex flex-col gap-5">
+                    <label className="flex cursor-pointer items-start gap-3">
+                      <input
+                        type="checkbox"
+                        checked={hasAcceptedAgreement}
+                        onChange={handleConsentIntent}
+                        className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-emerald-600"
+                      />
+                      <span className="text-sm text-slate-600">
+                        I have read and agree to the{' '}
+                        <Link to="/data-privacy-agreement" className="font-semibold text-emerald-600 hover:text-emerald-700 hover:underline">
+                          Data Privacy Agreement
+                        </Link>
+                      </span>
+                    </label>
+
+                    {hasAcceptedAgreement && (
+                      <div className="flex justify-center">
+                        <ReCAPTCHA
+                          ref={recaptchaRef}
+                          sitekey={RECAPTCHA_SITE_KEY}
+                          onChange={(token) => {
+                            setRecaptchaToken(token || '');
+                            setError('');
+                          }}
+                          onExpired={() => setRecaptchaToken('')}
+                          onErrored={() => {
+                            setRecaptchaToken('');
+                            setError('reCAPTCHA verification failed. Please try again.');
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Footer actions */}
+              <div className="flex flex-col-reverse gap-3 px-6 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-8">
+                <Link
+                  to="/login"
+                  className="text-center text-sm font-medium text-slate-500 transition hover:text-slate-700"
+                >
+                  Already have an account? <span className="font-semibold text-emerald-600 hover:text-emerald-700">Log in</span>
+                </Link>
+                <button
+                  type="submit"
+                  disabled={loading || !canSubmit}
+                  className="rounded-xl bg-emerald-600 px-8 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {loading ? 'Creating Account…' : 'Create Account'}
+                </button>
               </div>
             </form>
-          </section>
+          </div>
         </div>
       </div>
 
       {showAgreementModal && agreement ? (
         <div
-          className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/70 px-4 py-6"
+          className="fixed inset-0 z-[95] flex items-center justify-center bg-black/60 px-4 py-6 backdrop-blur-sm"
           role="dialog"
           aria-modal="true"
           aria-labelledby="dpa-modal-title"
         >
-          <div className="w-full max-w-3xl rounded-[28px] bg-white shadow-[0_30px_80px_rgba(15,23,42,0.28)]">
-            <div className="border-b border-slate-100 px-6 py-5 sm:px-7">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-600">Required Review</p>
-              <h2 id="dpa-modal-title" className="mt-2 text-2xl font-bold text-slate-900">
-                WARDS Data Privacy Agreement
+          <div className="w-full max-w-3xl rounded-3xl bg-white shadow-2xl shadow-black/30">
+            <div className="border-b border-slate-100 px-6 py-5 sm:px-8">
+              <p className="text-xs font-semibold uppercase tracking-widest text-emerald-600">Required Review</p>
+              <h2 id="dpa-modal-title" className="mt-1.5 text-xl font-bold text-slate-900">
+                Data Privacy Agreement
               </h2>
-              <p className="mt-2 text-sm leading-6 text-slate-500">
-                Scroll to the end of the agreement to enable the close button and complete this step.
+              <p className="mt-1 text-sm text-slate-500">
+                Scroll to the bottom to enable the accept button.
               </p>
             </div>
 
-            <div className="px-5 py-5 sm:px-6">
+            <div className="px-6 py-5 sm:px-8">
               <DataPrivacyAgreementCard
                 agreement={agreement}
                 scrollable
@@ -601,28 +573,23 @@ const UserRegister = () => {
                 containerRef={agreementScrollRef}
                 className="border border-slate-200 shadow-none"
                 footer={
-                  <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                  <div className={`rounded-xl px-4 py-3 text-sm ${hasReachedAgreementEnd ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-50 text-slate-500'}`}>
                     {hasReachedAgreementEnd
-                      ? 'You have reached the end of the agreement. You may now close this window to confirm acceptance.'
-                      : 'Please continue scrolling until you reach the end of the agreement.'}
+                      ? 'You\'ve reached the end. You may now accept the agreement.'
+                      : 'Please scroll to the end of the agreement to continue.'}
                   </div>
                 }
               />
             </div>
 
-            <div className="flex flex-col gap-3 border-t border-slate-100 px-6 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-7">
-              <p className="text-sm text-slate-500">
-                {hasReachedAgreementEnd
-                  ? 'Review complete. Closing this modal will mark the agreement as accepted.'
-                  : ''}
-              </p>
+            <div className="flex items-center justify-end gap-3 border-t border-slate-100 px-6 py-4 sm:px-8">
               <button
                 type="button"
                 onClick={handleAgreementModalClose}
                 disabled={!hasReachedAgreementEnd}
-                className="rounded-2xl bg-emerald-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-300"
+                className="rounded-xl bg-emerald-600 px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                Close and Accept
+                Accept &amp; Continue
               </button>
             </div>
           </div>
