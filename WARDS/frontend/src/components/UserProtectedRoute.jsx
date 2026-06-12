@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { clearStoredPublicUser, setStoredPublicUser } from '../utils/publicSession';
 
+const AUTH_VERIFY_TIMEOUT_MS = 8000;
+
 const UserProtectedRoute = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -31,7 +33,8 @@ const UserProtectedRoute = ({ children }) => {
       const response = await axios.get('http://localhost:8000/api/user/auth/verify', {
         headers: {
           'Authorization': `Bearer ${token}`
-        }
+        },
+        timeout: AUTH_VERIFY_TIMEOUT_MS,
       });
 
       const userAuthenticatedAt = Date.parse(localStorage.getItem('userAuthenticatedAt') || '');
@@ -65,6 +68,12 @@ const UserProtectedRoute = ({ children }) => {
       clearStoredPublicUser();
       localStorage.removeItem('userAuthenticatedAt');
       sessionStorage.setItem('redirectAfterLogin', location.pathname);
+      sessionStorage.setItem(
+        'loginMessage',
+        error.code === 'ECONNABORTED' || !error.response
+          ? 'Unable to reach the backend. Please make sure the API server is running.'
+          : 'Please login to continue'
+      );
     } finally {
       setIsLoading(false);
     }

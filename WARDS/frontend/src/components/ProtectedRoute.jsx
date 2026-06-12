@@ -1,12 +1,14 @@
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 
 const ALLOWED_ADMIN_INTERNAL_ROLES = new Set(['main_admin', 'superadmin']);
+const AUTH_VERIFY_TIMEOUT_MS = 8000;
 
 const ProtectedRoute = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const location = useLocation();
 
   useEffect(() => {
     verifyToken();
@@ -30,12 +32,19 @@ const ProtectedRoute = ({ children }) => {
     sessionStorage.removeItem('settingsAuthenticatedAt');
   };
 
+  const setAdminLoginRedirectState = (message) => {
+    sessionStorage.setItem('redirectAfterLogin', location.pathname);
+    sessionStorage.setItem('loginPortal', 'admin');
+    sessionStorage.setItem('loginMessage', message);
+  };
+
   const verifyToken = async () => {
     const token = localStorage.getItem('adminToken');
     
     if (!token) {
       setIsAuthenticated(false);
       setIsLoading(false);
+      setAdminLoginRedirectState('Please login with your admin account to continue.');
       return;
     }
 
@@ -43,7 +52,8 @@ const ProtectedRoute = ({ children }) => {
       const response = await axios.get('http://localhost:8000/api/admin/auth/verify', {
         headers: {
           'Authorization': `Bearer ${token}`
-        }
+        },
+        timeout: AUTH_VERIFY_TIMEOUT_MS,
       });
 
       const adminAuthenticatedAt = Date.parse(localStorage.getItem('adminAuthenticatedAt') || '');
@@ -53,6 +63,7 @@ const ProtectedRoute = ({ children }) => {
       if (serverStartedAt && (!adminAuthenticatedAt || adminAuthenticatedAt <= serverStartedAt)) {
         clearAdminSession();
         setIsAuthenticated(false);
+        setAdminLoginRedirectState('Please login again after the backend restarts.');
         return;
       }
 
@@ -69,11 +80,18 @@ const ProtectedRoute = ({ children }) => {
       } else {
         setIsAuthenticated(false);
         clearAdminSession();
+        setAdminLoginRedirectState('Please login with your admin account to continue.');
       }
     } catch (error) {
       console.error('Token verification failed:', error);
       setIsAuthenticated(false);
       clearAdminSession();
+      const isBackendUnavailable = error.code === 'ECONNABORTED' || !error.response;
+      setAdminLoginRedirectState(
+        isBackendUnavailable
+          ? 'Unable to reach the backend. Please make sure the API server is running.'
+          : 'Please login with your admin account to continue.'
+      );
     } finally {
       setIsLoading(false);
     }
@@ -91,7 +109,7 @@ const ProtectedRoute = ({ children }) => {
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/login?portal=admin" replace />;
   }
 
   return children;

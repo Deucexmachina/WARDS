@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { clearBranchSettingsSession } from '../utils/settingsSecurity';
 
+const AUTH_VERIFY_TIMEOUT_MS = 8000;
+
 const BranchProtectedRoute = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -32,7 +34,8 @@ const BranchProtectedRoute = ({ children }) => {
       const response = await axios.get('http://localhost:8000/api/branch/auth/verify', {
         headers: {
           'Authorization': `Bearer ${token}`
-        }
+        },
+        timeout: AUTH_VERIFY_TIMEOUT_MS,
       });
 
       const branchAuthenticatedAt = Date.parse(localStorage.getItem('branchAuthenticatedAt') || '');
@@ -73,7 +76,12 @@ const BranchProtectedRoute = ({ children }) => {
       clearBranchSettingsSession();
       sessionStorage.setItem('redirectAfterLogin', location.pathname);
       sessionStorage.setItem('loginPortal', 'branch');
-      sessionStorage.setItem('loginMessage', 'Please login with your branch account to continue.');
+      sessionStorage.setItem(
+        'loginMessage',
+        error.code === 'ECONNABORTED' || !error.response
+          ? 'Unable to reach the backend. Please make sure the API server is running.'
+          : 'Please login with your branch account to continue.'
+      );
     } finally {
       setIsLoading(false);
     }

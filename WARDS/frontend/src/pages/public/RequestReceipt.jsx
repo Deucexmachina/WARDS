@@ -87,6 +87,7 @@ const RequestReceipt = () => {
   const authenticatedProfileName = (storedUser?.full_name || '').trim();
   const [branches, setBranches] = useState([]);
   const [branchServices, setBranchServices] = useState([]);
+  const [branchServicesLoading, setBranchServicesLoading] = useState(false);
   const [requestStatus, setRequestStatus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [paying, setPaying] = useState(false);
@@ -117,6 +118,10 @@ const RequestReceipt = () => {
         emailAddress: 'Email Address',
         emailPlaceholder: 'iyong.email@example.com',
         taxType: 'Uri ng Buwis',
+        selectTaxType: 'Pumili ng Uri ng Buwis',
+        selectBranchFirst: 'Mangyaring pumili muna ng branch upang makita ang mga available na uri ng buwis.',
+        loadingTaxTypes: 'Nilo-load ang mga available na uri ng buwis...',
+        noTaxTypesAvailable: 'Walang available na uri ng buwis para sa branch na ito.',
         transactionDate: 'Petsa ng Transaksyon',
         branch: 'Branch',
         selectBranch: 'Pumili ng Branch',
@@ -177,6 +182,10 @@ const RequestReceipt = () => {
         emailAddress: 'Email Address',
         emailPlaceholder: 'your.email@example.com',
         taxType: 'Tax Type',
+        selectTaxType: 'Select Tax Type',
+        selectBranchFirst: 'Please select a branch first to view available tax types.',
+        loadingTaxTypes: 'Loading available tax types...',
+        noTaxTypesAvailable: 'No available tax types for this branch.',
         transactionDate: 'Transaction Date',
         branch: 'Branch',
         selectBranch: 'Select Branch',
@@ -306,7 +315,7 @@ const RequestReceipt = () => {
 
   const [formData, setFormData] = useState({
     taxpayerName: authenticatedProfileName,
-    taxType: 'RPT',
+    taxType: '',
     requestReason: RECEIPT_REQUEST_REASONS[0],
     requestReasonOther: '',
     branchId: '',
@@ -400,10 +409,17 @@ const RequestReceipt = () => {
   useEffect(() => {
     const selectedBranchId = Number(formData.branchId);
     if (!selectedBranchId) {
+      setBranchServicesLoading(false);
       setBranchServices([]);
+      setFormData((current) => (
+        current.taxType
+          ? { ...current, taxType: '' }
+          : current
+      ));
       return;
     }
 
+    setBranchServicesLoading(true);
     axios.get(`http://localhost:8000/api/public/branches/${selectedBranchId}`)
       .then((response) => {
         const nextServices = response.data?.services || [];
@@ -412,12 +428,15 @@ const RequestReceipt = () => {
           ...current,
           taxType: nextServices.some((service) => service.name === current.taxType)
             ? current.taxType
-            : (nextServices[0]?.name || current.taxType),
+            : '',
         }));
       })
       .catch((err) => {
         setBranchServices([]);
         setError(err.response?.data?.detail || text.failedToLoadBranches);
+      })
+      .finally(() => {
+        setBranchServicesLoading(false);
       });
   }, [formData.branchId, text.failedToLoadBranches]);
 
@@ -428,9 +447,15 @@ const RequestReceipt = () => {
       return;
     }
 
+    if (name === 'branchId') {
+      setBranchServices([]);
+      setBranchServicesLoading(Boolean(value));
+    }
+
     setFormData((current) => ({
       ...current,
       [name]: value,
+      ...(name === 'branchId' ? { taxType: '' } : {}),
       ...(name === 'requestReason' && value !== 'Other' ? { requestReasonOther: '' } : {}),
     }));
 
@@ -600,6 +625,18 @@ const RequestReceipt = () => {
 
   const assignedBranchLabel = requestStatus?.branchName || selectedBranch?.name || text.notYetAssigned;
   const shouldShowReceiptStatusPanel = Boolean(requestStatus) && !isRateLimitMessage(error);
+  const receiptRequestUnavailable = Boolean(systemStatus && (!systemStatus.receiptRequestEnabled || systemStatus.maintenanceMode));
+  const requiresBranchSelection = !formData.branchId;
+  const hasBranchServiceOptions = branchServices.length > 0;
+  const hasNoBranchTaxTypes = Boolean(formData.branchId) && !branchServicesLoading && !hasBranchServiceOptions;
+  const isTaxTypeDisabled = receiptRequestUnavailable || requiresBranchSelection || branchServicesLoading || hasNoBranchTaxTypes;
+  const taxTypePlaceholderLabel = requiresBranchSelection
+    ? text.selectBranchFirst
+    : branchServicesLoading
+      ? text.loadingTaxTypes
+      : hasNoBranchTaxTypes
+        ? text.noTaxTypesAvailable
+        : text.selectTaxType;
 
   return (
     <section className="min-h-screen bg-slate-50 py-16">
@@ -760,20 +797,15 @@ const RequestReceipt = () => {
                           name="taxType"
                           value={formData.taxType}
                           onChange={handleInputChange}
-                          disabled={Boolean(systemStatus && (!systemStatus.receiptRequestEnabled || systemStatus.maintenanceMode))}
+                          disabled={isTaxTypeDisabled}
                           className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-blue-100"
                         >
-                          {branchServices.length ? branchServices.map((service) => (
+                          <option value="">{taxTypePlaceholderLabel}</option>
+                          {hasBranchServiceOptions ? branchServices.map((service) => (
                             <option key={service.code || service.name} value={service.name}>
                               {localizeTaxType(service.name)}
                             </option>
-                          )) : (
-                            <>
-                              <option value="RPT">{localizeTaxType('RPT')}</option>
-                              <option value="BUSINESS">{localizeTaxType('BUSINESS')}</option>
-                              <option value="MISC">{localizeTaxType('MISC')}</option>
-                            </>
-                          )}
+                          )) : null}
                         </select>
                       </div>
 
