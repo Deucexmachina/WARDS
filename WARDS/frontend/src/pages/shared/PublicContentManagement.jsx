@@ -324,6 +324,11 @@ const GuidePreview = ({ content, language }) => {
   const suffix = language === 'en' ? 'en' : 'tl';
   const guides = language === 'en' ? (content.guides_en || []) : (content.guides_tl || []);
   const categories = ['all', ...new Set(guides.map((g) => g.category).filter(Boolean))];
+  const [openIndex, setOpenIndex] = useState(null);
+
+  useEffect(() => {
+    setOpenIndex(null);
+  }, [language]);
 
   return (
     <PreviewShell>
@@ -350,28 +355,42 @@ const GuidePreview = ({ content, language }) => {
           </div>
         </div>
 
-        {/* Guide cards */}
-        <div className="grid gap-3 sm:grid-cols-2">
-          {guides.length > 0 ? guides.map((guide, i) => (
-            <div key={i} className="flex flex-col rounded-xl bg-white p-4 shadow-sm">
-              <div className="mb-2 flex items-start gap-2">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-accent">
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+        {/* Guide accordion */}
+        {guides.length > 0 ? (
+          <div className="overflow-hidden rounded-xl bg-white shadow-sm">
+            {guides.map((guide, i) => {
+              const isOpen = openIndex === i;
+              return (
+                <div key={i} className="border-b border-gray-100 last:border-b-0">
+                  <button
+                    onClick={() => setOpenIndex(isOpen ? null : i)}
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-blue-50/40"
+                  >
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-accent">
+                      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      {guide.category && <span className="mb-0.5 inline-block rounded-full bg-blue-50 px-2 py-0.5 text-xs font-semibold text-accent">{guide.category}</span>}
+                      <p className="text-xs font-bold leading-snug text-gray-800">{guide.title || 'Untitled guide'}</p>
+                    </div>
+                    <div className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors ${isOpen ? 'bg-accent text-white' : 'bg-gray-100 text-gray-500'}`}>
+                      <svg className={`h-3 w-3 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+                  </button>
+                  {isOpen && (
+                    <div className="border-t border-blue-50 bg-blue-50/30 px-4 py-3">
+                      <p className="whitespace-pre-line text-xs leading-relaxed text-gray-500">{guide.content || 'Guide content will appear here.'}</p>
+                    </div>
+                  )}
                 </div>
-                <div>
-                  {guide.category && <span className="mb-1 inline-block rounded-full bg-blue-50 px-2 py-0.5 text-xs font-semibold text-accent">{guide.category}</span>}
-                  <p className="text-xs font-bold leading-snug text-gray-800">{guide.title || 'Untitled guide'}</p>
-                </div>
-              </div>
-              <p className="line-clamp-3 text-xs leading-relaxed text-gray-500">{guide.content || 'Guide content will appear here.'}</p>
-              <div className="mt-3 rounded-lg bg-accent px-3 py-1.5 text-center text-xs font-semibold text-white">
-                {language === 'en' ? 'Read More' : 'Basahin Pa'}
-              </div>
-            </div>
-          )) : (
-            <div className="col-span-2 rounded-xl bg-white p-6 text-center text-xs text-gray-400 shadow-sm">No guides yet.</div>
-          )}
-        </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="rounded-xl bg-white p-6 text-center text-xs text-gray-400 shadow-sm">No guides yet.</div>
+        )}
 
         {/* Help box */}
         <div className="rounded-xl bg-primary p-4 text-white shadow-sm">
@@ -1099,6 +1118,7 @@ const PublicContentManagement = ({ portal = 'admin' }) => {
             </SectionCard>
 
             <RepeaterCard
+              key={`guides-${editorLanguage}`}
               title="Guides"
               description={`Maintain ${editorLanguage === 'en' ? 'English' : 'Tagalog'} guide cards in their public display order.`}
               items={guideContent[`guides_${editorLanguage}`]}
@@ -1327,6 +1347,7 @@ const PublicContentManagement = ({ portal = 'admin' }) => {
             </SectionCard>
 
             <RepeaterCard
+              key={`faqs-${editorLanguage}`}
               title="FAQs"
               description={`Manage ${editorLanguage === 'en' ? 'English' : 'Tagalog'} FAQ items grouped by category.`}
               items={faqsContent[`faqs_${editorLanguage}`]}

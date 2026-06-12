@@ -7,6 +7,7 @@ const TaxpayerGuide = () => {
   const [loading, setLoading] = useState(true);
   const [language] = usePublicLanguage();
   const [activeCategory, setActiveCategory] = useState('all');
+  const [openIndex, setOpenIndex] = useState(null);
 
   useEffect(() => {
     const fetchGuideContent = async () => {
@@ -19,25 +20,21 @@ const TaxpayerGuide = () => {
         setLoading(false);
       }
     };
-
     fetchGuideContent();
   }, []);
 
   const guides = language === 'en' ? pageContent?.guides_en || [] : pageContent?.guides_tl || [];
-  const categories = ['all', ...new Set(guides.map((guide) => guide.category).filter(Boolean))];
-  const filteredGuides = activeCategory === 'all' ? guides : guides.filter((guide) => guide.category === activeCategory);
+  const categories = ['all', ...new Set(guides.map((g) => g.category).filter(Boolean))];
+  const filteredGuides = activeCategory === 'all' ? guides : guides.filter((g) => g.category === activeCategory);
 
   useEffect(() => {
     setActiveCategory('all');
+    setOpenIndex(null);
   }, [language]);
 
-  const guideIcons = {
-    default: (
-      <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-      </svg>
-    ),
-  };
+  useEffect(() => {
+    setOpenIndex(null);
+  }, [activeCategory]);
 
   if (loading) {
     return (
@@ -74,7 +71,7 @@ const TaxpayerGuide = () => {
         </div>
       </div>
 
-      <div className="container mx-auto max-w-6xl px-4 py-10">
+      <div className="container mx-auto max-w-4xl px-4 py-10">
         {/* Category Filter */}
         <div className="mb-8 rounded-2xl bg-white p-5 shadow-sm">
           <p className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">
@@ -97,35 +94,50 @@ const TaxpayerGuide = () => {
           </div>
         </div>
 
-        {/* Guide Cards Grid */}
+        {/* Guide Accordion */}
         {filteredGuides.length > 0 ? (
-          <div className={activeCategory === 'all' ? 'mb-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3' : 'mb-10 flex flex-wrap justify-center gap-6'}>
-            {filteredGuides.map((guide, index) => (
-              <div
-                key={`${guide.title || 'guide'}-${index}`}
-                className={`flex flex-col rounded-2xl bg-white shadow-sm transition-shadow hover:shadow-md ${activeCategory !== 'all' ? 'w-full sm:w-[calc(50%-12px)] lg:w-[calc(33.333%-16px)]' : ''}`}
-              >
-                <div className="flex flex-1 flex-col p-6">
-                  <div className="mb-4 flex items-start gap-3">
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-accent">
-                      {guideIcons.default}
+          <div className="mb-10 overflow-hidden rounded-2xl bg-white shadow-sm">
+            {filteredGuides.map((guide, index) => {
+              const isOpen = openIndex === index;
+              return (
+                <div key={index} className={`border-b border-gray-100 last:border-b-0`}>
+                  <button
+                    onClick={() => setOpenIndex(isOpen ? null : index)}
+                    className="flex w-full items-center gap-4 px-6 py-5 text-left transition hover:bg-blue-50/40"
+                  >
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-accent">
+                      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                      </svg>
                     </div>
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                       {guide.category && (
-                        <span className="mb-1.5 inline-block rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-semibold text-accent">
+                        <span className="mb-1 inline-block rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-semibold text-accent">
                           {guide.category}
                         </span>
                       )}
-                      <h2 className="text-base font-bold leading-snug text-gray-800">{guide.title}</h2>
+                      <p className="text-sm font-bold text-gray-800">{guide.title}</p>
                     </div>
-                  </div>
+                    <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors ${isOpen ? 'bg-accent text-white' : 'bg-gray-100 text-gray-500'}`}>
+                      <svg
+                        className={`h-4 w-4 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path>
+                      </svg>
+                    </div>
+                  </button>
 
-                  <div className="flex-1 text-sm leading-relaxed text-gray-600">
-                    <div className="whitespace-pre-line">{guide.content}</div>
-                  </div>
+                  {isOpen && (
+                    <div className="border-t border-blue-50 bg-blue-50/30 px-6 py-5">
+                      <p className="whitespace-pre-line text-sm leading-relaxed text-gray-600">{guide.content}</p>
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="mb-10 rounded-2xl bg-white p-12 text-center shadow-sm">
