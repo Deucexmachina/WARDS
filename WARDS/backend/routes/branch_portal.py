@@ -1468,6 +1468,14 @@ async def call_next_queue(
     requested_service_window = normalize_requested_service_window(service_window)
     if is_queue_window_staff(current_staff):
         requested_service_window = current_staff.service_window
+        staff_service_window = infer_service_window(current_staff.service_window)
+        enabled_services = get_branch_setting_value(db, "enabledServices", current_staff.branch_id) or []
+        enabled_service_windows = {infer_service_window(s) for s in enabled_services}
+        if staff_service_window not in enabled_service_windows:
+            raise HTTPException(
+                status_code=403,
+                detail="This Service Window is currently disabled. New queue calls are not allowed until the window is re-enabled by a Branch Admin.",
+            )
     for attempt in range(2):
         try:
             active_queue, recovered_state = reconcile_active_queue_state(db, current_staff, service_window=requested_service_window, ip=request.client.host)

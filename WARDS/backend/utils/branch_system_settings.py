@@ -6,7 +6,7 @@ from datetime import datetime
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from database.models import ActivityLog, Branch, BranchSystemSetting, Service
+from database.models import ActivityLog, Branch, BranchAppointmentScheduleAudit, BranchSystemSetting, Service
 from utils.field_crypto import service_value
 from utils.branch_window_config import get_branch_service_options
 from utils.system_settings import (
@@ -122,17 +122,22 @@ def update_branch_system_settings(
     branch: Branch,
     payload: dict,
     changed_by: str,
+    changed_by_full_name: str | None = None,
+    changed_by_role: str = "branch_admin",
+    reason: str | None = None,
 ) -> dict:
     normalized_payload = {key: value for key, value in payload.items() if key in BRANCH_SCOPED_SETTING_KEYS}
     if not normalized_payload:
         raise HTTPException(status_code=400, detail="No branch system settings were provided.")
 
+    previous_settings_snapshot = get_branch_settings_payload(db, branch.id)
     global_payload = get_settings_payload(db)
     if "queueEnabled" in normalized_payload and not bool(normalized_payload["queueEnabled"]):
         normalized_payload["enabledServices"] = []
 
     changed = False
     change_lines: list[str] = []
+    structured_changes: list[dict] = []
     existing_rows = {row.key: row for row in _get_branch_override_rows(db, branch.id)}
 
     # When re-enabling queue, remove a stale enabledServices=[] override
@@ -146,6 +151,15 @@ def update_branch_system_settings(
             change_lines.append(
                 f"{SETTINGS_METADATA['enabledServices']['label']}: Disabled -> Branch Default"
             )
+            structured_changes.append({
+                "key": "enabledServices",
+                "label": SETTINGS_METADATA["enabledServices"]["label"],
+                "category": SETTINGS_METADATA["enabledServices"]["category"],
+                "previous_value": [],
+                "updated_value": _get_branch_service_names(db, branch.id),
+                "previous_value_label": "Disabled",
+                "updated_value_label": "Branch Default",
+            })
         # If the payload also sends an empty enabledServices, drop it so the
         # loop below doesn't recreate the stale empty override.
         if "enabledServices" in normalized_payload and not normalized_payload["enabledServices"]:
@@ -201,6 +215,15 @@ def update_branch_system_settings(
         change_lines.append(
             f"{metadata['label']}: {_format_audit_value(previous_value)} -> {_format_audit_value(normalized_value)}"
         )
+        structured_changes.append({
+            "key": key,
+            "label": metadata["label"],
+            "category": metadata["category"],
+            "previous_value": previous_value,
+            "updated_value": normalized_value,
+            "previous_value_label": _format_audit_value(previous_value),
+            "updated_value_label": _format_audit_value(normalized_value),
+        })
 
         serialized_value = _serialize_value(metadata["type"], normalized_value)
         if not row:
@@ -245,9 +268,38 @@ def update_branch_system_settings(
         details=f"branch: {branch.name} | role: branch_admin | changes: {change_details}",
         type="branch_portal",
     ))
+    updated_settings_snapshot = get_branch_settings_payload(db, branch.id)
+    previous_audit_snapshot = {
+        "audit_type": "system_settings",
+        "branch_name": branch.name,
+        "changed_by_username": changed_by,
+        "changed_by_full_name": (changed_by_full_name or "").strip() or None,
+        "user_role": changed_by_role,
+        "settings": previous_settings_snapshot,
+        "setting_changes": structured_changes,
+    }
+    new_audit_snapshot = {
+        "audit_type": "system_settings",
+        "branch_name": branch.name,
+        "changed_by_username": changed_by,
+        "changed_by_full_name": (changed_by_full_name or "").strip() or None,
+        "user_role": changed_by_role,
+        "settings": updated_settings_snapshot,
+        "setting_changes": structured_changes,
+    }
+    db.add(BranchAppointmentScheduleAudit(
+        branch_id=branch.id,
+        action="system_settings_updated",
+        change_summary="\n".join(change_lines),
+        previous_config=json.dumps(previous_audit_snapshot, sort_keys=True),
+        new_config=json.dumps(new_audit_snapshot, sort_keys=True),
+        effective_date=datetime.utcnow().date().isoformat(),
+        changed_by=changed_by,
+        reason=(reason or "").strip() or None,
+    ))
     db.commit()
 
     return {
         "branch_id": branch.id,
-        "settings": get_branch_settings_payload(db, branch.id),
+        "settings": updated_settings_snapshot,
     }

@@ -221,6 +221,7 @@ const GetQueue = () => {
   const [appointmentError, setAppointmentError] = useState('');
   const [formError, setFormError] = useState('');
   const [systemStatus, setSystemStatus] = useState(null);
+  const [systemStatusLoading, setSystemStatusLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [appointmentAvailability, setAppointmentAvailability] = useState(null);
   const [appointmentAvailabilityLoading, setAppointmentAvailabilityLoading] = useState(false);
@@ -437,9 +438,11 @@ const GetQueue = () => {
   const fetchBranchSystemStatus = async (branchId) => {
     if (!branchId) {
       setSystemStatus(null);
+      setSystemStatusLoading(false);
       return;
     }
     try {
+      setSystemStatusLoading(true);
       const response = await api.get('/public/system-status', {
         params: { branch_id: branchId }
       });
@@ -452,6 +455,8 @@ const GetQueue = () => {
         enabledServices: [],
         disabledMessage: error.response?.data?.detail || DEFAULT_DISABLED_MESSAGE,
       });
+    } finally {
+      setSystemStatusLoading(false);
     }
   };
 
@@ -517,6 +522,8 @@ const GetQueue = () => {
   const handleBranchSelect = async (branch) => {
     try {
       const response = await api.get(`/public/branches/${branch.id}`);
+      setLoadError('');
+      setSystemStatus(null);
       setSelectedBranch(response.data);
       setServices(response.data.services || []);
       setQueueAnalysis(null);
@@ -740,8 +747,10 @@ const GetQueue = () => {
   const currentServingQueueLabel = queueAnalysis?.current_serving_queue || statusLabels.noActiveQueue;
   const currentServingStatusLabel = queueAnalysis?.current_serving_status || statusLabels.waitingForNextCall;
 
-  const queueUnavailable = !systemStatus || !systemStatus.queueEnabled || !systemStatus.enabledServices?.length || systemStatus.maintenanceMode;
-  const disabledMessage = systemStatus?.disabledMessage || loadError || DEFAULT_DISABLED_MESSAGE;
+  const queueUnavailable = Boolean(selectedBranch) && !systemStatusLoading && Boolean(systemStatus) && (
+    !systemStatus.queueEnabled || !systemStatus.enabledServices?.length || systemStatus.maintenanceMode
+  );
+  const disabledMessage = loadError || systemStatus?.disabledMessage || DEFAULT_DISABLED_MESSAGE;
 
   if (loading) {
     return (

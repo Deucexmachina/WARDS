@@ -162,6 +162,18 @@ def _deserialize_config(raw_value: Optional[str]) -> dict:
     return normalize_schedule_config(parsed)
 
 
+def _deserialize_audit_payload(action: str, raw_value: Optional[str]) -> dict:
+    if action == "system_settings_updated":
+        if not raw_value:
+            return {}
+        try:
+            parsed = json.loads(raw_value)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return _deserialize_config(raw_value)
+
+
 def default_branch_schedule_config() -> dict:
     weekly_schedule = []
     for day_name in WEEKDAY_NAMES:
@@ -368,17 +380,26 @@ def _build_change_summary(previous_config: dict, new_config: dict) -> list[str]:
 
 
 def _serialize_audit_entry(entry: BranchAppointmentScheduleAudit) -> dict:
-    previous_config = _deserialize_config(entry.previous_config)
-    new_config = _deserialize_config(entry.new_config)
+    previous_payload = _deserialize_audit_payload(entry.action, entry.previous_config)
+    new_payload = _deserialize_audit_payload(entry.action, entry.new_config)
+    audit_type = "system_settings" if entry.action == "system_settings_updated" else "appointment_schedule"
+    previous_config = previous_payload.get("settings", {}) if audit_type == "system_settings" else previous_payload
+    new_config = new_payload.get("settings", {}) if audit_type == "system_settings" else new_payload
     return {
         "id": entry.id,
         "branch_id": entry.branch_id,
+        "audit_type": audit_type,
         "action": entry.action,
         "change_summary": [line for line in (entry.change_summary or "").split("\n") if line.strip()],
         "previous_config": previous_config,
         "new_config": new_config,
         "effective_date": entry.effective_date,
         "changed_by": entry.changed_by,
+        "branch_name": new_payload.get("branch_name") or previous_payload.get("branch_name"),
+        "changed_by_username": new_payload.get("changed_by_username") or previous_payload.get("changed_by_username") or entry.changed_by,
+        "changed_by_full_name": new_payload.get("changed_by_full_name") or previous_payload.get("changed_by_full_name"),
+        "user_role": new_payload.get("user_role") or previous_payload.get("user_role"),
+        "setting_changes": new_payload.get("setting_changes") or previous_payload.get("setting_changes") or [],
         "reason": entry.reason,
         "changed_at": f"{entry.changed_at.isoformat()}Z" if entry.changed_at else None,
     }

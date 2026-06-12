@@ -35,6 +35,7 @@ class BranchSystemSettingsPayload(BaseModel):
     paymentGatewayEnabled: bool
     receiptRequestEnabled: bool
     maintenanceMode: bool
+    reason: str | None = None
 
 
 def get_current_staff_branch(current_staff: BranchStaff, db: Session) -> Branch:
@@ -83,8 +84,11 @@ async def save_branch_system_settings(
     return update_branch_system_settings(
         db,
         branch=branch,
-        payload=payload.model_dump(),
+        payload=payload.model_dump(exclude={"reason"}),
         changed_by=current_staff.username,
+        changed_by_full_name=current_staff.full_name,
+        changed_by_role=current_staff.role,
+        reason=payload.reason,
     )
 
 

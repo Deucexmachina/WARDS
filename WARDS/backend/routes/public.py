@@ -428,7 +428,12 @@ async def get_branch_details(branch_id: int, db: Session = Depends(get_db)):
         ((Announcement.branch_id == None) | (Announcement.branch_id == branch_id))
     ).order_by(Announcement.publish_date.desc()).limit(5).all()
     
-    services = get_branch_service_options(db, branch_id)
+    enabled_branch_services = get_branch_configured_service_names(db, branch_id)
+    services = [
+        service
+        for service in get_branch_service_options(db, branch_id)
+        if (service.get("code") or infer_service_window(service.get("name"))).strip().upper() in enabled_branch_services
+    ]
     
     # Get operating hours
     hours = db.query(BranchOperatingHours).filter(
