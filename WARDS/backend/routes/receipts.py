@@ -8,6 +8,7 @@ import os
 import re
 import secrets
 import time
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -37,6 +38,27 @@ from utils.security_validation import normalize_email
 from utils.system_settings import SYSTEM_DISABLED_MESSAGE, get_setting_value
 
 router = APIRouter()
+
+
+def resolve_frontend_base_url(request: Request) -> str:
+    origin = (request.headers.get("origin") or "").strip().rstrip("/")
+    if origin:
+        return origin
+
+    referer = (request.headers.get("referer") or "").strip()
+    if referer:
+        parsed = urlparse(referer)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}"
+
+    for env_name in ("FRONTEND_BASE_URL", "FRONTEND_URL"):
+        frontend_url = (os.getenv(env_name) or "").strip()
+        if frontend_url:
+            return frontend_url.rstrip("/")
+
+    return "http://localhost:3000"
+
+
 USER_SECRET_KEY = os.getenv("USER_SECRET_KEY", "your-user-secret-key-change-in-production")
 UNIFIED_SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "your-unified-auth-secret-change-in-production")
 ALGORITHM = "HS256"
@@ -2232,6 +2254,7 @@ async def upload_receipt_for_ocr(
 @router.post("/records/mobile-upload-sessions")
 async def create_mobile_receipt_upload_session(
     payload: MobileReceiptUploadSessionCreate,
+    request: Request,
     current_staff=Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
@@ -2245,7 +2268,7 @@ async def create_mobile_receipt_upload_session(
         raise HTTPException(status_code=404, detail="Queue record not found for mobile receipt upload.")
 
     token = secrets.token_urlsafe(32)
-    frontend_base_url = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000").rstrip("/")
+    frontend_base_url = resolve_frontend_base_url(request)
     upload_url = f"{frontend_base_url}/mobile-receipt-upload/{token}"
     MOBILE_RECEIPT_UPLOAD_SESSIONS[token] = {
         "token": token,
@@ -2290,9 +2313,10 @@ async def get_mobile_receipt_upload_session_status(
 @router.get("/records/mobile-upload-sessions/{token}/qr")
 async def get_mobile_receipt_upload_qr(
     token: str,
+    request: Request,
 ):
     session = get_mobile_receipt_upload_session(token)
-    frontend_base_url = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000").rstrip("/")
+    frontend_base_url = resolve_frontend_base_url(request)
     upload_url = f"{frontend_base_url}/mobile-receipt-upload/{token}"
     image = qrcode.make(upload_url)
     buffer = BytesIO()
