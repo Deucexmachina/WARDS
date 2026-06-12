@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, Column, Integer, String as SQLString, Float, DateTime, Boolean, Text, ForeignKey, event, text, LargeBinary
+from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session as SASession, sessionmaker, relationship
 
@@ -1382,8 +1383,8 @@ class PublicPageContent(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     page_key = Column(String, unique=True, nullable=False, index=True)
-    draft_content_json = Column(Text, nullable=True)
-    published_content_json = Column(Text, nullable=True)
+    draft_content_json = Column(LONGTEXT().with_variant(Text, "sqlite"), nullable=True)
+    published_content_json = Column(LONGTEXT().with_variant(Text, "sqlite"), nullable=True)
     last_saved_at = Column(DateTime, nullable=True)
     last_saved_by = Column(String, nullable=True)
     published_at = Column(DateTime, nullable=True)

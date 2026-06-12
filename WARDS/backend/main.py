@@ -356,6 +356,14 @@ def ensure_auth_extensions():
                 if "blob" not in current_type:
                     conn.execute(text("ALTER TABLE announcement_attachments MODIFY COLUMN file_content LONGBLOB"))
 
+        if "public_page_contents" in table_names and is_mysql:
+            ppc_columns = {column["name"]: column for column in inspector.get_columns("public_page_contents")}
+            for col in ("draft_content_json", "published_content_json"):
+                if col in ppc_columns:
+                    current_type = str(ppc_columns[col].get("type", "")).lower()
+                    if "longtext" not in current_type:
+                        conn.execute(text(f"ALTER TABLE public_page_contents MODIFY COLUMN {col} LONGTEXT"))
+
         if "alert_views" not in table_names:
             conn.execute(text(f"""
                 CREATE TABLE alert_views (

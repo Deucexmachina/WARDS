@@ -393,12 +393,20 @@ const buildPortalAuthHeaders = (portal = 'admin') => {
 export const publicContentAPI = {
   getPublicTaxpayerGuide: () => api.get('/public-content/public/taxpayer-guide'),
   getPublicContact: () => api.get('/public-content/public/contact'),
+  getPublicAboutUs: () => api.get('/public-content/public/about-us'),
+  getPublicFaqs: () => api.get('/public-content/public/faqs'),
   getTaxpayerGuideEditor: (portal = 'admin') => api.get('/public-content/taxpayer-guide', { headers: buildPortalAuthHeaders(portal) }),
   saveTaxpayerGuideDraft: (content, portal = 'admin') => api.put('/public-content/taxpayer-guide/draft', { content }, { headers: buildPortalAuthHeaders(portal) }),
   publishTaxpayerGuide: (content, portal = 'admin') => api.post('/public-content/taxpayer-guide/publish', { content }, { headers: buildPortalAuthHeaders(portal) }),
   getContactEditor: (portal = 'admin') => api.get('/public-content/contact', { headers: buildPortalAuthHeaders(portal) }),
   saveContactDraft: (content, portal = 'admin') => api.put('/public-content/contact/draft', { content }, { headers: buildPortalAuthHeaders(portal) }),
   publishContact: (content, portal = 'admin') => api.post('/public-content/contact/publish', { content }, { headers: buildPortalAuthHeaders(portal) }),
+  getAboutUsEditor: (portal = 'admin') => api.get('/public-content/about-us', { headers: buildPortalAuthHeaders(portal) }),
+  saveAboutUsDraft: (content, portal = 'admin') => api.put('/public-content/about-us/draft', { content }, { headers: buildPortalAuthHeaders(portal) }),
+  publishAboutUs: (content, portal = 'admin') => api.post('/public-content/about-us/publish', { content }, { headers: buildPortalAuthHeaders(portal) }),
+  getFaqsEditor: (portal = 'admin') => api.get('/public-content/faqs', { headers: buildPortalAuthHeaders(portal) }),
+  saveFaqsDraft: (content, portal = 'admin') => api.put('/public-content/faqs/draft', { content }, { headers: buildPortalAuthHeaders(portal) }),
+  publishFaqs: (content, portal = 'admin') => api.post('/public-content/faqs/publish', { content }, { headers: buildPortalAuthHeaders(portal) }),
 };
 
 export const backupAPI = {

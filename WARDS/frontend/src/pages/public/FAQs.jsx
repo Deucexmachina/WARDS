@@ -13,7 +13,7 @@ const FAQs = () => {
   useEffect(() => {
     const fetchContent = async () => {
       try {
-        const response = await publicContentAPI.getPublicTaxpayerGuide();
+        const response = await publicContentAPI.getPublicFaqs();
         setPageContent(response.data || {});
       } catch (error) {
         console.error('Failed to fetch FAQ content:', error);
@@ -81,12 +81,14 @@ const FAQs = () => {
               {language === 'en' ? 'Help Center' : 'Sentro ng Tulong'}
             </div>
             <h1 className="mb-3 text-4xl font-bold text-white md:text-5xl">
-              {language === 'en' ? 'Frequently Asked Questions' : 'Mga Madalas Itanong'}
+              {language === 'en'
+                ? (pageContent?.page_title_en || 'Frequently Asked Questions')
+                : (pageContent?.page_title_tl || 'Mga Madalas Itanong')}
             </h1>
             <p className="text-lg leading-relaxed text-blue-100">
               {language === 'en'
-                ? 'Find answers to common questions about our services.'
-                : 'Hanapin ang mga sagot sa mga karaniwang tanong tungkol sa aming mga serbisyo.'}
+                ? (pageContent?.page_subtitle_en || 'Find answers to common questions about our services.')
+                : (pageContent?.page_subtitle_tl || 'Hanapin ang mga sagot sa mga karaniwang tanong tungkol sa aming mga serbisyo.')}
             </p>
           </div>
         </div>

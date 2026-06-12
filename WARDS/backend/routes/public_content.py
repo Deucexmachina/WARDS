@@ -15,6 +15,8 @@ router = APIRouter()
 
 PAGE_TAXPAYER_GUIDE = "taxpayer_guide"
 PAGE_CONTACT = "contact"
+PAGE_ABOUT_US = "about_us"
+PAGE_FAQS = "faqs"
 
 
 class PublicContentPayload(BaseModel):
@@ -107,8 +109,6 @@ def _merge_taxpayer_guide_page_content(db: Session, page_settings: dict[str, Any
         **(page_settings or {}),
         "guides_en": _serialize_guide_rows(db, "en"),
         "guides_tl": _serialize_guide_rows(db, "tl"),
-        "faqs_en": _serialize_faq_rows(db, "en"),
-        "faqs_tl": _serialize_faq_rows(db, "tl"),
     }
 
 
@@ -183,16 +183,12 @@ def _normalize_taxpayer_guide_content(content: dict[str, Any]) -> dict[str, Any]
         "help_contacts": _sanitize_line_items(content.get("help_contacts"), ["label_en", "label_tl", "value"]),
         "guides_en": _sanitize_line_items(content.get("guides_en"), ["title", "content", "category"]),
         "guides_tl": _sanitize_line_items(content.get("guides_tl"), ["title", "content", "category"]),
-        "faqs_en": _sanitize_line_items(content.get("faqs_en"), ["question", "answer", "category"]),
-        "faqs_tl": _sanitize_line_items(content.get("faqs_tl"), ["question", "answer", "category"]),
     }
 
     if not normalized["page_title_en"] or not normalized["page_title_tl"]:
         raise HTTPException(status_code=400, detail="Taxpayer Guide page titles are required.")
     if not normalized["guides_en"] or not normalized["guides_tl"]:
         raise HTTPException(status_code=400, detail="At least one guide is required for both English and Tagalog.")
-    if not normalized["faqs_en"] or not normalized["faqs_tl"]:
-        raise HTTPException(status_code=400, detail="At least one FAQ is required for both English and Tagalog.")
 
     return normalized
 
@@ -316,6 +312,89 @@ def _authorize_content_manager(current_user):
     return current_user
 
 
+def _default_about_us_content() -> dict[str, Any]:
+    return {
+        "page_title_en": "About Us",
+        "page_title_tl": "Tungkol sa Amin",
+        "page_subtitle_en": "Learn about the Quezon City Treasurer's Office — our mission, vision, and unwavering commitment to serving every taxpayer.",
+        "page_subtitle_tl": "Alamin ang tungkol sa Tanggapan ng Ingat-Yaman ng Lungsod ng Quezon — ang aming misyon, bisyon, at walang pagbabagong pangako sa pagsisilbi sa bawat nagbabayad ng buwis.",
+        "who_we_are_en": "The City Treasurer's Office (CTO) is the main revenue generating arm of the City, collecting various taxes and fees to support worthwhile City projects. CTO is responsible for managing the financial resources of the City Government while ensuring its fiscal growth and stability through improved collection methods and strategies in accordance with the revenue laws and ordinances.",
+        "who_we_are_tl": "Ang Tanggapan ng Ingat-Yaman ng Lungsod (CTO) ang pangunahing sangay ng Lungsod na nagkukuha ng kita, nangungulekta ng iba't ibang buwis at bayarin para suportahan ang mahahalagang proyekto ng Lungsod.",
+        "mission_items": [
+            {"letter": "A", "text": "Advance the cause of the Quezon City Government to serve the people.", "text_tl": "Isulong ang layunin ng Pamahalaan ng Lungsod ng Quezon upang maglingkod sa mamamayan."},
+            {"letter": "D", "text": "Develop organizational capacity to improve performance.", "text_tl": "Paunlarin ang kakayahan ng organisasyon upang mapabuti ang pagganap."},
+            {"letter": "V", "text": "Venture into innovative strategies in financial management.", "text_tl": "Magsagawa ng mga makabagong estratehiya sa pamamahala ng pananalapi."},
+            {"letter": "O", "text": "Organize further the Treasury to promote professionalism and specialization.", "text_tl": "Higit pang ayusin ang Ingat-Yaman upang maitaguyod ang propesyonalismo at espesyalisasyon."},
+            {"letter": "C", "text": "Complement the efforts of the local government to provide infrastructure and basic services.", "text_tl": "Dagdagan ang mga pagsisikap ng lokal na pamahalaan na magbigay ng imprastraktura at pangunahing serbisyo."},
+            {"letter": "A", "text": "Assist other Local Government Units through technical assistance.", "text_tl": "Tulungan ang ibang mga Lokal na Yunit ng Pamahalaan sa pamamagitan ng teknikal na tulong."},
+            {"letter": "T", "text": "Translate the City's plans and programs for economic growth and self-reliance.", "text_tl": "Isalin ang mga plano at programa ng Lungsod para sa pag-unlad ng ekonomiya at pagsasarili."},
+            {"letter": "E", "text": "Empower the Local Treasury through sound fiscal policy and effective financial management.", "text_tl": "Bigyang-lakas ang Lokal na Ingat-Yaman sa pamamagitan ng maingat na patakaran sa piskal at epektibong pamamahala ng pananalapi."},
+        ],
+        "vision_en": "To effectively meet the target collection yearly through innovative strategies and methods in financial management and continually improve the Quality Management System to ensure taxpayer satisfaction.",
+        "vision_tl": "Epektibong matugunan ang target na koleksyon taun-taon sa pamamagitan ng mga makabagong estratehiya at pamamaraan sa pamamahala ng pananalapi.",
+        "legal_basis_en": "The existence of the City Treasurer's Office in a local government unit is based on the provisions of Book II, Section 470 of Republic Act No. 7160 — Otherwise Known As The Local Government Code Of 1991.",
+        "legal_basis_tl": "Ang pagkakaroon ng Tanggapan ng Ingat-Yaman ng Lungsod sa isang lokal na yunit ng pamahalaan ay batay sa mga probisyon ng Aklat II, Seksyon 470 ng Republika Blg. 7160.",
+        "service_pledges": [
+            {"number": "01", "text": "Perform our duties and responsibilities with utmost integrity, competence, and dedication in order to serve and to meet taxpayer satisfaction.", "text_tl": "Gampanan ang aming mga tungkulin at responsibilidad nang may buong integridad, kakayahan, at dedikasyon upang maglingkod at matugunan ang kasiyahan ng nagbabayad ng buwis."},
+            {"number": "02", "text": "Pursue our goals objectively to attain office efficiency and meet the target collection to better serve our constituents.", "text_tl": "Ituloy ang aming mga layunin nang may obhetibidad upang makamit ang kahusayan ng tanggapan at matugunan ang target na koleksyon para mas mapagsilbihan ang aming mga nasasakupan."},
+            {"number": "03", "text": "Attend to all taxpayers or requesting parties who are within the premises of the Office prior to the end of official working hours and during lunch break.", "text_tl": "Asikasuhin ang lahat ng nagbabayad ng buwis o mga humihiling na partido na nasa loob ng Tanggapan bago matapos ang opisyal na oras ng trabaho at sa oras ng tanghalian."},
+        ],
+        "city_hall_image": "",
+        "office_image_1": "",
+        "office_image_2": "",
+        "office_image_3": "",
+    }
+
+
+def _default_faqs_page_settings() -> dict[str, Any]:
+    return {
+        "page_title_en": "Frequently Asked Questions",
+        "page_title_tl": "Mga Madalas Itanong",
+        "page_subtitle_en": "Find answers to common questions about our services.",
+        "page_subtitle_tl": "Hanapin ang mga sagot sa mga karaniwang tanong tungkol sa aming mga serbisyo.",
+    }
+
+
+def _normalize_about_us_content(content: dict[str, Any]) -> dict[str, Any]:
+    normalized = {
+        "page_title_en": str(content.get("page_title_en", "")).strip(),
+        "page_title_tl": str(content.get("page_title_tl", "")).strip(),
+        "page_subtitle_en": str(content.get("page_subtitle_en", "")).strip(),
+        "page_subtitle_tl": str(content.get("page_subtitle_tl", "")).strip(),
+        "who_we_are_en": str(content.get("who_we_are_en", "")).strip(),
+        "who_we_are_tl": str(content.get("who_we_are_tl", "")).strip(),
+        "mission_items": _sanitize_line_items(content.get("mission_items"), ["letter", "text", "text_tl"]),
+        "vision_en": str(content.get("vision_en", "")).strip(),
+        "vision_tl": str(content.get("vision_tl", "")).strip(),
+        "legal_basis_en": str(content.get("legal_basis_en", "")).strip(),
+        "legal_basis_tl": str(content.get("legal_basis_tl", "")).strip(),
+        "service_pledges": _sanitize_line_items(content.get("service_pledges"), ["number", "text", "text_tl"]),
+        "city_hall_image": str(content.get("city_hall_image", "")).strip(),
+        "office_image_1": str(content.get("office_image_1", "")).strip(),
+        "office_image_2": str(content.get("office_image_2", "")).strip(),
+        "office_image_3": str(content.get("office_image_3", "")).strip(),
+    }
+    if not normalized["page_title_en"] or not normalized["page_title_tl"]:
+        raise HTTPException(status_code=400, detail="About Us page titles are required.")
+    return normalized
+
+
+def _normalize_faqs_content(content: dict[str, Any]) -> dict[str, Any]:
+    normalized = {
+        "page_title_en": str(content.get("page_title_en", "")).strip(),
+        "page_title_tl": str(content.get("page_title_tl", "")).strip(),
+        "page_subtitle_en": str(content.get("page_subtitle_en", "")).strip(),
+        "page_subtitle_tl": str(content.get("page_subtitle_tl", "")).strip(),
+        "faqs_en": _sanitize_line_items(content.get("faqs_en"), ["question", "answer", "category"]),
+        "faqs_tl": _sanitize_line_items(content.get("faqs_tl"), ["question", "answer", "category"]),
+    }
+    if not normalized["page_title_en"] or not normalized["page_title_tl"]:
+        raise HTTPException(status_code=400, detail="FAQs page titles are required.")
+    if not normalized["faqs_en"] or not normalized["faqs_tl"]:
+        raise HTTPException(status_code=400, detail="At least one FAQ is required for both English and Tagalog.")
+    return normalized
+
+
 @router.get("/public/taxpayer-guide")
 async def get_public_taxpayer_guide_content(db: Session = Depends(get_db)):
     return _resolve_public_content(db, PAGE_TAXPAYER_GUIDE)
@@ -362,8 +441,6 @@ async def publish_taxpayer_guide(
     normalized = _normalize_taxpayer_guide_content(payload.content or {})
     _write_taxpayer_guides(db, normalized["guides_en"], "en")
     _write_taxpayer_guides(db, normalized["guides_tl"], "tl")
-    _write_faqs(db, normalized["faqs_en"], "en")
-    _write_faqs(db, normalized["faqs_tl"], "tl")
     record = _get_page_record(db, PAGE_TAXPAYER_GUIDE)
     _save_record(
         db,
@@ -424,3 +501,129 @@ async def publish_contact(
     _log_public_content_activity(db, request=request, current_user=current_user, page_label="Contact", action_type="Publish")
     db.commit()
     return {"message": "Contact page published successfully."}
+
+
+@router.get("/public/about-us")
+async def get_public_about_us_content(db: Session = Depends(get_db)):
+    record = _get_page_record(db, PAGE_ABOUT_US)
+    return _read_json_blob(record.published_content_json if record else None, _default_about_us_content())
+
+
+@router.get("/about-us")
+async def get_about_us_editor_content(
+    current_user=Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    _authorize_content_manager(current_user)
+    record = _get_page_record(db, PAGE_ABOUT_US)
+    default_content = _default_about_us_content()
+    published = _read_json_blob(record.published_content_json if record else None, default_content)
+    return _read_json_blob(record.draft_content_json if record else None, published)
+
+
+@router.put("/about-us/draft")
+async def save_about_us_draft(
+    payload: PublicContentPayload,
+    request: Request,
+    current_user=Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    _authorize_content_manager(current_user)
+    normalized = _normalize_about_us_content(payload.content or {})
+    record = _get_page_record(db, PAGE_ABOUT_US)
+    _save_record(db, record=record, page_key=PAGE_ABOUT_US, draft_content=normalized, actor=current_user.username)
+    _log_public_content_activity(db, request=request, current_user=current_user, page_label="About Us", action_type="Update Draft")
+    db.commit()
+    return {"message": "About Us draft saved successfully."}
+
+
+@router.post("/about-us/publish")
+async def publish_about_us(
+    payload: PublicContentPayload,
+    request: Request,
+    current_user=Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    _authorize_content_manager(current_user)
+    normalized = _normalize_about_us_content(payload.content or {})
+    record = _get_page_record(db, PAGE_ABOUT_US)
+    _save_record(
+        db,
+        record=record,
+        page_key=PAGE_ABOUT_US,
+        draft_content=normalized,
+        published_content=normalized,
+        actor=current_user.username,
+    )
+    _log_public_content_activity(db, request=request, current_user=current_user, page_label="About Us", action_type="Publish")
+    db.commit()
+    return {"message": "About Us page published successfully."}
+
+
+@router.get("/public/faqs")
+async def get_public_faqs_content(db: Session = Depends(get_db)):
+    record = _get_page_record(db, PAGE_FAQS)
+    page_settings = _read_json_blob(record.published_content_json if record else None, _default_faqs_page_settings())
+    return {
+        **page_settings,
+        "faqs_en": _serialize_faq_rows(db, "en"),
+        "faqs_tl": _serialize_faq_rows(db, "tl"),
+    }
+
+
+@router.get("/faqs")
+async def get_faqs_editor_content(
+    current_user=Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    _authorize_content_manager(current_user)
+    record = _get_page_record(db, PAGE_FAQS)
+    default_settings = _default_faqs_page_settings()
+    published = _read_json_blob(record.published_content_json if record else None, default_settings)
+    draft = _read_json_blob(record.draft_content_json if record else None, published)
+    return {
+        **draft,
+        "faqs_en": _serialize_faq_rows(db, "en"),
+        "faqs_tl": _serialize_faq_rows(db, "tl"),
+    }
+
+
+@router.put("/faqs/draft")
+async def save_faqs_draft(
+    payload: PublicContentPayload,
+    request: Request,
+    current_user=Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    _authorize_content_manager(current_user)
+    normalized = _normalize_faqs_content(payload.content or {})
+    record = _get_page_record(db, PAGE_FAQS)
+    _save_record(db, record=record, page_key=PAGE_FAQS, draft_content=normalized, actor=current_user.username)
+    _log_public_content_activity(db, request=request, current_user=current_user, page_label="FAQs", action_type="Update Draft")
+    db.commit()
+    return {"message": "FAQs page draft saved successfully."}
+
+
+@router.post("/faqs/publish")
+async def publish_faqs(
+    payload: PublicContentPayload,
+    request: Request,
+    current_user=Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    _authorize_content_manager(current_user)
+    normalized = _normalize_faqs_content(payload.content or {})
+    _write_faqs(db, normalized["faqs_en"], "en")
+    _write_faqs(db, normalized["faqs_tl"], "tl")
+    record = _get_page_record(db, PAGE_FAQS)
+    _save_record(
+        db,
+        record=record,
+        page_key=PAGE_FAQS,
+        draft_content=normalized,
+        published_content=normalized,
+        actor=current_user.username,
+    )
+    _log_public_content_activity(db, request=request, current_user=current_user, page_label="FAQs", action_type="Publish")
+    db.commit()
+    return {"message": "FAQs page published successfully."}
