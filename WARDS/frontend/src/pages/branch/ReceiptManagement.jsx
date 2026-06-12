@@ -1801,7 +1801,7 @@ const ReceiptManagement = () => {
               ) : (
                 visibleRows.map((request) => (
                   <tr key={request.requestId} className="transition hover:bg-slate-50">
-                    <td className="px-4 py-4 font-semibold text-slate-900">{request.requestId}</td>
+                    <td className="px-4 py-4 font-semibold text-slate-900 break-all">{request.requestId}</td>
                     <td className="px-4 py-4 font-medium text-slate-900">{request.taxpayerName || 'N/A'}</td>
                     <td className="px-4 py-4">{request.requestReason === 'Other' ? (request.requestReasonOther || 'Other') : (request.requestReason || 'N/A')}</td>
                     <td className="px-4 py-4 font-mono text-xs text-slate-600">{request.refNumber || 'N/A'}</td>
