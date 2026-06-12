@@ -489,6 +489,154 @@ def send_branch_access_email(
         }
 
 
+def send_new_window_accounts_email(
+    recipient_email: str,
+    branch_name: str,
+    dashboard_url: str | None,
+    new_accounts: list[dict],
+    deactivated_count: int = 0,
+) -> dict:
+    """Send branch admin an email listing newly generated queue window accounts."""
+    dashboard_url = (
+        dashboard_url
+        or f"{os.getenv('FRONTEND_BASE_URL', 'http://localhost:3000').rstrip('/')}/branch-dashboard"
+    )
+
+    if not smtp_is_configured():
+        return {
+            "sent": False,
+            "status": "skipped",
+            "message": "SMTP is not configured. Window accounts created but no email was sent.",
+            "dashboard_url": dashboard_url,
+        }
+
+    smtp_from_email = os.getenv("SMTP_FROM_EMAIL")
+    smtp_from_name = os.getenv("SMTP_FROM_NAME", "WARDS Admin")
+
+    deactivation_note = (
+        f"\n\nNote: {deactivated_count} previously active window account(s) have been automatically deactivated because the number of service counters was reduced."
+        if deactivated_count > 0 else ""
+    )
+
+    # Plain-text body
+    lines = [
+        f"WARDS — New Queue Window Account(s) Added: {branch_name}",
+        "",
+        f"The following new queue window staff account(s) have been generated for {branch_name}.",
+        "Use the credentials below to log in to each queue window. Each account requires Microsoft Authenticator MFA on first login.",
+    ]
+    for account in new_accounts:
+        window_name = f"Window {account.get('assigned_window_number')} - {account.get('window_label') or account.get('service_window', '')}"
+        lines.extend([
+            "",
+            window_name,
+            f"  Login Email:        {account['email']}",
+            f"  Temporary Password: {account['temporary_password']}",
+            f"  Access Scope:       Queue-window only",
+        ])
+    lines.extend([
+        deactivation_note,
+        "",
+        "If you were not expecting this email, please contact the WARDS main administrator.",
+        "",
+        "City Treasurer's Office",
+        "WARDS Admin",
+    ])
+    plain_text = "\n".join(lines)
+
+    # HTML body
+    account_rows = "".join(
+        f"""
+        <tr>
+          <td style="padding:12px 0;border-bottom:1px solid #e5e7eb;vertical-align:top;">
+            <div style="font-weight:700;color:#0f2744;">
+              Window {_safe_html(str(account.get('assigned_window_number')))} — {_safe_html(account.get('window_label') or account.get('service_window', ''))}
+            </div>
+            <div style="margin-top:4px;font-size:14px;color:#475569;">Login Email: <strong>{_safe_html(account['email'])}</strong></div>
+            <div style="margin-top:4px;font-size:14px;color:#475569;">Temporary Password: <strong>{_safe_html(account['temporary_password'])}</strong></div>
+            <div style="margin-top:4px;font-size:13px;color:#6b7280;">Queue-only access · Microsoft Authenticator MFA required on first login.</div>
+          </td>
+        </tr>
+        """
+        for account in new_accounts
+    )
+
+    deactivation_block = ""
+    if deactivated_count > 0:
+        deactivation_block = f"""
+        <div style="background:#fff3cd;border:1px solid #ffc107;border-radius:12px;padding:14px 18px;margin:20px 0;">
+          <strong style="color:#7c4a03;">&#9888; {deactivated_count} window account(s) deactivated.</strong>
+          <p style="margin:6px 0 0;font-size:14px;color:#7c4a03;line-height:1.6;">
+            The number of service counters was reduced. The affected queue window account(s) have been automatically set to <strong>Inactive</strong> and can no longer log in.
+          </p>
+        </div>
+        """
+
+    html_body = f"""
+<!DOCTYPE html>
+<html lang="en">
+  <body style="margin:0;padding:0;background:#f3f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;">
+    <div style="max-width:640px;margin:0 auto;padding:32px 20px;">
+      <div style="background:#0f2744;border-radius:18px 18px 0 0;padding:24px 28px;color:#ffffff;">
+        <div style="font-size:13px;letter-spacing:.08em;text-transform:uppercase;opacity:.8;">City Treasurer's Office</div>
+        <h1 style="margin:10px 0 0;font-size:26px;line-height:1.2;">New Queue Window Account(s) Added</h1>
+        <p style="margin:8px 0 0;font-size:15px;opacity:.9;">{_safe_html(branch_name)}</p>
+      </div>
+      <div style="background:#ffffff;border-radius:0 0 18px 18px;padding:28px;box-shadow:0 18px 40px rgba(15,39,68,.10);">
+        <p style="margin:0 0 16px;font-size:15px;line-height:1.7;color:#374151;">
+          The following new queue window staff account(s) have been generated for <strong>{_safe_html(branch_name)}</strong>.
+          Use the credentials below to log in. Each account requires Microsoft Authenticator MFA setup on first login.
+        </p>
+
+        {deactivation_block}
+
+        <div style="background:#f8fbff;border:1px solid #d7e5f5;border-radius:14px;padding:18px 20px;margin:0 0 20px;">
+          <h2 style="margin:0 0 14px;font-size:17px;color:#0f2744;">New Window Account Credentials</h2>
+          <table style="width:100%;border-collapse:collapse;table-layout:fixed;">
+            {account_rows}
+          </table>
+        </div>
+
+        <div style="background:#fff8e8;border:1px solid #f4d58d;border-radius:14px;padding:16px 20px;margin:0 0 20px;">
+          <h2 style="margin:0 0 10px;font-size:15px;color:#7c4a03;">Important Notes</h2>
+          <ul style="padding-left:18px;margin:0;color:#5b6471;font-size:14px;line-height:1.7;">
+            <li>These accounts are for queue-window-only access. They cannot access the full branch dashboard.</li>
+            <li>Each account must complete Microsoft Authenticator MFA setup on first login.</li>
+            <li>If this project is running locally, open the branch dashboard on the same machine where WARDS is running.</li>
+          </ul>
+        </div>
+
+        <p style="margin:20px 0 0;font-size:14px;line-height:1.7;color:#5b6471;">
+          If you were not expecting this email, please contact the WARDS main administrator.
+        </p>
+        <p style="margin:20px 0 0;font-size:14px;line-height:1.7;color:#1f2937;">
+          City Treasurer's Office<br><strong>WARDS Admin</strong>
+        </p>
+      </div>
+    </div>
+  </body>
+</html>
+"""
+
+    message = EmailMessage()
+    message["Subject"] = f"New Queue Window Account(s) Added — {branch_name} | WARDS"
+    message["From"] = f"{smtp_from_name} <{smtp_from_email}>"
+    message["To"] = recipient_email
+    message.set_content(plain_text)
+    message.add_alternative(html_body, subtype="html")
+
+    try:
+        result = _send_email_message(message)
+        return {**result, "message": f"New window account credentials sent to {recipient_email}.", "dashboard_url": dashboard_url}
+    except Exception as exc:
+        return {
+            "sent": False,
+            "status": "failed",
+            "message": f"Window accounts created but the email could not be sent: {exc}",
+            "dashboard_url": dashboard_url,
+        }
+
+
 def send_citizen_verification_email(recipient_email: str, verification_code: str, expires_minutes: int = 10) -> dict:
     if not smtp_is_configured():
         return {

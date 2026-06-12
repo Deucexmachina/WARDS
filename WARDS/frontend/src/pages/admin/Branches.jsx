@@ -740,11 +740,22 @@ const Branches = () => {
         setSelectedPreset('custom');
         setFormData(EMPTY_BRANCH_FORM);
         setWindowAccounts(EMPTY_WINDOW_ACCOUNTS);
-        if (response.data?.email_delivery?.message) {
-          setSuccessMessage(`Branch updated successfully. ${response.data.email_delivery.message}`);
-        } else {
-          setSuccessMessage('Branch updated successfully.');
+
+        const newAdded = response.data?.new_window_accounts_added || 0;
+        const deactivated = response.data?.window_accounts_deactivated || 0;
+        const emailMsg = response.data?.email_delivery?.message || '';
+
+        let successParts = ['Branch updated successfully.'];
+        if (newAdded > 0) {
+          successParts.push(`${newAdded} new queue window account${newAdded > 1 ? 's were' : ' was'} generated and the credentials have been sent to the branch admin's email.`);
         }
+        if (deactivated > 0) {
+          successParts.push(`${deactivated} window account${deactivated > 1 ? 's were' : ' was'} automatically deactivated because the counter count was reduced.`);
+        }
+        if (emailMsg && newAdded === 0) {
+          successParts.push(emailMsg);
+        }
+        setSuccessMessage(successParts.join(' '));
       }
 
       if (authModal.mode === 'delete' && authModal.branchId) {

@@ -21,20 +21,30 @@ from database.models import (
     BranchService,
     BranchStaff,
     BranchSystemSetting,
+    BusinessTaxApplication,
+    CollectionAccount,
     DiscrepancyReport,
     Invite,
     MFASecret,
     Payment,
     Queue,
     QueueActivity,
+    QueueHistory,
     ReceiptRecord,
     ReceiptRequest,
+    ReceiptRequestHistory,
+    Remittance,
+    RemittanceItem,
+    ReportHistory,
+    RPTPropertyRecord,
+    TaxAssessmentRecord,
+    TaxpayerIdentifierSubmission,
     Report,
     get_db,
 )
 from utils.field_crypto import apply_invite_security, find_active_invite_by_email_role, find_mfa_secret_record, get_decrypted_or_raw
 from middleware.admin_auth import get_current_admin_user, require_main_admin
-from services.email_service import send_branch_access_email, smtp_is_configured
+from services.email_service import send_branch_access_email, send_new_window_accounts_email, smtp_is_configured
 from utils.field_crypto import build_redacted_text, get_decrypted_or_raw, set_encrypted_hash_companions
 from routes.branch_auth_v2 import create_access_token as create_branch_access_token
 from routes.branch_auth_v2 import get_branch_dashboard_url, get_session_timeout_minutes
@@ -627,7 +637,7 @@ async def update_branch(
     unclaimed_accounts = [account for account in existing_window_accounts]
     reserved_emails = {account.email for account in existing_window_accounts if account.email}
     window_account_deliveries = []
-    credentials_resent = False
+    new_window_account_deliveries = []  # only brand-new accounts (counter increase)
 
     assigned_existing_ids: set[int] = set()
 
@@ -658,7 +668,6 @@ async def update_branch(
                 refreshed_password = generate_window_password(window_account["service_window"])
                 staff_account.hashed_password = pwd_context.hash(refreshed_password)
                 clear_branch_mfa_secret(db, staff_account.username)
-                credentials_resent = True
                 window_account_deliveries.append(build_window_account_delivery_payload(
                     username=staff_account.username,
                     email=staff_account.email,
@@ -701,8 +710,7 @@ async def update_branch(
         )
         db.add(staff_user)
         clear_branch_mfa_secret(db, generated_username)
-        credentials_resent = True
-        window_account_deliveries.append(build_window_account_delivery_payload(
+        new_account_payload = build_window_account_delivery_payload(
             username=generated_username,
             email=generated_email,
             full_name=staff_user.full_name,
@@ -710,12 +718,23 @@ async def update_branch(
             assigned_window_number=staff_user.assigned_window_number,
             window_label=get_window_display_label(staff_user),
             temporary_password=generated_password,
-        ))
+        )
+        window_account_deliveries.append(new_account_payload)
+        new_window_account_deliveries.append(new_account_payload)
 
-    for staff_account in existing_window_accounts:
-        if staff_account.id in assigned_existing_ids:
-            continue
+    deactivated_accounts = [
+        account for account in existing_window_accounts
+        if account.id not in assigned_existing_ids
+    ]
+    for staff_account in deactivated_accounts:
         staff_account.status = "Inactive"
+        db.add(ActivityLog(
+            action="Branch Window Account Deactivated",
+            user=current_user.username,
+            details=f"Auto-deactivated window account {staff_account.username} for {normalized_name} due to counter reduction",
+            type="admin",
+        ))
+    deactivated_count = len(deactivated_accounts)
 
     # Sync branch enabledServices with all active service windows
     active_service_windows = sorted({
@@ -744,7 +763,31 @@ async def update_branch(
 
     apply_branch_security_fields(db_branch)
     email_delivery = None
-    if credentials_resent:
+
+    # Send targeted email for newly added window accounts (counter increase)
+    if new_window_account_deliveries:
+        branch_admin = (
+            db.query(BranchStaff)
+            .filter(BranchStaff.branch_id == db_branch.id, BranchStaff.role == "branch_admin")
+            .order_by(BranchStaff.created_at.desc())
+            .first()
+        )
+        if branch_admin:
+            email_delivery = send_new_window_accounts_email(
+                recipient_email=branch_admin.email,
+                branch_name=normalized_name,
+                dashboard_url=db_branch.dashboard_url,
+                new_accounts=new_window_account_deliveries,
+                deactivated_count=deactivated_count,
+            )
+            db.add(ActivityLog(
+                action="Branch New Window Credentials Email",
+                user=current_user.username,
+                details=f"{(email_delivery or {}).get('status', 'sent').upper()} to {branch_admin.email} — {len(new_window_account_deliveries)} new window account(s) added to {normalized_name}",
+                type="admin",
+            ))
+    elif deactivated_count > 0 and window_account_deliveries:
+        # Reassignments with deactivations — use existing branch access email
         branch_admin = (
             db.query(BranchStaff)
             .filter(BranchStaff.branch_id == db_branch.id, BranchStaff.role == "branch_admin")
@@ -782,6 +825,8 @@ async def update_branch(
     response_payload.update({
         "email_delivery": email_delivery,
         "window_accounts_updated": window_account_deliveries,
+        "new_window_accounts_added": len(new_window_account_deliveries),
+        "window_accounts_deactivated": deactivated_count,
     })
     return response_payload
 
@@ -806,8 +851,18 @@ async def delete_branch(
     for user in branch_users:
         db.delete(user)
 
+    # RemittanceItem references both Remittance and Payment — delete before both
+    db.query(RemittanceItem).filter(RemittanceItem.branch_id == branch_id).delete(synchronize_session=False)
+    db.query(Remittance).filter(Remittance.branch_id == branch_id).delete(synchronize_session=False)
+    db.query(CollectionAccount).filter(CollectionAccount.branch_id == branch_id).delete(synchronize_session=False)
     db.query(Payment).filter(Payment.branch_id == branch_id).delete(synchronize_session=False)
+    db.query(BusinessTaxApplication).filter(BusinessTaxApplication.branch_id == branch_id).delete(synchronize_session=False)
+    # TaxAssessmentRecord references TaxpayerIdentifierSubmission — delete before it
+    db.query(TaxAssessmentRecord).filter(TaxAssessmentRecord.branch_id == branch_id).delete(synchronize_session=False)
+    db.query(TaxpayerIdentifierSubmission).filter(TaxpayerIdentifierSubmission.branch_id == branch_id).delete(synchronize_session=False)
+    db.query(RPTPropertyRecord).filter(RPTPropertyRecord.branch_id == branch_id).delete(synchronize_session=False)
     db.query(ReceiptRequest).filter(ReceiptRequest.branch_id == branch_id).delete(synchronize_session=False)
+    db.query(ReceiptRequestHistory).filter(ReceiptRequestHistory.branch_id == branch_id).delete(synchronize_session=False)
     db.query(ReceiptRecord).filter(ReceiptRecord.branch_id == branch_id).delete(synchronize_session=False)
     db.query(Announcement).filter(Announcement.branch_id == branch_id).delete(synchronize_session=False)
     db.query(DiscrepancyReport).filter(DiscrepancyReport.branch_id == branch_id).delete(synchronize_session=False)
@@ -816,8 +871,11 @@ async def delete_branch(
     db.query(BranchOperatingHours).filter(BranchOperatingHours.branch_id == branch_id).delete(synchronize_session=False)
     db.query(QueueActivity).filter(QueueActivity.branch_id == branch_id).delete(synchronize_session=False)
     db.query(Queue).filter(Queue.branch_id == branch_id).delete(synchronize_session=False)
+    db.query(QueueHistory).filter(QueueHistory.branch_id == branch_id).delete(synchronize_session=False)
     db.query(BranchService).filter(BranchService.branch_id == branch_id).delete(synchronize_session=False)
+    db.query(BranchSystemSetting).filter(BranchSystemSetting.branch_id == branch_id).delete(synchronize_session=False)
     db.query(Report).filter(Report.branch_id == branch_id).delete(synchronize_session=False)
+    db.query(ReportHistory).filter(ReportHistory.branch_id == branch_id).delete(synchronize_session=False)
 
     # Log the deletion
     log = ActivityLog(
