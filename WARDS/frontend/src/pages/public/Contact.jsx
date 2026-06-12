@@ -74,23 +74,21 @@ const Contact = () => {
       {/* Hero Section */}
       <div className="bg-primary py-14">
         <div className="container mx-auto max-w-6xl px-4">
-          <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
-            <div className="max-w-2xl">
-              <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-1.5 text-sm font-medium text-blue-100">
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-                </svg>
-                {language === 'en' ? 'Get in Touch' : 'Makipag-ugnayan'}
-              </div>
-              <h1 className="mb-1 text-4xl font-bold text-white md:text-5xl">
-                {language === 'en' ? (pageContent?.page_title_en || 'Contact Us') : (pageContent?.page_title_tl || 'Makipag-ugnayan sa Amin')}
-              </h1>
-              <p className="mt-2 text-lg leading-relaxed text-blue-100">
-                {language === 'en'
-                  ? (pageContent?.page_subtitle_en || 'For inquiries, concerns, or assistance regarding WARDS services, please contact the Quezon City Treasurer\'s Office using the information below.')
-                  : (pageContent?.page_subtitle_tl || 'Para sa mga katanungan, alalahanin, o tulong kaugnay sa mga serbisyo ng WARDS, makipag-ugnayan sa Tanggapan ng Ingat-Yaman ng Lungsod ng Quezon.')}
-              </p>
+          <div className="mx-auto max-w-2xl text-center">
+            <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-1.5 text-sm font-medium text-blue-100">
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+              </svg>
+              {language === 'en' ? 'Get in Touch' : 'Makipag-ugnayan'}
             </div>
+            <h1 className="mb-1 text-4xl font-bold text-white md:text-5xl">
+              {language === 'en' ? (pageContent?.page_title_en || 'Contact Us') : (pageContent?.page_title_tl || 'Makipag-ugnayan sa Amin')}
+            </h1>
+            <p className="mt-2 text-lg leading-relaxed text-blue-100">
+              {language === 'en'
+                ? (pageContent?.page_subtitle_en || 'For inquiries, concerns, or assistance regarding WARDS services, please contact the Quezon City Treasurer\'s Office using the information below.')
+                : (pageContent?.page_subtitle_tl || 'Para sa mga katanungan, alalahanin, o tulong kaugnay sa mga serbisyo ng WARDS, makipag-ugnayan sa Tanggapan ng Ingat-Yaman ng Lungsod ng Quezon.')}
+            </p>
           </div>
         </div>
       </div>

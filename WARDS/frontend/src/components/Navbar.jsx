@@ -97,6 +97,7 @@ const Navbar = () => {
     { to: '/request-receipt', label: 'Request Receipt' },
     { to: '/taxpayer-guide', label: 'Taxpayer Guide' },
     { to: '/contact', label: 'Contact Us' },
+    { to: '/about-us', label: 'About Us' },
     { to: '/faqs', label: 'FAQs' },
   ];
   const drawerLinks = [
