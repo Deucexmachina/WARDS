@@ -71,7 +71,11 @@ const BranchLayout = () => {
     }).length
   );
   const getActiveReceiptCount = (items) => (
-    (items || []).filter((item) => !['Released', 'Completed'].includes(item.status)).length
+    (items || []).filter((item) => {
+      if (['Released', 'Completed'].includes(item.status)) return false;
+      const paymentStatus = item.paymentStatus || (item.feePaid ? 'Pending Transaction' : 'Pending');
+      return paymentStatus === 'Verified';
+    }).length
   );
   const resolveUnreadCount = (event, currentCount) => {
     const explicitCount = event?.detail?.unreadCount;

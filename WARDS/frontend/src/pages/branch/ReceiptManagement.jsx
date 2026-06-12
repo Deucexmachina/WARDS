@@ -431,7 +431,11 @@ const ReceiptManagement = () => {
   });
 
   const getActiveReceiptBadgeCount = (items) => (
-    (items || []).filter((item) => !['Released', 'Completed'].includes(item.status)).length
+    (items || []).filter((item) => {
+      if (['Released', 'Completed'].includes(item.status)) return false;
+      const paymentStatus = item.paymentStatus || (item.feePaid ? 'Pending Transaction' : 'Pending');
+      return paymentStatus === 'Verified';
+    }).length
   );
 
   const emitBranchReceiptUpdated = (items) => {
@@ -505,7 +509,11 @@ const ReceiptManagement = () => {
   const normalizedActiveRequests = useMemo(() => dedupeRequestsById(requests), [requests]);
 
   const pendingRequests = useMemo(
-    () => normalizedActiveRequests.filter((request) => !['Released', 'Completed'].includes(request.status)),
+    () => normalizedActiveRequests.filter((request) => {
+      if (['Released', 'Completed'].includes(request.status)) return false;
+      const paymentStatus = request.paymentStatus || (request.feePaid ? 'Pending Transaction' : 'Pending');
+      return paymentStatus === 'Verified';
+    }),
     [normalizedActiveRequests]
   );
 
