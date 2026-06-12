@@ -250,7 +250,8 @@ def _save_record(
 
 
 def _write_taxpayer_guides(db: Session, guides: list[dict[str, str]], language: str) -> None:
-    db.query(TaxpayerGuide).filter(TaxpayerGuide.language == language).delete(synchronize_session=False)
+    language_hash = hash_optional_value(language.strip().lower())
+    db.query(TaxpayerGuide).filter(TaxpayerGuide.language_hash == language_hash).delete(synchronize_session=False)
     for index, guide in enumerate(guides, start=1):
         guide_record = TaxpayerGuide(
             title=guide["title"],
@@ -265,7 +266,8 @@ def _write_taxpayer_guides(db: Session, guides: list[dict[str, str]], language: 
 
 
 def _write_faqs(db: Session, faqs: list[dict[str, str]], language: str) -> None:
-    db.query(FAQ).filter(FAQ.language == language).delete(synchronize_session=False)
+    language_hash = hash_optional_value(language.strip().lower())
+    db.query(FAQ).filter(FAQ.language_hash == language_hash).delete(synchronize_session=False)
     for index, faq in enumerate(faqs, start=1):
         faq_record = FAQ(
             question=faq["question"],
