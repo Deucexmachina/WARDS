@@ -202,10 +202,11 @@ const Branches = () => {
   const mapMarkerRef = useRef(null);
 
   const getNormalizedCounterCount = (value) => {
-    return MAX_QUEUE_WINDOWS;
+    const parsed = parseInt(value, 10);
+    return Math.min(Math.max(Number.isNaN(parsed) ? 1 : parsed, 1), MAX_QUEUE_WINDOWS);
   };
 
-  const getActiveWindowOptions = () => WINDOW_ACCOUNT_OPTIONS.slice(0, MAX_QUEUE_WINDOWS);
+  const getActiveWindowOptions = () => WINDOW_ACCOUNT_OPTIONS.slice(0, formData.counters);
 
   const getSelectedAssignedWindowNumber = (rowKey, fallbackNumber) => {
     const parsed = Number(windowAccounts[rowKey]?.assigned_window_number);
@@ -218,7 +219,7 @@ const Branches = () => {
 
   const getUsedAssignedWindowNumbers = (currentRowKey) => {
     const used = new Set();
-    WINDOW_ACCOUNT_OPTIONS.forEach((option) => {
+    WINDOW_ACCOUNT_OPTIONS.slice(0, formData.counters).forEach((option) => {
       if (option.key === currentRowKey) {
         return;
       }
@@ -229,7 +230,7 @@ const Branches = () => {
 
   const getUsedServiceWindows = (currentRowKey) => {
     const used = new Set();
-    WINDOW_ACCOUNT_OPTIONS.forEach((option) => {
+    WINDOW_ACCOUNT_OPTIONS.slice(0, formData.counters).forEach((option) => {
       if (option.key === currentRowKey) {
         return;
       }
@@ -252,12 +253,13 @@ const Branches = () => {
       EMPTY_WINDOW_ACCOUNTS[rowKey]?.assigned_window_number || 1,
     );
     const selectedService = getSelectedServiceWindow(rowKey);
+    const activeOptions = WINDOW_ACCOUNT_OPTIONS.slice(0, formData.counters);
 
-    const conflictingWindowRow = WINDOW_ACCOUNT_OPTIONS.find((option) => (
+    const conflictingWindowRow = activeOptions.find((option) => (
       option.key !== rowKey
       && getSelectedAssignedWindowNumber(option.key, option.number) === selectedWindow
     ));
-    const conflictingServiceRow = WINDOW_ACCOUNT_OPTIONS.find((option) => (
+    const conflictingServiceRow = activeOptions.find((option) => (
       option.key !== rowKey
       && getSelectedServiceWindow(option.key) === selectedService
     ));
@@ -403,7 +405,7 @@ const Branches = () => {
     setFormData({
       ...EMPTY_BRANCH_FORM,
       ...branch,
-      counters: MAX_QUEUE_WINDOWS,
+      counters: branch.counters || MAX_QUEUE_WINDOWS,
       dashboard_url: branch.dashboard_url || buildBranchDashboardUrl(branch.name || 'branch'),
       admin_password: '',
     });
@@ -1025,14 +1027,13 @@ const Branches = () => {
                   name="counters"
                   value={formData.counters}
                   onChange={handleInputChange}
-                  min={MAX_QUEUE_WINDOWS}
+                  min={1}
                   max={MAX_QUEUE_WINDOWS}
-                  readOnly
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
                 />
                 {!editingBranch && (
                   <p className="mt-2 text-sm text-gray-500">
-                    This setup uses the fixed six standard branch services and preserves their assigned window mapping.
+                    Choose how many service counters (1–{MAX_QUEUE_WINDOWS}) this branch operates. The system generates one queue-only staff account per counter.
                   </p>
                 )}
               </div>
@@ -1112,7 +1113,7 @@ const Branches = () => {
                         : `Service counters and queue window staff accounts are the same setup here. If you set ${getNormalizedCounterCount(formData.counters)} service counter${getNormalizedCounterCount(formData.counters) > 1 ? 's' : ''}, the system will generate ${getNormalizedCounterCount(formData.counters)} queue-only branch staff account${getNormalizedCounterCount(formData.counters) > 1 ? 's' : ''}. The system automatically generates the login email addresses, passwords, and staff names, then includes those credentials in the same branch admin email verification message. Every generated queue account uses Microsoft Authenticator MFA on first login.`}
                     </div>
                   </div>
-                  {WINDOW_ACCOUNT_OPTIONS.map((option, index) => {
+                  {WINDOW_ACCOUNT_OPTIONS.slice(0, formData.counters).map((option, index) => {
                     const selectedServiceWindow = getSelectedServiceWindow(option.key);
                     const selectedAssignedWindowNumber = getSelectedAssignedWindowNumber(option.key, option.number);
                     const serviceChoices = SERVICE_WINDOW_CHOICES;

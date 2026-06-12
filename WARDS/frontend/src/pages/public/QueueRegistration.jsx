@@ -115,15 +115,12 @@ const QueueRegistration = () => {
 
   const fetchBranchAndServices = async () => {
     try {
-      const [branchRes, servicesRes] = await Promise.all([
-        axios.get(`${API_BASE_URL}/public/branches/${branchId}`),
-        axios.get(`${API_BASE_URL}/public/services`)
-      ]);
+      const branchRes = await axios.get(`${API_BASE_URL}/public/branches/${branchId}`);
       const statusRes = await axios.get(`${API_BASE_URL}/public/system-status`, {
         params: { branch_id: branchId }
       });
       setBranch(branchRes.data);
-      setServices(servicesRes.data);
+      setServices(branchRes.data.services || []);
       setSystemStatus(statusRes.data);
       setLoading(false);
     } catch (error) {

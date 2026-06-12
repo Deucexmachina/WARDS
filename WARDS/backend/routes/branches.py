@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import secrets
@@ -19,6 +20,7 @@ from database.models import (
     BranchOperatingHours,
     BranchService,
     BranchStaff,
+    BranchSystemSetting,
     DiscrepancyReport,
     Invite,
     MFASecret,
@@ -50,6 +52,7 @@ from utils.branch_window_config import (
     STANDARD_SERVICE_LABELS,
     default_assigned_window_number as resolve_default_assigned_window_number,
     default_service_window_for_position,
+    get_configured_window_accounts,
     get_default_window_label,
     get_service_window_display_label,
     normalize_service_window as normalize_window_service_code,
@@ -713,6 +716,31 @@ async def update_branch(
         if staff_account.id in assigned_existing_ids:
             continue
         staff_account.status = "Inactive"
+
+    # Sync branch enabledServices with all active service windows
+    active_service_windows = sorted({
+        account.service_window
+        for account in get_configured_window_accounts(db, db_branch.id)
+        if account.status == "Active" and account.service_window
+    })
+    branch_setting = db.query(BranchSystemSetting).filter(
+        BranchSystemSetting.branch_id == db_branch.id,
+        BranchSystemSetting.key == "enabledServices",
+    ).first()
+    if branch_setting:
+        branch_setting.value = json.dumps(active_service_windows)
+        branch_setting.value_json = json.dumps(active_service_windows)
+    else:
+        db.add(BranchSystemSetting(
+            branch_id=db_branch.id,
+            key="enabledServices",
+            label="Enabled Public Services",
+            category="Services",
+            value=json.dumps(active_service_windows),
+            value_json=json.dumps(active_service_windows),
+            value_type="json",
+            description="Service names available for public queueing and branch-facing service listings.",
+        ))
 
     apply_branch_security_fields(db_branch)
     email_delivery = None
