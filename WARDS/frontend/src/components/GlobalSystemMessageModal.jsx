@@ -20,7 +20,11 @@ const GlobalSystemMessageModal = () => {
       title={messageModal?.title}
       message={messageModal?.message}
       buttonLabel={messageModal?.buttonLabel}
-      onClose={() => setMessageModal(null)}
+      onClose={() => {
+        const callback = messageModal?.onClose;
+        setMessageModal(null);
+        callback?.();
+      }}
     />
   );
 };

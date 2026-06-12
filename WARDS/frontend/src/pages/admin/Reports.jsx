@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { branchAPI, reportAPI } from '../../services/api';
 import { formatUtc8Date, formatUtc8DateTime } from '../../utils/dateTime';
 import GeneratedReportContent from '../../components/reports/GeneratedReportContent';
@@ -72,13 +73,21 @@ const getInvalidDateRangeMessage = (dateFrom, dateTo) => {
 };
 
 const ReportDetailModal = ({ report, metrics, onClose, onExport, exportingFormat }) => {
-  if (!report || !metrics) {
+  const isOpen = Boolean(report && metrics);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = ''; };
+  }, [isOpen]);
+
+  if (!isOpen) {
     return null;
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6">
-      <div className="flex max-h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-3xl bg-slate-50 shadow-2xl">
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 backdrop-blur-sm px-4 py-6">
+      <div className="flex h-full max-h-[90vh] w-full max-w-7xl flex-col overflow-hidden rounded-3xl bg-slate-50 shadow-2xl">
         <div className="flex shrink-0 flex-wrap justify-end gap-3 border-b border-slate-200 bg-white/95 px-6 py-4 backdrop-blur md:px-8">
           <button
             onClick={() => onExport(report.id, 'pdf')}
@@ -105,7 +114,8 @@ const ReportDetailModal = ({ report, metrics, onClose, onExport, exportingFormat
           <GeneratedReportContent report={report} metrics={metrics} contextLabel="Main Admin Review" />
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 
@@ -767,8 +777,8 @@ const Reports = () => {
         isLoading={Boolean(deletingId)}
       />
 
-      {historyReportToView && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+      {historyReportToView && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 backdrop-blur-sm px-4 py-6">
           <div className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl bg-white shadow-xl">
             <div className="flex shrink-0 items-center justify-between px-6 py-6">
               <h3 className="text-xl font-bold text-primary">Report History - {historyReportToView.title}</h3>
@@ -824,7 +834,8 @@ const Reports = () => {
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       <DeleteConfirmationModal

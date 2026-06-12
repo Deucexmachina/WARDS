@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { branchReportAPI } from '../../services/api';
 import { formatUtc8Date, formatUtc8DateTime } from '../../utils/dateTime';
 import GeneratedReportContent from '../../components/reports/GeneratedReportContent';
@@ -78,13 +79,21 @@ const getInvalidDateRangeMessage = (dateFrom, dateTo) => {
 };
 
 const ReportMetricsModal = ({ report, metrics, onClose }) => {
-  if (!report || !metrics) {
+  const isOpen = Boolean(report && metrics);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = ''; };
+  }, [isOpen]);
+
+  if (!isOpen) {
     return null;
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6">
-      <div className="flex max-h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-3xl bg-slate-50 shadow-2xl">
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 backdrop-blur-sm px-4 py-6">
+      <div className="flex h-full max-h-[90vh] w-full max-w-7xl flex-col overflow-hidden rounded-3xl bg-slate-50 shadow-2xl">
         <div className="flex shrink-0 justify-end border-b border-slate-200 bg-white/95 px-6 py-4 backdrop-blur md:px-8">
           <button onClick={onClose} className="rounded-xl bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-300">
             Close
@@ -94,7 +103,8 @@ const ReportMetricsModal = ({ report, metrics, onClose }) => {
           <GeneratedReportContent report={report} metrics={metrics} contextLabel="Submitted To Main Admin" />
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 
@@ -114,6 +124,7 @@ const BranchReports = () => {
   const [selectedMetrics, setSelectedMetrics] = useState(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [reportToDelete, setReportToDelete] = useState(null);
+  const [pendingGeneratedReport, setPendingGeneratedReport] = useState(null);
   const [historyReportToView, setHistoryReportToView] = useState(null);
   const [automation, setAutomation] = useState({
     enabled: false,
@@ -212,15 +223,27 @@ const BranchReports = () => {
         ...response.data.report,
         is_viewed: viewedIds.includes(Number(response.data?.report?.id)),
       };
-      setSelectedReport(nextReport);
-      setSelectedMetrics(response.data.metrics);
+      setPendingGeneratedReport({ report: nextReport, metrics: response.data.metrics });
       window.dispatchEvent(new CustomEvent(BRANCH_REPORT_VIEWED_EVENT, { detail: { reportId: response.data?.report?.id } }));
       window.dispatchEvent(new CustomEvent(BRANCH_REPORTS_UPDATED_EVENT));
       await fetchReports(1);
-      showSystemSuccessMessage({
-        title: 'Report Submitted Successfully',
-        message: 'The report has been successfully generated and submitted to the Main Admin.',
-      });
+      window.dispatchEvent(new CustomEvent('wards:system-message', {
+        detail: {
+          tone: 'success',
+          title: 'Report Submitted Successfully',
+          message: 'The report has been successfully generated and submitted to the Main Admin.',
+          buttonLabel: 'OK',
+          onClose: () => {
+            setPendingGeneratedReport((pending) => {
+              if (pending) {
+                setSelectedReport(pending.report);
+                setSelectedMetrics(pending.metrics);
+              }
+              return null;
+            });
+          },
+        },
+      }));
     } catch (generateError) {
       console.error('Failed to generate branch report:', generateError);
       setError(generateError.response?.data?.detail || 'Failed to generate and submit the report.');
@@ -848,8 +871,8 @@ const BranchReports = () => {
         isLoading={Boolean(deletingId)}
       />
 
-      {historyReportToView && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+      {historyReportToView && createPortal(
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-50">
           <div className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl bg-white shadow-xl">
             <div className="flex shrink-0 items-center justify-between px-6 py-6">
               <h3 className="text-xl font-bold text-primary">Report History - {historyReportToView.title}</h3>
@@ -901,7 +924,8 @@ const BranchReports = () => {
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
