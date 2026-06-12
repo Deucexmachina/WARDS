@@ -1483,7 +1483,7 @@ def save_receipt_record_payload(
     if normalized_tax_type == "CTC" and detected_category not in {"CTC", "UNKNOWN"}:
         raise HTTPException(
             status_code=400,
-            detail="This looks like a Different recipt",
+            detail="This looks like a Different Receipt",
         )
 
     if requires_ocr and (detected_category != selected_category or payload.category_match is False):
@@ -1686,7 +1686,7 @@ def build_receipt_ocr_result(
                         pass
                 raise HTTPException(
                     status_code=400,
-                    detail="This looks like a Different recipt",
+                    detail="This looks like a Different Receipt",
                 )
         filename_validation = build_receipt_filename_validation(
             filename=file.filename or os.path.basename(file_path),
@@ -1763,7 +1763,7 @@ def build_receipt_ocr_result(
         if not category_allowed:
             raise HTTPException(
                 status_code=400,
-                detail="This looks like a Different recipt",
+                detail="This looks like a Different Receipt",
             )
         if rpt_fallback_applied:
             result["detected_category"] = normalized_category
@@ -1780,7 +1780,7 @@ def build_receipt_ocr_result(
         if detected_category != normalized_category or category_match is False:
             raise HTTPException(
                 status_code=400,
-                detail="This looks like a Different recipt",
+                detail="This looks like a Different Receipt",
             )
 
     duplicate_record, duplicate_type = find_duplicate_receipt_record(

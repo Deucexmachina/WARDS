@@ -617,6 +617,9 @@ const WindowMonitoringSection = ({
   onWindowCallNext,
   onWindowRecall,
   onWindowSkip,
+  onWindowServe,
+  onWindowComplete,
+  onWindowRecallSkipped,
   isAnnouncementPlaying,
 }) => {
   const queueTypeEntries = Object.entries(windowsByQueueType);
@@ -810,38 +813,41 @@ const WindowMonitoringSection = ({
                             </div>
                           </div>
 
-                          {window.queues.length === 0 ? (
-                            <p className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-4 text-sm text-slate-500">
-                              No queue records in this window match the active filters.
-                            </p>
-                          ) : (
-                            <div className="mt-4 space-y-3">
-                              {window.queues.slice(0, 5).map((queue) => {
-                                const derivedStatus = getDerivedStatus(queue, now);
-                                return (
-                                  <div key={queue.id} className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                                      <div className="flex flex-wrap items-center gap-2">
-                                        <p className="text-sm font-bold text-primary">{queue.queue_number}</p>
-                                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusClasses[derivedStatus] || 'bg-slate-100 text-slate-700'}`}>
-                                          {getStatusLabel(queue, now)}
-                                        </span>
-                                        <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
-                                          {queue.service_type || 'N/A'}
-                                        </span>
+                          {(() => {
+                            const visibleQueues = window.queues.filter((queue) => getDerivedStatus(queue, now) !== 'skipped');
+                            return visibleQueues.length === 0 ? (
+                              <p className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-4 text-sm text-slate-500">
+                                No queue records in this window match the active filters.
+                              </p>
+                            ) : (
+                              <div className="mt-4 space-y-3">
+                                {visibleQueues.slice(0, 5).map((queue) => {
+                                  const derivedStatus = getDerivedStatus(queue, now);
+                                  return (
+                                    <div key={queue.id} className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <p className="text-sm font-bold text-primary">{queue.queue_number}</p>
+                                          <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusClasses[derivedStatus] || 'bg-slate-100 text-slate-700'}`}>
+                                            {getStatusLabel(queue, now)}
+                                          </span>
+                                          <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+                                            {queue.service_type || 'N/A'}
+                                          </span>
+                                        </div>
+                                        <p className="text-xs text-slate-500">{queue.taxpayer_name || 'Walk-in'}</p>
                                       </div>
-                                      <p className="text-xs text-slate-500">{queue.taxpayer_name || 'Walk-in'}</p>
                                     </div>
-                                  </div>
-                                );
-                              })}
-                              {window.queues.length > 5 ? (
-                                <p className="text-xs text-slate-500">
-                                  Showing 5 of {window.queues.length} matching queue entries for this window.
-                                </p>
-                              ) : null}
-                            </div>
-                          )}
+                                  );
+                                })}
+                                {visibleQueues.length > 5 ? (
+                                  <p className="text-xs text-slate-500">
+                                    Showing 5 of {visibleQueues.length} matching queue entries for this window.
+                                  </p>
+                                ) : null}
+                              </div>
+                            );
+                          })()}
                         </div>
                         {queueTypeKey === 'immediate' && isSuperadminBranch && (
                           <div className="mt-5 flex flex-wrap gap-2">
@@ -852,10 +858,28 @@ const WindowMonitoringSection = ({
                             >
                               {isAnnouncementPlaying ? 'Announcing...' : 'Call Next'}
                             </button>
+                            {activeQueue && (activeQueue.status || '').toLowerCase() === 'called' && (
+                              <button
+                                onClick={() => onWindowServe(activeQueue)}
+                                disabled={queueUnavailable}
+                                className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
+                              >
+                                Serve
+                              </button>
+                            )}
+                            {activeQueue && (activeQueue.status || '').toLowerCase() === 'serving' && (
+                              <button
+                                onClick={() => onWindowComplete(activeQueue)}
+                                disabled={queueUnavailable}
+                                className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
+                              >
+                                Complete
+                              </button>
+                            )}
                             <button
                               onClick={() => onWindowRecall(activeQueue)}
                               disabled={queueUnavailable || !activeQueue}
-                              className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
+                              className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-50"
                             >
                               Recall
                             </button>
@@ -1821,6 +1845,63 @@ const QueueManagement = () => {
     }
   };
 
+  const handleWindowServe = async (queue) => {
+    setError('');
+    if (!systemStatus?.queueEnabled) {
+      setError(systemStatus?.disabledMessage || DEFAULT_DISABLED_MESSAGE);
+      return;
+    }
+    if (!queue) {
+      setError('No active queue to serve.');
+      return;
+    }
+    try {
+      await api.post(`/branch/queue/${queue.id}/serve`);
+      await fetchQueues();
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to serve queue.');
+    }
+  };
+
+  const handleWindowComplete = (queue) => {
+    setError('');
+    if (!systemStatus?.queueEnabled) {
+      setError(systemStatus?.disabledMessage || DEFAULT_DISABLED_MESSAGE);
+      return;
+    }
+    if (!queue) {
+      setError('No active queue to complete.');
+      return;
+    }
+    setCompletionQueue(queue);
+    setCompletionMode('options');
+    setCompletionError('');
+    setCompletionNotice('');
+    setReceiptSavedForCompletion(false);
+    setShowCancelCompletionConfirm(false);
+    setReceiptDraft(null);
+    setReceiptUploadFile(null);
+    setMobileSession(null);
+  };
+
+  const handleWindowRecallSkipped = async (queue) => {
+    setError('');
+    if (!systemStatus?.queueEnabled) {
+      setError(systemStatus?.disabledMessage || DEFAULT_DISABLED_MESSAGE);
+      return;
+    }
+    if (!queue) {
+      setError('No skipped queue to pull up.');
+      return;
+    }
+    try {
+      await api.post(`/branch/queue/${queue.id}/recall-skipped`);
+      await fetchQueues();
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to pull up queue.');
+    }
+  };
+
   const now = useMemo(() => new Date(), [queues]);
   const queueUnavailable = systemStatus && (!systemStatus.queueEnabled || systemStatus.maintenanceMode);
   const isSelectedCallNextWindowQueue = (queue) => (
@@ -2380,6 +2461,9 @@ const QueueManagement = () => {
           onWindowCallNext={handleWindowCallNext}
           onWindowRecall={handleWindowRecall}
           onWindowSkip={handleWindowSkip}
+          onWindowServe={handleWindowServe}
+          onWindowComplete={handleWindowComplete}
+          onWindowRecallSkipped={handleWindowRecallSkipped}
           isAnnouncementPlaying={isAnnouncementPlaying}
         />
       ) : null}
@@ -2399,7 +2483,7 @@ const QueueManagement = () => {
         onDeleteRequest={openDeleteModal}
         now={now}
         skippedOnly
-        canManageQueues={canManageQueueOperations}
+        canManageQueues={canManageQueueOperations || isSuperadminManagedBranch}
       />
 
       <CompletedTransactionsSection
