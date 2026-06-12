@@ -1491,73 +1491,76 @@ const ReceiptManagement = () => {
           <>
       <div className="overflow-hidden rounded-2xl border border-slate-200">
         <div className="overflow-x-auto">
-          <table className="min-w-full text-sm text-slate-700">
+          <table className="w-full table-fixed text-sm text-slate-700">
             <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
               <tr>
                 {showReferenceColumn ? (
-                  <th className="px-4 py-3.5 text-left">{referenceLabelText}</th>
+                  <th className="whitespace-nowrap px-4 py-3.5 text-left w-[14%]">{referenceLabelText}</th>
                 ) : null}
-                {showTaxpayerColumn ? <th className="px-4 py-3.5 text-left">Taxpayer</th> : null}
-                {showAmountColumn ? <th className="px-4 py-3.5 text-left">Amount</th> : null}
-                <th className="px-4 py-3.5 text-left">Saved By</th>
-                <th className="px-4 py-3.5 text-left">Created</th>
-                {showActionColumn ? <th className="px-4 py-3.5 text-left">Action</th> : null}
+                {showTaxpayerColumn ? <th className="whitespace-nowrap px-4 py-3.5 text-left w-[24%]">Taxpayer</th> : null}
+                {showAmountColumn ? <th className="whitespace-nowrap px-4 py-3.5 text-left w-[12%]">Amount</th> : null}
+                <th className="whitespace-nowrap px-4 py-3.5 text-left w-[14%]">Saved By</th>
+                <th className="whitespace-nowrap px-4 py-3.5 text-left w-[16%]">Created</th>
+                {showActionColumn ? <th className="whitespace-nowrap px-4 py-3.5 text-left w-[20%]">Action</th> : null}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 bg-white">
-              {visibleRows.map((record) => (
-                <tr key={record.id} className="transition hover:bg-slate-50">
-                  {showReferenceColumn ? (
-                    <td className="px-4 py-4 font-mono text-xs text-slate-600">{record.ref_number || 'N/A'}</td>
-                  ) : null}
-                  {showTaxpayerColumn ? <td className="px-4 py-4 font-medium text-slate-900">{record.taxpayer_name || 'N/A'}</td> : null}
-                  {showAmountColumn ? <td className="px-4 py-4">{record.amount != null ? `P${Number(record.amount).toFixed(2)}` : 'N/A'}</td> : null}
-                  <td className="px-4 py-4">{record.uploaded_by || 'N/A'}</td>
-                  <td className="px-4 py-4 text-slate-500">{record.created_at ? formatUtc8DateTime(record.created_at) : 'N/A'}</td>
-                  {showActionColumn ? (
-                    <td className="px-4 py-4">
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          onClick={() => handleDownloadRecordImage(record.id, record.taxpayer_name)}
-                          className="rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white transition hover:bg-blue-700"
-                        >
-                          Download
-                        </button>
-                        <button
-                          onClick={() => handlePrintRecordImage(record.id)}
-                          className="rounded-lg bg-purple-600 px-3 py-1.5 font-semibold text-white transition hover:bg-purple-700"
-                        >
-                          Print
-                        </button>
-                        <button
-                          onClick={() => requestDeleteConfirmation({
-                            type: 'record',
-                            id: record.id,
-                            title: 'Delete this receipt record?',
-                            message: 'This will permanently remove the verified receipt record from the branch receipt list.',
-                            details: [
-                              { label: 'Taxpayer', value: record.taxpayer_name || 'N/A' },
-                              { label: referenceLabelText || 'Reference', value: record.ref_number || 'N/A' },
-                            ],
-                          })}
-                          disabled={deletingRecordId === record.id}
-                          className="rounded-lg bg-red-600 px-3 py-1.5 font-semibold text-white transition hover:bg-red-700 disabled:opacity-40"
-                        >
-                          {deletingRecordId === record.id ? 'Deleting...' : 'Delete'}
-                        </button>
-                      </div>
-                    </td>
-                  ) : null}
+              {rows.length === 0 ? (
+                <tr>
+                  <td colSpan={[showReferenceColumn, showTaxpayerColumn, showAmountColumn, true, true, showActionColumn].filter(Boolean).length} className="px-4 py-10 text-center text-sm text-slate-500">
+                    No verified records found for this category.
+                  </td>
                 </tr>
-              ))}
+              ) : (
+                visibleRows.map((record) => (
+                  <tr key={record.id} className="transition hover:bg-slate-50">
+                    {showReferenceColumn ? (
+                      <td className="px-4 py-4 font-mono text-xs text-slate-600">{record.ref_number || 'N/A'}</td>
+                    ) : null}
+                    {showTaxpayerColumn ? <td className="px-4 py-4 font-medium text-slate-900">{record.taxpayer_name || 'N/A'}</td> : null}
+                    {showAmountColumn ? <td className="px-4 py-4">{record.amount != null ? `P${Number(record.amount).toFixed(2)}` : 'N/A'}</td> : null}
+                    <td className="px-4 py-4">{record.uploaded_by || 'N/A'}</td>
+                    <td className="px-4 py-4 text-slate-500">{record.created_at ? formatUtc8DateTime(record.created_at) : 'N/A'}</td>
+                    {showActionColumn ? (
+                      <td className="px-4 py-4">
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleDownloadRecordImage(record.id, record.taxpayer_name)}
+                            className="inline-flex items-center rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white transition hover:bg-blue-700"
+                          >
+                            Download
+                          </button>
+                          <button
+                            onClick={() => handlePrintRecordImage(record.id)}
+                            className="inline-flex items-center rounded-lg bg-purple-600 px-3 py-1.5 font-semibold text-white transition hover:bg-purple-700"
+                          >
+                            Print
+                          </button>
+                          <button
+                            onClick={() => requestDeleteConfirmation({
+                              type: 'record',
+                              id: record.id,
+                              title: 'Delete this receipt record?',
+                              message: 'This will permanently remove the verified receipt record from the branch receipt list.',
+                              details: [
+                                { label: 'Taxpayer', value: record.taxpayer_name || 'N/A' },
+                                { label: referenceLabelText || 'Reference', value: record.ref_number || 'N/A' },
+                              ],
+                            })}
+                            disabled={deletingRecordId === record.id}
+                            className="inline-flex items-center rounded-lg bg-red-600 px-3 py-1.5 font-semibold text-white transition hover:bg-red-700 disabled:opacity-40"
+                          >
+                            {deletingRecordId === record.id ? 'Deleting...' : 'Delete'}
+                          </button>
+                        </div>
+                      </td>
+                    ) : null}
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
-        {rows.length === 0 && (
-          <div className="border-t border-slate-100 bg-slate-50 px-6 py-8 text-center text-sm text-slate-500">
-            No verified records found for this category.
-          </div>
-        )}
       </div>
       <PaginationControls
         page={sectionPages[pageKey]}
@@ -1601,71 +1604,74 @@ const ReceiptManagement = () => {
           <>
             <div className="overflow-hidden rounded-2xl border border-slate-200">
               <div className="overflow-x-auto">
-                <table className="min-w-full text-sm text-slate-700">
+                <table className="w-full table-fixed text-sm text-slate-700">
                   <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
                     <tr>
-                      <th className="px-4 py-3.5 text-left">Certificate No.</th>
-                      <th className="px-4 py-3.5 text-left">Name</th>
-                      <th className="px-4 py-3.5 text-left">Date of Issue</th>
-                      <th className="px-4 py-3.5 text-left">Purpose of Renewal</th>
-                      <th className="px-4 py-3.5 text-left">Valid Until</th>
-                      <th className="px-4 py-3.5 text-left">Saved By</th>
-                      <th className="px-4 py-3.5 text-left">Created</th>
-                      <th className="px-4 py-3.5 text-left">Action</th>
+                      <th className="whitespace-nowrap px-4 py-3.5 text-left w-[10%]">Certificate No.</th>
+                      <th className="whitespace-nowrap px-4 py-3.5 text-left w-[16%]">Name</th>
+                      <th className="whitespace-nowrap px-4 py-3.5 text-left w-[10%]">Date of Issue</th>
+                      <th className="whitespace-nowrap px-4 py-3.5 text-left w-[14%]">Purpose of Renewal</th>
+                      <th className="whitespace-nowrap px-4 py-3.5 text-left w-[10%]">Valid Until</th>
+                      <th className="whitespace-nowrap px-4 py-3.5 text-left w-[10%]">Saved By</th>
+                      <th className="whitespace-nowrap px-4 py-3.5 text-left w-[12%]">Created</th>
+                      <th className="whitespace-nowrap px-4 py-3.5 text-left w-[18%]">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 bg-white">
-                    {visibleRows.map((record) => (
-                      <tr key={record.id} className="transition hover:bg-slate-50">
-                        <td className="px-4 py-4 font-mono text-xs text-slate-600">{record.ref_number || record.receipt_number || 'N/A'}</td>
-                        <td className="px-4 py-4 font-medium text-slate-900">{record.taxpayer_name || 'N/A'}</td>
-                        <td className="px-4 py-4">{record.transaction_date || 'N/A'}</td>
-                        <td className="px-4 py-4">{record.market_purpose_of_renewal || 'N/A'}</td>
-                        <td className="px-4 py-4">{record.market_valid_until || 'N/A'}</td>
-                        <td className="px-4 py-4">{record.uploaded_by || 'N/A'}</td>
-                        <td className="px-4 py-4 text-slate-500">{record.created_at ? formatUtc8DateTime(record.created_at) : 'N/A'}</td>
-                        <td className="px-4 py-4">
-                          <div className="flex flex-wrap gap-2">
-                            <button
-                              onClick={() => handleDownloadRecordImage(record.id, record.taxpayer_name)}
-                              className="rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white transition hover:bg-blue-700"
-                            >
-                              Download
-                            </button>
-                            <button
-                              onClick={() => handlePrintRecordImage(record.id)}
-                              className="rounded-lg bg-purple-600 px-3 py-1.5 font-semibold text-white transition hover:bg-purple-700"
-                            >
-                              Print
-                            </button>
-                            <button
-                              onClick={() => requestDeleteConfirmation({
-                                type: 'record',
-                                id: record.id,
-                                title: 'Delete this market receipt record?',
-                                message: 'This will permanently remove the verified market record from the branch receipt list.',
-                                details: [
-                                  { label: 'Name', value: record.taxpayer_name || 'N/A' },
-                                  { label: 'Certificate No.', value: record.ref_number || record.receipt_number || 'N/A' },
-                                ],
-                              })}
-                              disabled={deletingRecordId === record.id}
-                              className="rounded-lg bg-red-600 px-3 py-1.5 font-semibold text-white transition hover:bg-red-700 disabled:opacity-40"
-                            >
-                              {deletingRecordId === record.id ? 'Deleting...' : 'Delete'}
-                            </button>
-                          </div>
+                    {rows.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="px-4 py-10 text-center text-sm text-slate-500">
+                          No verified records found for this category.
                         </td>
                       </tr>
-                    ))}
+                    ) : (
+                      visibleRows.map((record) => (
+                        <tr key={record.id} className="transition hover:bg-slate-50">
+                          <td className="px-4 py-4 font-mono text-xs text-slate-600">{record.ref_number || record.receipt_number || 'N/A'}</td>
+                          <td className="px-4 py-4 font-medium text-slate-900">{record.taxpayer_name || 'N/A'}</td>
+                          <td className="px-4 py-4">{record.transaction_date || 'N/A'}</td>
+                          <td className="px-4 py-4">{record.market_purpose_of_renewal || 'N/A'}</td>
+                          <td className="px-4 py-4">{record.market_valid_until || 'N/A'}</td>
+                          <td className="px-4 py-4">{record.uploaded_by || 'N/A'}</td>
+                          <td className="px-4 py-4 text-slate-500">{record.created_at ? formatUtc8DateTime(record.created_at) : 'N/A'}</td>
+                          <td className="px-4 py-4">
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => handleDownloadRecordImage(record.id, record.taxpayer_name)}
+                                className="inline-flex items-center rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white transition hover:bg-blue-700"
+                              >
+                                Download
+                              </button>
+                              <button
+                                onClick={() => handlePrintRecordImage(record.id)}
+                                className="inline-flex items-center rounded-lg bg-purple-600 px-3 py-1.5 font-semibold text-white transition hover:bg-purple-700"
+                              >
+                                Print
+                              </button>
+                              <button
+                                onClick={() => requestDeleteConfirmation({
+                                  type: 'record',
+                                  id: record.id,
+                                  title: 'Delete this market receipt record?',
+                                  message: 'This will permanently remove the verified market record from the branch receipt list.',
+                                  details: [
+                                    { label: 'Name', value: record.taxpayer_name || 'N/A' },
+                                    { label: 'Certificate No.', value: record.ref_number || record.receipt_number || 'N/A' },
+                                  ],
+                                })}
+                                disabled={deletingRecordId === record.id}
+                                className="inline-flex items-center rounded-lg bg-red-600 px-3 py-1.5 font-semibold text-white transition hover:bg-red-700 disabled:opacity-40"
+                              >
+                                {deletingRecordId === record.id ? 'Deleting...' : 'Delete'}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
-              {rows.length === 0 && (
-                <div className="border-t border-slate-100 bg-slate-50 px-6 py-8 text-center text-sm text-slate-500">
-                  No verified records found for this category.
-                </div>
-              )}
             </div>
             <PaginationControls
               page={sectionPages[pageKey]}
@@ -1745,69 +1751,72 @@ const ReceiptManagement = () => {
           <>
       <div className="overflow-hidden rounded-2xl border border-slate-200">
         <div className="overflow-x-auto">
-          <table className="min-w-full text-sm text-slate-700">
+          <table className="w-full table-fixed text-sm text-slate-700">
             <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
               <tr>
-                <th className="px-4 py-3.5 text-left">Request ID</th>
-                <th className="px-4 py-3.5 text-left">Taxpayer</th>
-                <th className="px-4 py-3.5 text-left">Reason</th>
-                <th className="px-4 py-3.5 text-left">Reference</th>
-                <th className="px-4 py-3.5 text-left">Status</th>
-                <th className="px-4 py-3.5 text-left">Processed</th>
-                <th className="px-4 py-3.5 text-left">Completed By</th>
-                <th className="px-4 py-3.5 text-left">Action</th>
+                <th className="whitespace-nowrap px-4 py-3.5 text-left w-[10%]">Request ID</th>
+                <th className="whitespace-nowrap px-4 py-3.5 text-left w-[16%]">Taxpayer</th>
+                <th className="whitespace-nowrap px-4 py-3.5 text-left w-[12%]">Reason</th>
+                <th className="whitespace-nowrap px-4 py-3.5 text-left w-[12%]">Reference</th>
+                <th className="whitespace-nowrap px-4 py-3.5 text-left w-[10%]">Status</th>
+                <th className="whitespace-nowrap px-4 py-3.5 text-left w-[12%]">Processed</th>
+                <th className="whitespace-nowrap px-4 py-3.5 text-left w-[10%]">Completed By</th>
+                <th className="whitespace-nowrap px-4 py-3.5 text-left w-[18%]">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 bg-white">
-              {visibleRows.map((request) => (
-                <tr key={request.requestId} className="transition hover:bg-slate-50">
-                  <td className="px-4 py-4 font-semibold text-slate-900">{request.requestId}</td>
-                  <td className="px-4 py-4 font-medium text-slate-900">{request.taxpayerName || 'N/A'}</td>
-                  <td className="px-4 py-4">{request.requestReason === 'Other' ? (request.requestReasonOther || 'Other') : (request.requestReason || 'N/A')}</td>
-                  <td className="px-4 py-4 font-mono text-xs text-slate-600">{request.refNumber || 'N/A'}</td>
-                  <td className="px-4 py-4">
-                    <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
-                      {request.status || 'Done'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-4 text-slate-500">{request.processedAt ? formatUtc8DateTime(request.processedAt) : 'N/A'}</td>
-                  <td className="px-4 py-4">{request.completedBy || 'N/A'}</td>
-                  <td className="px-4 py-4">
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => setSelectedCompletedRequest(request)}
-                        className="rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white transition hover:bg-blue-700"
-                      >
-                        View
-                      </button>
-                      <button
-                        onClick={() => requestDeleteConfirmation({
-                          type: 'history',
-                          id: request.requestId,
-                          title: 'Delete this completed receipt request?',
-                          message: 'This will permanently remove the completed receipt request from branch history.',
-                          details: [
-                            { label: 'Request ID', value: request.requestId },
-                            { label: 'Taxpayer', value: request.taxpayerName || 'N/A' },
-                          ],
-                        })}
-                        disabled={deletingHistoryId === request.requestId}
-                        className="rounded-lg bg-red-600 px-3 py-1.5 font-semibold text-white transition hover:bg-red-700 disabled:opacity-40"
-                      >
-                        {deletingHistoryId === request.requestId ? 'Deleting...' : 'Delete'}
-                      </button>
-                    </div>
+              {rows.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="px-4 py-10 text-center text-sm text-slate-500">
+                    No completed receipt requests found for this category.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                visibleRows.map((request) => (
+                  <tr key={request.requestId} className="transition hover:bg-slate-50">
+                    <td className="px-4 py-4 font-semibold text-slate-900">{request.requestId}</td>
+                    <td className="px-4 py-4 font-medium text-slate-900">{request.taxpayerName || 'N/A'}</td>
+                    <td className="px-4 py-4">{request.requestReason === 'Other' ? (request.requestReasonOther || 'Other') : (request.requestReason || 'N/A')}</td>
+                    <td className="px-4 py-4 font-mono text-xs text-slate-600">{request.refNumber || 'N/A'}</td>
+                    <td className="px-4 py-4">
+                      <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
+                        {request.status || 'Done'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-slate-500">{request.processedAt ? formatUtc8DateTime(request.processedAt) : 'N/A'}</td>
+                    <td className="px-4 py-4">{request.completedBy || 'N/A'}</td>
+                    <td className="px-4 py-4">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setSelectedCompletedRequest(request)}
+                          className="inline-flex items-center rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white transition hover:bg-blue-700"
+                        >
+                          View
+                        </button>
+                        <button
+                          onClick={() => requestDeleteConfirmation({
+                            type: 'history',
+                            id: request.requestId,
+                            title: 'Delete this completed receipt request?',
+                            message: 'This will permanently remove the completed receipt request from branch history.',
+                            details: [
+                              { label: 'Request ID', value: request.requestId },
+                              { label: 'Taxpayer', value: request.taxpayerName || 'N/A' },
+                            ],
+                          })}
+                          disabled={deletingHistoryId === request.requestId}
+                          className="inline-flex items-center rounded-lg bg-red-600 px-3 py-1.5 font-semibold text-white transition hover:bg-red-700 disabled:opacity-40"
+                        >
+                          {deletingHistoryId === request.requestId ? 'Deleting...' : 'Delete'}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
-        {rows.length === 0 && (
-          <div className="border-t border-slate-100 bg-slate-50 px-6 py-8 text-center text-sm text-slate-500">
-            No completed receipt requests found for this category.
-          </div>
-        )}
       </div>
       <PaginationControls
         page={sectionPages[pageKey]}
@@ -2276,9 +2285,9 @@ const ReceiptManagement = () => {
       {renderVerifiedRecordSection({
         title: 'Verified Misc Tax Records',
         categoryKey: 'MISC',
-        referenceLabelText: '',
+        referenceLabelText: 'Reference Number',
         rows: miscRecords,
-        showReferenceColumn: false,
+        showReferenceColumn: true,
       })}
 
       {renderVerifiedRecordSection({
@@ -2286,9 +2295,9 @@ const ReceiptManagement = () => {
         categoryKey: 'CTC',
         referenceLabelText: 'Reference Number',
         rows: ctcRecords,
-        showReferenceColumn: false,
-        showTaxpayerColumn: false,
-        showAmountColumn: false,
+        showReferenceColumn: true,
+        showTaxpayerColumn: true,
+        showAmountColumn: true,
         showActionColumn: true,
       })}
 
