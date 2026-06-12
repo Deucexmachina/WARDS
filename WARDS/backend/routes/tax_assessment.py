@@ -38,6 +38,7 @@ from services.email_service import (
 from utils.field_crypto import apply_citizen_user_security, apply_tax_assessment_record_security, apply_taxpayer_identifier_submission_security, build_redacted_text, get_decrypted_or_raw, hash_aware_match, hash_optional_value, set_encrypted_hash_companions, tax_assessment_value, taxpayer_submission_value
 from utils.file_validation import SafeFileType, validate_upload_file
 from utils.security_validation import (
+    ensure_contact_number_is_unique,
     ensure_email_is_unique,
     ensure_tin_is_unique,
     normalize_citizen_full_name,
@@ -663,6 +664,7 @@ async def update_public_account_profile(
     ensure_email_is_unique(db, normalized_email, exclude_citizen_id=current_user.id)
     taxpayer_type = normalize_taxpayer_type(payload.taxpayer_type)
     mobile_number = normalize_mobile_number(payload.mobile_number)
+    ensure_contact_number_is_unique(db, mobile_number, exclude_citizen_id=current_user.id)
     full_name = normalize_citizen_full_name(payload.full_name)
 
     normalized_tin = None

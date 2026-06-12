@@ -92,6 +92,7 @@ const UserRegister = () => {
   const [emailError, setEmailError] = useState('');
   const [fullNameError, setFullNameError] = useState('');
   const [contactError, setContactError] = useState('');
+  const [contactCheckingUniqueness, setContactCheckingUniqueness] = useState(false);
   const [passwordError, setPasswordError] = useState('');
   const [confirmPasswordError, setConfirmPasswordError] = useState('');
   const [recaptchaToken, setRecaptchaToken] = useState('');
@@ -213,14 +214,38 @@ const UserRegister = () => {
     }
   };
 
+  const handleContactBlur = async () => {
+    const digits = formData.contact_number;
+    const formatError = getRegistrationContactError(digits);
+    if (formatError) {
+      setContactError(formatError);
+      return;
+    }
+    setContactCheckingUniqueness(true);
+    try {
+      const response = await axios.post(`${API_URL}/api/user/auth/check-contact`, {
+        contact_number: `+63${digits}`,
+      });
+      if (!response.data.available) {
+        setContactError('This contact number is unavailable. Please enter a different contact number.');
+      }
+    } catch {
+      // silently skip — server-side will catch it on submit
+    } finally {
+      setContactCheckingUniqueness(false);
+    }
+  };
+
   const canSubmit = useMemo(() => {
     return (
       !agreementLoading &&
-      !showAgreementModal
+      !showAgreementModal &&
+      !contactCheckingUniqueness
     );
   }, [
     agreementLoading,
     showAgreementModal,
+    contactCheckingUniqueness,
   ]);
 
   const handleSubmit = async (event) => {
@@ -391,6 +416,7 @@ const UserRegister = () => {
                         name="contact_number"
                         value={formData.contact_number}
                         onChange={handleChange}
+                        onBlur={handleContactBlur}
                         inputMode="numeric"
                         maxLength={10}
                         placeholder="9123456789"

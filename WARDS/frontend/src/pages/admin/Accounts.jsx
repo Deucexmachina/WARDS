@@ -1,3 +1,4 @@
+import axios from 'axios';
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { accountAPI, branchAPI } from '../../services/api';
@@ -85,6 +86,7 @@ const Accounts = () => {
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [emailError, setEmailError] = useState('');
   const [contactError, setContactError] = useState('');
+  const [contactCheckingUniqueness, setContactCheckingUniqueness] = useState(false);
   const [fullNameError, setFullNameError] = useState('');
   const [authPasswordError, setAuthPasswordError] = useState('');
   const [jumpPage, setJumpPage] = useState('');
@@ -270,6 +272,26 @@ const Accounts = () => {
       setFullNameError(validateCitizenFullName(normalized));
     }
     setError('');
+  };
+
+  const handleContactBlur = async () => {
+    if (formData.role !== 'public') return;
+    const digits = formData.contact_number;
+    if (!digits || validatePhilippineContactDigits(digits)) return;
+    setContactCheckingUniqueness(true);
+    try {
+      const response = await axios.post('http://localhost:8000/api/user/auth/check-contact', {
+        contact_number: `+63${digits}`,
+        exclude_citizen_id: editingAccount?.id ?? null,
+      });
+      if (!response.data.available) {
+        setContactError('This contact number is unavailable. Please enter a different contact number.');
+      }
+    } catch {
+      // silently skip — server-side enforces on save
+    } finally {
+      setContactCheckingUniqueness(false);
+    }
   };
 
   const handleAddAccount = () => {
@@ -889,6 +911,7 @@ const Accounts = () => {
                               name="contact_number"
                               value={formData.contact_number}
                               onChange={handleInputChange}
+                              onBlur={handleContactBlur}
                               inputMode="numeric"
                               maxLength={10}
                               className="w-full px-4 py-3 text-sm font-medium text-slate-900 outline-none"
@@ -1094,7 +1117,7 @@ const Accounts = () => {
                 </button>
                 <button
                   onClick={handleSaveAccount}
-                  disabled={loading}
+                  disabled={loading || contactCheckingUniqueness}
                   className="w-full rounded-2xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                 >
                   {loading ? 'Saving...' : editingAccount ? 'Save Changes' : 'Create Account'}

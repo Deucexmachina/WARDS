@@ -8,10 +8,11 @@ import requests
 from sqlalchemy.orm import Session
 
 from database.models import Admin, Branch, BranchStaff, CitizenUser
-from utils.field_crypto import find_citizen_by_email, find_citizen_by_tin, hash_optional_value
+from utils.field_crypto import find_citizen_by_contact_number, find_citizen_by_email, find_citizen_by_tin, hash_optional_value
 
 
 DUPLICATE_EMAIL_MESSAGE = "This email has already been used."
+DUPLICATE_CONTACT_NUMBER_MESSAGE = "This contact number is unavailable. Please enter a different contact number."
 EMAIL_INVALID_MESSAGE = "Please enter a valid email address."
 PASSWORD_INVALID_MESSAGE = (
     "Password must be more than 12 characters long and include at least one uppercase letter, "
@@ -226,6 +227,20 @@ def ensure_email_is_unique(
     citizen_match = find_citizen_by_email(db, CitizenUser, email)
     if citizen_match and (exclude_citizen_id is None or citizen_match.id != exclude_citizen_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=DUPLICATE_EMAIL_MESSAGE)
+
+
+def ensure_contact_number_is_unique(
+    db: Session,
+    contact_number: str,
+    *,
+    exclude_citizen_id: Optional[int] = None,
+):
+    citizen_match = find_citizen_by_contact_number(db, CitizenUser, contact_number)
+    if citizen_match and (exclude_citizen_id is None or citizen_match.id != exclude_citizen_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=DUPLICATE_CONTACT_NUMBER_MESSAGE,
+        )
 
 
 def ensure_tin_is_unique(

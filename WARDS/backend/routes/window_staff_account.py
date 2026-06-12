@@ -17,6 +17,10 @@ from sqlalchemy.orm import Session
 from typing import Optional
 
 from database.models import ActivityLog, BranchStaff, MFASecret, get_db
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+limiter = Limiter(key_func=get_remote_address)
 from middleware.branch_auth import get_current_branch_staff
 from services.email_service import send_account_change_notification_email
 from utils.field_crypto import find_mfa_secret_record
@@ -24,6 +28,7 @@ from utils.security_validation import (
     ensure_email_is_unique,
     normalize_citizen_full_name,
     normalize_email,
+    normalize_ph_contact_number,
     validate_strong_password,
 )
 
@@ -42,6 +47,11 @@ class UpdateProfileRequest(BaseModel):
     email: str
     contact_number: str
     current_password: str
+
+
+class ContactNumberCheckRequest(BaseModel):
+    contact_number: str
+    exclude_staff_id: Optional[int] = None
 
 
 class ChangePasswordRequest(BaseModel):
@@ -115,9 +125,45 @@ def _save_mfa_secret(db: Session, username: str, secret: str):
     db.commit()
 
 
+DUPLICATE_CONTACT_NUMBER_MESSAGE = "This contact number is unavailable. Please enter a different contact number."
+
+
+def _normalize_contact_safe(value: str) -> str:
+    """Normalize to +63XXXXXXXXXX; return empty string if invalid."""
+    try:
+        return normalize_ph_contact_number(value)
+    except Exception:
+        return ""
+
+
+def _ensure_branch_staff_contact_is_unique(db: Session, contact_number: str, exclude_staff_id: Optional[int] = None):
+    canonical = _normalize_contact_safe(contact_number)
+    if not canonical:
+        return
+    candidates = db.query(BranchStaff)
+    if exclude_staff_id is not None:
+        candidates = candidates.filter(BranchStaff.id != exclude_staff_id)
+    for staff in candidates.all():
+        if _normalize_contact_safe(staff.contact_number or "") == canonical:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=DUPLICATE_CONTACT_NUMBER_MESSAGE)
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+@router.post("/check-contact")
+@limiter.limit("20/minute")
+async def check_branch_staff_contact_availability(request: Request, payload: ContactNumberCheckRequest, db: Session = Depends(get_db)):
+    canonical = _normalize_contact_safe(payload.contact_number or "")
+    if not canonical:
+        return {"available": True}
+    try:
+        _ensure_branch_staff_contact_is_unique(db, canonical, exclude_staff_id=payload.exclude_staff_id)
+        return {"available": True}
+    except HTTPException:
+        return {"available": False, "detail": DUPLICATE_CONTACT_NUMBER_MESSAGE}
+
 
 @router.get("/profile")
 async def get_own_profile(
@@ -159,19 +205,26 @@ async def update_own_profile(
     normalized_full_name = normalize_citizen_full_name(payload.full_name)
     normalized_email = normalize_email(payload.email.strip().lower())
 
+    normalized_contact = _normalize_contact_safe(payload.contact_number)
+    if not normalized_contact:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Contact number must begin with 9 and contain exactly 10 digits.",
+        )
     ensure_email_is_unique(db, normalized_email, exclude_branch_staff_id=current_staff.id)
+    _ensure_branch_staff_contact_is_unique(db, normalized_contact, exclude_staff_id=current_staff.id)
 
     changed_fields = []
     if normalized_full_name != (current_staff.full_name or ""):
         changed_fields.append("Full Name")
     if normalized_email != (current_staff.email or ""):
         changed_fields.append("Email Address")
-    if payload.contact_number.strip() != (current_staff.contact_number or ""):
+    if normalized_contact != _normalize_contact_safe(current_staff.contact_number or ""):
         changed_fields.append("Contact Number")
 
     current_staff.full_name = normalized_full_name
     current_staff.email = normalized_email
-    current_staff.contact_number = payload.contact_number.strip()
+    current_staff.contact_number = normalized_contact
     db.commit()
 
     client_ip = request.client.host if request.client else "unknown"

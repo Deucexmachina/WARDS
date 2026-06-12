@@ -819,6 +819,32 @@ def find_citizen_by_email(db, CitizenUser, email: Optional[str]):
     return None
 
 
+def find_citizen_by_contact_number(db, CitizenUser, contact_number: Optional[str]):
+    normalized = (contact_number or "").strip()
+    if not normalized:
+        return None
+    contact_hash = hash_optional_value(normalized)
+    user = (
+        db.query(CitizenUser)
+        .filter(
+            or_(
+                CitizenUser.contact_number == normalized,
+                CitizenUser.contact_number_hash == contact_hash,
+            )
+        )
+        .first()
+    )
+    if user:
+        return user
+
+    for candidate in db.query(CitizenUser).all():
+        candidate_contact = (get_decrypted_or_raw(candidate, "contact_number") or "").strip()
+        if candidate_contact == normalized:
+            return candidate
+
+    return None
+
+
 def find_citizen_by_tin(db, CitizenUser, tin: Optional[str]):
     normalized = (tin or "").strip()
     if not normalized:

@@ -40,7 +40,9 @@ from utils.field_crypto import apply_citizen_user_security, apply_email_otp_secu
 from utils.privacy_agreement import get_public_privacy_agreement
 from utils.system_settings import get_setting_value
 from utils.security_validation import (
+    DUPLICATE_CONTACT_NUMBER_MESSAGE,
     DUPLICATE_EMAIL_MESSAGE,
+    ensure_contact_number_is_unique,
     ensure_email_is_unique,
     ensure_tin_is_unique,
     format_tin,
@@ -472,6 +474,24 @@ def check_verification_confirm_rate_limit(email: str) -> bool:
     verification_confirm_rate_limits[email_lower].append(current_time)
     return True
 
+class ContactNumberCheckRequest(BaseModel):
+    contact_number: str
+    exclude_citizen_id: Optional[int] = None
+
+
+@router.post("/check-contact")
+@limiter.limit("20/minute")
+async def check_contact_number_availability(request: Request, payload: ContactNumberCheckRequest, db: Session = Depends(get_db)):
+    normalized = normalize_ph_contact_number(payload.contact_number)
+    if not normalized:
+        return {"available": True}
+    try:
+        ensure_contact_number_is_unique(db, normalized, exclude_citizen_id=payload.exclude_citizen_id)
+        return {"available": True}
+    except HTTPException:
+        return {"available": False, "detail": DUPLICATE_CONTACT_NUMBER_MESSAGE}
+
+
 @router.post("/register", response_model=Token)
 @limiter.limit("5/minute;25/day")
 async def register_user(request: Request, user_data: UserRegisterRequest, db: Session = Depends(get_db)):
@@ -504,6 +524,7 @@ async def register_user(request: Request, user_data: UserRegisterRequest, db: Se
             detail="reCAPTCHA verification failed. Please try again.",
         )
     ensure_email_is_unique(db, normalized_email)
+    ensure_contact_number_is_unique(db, normalized_contact_number)
     normalized_tin = None
     if user_data.tin and user_data.tin.strip():
         normalized_tin = normalize_tin(user_data.tin)

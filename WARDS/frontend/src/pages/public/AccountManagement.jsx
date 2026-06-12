@@ -1,3 +1,4 @@
+import axios from 'axios';
 import { useEffect, useMemo, useState } from 'react';
 import { taxpayerAccountAPI, queueAPI } from '../../services/api';
 import { getStoredPublicUser, setStoredPublicUser } from '../../utils/publicSession';
@@ -89,6 +90,7 @@ const AccountManagement = () => {
   const [error, setError] = useState('');
   const [emailError, setEmailError] = useState('');
   const [contactError, setContactError] = useState('');
+  const [contactCheckingUniqueness, setContactCheckingUniqueness] = useState(false);
   const [fullNameError, setFullNameError] = useState('');
   const [confirmProfilePassword, setConfirmProfilePassword] = useState('');
   const [showProfileConfirm, setShowProfileConfirm] = useState(false);
@@ -169,6 +171,29 @@ const AccountManagement = () => {
     }
     setMessage('');
     setError('');
+  };
+
+  const handleContactBlur = async () => {
+    const digits = profile.mobile_number;
+    const formatError = validatePhilippineContactDigits(digits);
+    if (formatError) {
+      return;
+    }
+    const storedUser = getStoredPublicUser();
+    setContactCheckingUniqueness(true);
+    try {
+      const response = await axios.post('http://localhost:8000/api/user/auth/check-contact', {
+        contact_number: `+63${digits}`,
+        exclude_citizen_id: storedUser?.id ?? null,
+      });
+      if (!response.data.available) {
+        setContactError('This contact number is unavailable. Please enter a different contact number.');
+      }
+    } catch {
+      // silently skip — server-side will catch it on save
+    } finally {
+      setContactCheckingUniqueness(false);
+    }
   };
 
   const handleIdentifierChange = (event) => {
@@ -411,7 +436,7 @@ const AccountManagement = () => {
                     </button>
                     <button
                       type="submit"
-                      disabled={savingProfile}
+                      disabled={savingProfile || contactCheckingUniqueness}
                       className="rounded-full bg-[#0f5b83] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#0c4d6f] disabled:opacity-60"
                     >
                       {savingProfile ? 'Saving...' : 'Save Changes'}
@@ -438,6 +463,7 @@ const AccountManagement = () => {
                         name="mobile_number"
                         value={profile.mobile_number}
                         onChange={handleProfileChange}
+                        onBlur={handleContactBlur}
                         disabled={isProfileLocked}
                         inputMode="numeric"
                         maxLength={10}

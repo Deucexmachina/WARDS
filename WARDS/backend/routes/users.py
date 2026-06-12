@@ -10,6 +10,7 @@ from database.models import ActivityLog, Admin, Branch, BranchStaff, CitizenUser
 from middleware.admin_auth import get_current_admin_user
 from utils.field_crypto import apply_citizen_user_security, get_decrypted_or_raw, serialize_citizen_user
 from utils.security_validation import (
+    ensure_contact_number_is_unique,
     ensure_email_is_unique,
     ensure_username_is_unique,
     normalize_email,
@@ -491,7 +492,9 @@ async def update_user(
         if user.role != "public":
             raise HTTPException(status_code=400, detail="Citizen accounts must keep a public role")
         if user.contact_number is not None:
-            account.contact_number = normalize_ph_contact_number(user.contact_number)
+            normalized_contact = normalize_ph_contact_number(user.contact_number)
+            ensure_contact_number_is_unique(db, normalized_contact, exclude_citizen_id=account.id)
+            account.contact_number = normalized_contact
         apply_citizen_user_security(account)
         branch_name = "Public Portal"
 

@@ -1,3 +1,4 @@
+import axios from 'axios';
 import { useEffect, useState } from 'react';
 import { windowStaffAccountAPI } from '../../services/api';
 import WardsPageHero from '../../components/WardsPageHero';
@@ -78,17 +79,19 @@ function EditProfileModal({ open, profile, onClose, onSuccess }) {
   const [password, setPassword] = useState('');
   const [passwordError, setPasswordError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [contactCheckingUniqueness, setContactCheckingUniqueness] = useState(false);
 
   useEffect(() => {
     if (open && profile) {
       setForm({
         full_name: profile.full_name || '',
         email: profile.email || '',
-        contact_number: profile.contact_number || '',
+        contact_number: normalizePhilippineContactDigits(profile.contact_number || ''),
       });
       setErrors({});
       setPassword('');
       setPasswordError('');
+      setContactCheckingUniqueness(false);
       setStep('edit');
     }
   }, [open, profile]);
@@ -96,6 +99,12 @@ function EditProfileModal({ open, profile, onClose, onSuccess }) {
   const set = (field) => (e) => {
     setForm((prev) => ({ ...prev, [field]: e.target.value }));
     setErrors((prev) => ({ ...prev, [field]: '' }));
+  };
+
+  const handleContactChange = (e) => {
+    const digits = normalizePhilippineContactDigits(e.target.value);
+    setForm((prev) => ({ ...prev, contact_number: digits }));
+    setErrors((prev) => ({ ...prev, contact_number: '' }));
   };
 
   const validateEdit = () => {
@@ -114,9 +123,33 @@ function EditProfileModal({ open, profile, onClose, onSuccess }) {
     return e;
   };
 
+  const handleContactBlur = async () => {
+    const digits = normalizePhilippineContactDigits(form.contact_number);
+    const formatError = validatePhilippineContactDigits(digits);
+    if (formatError || !digits) return;
+    setContactCheckingUniqueness(true);
+    try {
+      const storedStaff = JSON.parse(localStorage.getItem('branchUser') || '{}');
+      const response = await axios.post('http://localhost:8000/api/branch/account/check-contact', {
+        contact_number: `+63${digits}`,
+        exclude_staff_id: storedStaff?.id ?? null,
+      });
+      if (!response.data.available) {
+        setErrors((prev) => ({ ...prev, contact_number: 'This contact number is unavailable. Please enter a different contact number.' }));
+      }
+    } catch {
+      // silently skip — server-side enforces on save
+    } finally {
+      setContactCheckingUniqueness(false);
+    }
+  };
+
   const handleSaveClick = (ev) => {
     ev.preventDefault();
     const errs = validateEdit();
+    if (errors.contact_number && !errs.contact_number) {
+      errs.contact_number = errors.contact_number;
+    }
     if (Object.keys(errs).length) { setErrors(errs); return; }
     setStep('confirm');
   };
@@ -127,20 +160,19 @@ function EditProfileModal({ open, profile, onClose, onSuccess }) {
 
     setSaving(true);
     try {
-      const contactDigits = form.contact_number.trim()
-        ? normalizePhilippineContactDigits(form.contact_number)
-        : '';
+      const contactDigits = normalizePhilippineContactDigits(form.contact_number);
+      const contactFull = contactDigits ? `+63${contactDigits}` : '';
       const res = await windowStaffAccountAPI.updateProfile({
         full_name: form.full_name.trim(),
         email: form.email.trim(),
-        contact_number: contactDigits || null,
+        contact_number: contactFull || null,
         current_password: password,
       });
       onSuccess(
         {
           full_name: form.full_name.trim(),
           email: form.email.trim(),
-          contact_number: contactDigits || '',
+          contact_number: contactFull,
         },
         res?.data?.email_sent,
       );
@@ -149,9 +181,11 @@ function EditProfileModal({ open, profile, onClose, onSuccess }) {
       if (detail.toLowerCase().includes('incorrect') || detail.toLowerCase().includes('password')) {
         setPasswordError('The password you entered is incorrect. Please try again.');
       } else if (detail.toLowerCase().includes('email')) {
-        // Go back to edit step to show email error
         setStep('edit');
         setErrors({ email: detail });
+      } else if (detail.toLowerCase().includes('contact number')) {
+        setStep('edit');
+        setErrors({ contact_number: detail });
       } else {
         setPasswordError(detail || 'An error occurred. Please try again.');
       }
@@ -164,10 +198,10 @@ function EditProfileModal({ open, profile, onClose, onSuccess }) {
 
   // ---- Step: Confirm Changes ----
   if (step === 'confirm') {
-    const prevContact = profile?.contact_number || '—';
-    const nextContact = form.contact_number.trim()
-      ? normalizePhilippineContactDigits(form.contact_number) || '—'
-      : '—';
+    const prevDigits = normalizePhilippineContactDigits(profile?.contact_number || '');
+    const prevContact = prevDigits ? `+63${prevDigits}` : '—';
+    const nextDigits = normalizePhilippineContactDigits(form.contact_number);
+    const nextContact = nextDigits ? `+63${nextDigits}` : '—';
 
     const fields = [
       {
@@ -308,21 +342,32 @@ function EditProfileModal({ open, profile, onClose, onSuccess }) {
       <form onSubmit={handleSaveClick} className="space-y-4">
         <Field label="Full Name" id="ep-name" value={form.full_name} onChange={set('full_name')} error={errors.full_name} />
         <Field label="Email Address" id="ep-email" type="email" value={form.email} onChange={set('email')} error={errors.email} />
-        <Field
-          label="Contact Number"
-          id="ep-contact"
-          value={form.contact_number}
-          onChange={set('contact_number')}
-          error={errors.contact_number}
-          hint="Philippine mobile number — digits only, starting with 9 (e.g. 9171234567)."
-        />
+        <div>
+          <label htmlFor="ep-contact" className="block text-sm font-semibold text-gray-700 mb-1">Contact Number</label>
+          <div className={`flex overflow-hidden rounded-lg border transition focus-within:ring-2 focus-within:ring-primary/30 ${errors.contact_number ? 'border-red-400 bg-red-50 focus-within:border-red-400' : 'border-gray-300 bg-white focus-within:border-primary'}`}>
+            <span className="flex items-center border-r border-gray-200 bg-gray-50 px-3 text-sm font-semibold text-gray-500">+63</span>
+            <input
+              id="ep-contact"
+              type="tel"
+              value={form.contact_number}
+              onChange={handleContactChange}
+              onBlur={handleContactBlur}
+              inputMode="numeric"
+              maxLength={10}
+              placeholder="9171234567"
+              className="w-full bg-transparent px-4 py-2.5 text-sm text-gray-900 outline-none"
+            />
+          </div>
+          {!errors.contact_number && <p className="mt-1 text-xs text-gray-400">Philippine mobile number — digits only, starting with 9 (e.g. 9171234567).</p>}
+          {errors.contact_number && <p className="mt-1 text-xs text-red-500">{errors.contact_number}</p>}
+        </div>
         <div className="flex justify-end gap-3 pt-2">
           <button type="button" onClick={onClose}
             className="px-5 py-2.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-sm font-semibold text-gray-700 transition">
             Cancel
           </button>
-          <button type="submit"
-            className="px-5 py-2.5 rounded-lg bg-primary hover:bg-secondary text-white text-sm font-semibold transition">
+          <button type="submit" disabled={contactCheckingUniqueness}
+            className="px-5 py-2.5 rounded-lg bg-primary hover:bg-secondary text-white text-sm font-semibold transition disabled:opacity-60">
             Save Changes
           </button>
         </div>
@@ -766,7 +811,9 @@ const WindowStaffAccount = () => {
           </div>
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-1">Contact Number</p>
-            <p className="text-sm font-medium text-gray-800">{profile?.contact_number || '—'}</p>
+            <p className="text-sm font-medium text-gray-800">
+              {profile?.contact_number ? `+63${normalizePhilippineContactDigits(profile.contact_number)}` : '—'}
+            </p>
           </div>
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-1">Service Window</p>
