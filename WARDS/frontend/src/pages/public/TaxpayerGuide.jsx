@@ -57,23 +57,21 @@ const TaxpayerGuide = () => {
       {/* Hero Section */}
       <div className="bg-primary py-16">
         <div className="container mx-auto max-w-6xl px-4">
-          <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
-            <div className="max-w-2xl">
-              <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-1.5 text-sm font-medium text-blue-100">
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
-                </svg>
-                {language === 'en' ? 'Taxpayer Resource Center' : 'Sentro ng Impormasyon para sa Nagbabayad ng Buwis'}
-              </div>
-              <h1 className="mb-3 text-4xl font-bold text-white md:text-5xl">
-                {language === 'en' ? (pageContent?.page_title_en || 'Taxpayer Guide') : (pageContent?.page_title_tl || 'Gabay para sa Nagbabayad ng Buwis')}
-              </h1>
-              <p className="text-lg leading-relaxed text-blue-100">
-                {language === 'en'
-                  ? (pageContent?.page_subtitle_en || 'Learn the step-by-step procedures for using WARDS services and completing your transactions efficiently.')
-                  : (pageContent?.page_subtitle_tl || 'Alamin ang mga hakbang-hakbang na pamamaraan sa paggamit ng mga serbisyo ng WARDS at mabisang pagkumpleto ng inyong mga transaksyon.')}
-              </p>
+          <div className="mx-auto max-w-2xl text-center">
+            <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-1.5 text-sm font-medium text-blue-100">
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
+              </svg>
+              {language === 'en' ? 'Taxpayer Resource Center' : 'Sentro ng Impormasyon para sa Nagbabayad ng Buwis'}
             </div>
+            <h1 className="mb-3 text-4xl font-bold text-white md:text-5xl">
+              {language === 'en' ? (pageContent?.page_title_en || 'Taxpayer Guide') : (pageContent?.page_title_tl || 'Gabay para sa Nagbabayad ng Buwis')}
+            </h1>
+            <p className="text-lg leading-relaxed text-blue-100">
+              {language === 'en'
+                ? (pageContent?.page_subtitle_en || 'Learn the step-by-step procedures for using WARDS services and completing your transactions efficiently.')
+                : (pageContent?.page_subtitle_tl || 'Alamin ang mga hakbang-hakbang na pamamaraan sa paggamit ng mga serbisyo ng WARDS at mabisang pagkumpleto ng inyong mga transaksyon.')}
+            </p>
           </div>
         </div>
       </div>
