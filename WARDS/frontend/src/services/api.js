@@ -430,6 +430,7 @@ export const accountAPI = {
   update: (id, data) => api.put(`/accounts/${id}`, data),
   delete: (id, role, data, config = {}) => api.delete(`/accounts/${id}`, { params: { role }, data: data, ...config }),
   deactivate: (id, role, data, config = {}) => api.put(`/accounts/${id}/deactivate`, data, { params: { role }, ...config }),
+  activate: (id, role, data, config = {}) => api.put(`/accounts/${id}/activate`, data, { params: { role }, ...config }),
 };
 
 export const ocrAPI = {

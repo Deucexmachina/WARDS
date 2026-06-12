@@ -538,6 +538,37 @@ async def deactivate_user(
     return {"message": "User deactivated successfully"}
 
 
+@router.put("/{user_id}/activate")
+async def activate_user(
+    user_id: int,
+    role: Optional[str] = Query(None),
+    payload: ProtectedAccountAction = None,
+    current_user: Admin | BranchStaff = Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    require_accounts_access(current_user)
+
+    if payload is None:
+        raise HTTPException(status_code=401, detail=f"Incorrect {protected_admin_label(current_user)} password")
+    verify_protected_account_password(current_user, payload.current_admin_password)
+
+    account = find_account(db, user_id, role)
+    if not account:
+        raise HTTPException(status_code=404, detail="User not found")
+    ensure_manageable_account(current_user, account, db)
+
+    account.status = "Active"
+    db.add(ActivityLog(
+        action="User Account Activated",
+        user=current_user.username,
+        details=f"Activated account: {getattr(account, 'username', None) or getattr(account, 'full_name', None) or account.email}",
+        type="admin",
+    ))
+    db.commit()
+
+    return {"message": "User activated successfully"}
+
+
 @router.delete("/{user_id}")
 async def delete_user(
     user_id: int,

@@ -240,6 +240,29 @@ async def deactivate_user(
     return {"message": "User deactivated successfully"}
 
 
+@router.put("/users/{role}/{user_id}/activate")
+async def activate_user(
+    role: str,
+    user_id: int,
+    current_admin=Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    ensure_admin_role(current_admin)
+    role = normalize_role(role)
+    user = find_user(db, role, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.status = "Active"
+    db.add(ActivityLog(
+        action="Admin User Activated",
+        user=current_admin.username,
+        details=f"Activated {role} account for {user.email}",
+        type="admin_user",
+    ))
+    db.commit()
+    return {"message": "User activated successfully"}
+
+
 @router.delete("/users/{role}/{user_id}")
 async def delete_user(
     role: str,

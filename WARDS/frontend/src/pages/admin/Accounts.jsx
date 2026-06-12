@@ -434,6 +434,16 @@ const Accounts = () => {
     });
   };
 
+  const handleActivateAccount = (account) => {
+    setError('');
+    setSuccessMessage('');
+    setAuthModal({
+      mode: 'activate',
+      account,
+      password: '',
+    });
+  };
+
   const handleDeleteAccount = (account) => {
     setError('');
     setSuccessMessage('');
@@ -494,6 +504,15 @@ const Accounts = () => {
         });
         await fetchAccounts(pagination.page);
         setSuccessMessage('Account deactivated successfully.');
+        window.dispatchEvent(new Event('wards-accounts-refresh'));
+      }
+
+      if (authModal.mode === 'activate' && authModal.account) {
+        await accountAPI.activate(authModal.account.id, authModal.account.role, {
+          current_admin_password: authModal.password,
+        });
+        await fetchAccounts(pagination.page);
+        setSuccessMessage('Account activated successfully.');
         window.dispatchEvent(new Event('wards-accounts-refresh'));
       }
 
@@ -626,6 +645,14 @@ const Accounts = () => {
                     className="rounded-lg bg-yellow-500 px-3 py-1 font-semibold text-white transition duration-300 hover:bg-yellow-600"
                   >
                     Deactivate
+                  </button>
+                )}
+                {account.status === 'Inactive' && (
+                  <button
+                    onClick={() => handleActivateAccount(account)}
+                    className="rounded-lg bg-green-500 px-3 py-1 font-semibold text-white transition duration-300 hover:bg-green-600"
+                  >
+                    Activate
                   </button>
                 )}
                 <button
@@ -1075,7 +1102,7 @@ const Accounts = () => {
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Protected Action</p>
                 <h3 className="mt-2 text-2xl font-bold text-slate-900">
-                  {authModal.mode === 'edit' ? 'Verify Account Update' : authModal.mode === 'deactivate' ? 'Verify Account Deactivation' : 'Verify Account Deletion'}
+                  {authModal.mode === 'edit' ? 'Verify Account Update' : authModal.mode === 'deactivate' ? 'Verify Account Deactivation' : authModal.mode === 'activate' ? 'Verify Account Activation' : 'Verify Account Deletion'}
                 </h3>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
                   Review the change, then confirm your identity to proceed.
@@ -1151,7 +1178,7 @@ const Accounts = () => {
                   disabled={loading}
                   className="w-full rounded-2xl bg-red-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                 >
-                  {loading ? 'Verifying...' : `Confirm ${authModal.mode === 'edit' ? 'Update' : authModal.mode === 'deactivate' ? 'Deactivation' : 'Deletion'}`}
+                  {loading ? 'Verifying...' : `Confirm ${authModal.mode === 'edit' ? 'Update' : authModal.mode === 'deactivate' ? 'Deactivation' : authModal.mode === 'activate' ? 'Activation' : 'Deletion'}`}
                 </button>
               </div>
             </div>
