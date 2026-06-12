@@ -5,6 +5,7 @@ import ReCAPTCHA from 'react-google-recaptcha';
 
 import { getPortalHome, getStoredPortal, persistSession } from '../../utils/auth';
 import { AUTH_GRADIENTS } from '../../utils/authTheme';
+import cityHall from '../../assets/branding/qc_city_hall.jpg';
 
 const API_URL = 'http://localhost:8000';
 const RECAPTCHA_SITE_KEY = '6LdOdsAsAAAAAKW-mZvEfaesLvdAwCm_SnZoiirK';
@@ -15,27 +16,51 @@ const LOCKOUT_DURATION_MS = 2 * 60 * 1000;
 const portalCopy = {
   public: {
     title: 'Citizen Access',
-    subtitle: 'Email, password, and Microsoft Authenticator MFA',
+    badge: 'Citizen Portal',
+    subtitle: 'Sign in to your citizen account',
     accent: AUTH_GRADIENTS.public,
-    button: 'bg-green-600 hover:bg-green-700',
+    badgeBg: 'bg-green-100 text-green-700',
+    button: 'bg-green-600 hover:bg-green-700 shadow-green-200',
+    focusRing: 'focus:ring-green-500',
+    overlay: 'from-green-900/75 to-emerald-700/55',
+    captionColor: 'text-green-200',
+    captionBody: 'text-green-100',
   },
   admin: {
     title: 'Main Office Admin',
+    badge: 'Admin Portal',
     subtitle: 'MFA required for secured access',
     accent: AUTH_GRADIENTS.admin,
-    button: 'bg-blue-600 hover:bg-blue-700',
+    badgeBg: 'bg-blue-100 text-blue-700',
+    button: 'bg-blue-600 hover:bg-blue-700 shadow-blue-200',
+    focusRing: 'focus:ring-blue-500',
+    overlay: 'from-blue-900/75 to-blue-700/55',
+    captionColor: 'text-blue-200',
+    captionBody: 'text-blue-100',
   },
   branch: {
     title: 'Branch Office',
+    badge: 'Branch Portal',
     subtitle: 'MFA required for staff and branch admins',
     accent: AUTH_GRADIENTS.branch,
-    button: 'bg-purple-600 hover:bg-purple-700',
+    badgeBg: 'bg-purple-100 text-purple-700',
+    button: 'bg-purple-600 hover:bg-purple-700 shadow-purple-200',
+    focusRing: 'focus:ring-purple-500',
+    overlay: 'from-purple-900/75 to-indigo-700/55',
+    captionColor: 'text-purple-200',
+    captionBody: 'text-purple-100',
   },
   default: {
     title: 'WARDS Login',
-    subtitle: '',
+    badge: 'Portal Login',
+    subtitle: 'Sign in to continue',
     accent: AUTH_GRADIENTS.default,
-    button: 'bg-slate-900 hover:bg-slate-800',
+    badgeBg: 'bg-slate-100 text-slate-700',
+    button: 'bg-slate-900 hover:bg-slate-800 shadow-slate-300',
+    focusRing: 'focus:ring-slate-500',
+    overlay: 'from-slate-900/75 to-teal-800/55',
+    captionColor: 'text-slate-300',
+    captionBody: 'text-slate-200',
   },
 };
 
@@ -545,222 +570,220 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
   const showPasswordToggle = step === 'credentials' && Boolean(password);
 
   return (
-    <div className={`min-h-screen bg-gradient-to-br ${copy.accent} flex items-center justify-center p-4`}>
-      <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-8">
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">{copy.title}</h1>
-          <p className="text-gray-600 mt-2">{copy.subtitle}</p>
-        </div>
+    <div className={`min-h-screen bg-gradient-to-br ${copy.accent} flex items-center justify-center p-6`}>
+      <div className="w-full max-w-4xl bg-white rounded-3xl shadow-2xl overflow-hidden flex min-h-[560px]">
 
-        {error && (
-          <div className="mb-6 bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl">
-            <p className="text-sm font-semibold">{error}</p>
+        {/* Left — Login Form */}
+        <div className="flex flex-col justify-center w-full md:w-1/2 px-10 py-12">
+          <div className="mb-8">
+            <span className={`inline-block text-xs font-semibold tracking-widest uppercase px-3 py-1 rounded-full mb-3 ${copy.badgeBg}`}>
+              {copy.badge}
+            </span>
+            <h1 className="text-3xl font-bold text-gray-900 leading-tight">Welcome back</h1>
+            <p className="text-gray-500 text-sm mt-1">{copy.subtitle}</p>
           </div>
-        )}
 
-        {notice && (
-          <div className={`mb-6 p-4 rounded-xl border ${noticeType === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-blue-50 border-blue-200 text-blue-700'}`}>
-            <p className="text-sm font-semibold">{notice}</p>
-          </div>
-        )}
-
-        {step === 'credentials' && (
-          <form onSubmit={handleCredentialsSubmit} noValidate className="space-y-5">
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">{getIdentifierLabel()}</label>
-              <input
-                type="text"
-                value={identifier}
-                onChange={(event) => {
-                  setIdentifier(event.target.value);
-                  setIdentifierError(validateIdentifier(event.target.value));
-                  setError('');
-                }}
-                aria-invalid={identifierError ? 'true' : 'false'}
-                className={`w-full px-4 py-3 border-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${identifierError ? 'border-red-300 bg-red-50 text-red-900 focus:ring-red-500/20' : 'border-gray-200'}`}
-                placeholder="name@example.com"
-                required
-                autoComplete="email"
-              />
-              {identifierError ? (
-                <p className="mt-2 text-sm font-semibold text-red-600">{identifierError}</p>
-              ) : null}
+          {error && (
+            <div className="mb-5 flex items-start gap-3 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">
+              <svg className="w-4 h-4 mt-0.5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm-.75-11.25a.75.75 0 011.5 0v4.5a.75.75 0 01-1.5 0v-4.5zm.75 7.5a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+              </svg>
+              <span>{error}</span>
             </div>
+          )}
 
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">Password</label>
-              <div className="relative">
+          {notice && (
+            <div className={`mb-5 px-4 py-3 rounded-xl border text-sm ${noticeType === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-blue-50 border-blue-200 text-blue-700'}`}>
+              <p className="font-semibold">{notice}</p>
+            </div>
+          )}
+
+          {step === 'credentials' && (
+            <form onSubmit={handleCredentialsSubmit} noValidate className="space-y-5">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">{getIdentifierLabel()}</label>
                 <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
+                  type="text"
+                  value={identifier}
                   onChange={(event) => {
-                    setPassword(event.target.value);
-                    setPasswordError(validatePassword(event.target.value));
+                    setIdentifier(event.target.value);
+                    setIdentifierError(validateIdentifier(event.target.value));
                     setError('');
                   }}
-                  aria-invalid={passwordError ? 'true' : 'false'}
-                  className={`w-full border-2 rounded-xl focus:outline-none focus:ring-2 focus:border-transparent ${
-                    showPasswordToggle ? 'px-4 py-3 pr-12' : 'px-4 py-3'
-                  } ${passwordError ? 'border-red-300 bg-red-50 text-red-900 focus:ring-red-500/20' : 'border-gray-200 focus:ring-blue-500'}`}
+                  aria-invalid={identifierError ? 'true' : 'false'}
+                  className={`w-full px-4 py-2.5 text-sm border rounded-xl bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:border-transparent transition ${copy.focusRing} ${identifierError ? 'border-red-400 bg-red-50' : 'border-gray-200'}`}
+                  placeholder="name@example.com"
                   required
-                  autoComplete="current-password"
+                  autoComplete="email"
                 />
-                {showPasswordToggle ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((current) => !current)}
-                    className="absolute inset-y-0 right-0 flex items-center px-4 text-gray-500 transition hover:text-gray-700"
-                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                {identifierError && <p className="mt-1.5 text-xs font-medium text-red-600">{identifierError}</p>}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Password</label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(event) => {
+                      setPassword(event.target.value);
+                      setPasswordError(validatePassword(event.target.value));
+                      setError('');
+                    }}
+                    aria-invalid={passwordError ? 'true' : 'false'}
+                    className={`w-full px-4 py-2.5 text-sm border rounded-xl bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:border-transparent transition ${copy.focusRing} ${showPasswordToggle ? 'pr-12' : ''} ${passwordError ? 'border-red-400 bg-red-50' : 'border-gray-200'}`}
+                    placeholder="••••••••"
+                    required
+                    autoComplete="current-password"
+                  />
+                  {showPasswordToggle && (
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((current) => !current)}
+                      className="absolute inset-y-0 right-0 flex items-center px-3 text-gray-400 hover:text-gray-600 transition"
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      <EyeIcon open={showPassword} />
+                    </button>
+                  )}
+                </div>
+                {passwordError && <p className="mt-1.5 text-xs font-medium text-red-600">{passwordError}</p>}
+                <div className="mt-2 text-right">
+                  <Link
+                    to={`/forgot-password${getActivePortal() ? `?portal=${getActivePortal()}` : ''}`}
+                    className="text-xs font-semibold text-blue-600 hover:text-blue-700"
                   >
-                    <EyeIcon open={showPassword} />
-                  </button>
-                ) : null}
+                    Forgot Password?
+                  </Link>
+                </div>
               </div>
-              {passwordError ? (
-                <p className="mt-2 text-sm font-semibold text-red-600">{passwordError}</p>
-              ) : null}
-              <div className="mt-2 text-right">
-                <Link
-                  to={`/forgot-password${getActivePortal() ? `?portal=${getActivePortal()}` : ''}`}
-                  className="text-sm font-semibold text-blue-600 hover:text-blue-700"
-                >
-                  Forgot Password?
-                </Link>
-              </div>
-            </div>
 
-            {requiresCaptcha && (
-              <div className="flex justify-center">
-                <ReCAPTCHA sitekey={RECAPTCHA_SITE_KEY} onChange={setRecaptchaToken} />
-              </div>
-            )}
+              {requiresCaptcha && (
+                <div className="flex justify-center">
+                  <ReCAPTCHA sitekey={RECAPTCHA_SITE_KEY} onChange={setRecaptchaToken} />
+                </div>
+              )}
 
-            <button
-              type="submit"
-              disabled={loading || (requiresCaptcha && !recaptchaToken)}
-              className={`w-full ${copy.button} text-white py-3 rounded-xl font-semibold transition disabled:opacity-50`}
-            >
-              {loading ? 'Checking account...' : 'Continue'}
-            </button>
-
-            {showMfaSetup && (
-              <button
-                type="button"
-                onClick={handleSetupMfa}
-                disabled={loading}
-                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded-xl font-semibold transition disabled:opacity-50"
-              >
-                Set Up MFA
-              </button>
-            )}
-          </form>
-        )}
-
-        {step === 'totp' && (
-          <form onSubmit={handleTotpSubmit} noValidate className="space-y-5">
-            <div className="text-center">
-              <p className="text-sm text-gray-600">Enter the 6-digit code from your authenticator app.</p>
-              <p className="mt-2 text-xs text-gray-500">
-                Use the current code from Microsoft Authenticator. If the code fails, check that your device time is set automatically and try again.
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">Authenticator Code</label>
-              <input
-                type="text"
-                value={totpCode}
-                onChange={(event) => {
-                  const nextValue = event.target.value.replace(/\D/g, '').slice(0, 6);
-                  setTotpCode(nextValue);
-                  setTotpError(validateTotpCode(nextValue));
-                  setError('');
-                }}
-                aria-invalid={totpError ? 'true' : 'false'}
-                className={`w-full px-4 py-3 border-2 rounded-xl text-center text-2xl tracking-[0.4em] font-mono focus:outline-none focus:ring-2 focus:border-transparent ${totpError ? 'border-red-300 bg-red-50 text-red-900 focus:ring-red-500/20' : 'border-gray-200 focus:ring-blue-500'}`}
-                placeholder="000000"
-                required
-                maxLength="6"
-                autoComplete="one-time-code"
-              />
-              {totpError ? (
-                <p className="mt-2 text-sm font-semibold text-red-600">{totpError}</p>
-              ) : null}
-            </div>
-
-            {requiresCaptcha && (
-              <div className="flex justify-center">
-                <ReCAPTCHA sitekey={RECAPTCHA_SITE_KEY} onChange={setRecaptchaToken} />
-              </div>
-            )}
-
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setStep('credentials');
-                  setTotpCode('');
-                }}
-                className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 py-3 rounded-xl font-semibold transition"
-              >
-                Back
-              </button>
               <button
                 type="submit"
-                disabled={loading || totpCode.length !== 6 || (requiresCaptcha && !recaptchaToken)}
-                className={`flex-1 ${copy.button} text-white py-3 rounded-xl font-semibold transition disabled:opacity-50`}
+                disabled={loading || (requiresCaptcha && !recaptchaToken)}
+                className={`w-full ${copy.button} text-white py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 shadow-md mt-1`}
               >
-                {loading ? 'Signing in...' : 'Login'}
+                {loading ? 'Checking account…' : 'Continue'}
+              </button>
+
+              {showMfaSetup && (
+                <button
+                  type="button"
+                  onClick={handleSetupMfa}
+                  disabled={loading}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 shadow-md shadow-emerald-200"
+                >
+                  Set Up MFA
+                </button>
+              )}
+
+              <div className="pt-2 text-center space-y-2">
+                <p className="text-xs text-gray-500">
+                  Don't have an account?{' '}
+                  <Link to="/user/register" className="text-green-600 font-semibold hover:text-green-700">
+                    Register as a citizen
+                  </Link>
+                </p>
+                <button
+                  type="button"
+                  onClick={() => navigate('/')}
+                  className="text-xs text-gray-400 hover:text-gray-600 font-medium transition-colors"
+                >
+                  ← Back to Home
+                </button>
+              </div>
+            </form>
+          )}
+
+          {step === 'totp' && (
+            <form onSubmit={handleTotpSubmit} noValidate className="space-y-5">
+              <div className={`text-center px-4 py-3 rounded-xl ${copy.badgeBg} bg-opacity-60`}>
+                <p className="text-xs font-medium">Open Microsoft Authenticator and enter the 6-digit code</p>
+                <p className="mt-1 text-xs opacity-75">If the code fails, check your device time is set automatically.</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Authenticator Code</label>
+                <input
+                  type="text"
+                  value={totpCode}
+                  onChange={(event) => {
+                    const nextValue = event.target.value.replace(/\D/g, '').slice(0, 6);
+                    setTotpCode(nextValue);
+                    setTotpError(validateTotpCode(nextValue));
+                    setError('');
+                  }}
+                  aria-invalid={totpError ? 'true' : 'false'}
+                  className={`w-full px-4 py-3 border rounded-xl text-center text-2xl tracking-[0.5em] font-mono bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:border-transparent transition ${copy.focusRing} ${totpError ? 'border-red-400 bg-red-50' : 'border-gray-200'}`}
+                  placeholder="000000"
+                  required
+                  maxLength="6"
+                  autoComplete="one-time-code"
+                />
+                {totpError && <p className="mt-1.5 text-xs font-medium text-red-600">{totpError}</p>}
+              </div>
+
+              {requiresCaptcha && (
+                <div className="flex justify-center">
+                  <ReCAPTCHA sitekey={RECAPTCHA_SITE_KEY} onChange={setRecaptchaToken} />
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => { setStep('credentials'); setTotpCode(''); }}
+                  className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-semibold transition-colors"
+                >
+                  Back
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading || totpCode.length !== 6 || (requiresCaptcha && !recaptchaToken)}
+                  className={`flex-1 ${copy.button} text-white py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 shadow-md`}
+                >
+                  {loading ? 'Signing in…' : 'Login'}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {step === 'setup' && mfaSetupData && (
+            <div className="space-y-4">
+              <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 px-4 py-3 rounded-xl text-sm">
+                Scan this QR code in Microsoft Authenticator, then sign in again.
+              </div>
+              <div className="flex justify-center">
+                <img src={mfaSetupData.qr_code} alt="MFA QR code" className="w-44 h-44 rounded-xl border-4 border-white shadow-lg object-contain" />
+              </div>
+              <code className="block bg-slate-100 text-slate-700 p-3 rounded-xl text-xs break-all">{mfaSetupData.manual_entry_key}</code>
+              <button
+                type="button"
+                onClick={() => { setStep('credentials'); setMfaSetupData(null); setError(''); }}
+                className={`w-full ${copy.button} text-white py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-md`}
+              >
+                Return to Login
               </button>
             </div>
-          </form>
-        )}
-
-        {step === 'setup' && mfaSetupData && (
-          <div className="space-y-5">
-            <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 p-4 rounded-xl">
-              <p className="text-sm font-semibold">Scan this QR code in Microsoft Authenticator, then sign in again.</p>
-            </div>
-
-            <div className="flex justify-center">
-              <img src={mfaSetupData.qr_code} alt="MFA QR code" className="w-56 h-56 rounded-xl border-4 border-white shadow-lg" />
-            </div>
-
-            <code className="block bg-slate-100 text-slate-700 p-3 rounded-xl text-xs break-all">
-              {mfaSetupData.manual_entry_key}
-            </code>
-
-            <button
-              type="button"
-              onClick={() => {
-                setStep('credentials');
-                setMfaSetupData(null);
-                setError('');
-              }}
-              className={`w-full ${copy.button} text-white py-3 rounded-xl font-semibold transition`}
-            >
-              Return to Login
-            </button>
-          </div>
-        )}
-
-        <div className="mt-8 text-center space-y-3">
-          <p className="text-sm text-gray-600">
-            Public users can still create an account here.
-          </p>
-          <Link to="/user/register" className="text-green-600 hover:text-green-700 font-semibold text-sm">
-            Register as a citizen
-          </Link>
-          <div>
-            <button
-              type="button"
-              onClick={() => navigate('/')}
-              className="text-sm text-gray-500 hover:text-gray-700 font-semibold"
-            >
-              Back to Home
-            </button>
-          </div>
+          )}
         </div>
+
+        {/* Right — City Hall Image */}
+        <div className="hidden md:block w-1/2 relative">
+          <img
+            src={cityHall}
+            alt="Quezon City Hall"
+            className="absolute inset-0 w-full h-full object-cover"
+          />
+          <div className={`absolute inset-0 bg-gradient-to-br ${copy.overlay}`} />
+        </div>
+
       </div>
     </div>
   );

@@ -5,6 +5,7 @@ import ReCAPTCHA from 'react-google-recaptcha';
 import { getBranchPortalPath } from '../../utils/auth';
 import { getEmailValidationMessage } from '../../utils/validation';
 import PasswordField from '../../components/PasswordField';
+import cityHall from '../../assets/branding/qc_city_hall.jpg';
 
 const API_URL = 'http://localhost:8000';
 const RECAPTCHA_SITE_KEY = '6LdOdsAsAAAAAKW-mZvEfaesLvdAwCm_SnZoiirK';
@@ -77,81 +78,105 @@ const UserLogin = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-600 via-green-700 to-green-800 flex items-center justify-center p-4">
-      <div className="relative z-10 bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full">
-        <div className="text-center mb-8">
-          <h2 className="text-3xl font-bold text-gray-800">Public Portal Login</h2>
-          <p className="text-gray-600 mt-2">Sign in to continue</p>
-        </div>
+    <div className="min-h-screen bg-gradient-to-br from-green-950 via-green-900 to-emerald-800 flex items-center justify-center p-6">
+      <div className="w-full max-w-4xl bg-white rounded-3xl shadow-2xl overflow-hidden flex min-h-[520px]">
 
-        {error && (
-          <div className="mb-6 bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded">
-            <p className="text-sm font-semibold">{error}</p>
-          </div>
-        )}
-
-        <form onSubmit={handleLogin} className="space-y-6">
-          <div>
-            <label className="block text-gray-700 font-semibold mb-2">Email Address</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(event) => {
-                setEmail(event.target.value);
-                setEmailError(getEmailValidationMessage(event.target.value));
-              }}
-              className={`w-full px-4 py-3 border-2 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent ${
-                emailError ? 'border-red-500 bg-red-50' : 'border-gray-300'
-              }`}
-              required
-              autoComplete="email"
-            />
-            {emailError ? (
-              <p className="mt-2 text-sm font-semibold text-red-600">{emailError}</p>
-            ) : null}
+        {/* Left — Login Form */}
+        <div className="flex flex-col justify-center w-full md:w-1/2 px-10 py-12">
+          {/* Header */}
+          <div className="mb-8">
+            <span className="inline-block bg-green-100 text-green-700 text-xs font-semibold tracking-widest uppercase px-3 py-1 rounded-full mb-3">
+              Citizen Portal
+            </span>
+            <h2 className="text-3xl font-bold text-gray-900 leading-tight">Welcome back</h2>
+            <p className="text-gray-500 text-sm mt-1">Sign in to your account to continue</p>
           </div>
 
-          <div>
-            <label className="block text-gray-700 font-semibold mb-2">Password</label>
-            <PasswordField
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-              required
-              autoComplete="current-password"
-            />
-          </div>
-
-          {requiresCaptcha && (
-            <div className="flex justify-center">
-              <ReCAPTCHA sitekey={RECAPTCHA_SITE_KEY} onChange={setRecaptchaToken} />
+          {error && (
+            <div className="mb-5 flex items-start gap-3 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">
+              <svg className="w-4 h-4 mt-0.5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm-.75-11.25a.75.75 0 011.5 0v4.5a.75.75 0 01-1.5 0v-4.5zm.75 7.5a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+              </svg>
+              <span>{error}</span>
             </div>
           )}
 
-          <button
-            type="submit"
-            disabled={loading || (requiresCaptcha && !recaptchaToken)}
-            className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg font-semibold transition disabled:opacity-50 shadow-lg"
-          >
-            {loading ? 'Signing in...' : 'Login'}
-          </button>
+          <form onSubmit={handleLogin} className="space-y-5">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Email Address</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  setEmailError(getEmailValidationMessage(e.target.value));
+                }}
+                placeholder="you@example.com"
+                className={`w-full px-4 py-2.5 text-sm border rounded-xl bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition ${
+                  emailError ? 'border-red-400 bg-red-50' : 'border-gray-200'
+                }`}
+                required
+                autoComplete="email"
+              />
+              {emailError && (
+                <p className="mt-1.5 text-xs font-medium text-red-600">{emailError}</p>
+              )}
+            </div>
 
-          <div className="text-center space-y-3">
-            <p className="text-gray-600 text-sm">
-              Need a public account?{' '}
-              <Link to="/user/register" className="text-green-600 font-semibold hover:text-green-700">
-                Register here
-              </Link>
-            </p>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Password</label>
+              <PasswordField
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full px-4 py-2.5 text-sm border border-gray-200 rounded-xl bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition"
+                required
+                autoComplete="current-password"
+              />
+            </div>
+
+            {requiresCaptcha && (
+              <div className="flex justify-center">
+                <ReCAPTCHA sitekey={RECAPTCHA_SITE_KEY} onChange={setRecaptchaToken} />
+              </div>
+            )}
+
             <button
-              type="button"
-              onClick={() => navigate('/')}
-              className="text-green-600 hover:text-green-800 text-sm font-semibold"
+              type="submit"
+              disabled={loading || (requiresCaptcha && !recaptchaToken)}
+              className="w-full bg-green-600 hover:bg-green-700 active:bg-green-800 text-white py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 shadow-md shadow-green-200 mt-1"
             >
-              Back to Home
+              {loading ? 'Signing in…' : 'Login'}
             </button>
-          </div>
-        </form>
+
+            <div className="flex flex-col items-center gap-2 pt-1">
+              <p className="text-gray-500 text-sm">
+                Don&apos;t have an account?{' '}
+                <Link to="/user/register" className="text-green-600 font-semibold hover:text-green-700 transition-colors">
+                  Register here
+                </Link>
+              </p>
+              <button
+                type="button"
+                onClick={() => navigate('/')}
+                className="text-sm text-green-600 hover:text-green-800 font-medium transition-colors"
+              >
+                ← Back to Home
+              </button>
+            </div>
+          </form>
+        </div>
+
+        {/* Right — City Hall Image */}
+        <div className="hidden md:block w-1/2 relative">
+          <img
+            src={cityHall}
+            alt="Quezon City Hall"
+            className="absolute inset-0 w-full h-full object-cover"
+          />
+          <div className="absolute inset-0 bg-gradient-to-br from-green-900/70 to-emerald-700/50" />
+        </div>
+
       </div>
     </div>
   );

@@ -4,6 +4,7 @@ import axios from 'axios';
 import ReCAPTCHA from 'react-google-recaptcha';
 import { getBranchPortalPath } from '../../utils/auth';
 import PasswordField from '../../components/PasswordField';
+import cityHall from '../../assets/branding/qc_city_hall.jpg';
 
 const API_URL = 'http://localhost:8000';
 const RECAPTCHA_SITE_KEY = '6LdOdsAsAAAAAKW-mZvEfaesLvdAwCm_SnZoiirK';
@@ -33,7 +34,7 @@ const BranchLoginV2 = () => {
     setError('');
 
     try {
-        const response = await axios.post(`${API_URL}/api/branch/auth/login`, {
+      const response = await axios.post(`${API_URL}/api/branch/auth/login`, {
         email,
         password,
         recaptcha_token: recaptchaToken || undefined,
@@ -106,123 +107,149 @@ const BranchLoginV2 = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-700 via-slate-800 to-indigo-900 flex items-center justify-center p-4">
-      <div className="relative z-10 bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full">
-        <div className="text-center mb-8">
-          <h2 className="text-3xl font-bold text-gray-800">Branch Portal</h2>
-          <p className="text-gray-600 mt-2">Microsoft Authenticator MFA</p>
-        </div>
+    <div className="min-h-screen bg-gradient-to-br from-purple-950 via-purple-900 to-indigo-900 flex items-center justify-center p-6">
+      <div className="w-full max-w-4xl bg-white rounded-3xl shadow-2xl overflow-hidden flex min-h-[560px]">
 
-        {error && (
-          <div className="mb-6 bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded">
-            <p className="text-sm font-semibold">{error}</p>
+        {/* Left — Login Form */}
+        <div className="flex flex-col justify-center w-full md:w-1/2 px-10 py-12">
+          {/* Header */}
+          <div className="mb-8">
+            <span className="inline-block bg-purple-100 text-purple-700 text-xs font-semibold tracking-widest uppercase px-3 py-1 rounded-full mb-3">
+              Branch Portal
+            </span>
+            <h2 className="text-3xl font-bold text-gray-900 leading-tight">Welcome back</h2>
+            <p className="text-gray-500 text-sm mt-1">Sign in with your branch credentials</p>
           </div>
-        )}
 
-        {step === 'credentials' && (
-          <form onSubmit={handleCredentialsSubmit} className="space-y-6">
-            <div>
-              <label className="block text-gray-700 font-semibold mb-2">Email Address</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                required
-                autoComplete="email"
-              />
+          {error && (
+            <div className="mb-5 flex items-start gap-3 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">
+              <svg className="w-4 h-4 mt-0.5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm-.75-11.25a.75.75 0 011.5 0v4.5a.75.75 0 01-1.5 0v-4.5zm.75 7.5a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+              </svg>
+              <span>{error}</span>
             </div>
+          )}
 
-            <div>
-              <label className="block text-gray-700 font-semibold mb-2">Password</label>
-              <PasswordField
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                required
-                autoComplete="current-password"
-              />
-            </div>
-
-            {requiresCaptcha && (
-              <div className="flex justify-center">
-                <ReCAPTCHA sitekey={RECAPTCHA_SITE_KEY} onChange={setRecaptchaToken} />
+          {step === 'credentials' && (
+            <form onSubmit={handleCredentialsSubmit} className="space-y-5">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Email Address</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="branch@example.com"
+                  className="w-full px-4 py-2.5 text-sm border border-gray-200 rounded-xl bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition"
+                  required
+                  autoComplete="email"
+                />
               </div>
-            )}
 
-            <button
-              type="submit"
-              disabled={loading || (requiresCaptcha && !recaptchaToken)}
-              className="w-full bg-purple-600 hover:bg-purple-700 text-white py-3 rounded-lg font-semibold transition disabled:opacity-50 shadow-lg"
-            >
-              {loading ? 'Verifying...' : 'Continue'}
-            </button>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Password</label>
+                <PasswordField
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full px-4 py-2.5 text-sm border border-gray-200 rounded-xl bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition"
+                  required
+                  autoComplete="current-password"
+                />
+              </div>
 
-            {showMfaSetup && (
+              {requiresCaptcha && (
+                <div className="flex justify-center">
+                  <ReCAPTCHA sitekey={RECAPTCHA_SITE_KEY} onChange={setRecaptchaToken} />
+                </div>
+              )}
+
               <button
-                type="button"
-                onClick={handleSetupMFA}
-                className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg font-semibold transition shadow-lg"
+                type="submit"
+                disabled={loading || (requiresCaptcha && !recaptchaToken)}
+                className="w-full bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 shadow-md shadow-purple-200 mt-1"
               >
-                Enable MFA
+                {loading ? 'Verifying…' : 'Continue'}
               </button>
-            )}
-          </form>
-        )}
 
-        {step === 'totp' && (
-          <form onSubmit={handleTotpSubmit} className="space-y-6">
-            <div>
-              <label className="block text-gray-700 font-semibold mb-2">TOTP Code</label>
-              <input
-                type="text"
-                value={totpCode}
-                onChange={(event) => setTotpCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
-                className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-center text-2xl font-mono tracking-widest"
-                placeholder="000000"
-                maxLength="6"
-                required
-                autoComplete="one-time-code"
-              />
-            </div>
+              {showMfaSetup && (
+                <button
+                  type="button"
+                  onClick={handleSetupMFA}
+                  className="w-full bg-green-600 hover:bg-green-700 text-white py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-md shadow-green-200"
+                >
+                  Enable MFA
+                </button>
+              )}
+            </form>
+          )}
 
-            <div className="flex gap-3">
+          {step === 'totp' && (
+            <form onSubmit={handleTotpSubmit} className="space-y-5">
+              <div className="text-center bg-purple-50 rounded-xl px-4 py-3 mb-2">
+                <p className="text-xs text-purple-600 font-medium">Open Microsoft Authenticator and enter the 6-digit code</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Authenticator Code</label>
+                <input
+                  type="text"
+                  value={totpCode}
+                  onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  className="w-full px-4 py-3 border border-gray-200 rounded-xl text-center text-2xl font-mono tracking-[0.5em] bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-purple-500 transition"
+                  placeholder="000000"
+                  maxLength="6"
+                  required
+                  autoComplete="one-time-code"
+                />
+              </div>
+              <div className="flex gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setStep('credentials')}
+                  className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-semibold transition-colors"
+                >
+                  Back
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading || totpCode.length !== 6}
+                  className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 shadow-md shadow-purple-200"
+                >
+                  {loading ? 'Verifying…' : 'Login'}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {step === 'setup' && mfaSetupData && (
+            <div className="space-y-4">
+              <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-xl text-sm">
+                Scan this QR code with Microsoft Authenticator to enable MFA.
+              </div>
+              <div className="flex justify-center">
+                <img src={mfaSetupData.qr_code} alt="MFA QR code" className="border-4 border-purple-500 rounded-xl w-40 h-40 object-contain" />
+              </div>
+              <code className="block bg-gray-100 p-3 rounded-xl text-xs break-all text-gray-600">{mfaSetupData.manual_entry_key}</code>
               <button
                 type="button"
                 onClick={() => setStep('credentials')}
-                className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 py-3 rounded-lg font-semibold"
+                className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2.5 rounded-xl text-sm font-semibold transition-colors"
               >
-                Back
-              </button>
-              <button
-                type="submit"
-                disabled={loading || totpCode.length !== 6}
-                className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-3 rounded-lg font-semibold disabled:opacity-50 shadow-lg"
-              >
-                {loading ? 'Verifying...' : 'Login'}
+                Return to Login
               </button>
             </div>
-          </form>
-        )}
+          )}
+        </div>
 
-        {step === 'setup' && mfaSetupData && (
-          <div className="space-y-5">
-            <div className="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 rounded">
-              <p className="text-sm font-semibold">MFA setup started. Scan this QR code with Microsoft Authenticator.</p>
-            </div>
-            <div className="flex justify-center">
-              <img src={mfaSetupData.qr_code} alt="MFA QR code" className="border-4 border-purple-500 rounded-lg" />
-            </div>
-            <code className="block bg-gray-100 p-3 rounded text-xs break-all">{mfaSetupData.manual_entry_key}</code>
-            <button
-              type="button"
-              onClick={() => setStep('credentials')}
-              className="w-full bg-purple-600 hover:bg-purple-700 text-white py-3 rounded-lg font-semibold"
-            >
-              Return to Login
-            </button>
-          </div>
-        )}
+        {/* Right — City Hall Image */}
+        <div className="hidden md:block w-1/2 relative">
+          <img
+            src={cityHall}
+            alt="Quezon City Hall"
+            className="absolute inset-0 w-full h-full object-cover"
+          />
+          <div className="absolute inset-0 bg-gradient-to-br from-purple-900/70 to-indigo-700/50" />
+        </div>
+
       </div>
     </div>
   );
