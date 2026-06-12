@@ -612,10 +612,17 @@ const WindowMonitoringSection = ({
   lastRefreshedAt,
   now,
   serviceTypeFilter,
+  queueUnavailable,
+  isSuperadminBranch,
+  onWindowCallNext,
+  onWindowRecall,
+  onWindowSkip,
+  isAnnouncementPlaying,
 }) => {
   const queueTypeEntries = Object.entries(windowsByQueueType);
   const hasWindows = queueTypeEntries.some(([, windows]) => windows.length > 0);
   const isServiceTypeFiltered = serviceTypeFilter && serviceTypeFilter !== 'all';
+  const [activeQueueTypeTab, setActiveQueueTypeTab] = useState('immediate');
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow">
@@ -649,7 +656,26 @@ const WindowMonitoringSection = ({
         </div>
       ) : (
         <div className="mt-6 space-y-6">
-          {queueTypeEntries.map(([queueTypeKey, windows]) => (
+          {queueTypeEntries.length > 1 && (
+            <div className="flex flex-wrap gap-2">
+              {queueTypeEntries.map(([queueTypeKey]) => (
+                <button
+                  key={queueTypeKey}
+                  onClick={() => setActiveQueueTypeTab(queueTypeKey)}
+                  className={`rounded-xl px-5 py-2.5 text-sm font-semibold transition ${
+                    activeQueueTypeTab === queueTypeKey
+                      ? 'bg-primary text-white shadow'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {queueTypeLabels[queueTypeKey] || 'Immediate'} Queue Windows
+                </button>
+              ))}
+            </div>
+          )}
+          {queueTypeEntries
+            .filter(([queueTypeKey]) => queueTypeKey === activeQueueTypeTab)
+            .map(([queueTypeKey, windows]) => (
             <div
               key={queueTypeKey}
               className={`space-y-4 ${isServiceTypeFiltered ? 'mx-auto max-w-6xl' : ''}`}
@@ -711,36 +737,41 @@ const WindowMonitoringSection = ({
                         isServiceTypeFiltered ? 'mx-auto w-full max-w-4xl' : ''
                       }`}
                     >
-                      <div className="border-b border-slate-100 bg-gradient-to-r from-slate-50 via-white to-blue-50 px-5 py-5">
+                      <div className="border-b border-slate-100 bg-[#0B2545] px-5 py-5">
                         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                           <div className="space-y-3">
                             <div className="flex flex-wrap items-center gap-2">
-                              <span className="inline-flex rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-white">
+                              <span className="inline-flex rounded-full bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-white">
                                 {window.window_label}
                               </span>
-                              <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+                              <span className="inline-flex rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white">
                                 {window.assigned_window_number ? `Window ${window.assigned_window_number}` : 'Unassigned'}
                               </span>
-                              <span className="inline-flex rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-800">
+                              <span className="inline-flex rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white">
                                 {queueTypeLabels[queueTypeKey] || 'Immediate'}
                               </span>
                               {!isServiceTypeFiltered ? (
-                                <span className="inline-flex rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
+                                <span className="inline-flex rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white ring-1 ring-white/20">
                                   {window.serviceTypesLabel}
                                 </span>
                               ) : null}
                             </div>
-                            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">{window.service_window}</p>
+                            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white">{window.service_window}</p>
                           </div>
                           <div className="flex flex-col gap-3 lg:items-end">
-                            <span className={`inline-flex rounded-full px-4 py-1.5 text-xs font-semibold ${statusClassName}`}>
+                            <span className={`inline-flex rounded-full px-4 py-1.5 text-xs font-semibold border border-white/20 bg-white/10 ${
+                              windowStatus === 'Active' ? 'text-lime-400' :
+                              windowStatus === 'Idle' ? 'text-gray-400' :
+                              windowStatus === 'Inactive' ? 'text-red-400' :
+                              'text-white'
+                            }`}>
                               {windowStatus}
                             </span>
-                            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm lg:text-right">
-                              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Current Queue</p>
-                              <p className="mt-1 text-lg font-bold text-primary">{activeQueue?.queue_number || 'None'}</p>
+                            <div className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm shadow-sm lg:text-right backdrop-blur-sm">
+                              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/70">Current Queue</p>
+                              <p className="mt-1 text-lg font-bold text-white">{activeQueue?.queue_number || 'None'}</p>
                               {currentQueueLabel ? (
-                                <p className="mt-1 text-xs text-slate-500">{currentQueueLabel}</p>
+                                <p className="mt-1 text-xs text-white/60">{currentQueueLabel}</p>
                               ) : null}
                             </div>
                           </div>
@@ -812,6 +843,31 @@ const WindowMonitoringSection = ({
                             </div>
                           )}
                         </div>
+                        {queueTypeKey === 'immediate' && isSuperadminBranch && (
+                          <div className="mt-5 flex flex-wrap gap-2">
+                            <button
+                              onClick={() => onWindowCallNext(window.service_window)}
+                              disabled={queueUnavailable || Boolean(activeQueue) || isAnnouncementPlaying}
+                              className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-secondary disabled:opacity-50"
+                            >
+                              {isAnnouncementPlaying ? 'Announcing...' : 'Call Next'}
+                            </button>
+                            <button
+                              onClick={() => onWindowRecall(activeQueue)}
+                              disabled={queueUnavailable || !activeQueue}
+                              className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
+                            >
+                              Recall
+                            </button>
+                            <button
+                              onClick={() => onWindowSkip(activeQueue)}
+                              disabled={queueUnavailable || !activeQueue}
+                              className="rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:opacity-50"
+                            >
+                              Skip
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </article>
                   );
@@ -1660,6 +1716,111 @@ const QueueManagement = () => {
     }
   };
 
+  const handleWindowCallNext = async (serviceWindow) => {
+    setError('');
+    if (!systemStatus?.queueEnabled) {
+      setError(systemStatus?.disabledMessage || DEFAULT_DISABLED_MESSAGE);
+      return;
+    }
+    try {
+      let response;
+      try {
+        response = await api.post('/branch/queue/call-next', null, {
+          params: { service_window: serviceWindow },
+        });
+      } catch (err) {
+        if (err.response?.status === 409) {
+          const refreshedQueues = await fetchQueues();
+          const refreshedActiveQueue = (refreshedQueues || []).find((entry) =>
+            (entry.service_window || 'MISC') === serviceWindow &&
+            ['called', 'serving'].includes((entry.status || '').toLowerCase()),
+          );
+          if (!refreshedActiveQueue) {
+            response = await api.post('/branch/queue/call-next', null, {
+              params: { service_window: serviceWindow },
+            });
+          } else {
+            throw err;
+          }
+        } else {
+          throw err;
+        }
+      }
+      const calledQueue = response.data;
+      const refreshedQueues = await fetchQueues();
+      const refreshedQueue = refreshedQueues.find((q) => q.id === calledQueue?.id);
+      const queueToAnnounce = refreshedQueue || calledQueue;
+      if (queueToAnnounce && queueToAnnounce.queue_number) {
+        const queueData = {
+          id: queueToAnnounce.id,
+          queue_number: queueToAnnounce.queue_number,
+          service_window: queueToAnnounce.service_window || 'MISC',
+          assigned_window_number: queueToAnnounce.assigned_window_number,
+          status: queueToAnnounce.status,
+          timestamp: new Date().toISOString(),
+        };
+        setLastCalledQueue(queueData);
+        lastCalledQueueRef.current = queueData;
+
+        localStorage.setItem('queue_announcement_trigger', JSON.stringify({
+          queue_number: queueToAnnounce.queue_number,
+          queue_id: queueToAnnounce.id,
+          service_window: queueToAnnounce.service_window || 'MISC',
+          assigned_window_number: queueToAnnounce.assigned_window_number,
+          recall: false,
+          timestamp: Date.now(),
+        }));
+      }
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to call next queue.');
+    }
+  };
+
+  const handleWindowRecall = (queue) => {
+    setError('');
+    if (!systemStatus?.queueEnabled) {
+      setError(systemStatus?.disabledMessage || DEFAULT_DISABLED_MESSAGE);
+      return;
+    }
+    if (!queue) {
+      setError('No queue available to recall.');
+      return;
+    }
+    const currentQueue = queues.find(q => q.id === queue.id);
+    const currentStatus = currentQueue?.status?.toLowerCase();
+    if (!currentQueue || !['called', 'serving'].includes(currentStatus)) {
+      setError('Queue is no longer active and cannot be recalled.');
+      return;
+    }
+    localStorage.setItem('queue_announcement_trigger', JSON.stringify({
+      queue_number: currentQueue.queue_number,
+      queue_id: currentQueue.id,
+      service_window: currentQueue.service_window,
+      assigned_window_number: currentQueue.assigned_window_number,
+      recall: true,
+      timestamp: Date.now(),
+    }));
+  };
+
+  const handleWindowSkip = async (queue) => {
+    setError('');
+    if (!systemStatus?.queueEnabled) {
+      setError(systemStatus?.disabledMessage || DEFAULT_DISABLED_MESSAGE);
+      return;
+    }
+    if (!queue) {
+      setError('No active queue to skip.');
+      return;
+    }
+    try {
+      await api.post(`/branch/queue/${queue.id}/skip`);
+      await fetchQueues();
+      clearLastCalledQueue(queue.id);
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to skip queue.');
+    }
+  };
+
   const now = useMemo(() => new Date(), [queues]);
   const queueUnavailable = systemStatus && (!systemStatus.queueEnabled || systemStatus.maintenanceMode);
   const isSelectedCallNextWindowQueue = (queue) => (
@@ -2178,32 +2339,34 @@ const QueueManagement = () => {
         </div>
       ) : null}
 
-      <div className="space-y-6">
-        <QueueSection
-          title="Appointment Queue"
-          description="Appointment queue taxpayers stay separate so branch users can clearly distinguish scheduled appointments from ready, called, serving, completed, or skipped records."
-          queues={appointmentQueues}
-          page={appointmentPage}
-          onPageChange={setAppointmentPage}
-          queueUnavailable={queueUnavailable}
-          onAction={performAction}
-          onDeleteRequest={openDeleteModal}
-          now={now}
-          canManageQueues={canManageQueueOperations}
-        />
-        <QueueSection
-          title="Immediate Queue"
-          description="Immediate queue taxpayers are grouped here with active records shown first and completed history moved below them."
-          queues={immediateQueues}
-          page={immediatePage}
-          onPageChange={setImmediatePage}
-          queueUnavailable={queueUnavailable}
-          onAction={performAction}
-          onDeleteRequest={openDeleteModal}
-          now={now}
-          canManageQueues={canManageQueueOperations}
-        />
-      </div>
+      {!isSuperadminManagedBranch && (
+        <div className="space-y-6">
+          <QueueSection
+            title="Appointment Queue"
+            description="Appointment queue taxpayers stay separate so branch users can clearly distinguish scheduled appointments from ready, called, serving, completed, or skipped records."
+            queues={appointmentQueues}
+            page={appointmentPage}
+            onPageChange={setAppointmentPage}
+            queueUnavailable={queueUnavailable}
+            onAction={performAction}
+            onDeleteRequest={openDeleteModal}
+            now={now}
+            canManageQueues={canManageQueueOperations}
+          />
+          <QueueSection
+            title="Immediate Queue"
+            description="Immediate queue taxpayers are grouped here with active records shown first and completed history moved below them."
+            queues={immediateQueues}
+            page={immediatePage}
+            onPageChange={setImmediatePage}
+            queueUnavailable={queueUnavailable}
+            onAction={performAction}
+            onDeleteRequest={openDeleteModal}
+            now={now}
+            canManageQueues={canManageQueueOperations}
+          />
+        </div>
+      )}
 
       {!isQueueWindowAccount ? (
         <WindowMonitoringSection
@@ -2212,6 +2375,12 @@ const QueueManagement = () => {
           lastRefreshedAt={lastRefreshedAt}
           now={now}
           serviceTypeFilter={serviceTypeFilter}
+          queueUnavailable={queueUnavailable}
+          isSuperadminBranch={isSuperadminManagedBranch}
+          onWindowCallNext={handleWindowCallNext}
+          onWindowRecall={handleWindowRecall}
+          onWindowSkip={handleWindowSkip}
+          isAnnouncementPlaying={isAnnouncementPlaying}
         />
       ) : null}
 

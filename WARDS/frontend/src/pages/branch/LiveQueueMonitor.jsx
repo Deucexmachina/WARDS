@@ -341,7 +341,9 @@ const LiveQueueMonitor = () => {
               }`}
                 style={isDenseLayout ? { gridAutoRows: 'minmax(0, 1fr)' } : undefined}
               >
-                {Object.entries(queueData.windows).map(([windowKey, windowData]) => {
+                {Object.entries(queueData.windows)
+                  .sort(([, a], [, b]) => (a.assigned_window_number || 0) - (b.assigned_window_number || 0))
+                  .map(([windowKey, windowData]) => {
                   const currentServing = windowData.serving?.[0] || null;
                   const waitingQueues = windowData.waiting?.slice(0, isUltraDenseLayout ? 1 : (isDenseLayout ? 2 : 8)) || [];
                   const remainingWaitingCount = Math.max(0, (windowData.waiting?.length || 0) - waitingQueues.length);
