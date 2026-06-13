@@ -86,7 +86,7 @@ const parseContentDispositionFilename = (contentDisposition) => {
  * Safe for preview: PDF, PNG, JPEG (images rendered via <img>, PDF via sandboxed iframe)
  * Download-only: DOC, DOCX, TXT, CSV, JSON, SVG, HTML, XML, unknown types
  */
-const resolvePreviewType = (mimeType, _fileName) => {
+const resolvePreviewType = (mimeType, fileName) => {
   const normalizedMime = String(mimeType || '').split(';')[0].trim().toLowerCase();
 
   if (normalizedMime === 'application/pdf') {
@@ -94,6 +94,17 @@ const resolvePreviewType = (mimeType, _fileName) => {
   }
 
   if (BACKEND_SAFE_IMAGE_TYPES.has(normalizedMime)) {
+    return 'image';
+  }
+
+  // Fallback: check filename extension when MIME doesn't identify a previewable type.
+  // The backend already verifies file signatures during upload, so the
+  // extension is trustworthy enough for preview routing.
+  const ext = String(fileName || '').split('.').pop()?.toLowerCase();
+  if (ext === 'pdf') {
+    return 'pdf';
+  }
+  if (['png', 'jpg', 'jpeg'].includes(ext)) {
     return 'image';
   }
 
@@ -334,24 +345,41 @@ const TaxAssessment = () => {
         : new Blob([response.data], { type: mimeType || 'application/octet-stream' });
       const blobUrl = window.URL.createObjectURL(previewBlob);
 
+      const resolvedType = resolvePreviewType(mimeType, fileName);
+      console.log('[FRONTEND_FILE_DEBUG] mimeType=', mimeType, 'fileName=', fileName, 'resolvedType=', resolvedType);
+
       setFileViewer({
         open: true,
         title: fileName,
         fileUrl: blobUrl,
-        previewType: resolvePreviewType(mimeType, fileName),
+        previewType: resolvedType,
         isLoading: false,
         errorMessage: '',
       });
       setViewingSubmissionId(null);
       setError('');
     } catch (downloadError) {
+      let errorMessage = 'Failed to load the uploaded taxpayer file preview.';
+      const errorData = downloadError.response?.data;
+      if (errorData instanceof Blob) {
+        try {
+          const text = await errorData.text();
+          const parsed = JSON.parse(text);
+          errorMessage = parsed.detail || errorMessage;
+        } catch {
+          // keep default message
+        }
+      } else if (downloadError.response?.data?.detail) {
+        errorMessage = downloadError.response.data.detail;
+      }
+
       setFileViewer({
         open: true,
         title: submission.supporting_file_name || `submission-${submission.id}`,
         fileUrl: '',
         previewType: 'unsupported',
         isLoading: false,
-        errorMessage: downloadError.response?.data?.detail || 'Failed to load the uploaded taxpayer file preview.',
+        errorMessage,
       });
       setViewingSubmissionId(null);
       setError('Failed to load the uploaded taxpayer file.');
@@ -745,21 +773,21 @@ const TaxAssessment = () => {
                     <span className={`rounded-full px-3 py-1 text-xs font-bold ${statusTone[submission.status] || 'bg-slate-100 text-slate-700'}`}>{submission.status}</span>
                   </div>
 
-                  <div className="mt-4 grid gap-4 lg:grid-cols-[180px,1fr,auto]">
-                    <select value={draft.status} onChange={(event) => handleReviewDraftChange(submission.id, 'status', event.target.value)} className="rounded-2xl border border-slate-300 px-4 py-3 text-sm">
+                  <div className="mt-4 flex flex-col gap-3 lg:flex-row lg:items-start">
+                    <select value={draft.status} onChange={(event) => handleReviewDraftChange(submission.id, 'status', event.target.value)} className="w-full shrink-0 rounded-2xl border border-slate-300 px-4 py-3 text-sm lg:w-[180px]">
                       <option value="Pending Verification">Pending Verification</option>
                       <option value="Verified">Verified</option>
                       <option value="Rejected">Rejected</option>
                     </select>
-                    <input value={draft.remarks} onChange={(event) => handleReviewDraftChange(submission.id, 'remarks', event.target.value)} placeholder="Verification remarks or rejection reason" className="rounded-2xl border border-slate-300 px-4 py-3 text-sm" />
-                    <div className="flex flex-wrap gap-2">
-                      <button type="button" onClick={() => handleReviewSubmission(submission)} disabled={reviewingSubmissionId === submission.id} className="rounded-full bg-[#0f5b83] px-4 py-2 text-sm font-semibold text-white">
+                    <input value={draft.remarks} onChange={(event) => handleReviewDraftChange(submission.id, 'remarks', event.target.value)} placeholder="Verification remarks or rejection reason" className="min-w-0 flex-1 rounded-2xl border border-slate-300 px-4 py-3 text-sm" />
+                    <div className="flex shrink-0 flex-nowrap items-center gap-2">
+                      <button type="button" onClick={() => handleReviewSubmission(submission)} disabled={reviewingSubmissionId === submission.id} className="whitespace-nowrap rounded-full bg-[#0f5b83] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#0c4d6f] disabled:cursor-not-allowed disabled:opacity-70">
                         {reviewingSubmissionId === submission.id ? 'Saving...' : 'Save Status'}
                       </button>
-                      <button type="button" onClick={() => seedAssessmentFromSubmission(submission)} className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white">
+                      <button type="button" onClick={() => seedAssessmentFromSubmission(submission)} className="whitespace-nowrap rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700">
                         Create Assessment
                       </button>
-                      <button type="button" onClick={() => handleDeleteSubmission(submission)} className="rounded-full bg-rose-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-600">
+                      <button type="button" onClick={() => handleDeleteSubmission(submission)} className="whitespace-nowrap rounded-full bg-rose-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-600">
                         Delete
                       </button>
                       {submission.supporting_file_name ? (
@@ -767,7 +795,7 @@ const TaxAssessment = () => {
                           type="button"
                           onClick={() => handleDownloadSubmissionFile(submission)}
                           disabled={fileViewer.isLoading}
-                          className="rounded-full bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-300 disabled:cursor-not-allowed disabled:opacity-70"
+                          className="whitespace-nowrap rounded-full bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-300 disabled:cursor-not-allowed disabled:opacity-70"
                         >
                           {viewingSubmissionId === submission.id && fileViewer.isLoading ? 'Loading File...' : 'View File'}
                         </button>

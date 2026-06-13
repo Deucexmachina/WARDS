@@ -35,7 +35,7 @@ from services.email_service import (
     send_taxpayer_identifier_submission_email,
     send_taxpayer_verification_status_email,
 )
-from utils.field_crypto import apply_citizen_user_security, apply_tax_assessment_record_security, apply_taxpayer_identifier_submission_security, build_redacted_text, get_decrypted_or_raw, hash_aware_match, hash_optional_value, set_encrypted_hash_companions, tax_assessment_value, taxpayer_submission_value
+from utils.field_crypto import apply_citizen_user_security, apply_tax_assessment_record_security, apply_taxpayer_identifier_submission_security, build_redacted_text, get_decrypted_or_raw, hash_aware_match, hash_optional_value, is_redacted_placeholder, set_encrypted_hash_companions, tax_assessment_value, taxpayer_submission_value
 from utils.file_validation import SafeFileType, validate_upload_file
 from utils.security_validation import (
     ensure_contact_number_is_unique,
@@ -72,6 +72,29 @@ ALLOWED_UPLOAD_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 TAXPAYER_TYPES = {"Individual", "Business Owner"}
 SUBMISSION_TYPES = {"RPT", "BT"}
+
+
+def normalize_mime_type(mime_type: str) -> str:
+    """Normalize MIME type, handling stored enum string representations.
+
+    Some database records store the string representation of SafeFileType enum
+    members (e.g., 'SafeFileType.PDF') instead of the actual MIME type value.
+    This converts them back to proper MIME type strings.
+    """
+    if not mime_type or mime_type == "application/octet-stream":
+        return mime_type or "application/octet-stream"
+
+    # Handle stored enum strings like "SafeFileType.PDF"
+    if mime_type.startswith("SafeFileType."):
+        member_name = mime_type.split(".")[-1]
+        try:
+            return getattr(SafeFileType, member_name)
+        except AttributeError:
+            pass
+
+    return mime_type
+
+
 REVIEWABLE_STATUSES = {"Pending Verification", "Verified", "Rejected"}
 ACTIVE_ASSESSMENT_STATUSES = {"Active", "Inactive"}
 IDENTIFIER_PATTERN = re.compile(r"^[A-Z0-9-]{6,40}$")
@@ -889,10 +912,43 @@ async def download_submission_file(
 ):
     submission = db.query(TaxpayerIdentifierSubmission).filter(TaxpayerIdentifierSubmission.id == submission_id).first()
     file_path_value = taxpayer_submission_value(submission, "supporting_file_path") if submission else None
+
+    # Fallback: check raw field directly if it contains a real filesystem path
+    if not file_path_value and submission and submission.supporting_file_path:
+        raw_path = submission.supporting_file_path
+        if ('/' in raw_path or '\\' in raw_path) and not is_redacted_placeholder(raw_path):
+            file_path_value = raw_path
+
+    # Fallback: search upload directory by stored file name
+    if not file_path_value and submission:
+        stored_name = taxpayer_submission_value(submission, "supporting_file_name") or submission.supporting_file_name
+        if stored_name:
+            safe_suffix = Path(stored_name).suffix
+            for candidate in UPLOAD_DIR.iterdir():
+                if candidate.is_file() and candidate.suffix.lower() == safe_suffix.lower():
+                    file_path_value = str(candidate)
+                    break
+
     if not submission or not file_path_value:
         raise HTTPException(status_code=404, detail="Supporting file not found.")
 
     path = Path(file_path_value)
+
+    # If the stored absolute path is stale (project moved, etc.), try to find
+    # the file by its filename in the current UPLOAD_DIR.
+    if not path.exists():
+        filename = Path(file_path_value).name
+        candidate = UPLOAD_DIR / filename
+        if candidate.exists():
+            path = candidate
+        else:
+            safe_suffix = Path(filename).suffix
+            if safe_suffix:
+                for item in UPLOAD_DIR.iterdir():
+                    if item.is_file() and item.suffix.lower() == safe_suffix.lower():
+                        path = item
+                        break
+
     if not path.exists():
         raise HTTPException(status_code=404, detail="Supporting file is no longer available.")
 
@@ -900,10 +956,10 @@ async def download_submission_file(
     if not is_public_owner:
         raise HTTPException(status_code=403, detail="You do not have access to this file.")
 
-    mime_type = taxpayer_submission_value(submission, "supporting_file_mime") or "application/octet-stream"
+    mime_type = normalize_mime_type(taxpayer_submission_value(submission, "supporting_file_mime") or "application/octet-stream")
     is_safe_preview = SafeFileType.is_safe_for_preview(mime_type)
     disposition = "inline" if is_safe_preview else "attachment"
-    
+
     return FileResponse(
         path,
         filename=taxpayer_submission_value(submission, "supporting_file_name") or path.name,
@@ -966,16 +1022,63 @@ async def download_submission_file_admin(
 ):
     submission = db.query(TaxpayerIdentifierSubmission).filter(TaxpayerIdentifierSubmission.id == submission_id).first()
     file_path_value = taxpayer_submission_value(submission, "supporting_file_path") if submission else None
+    raw_supporting_file_path = submission.supporting_file_path if submission else None
+    stored_name = taxpayer_submission_value(submission, "supporting_file_name") or (submission.supporting_file_name if submission else None)
+
+    print(f"[TAX_ASSESSMENT_FILE_DEBUG] submission_id={submission_id}")
+    print(f"[TAX_ASSESSMENT_FILE_DEBUG] file_path_value={file_path_value}")
+    print(f"[TAX_ASSESSMENT_FILE_DEBUG] raw_supporting_file_path={raw_supporting_file_path}")
+    print(f"[TAX_ASSESSMENT_FILE_DEBUG] stored_name={stored_name}")
+    print(f"[TAX_ASSESSMENT_FILE_DEBUG] UPLOAD_DIR={UPLOAD_DIR}")
+    print(f"[TAX_ASSESSMENT_FILE_DEBUG] UPLOAD_DIR exists={UPLOAD_DIR.exists()}")
+    if UPLOAD_DIR.exists():
+        files = list(UPLOAD_DIR.iterdir())
+        print(f"[TAX_ASSESSMENT_FILE_DEBUG] files in UPLOAD_DIR={files}")
+
+    # Fallback: check raw field directly if it contains a real filesystem path
+    if not file_path_value and submission and submission.supporting_file_path:
+        raw_path = submission.supporting_file_path
+        if ('/' in raw_path or '\\' in raw_path) and not is_redacted_placeholder(raw_path):
+            file_path_value = raw_path
+
+    # Fallback: search upload directory by stored file name
+    if not file_path_value and submission:
+        if stored_name:
+            safe_suffix = Path(stored_name).suffix
+            for candidate in UPLOAD_DIR.iterdir():
+                if candidate.is_file() and candidate.suffix.lower() == safe_suffix.lower():
+                    file_path_value = str(candidate)
+                    break
+
     if not submission or not file_path_value:
+        print(f"[TAX_ASSESSMENT_FILE_DEBUG] 404: file not found")
         raise HTTPException(status_code=404, detail="Supporting file not found.")
     path = Path(file_path_value)
+
+    # If the stored absolute path is stale (project moved, etc.), try to find
+    # the file by its filename in the current UPLOAD_DIR.
     if not path.exists():
+        filename = Path(file_path_value).name
+        candidate = UPLOAD_DIR / filename
+        if candidate.exists():
+            path = candidate
+        else:
+            # Last resort: search UPLOAD_DIR for any file with same suffix
+            safe_suffix = Path(filename).suffix
+            if safe_suffix:
+                for item in UPLOAD_DIR.iterdir():
+                    if item.is_file() and item.suffix.lower() == safe_suffix.lower():
+                        path = item
+                        break
+
+    if not path.exists():
+        print(f"[TAX_ASSESSMENT_FILE_DEBUG] 404: path not found after fallbacks. final_path={path}")
         raise HTTPException(status_code=404, detail="Supporting file is no longer available.")
-    
-    mime_type = taxpayer_submission_value(submission, "supporting_file_mime") or "application/octet-stream"
+
+    mime_type = normalize_mime_type(taxpayer_submission_value(submission, "supporting_file_mime") or "application/octet-stream")
     is_safe_preview = SafeFileType.is_safe_for_preview(mime_type)
     disposition = "inline" if is_safe_preview else "attachment"
-    
+
     return FileResponse(
         path,
         filename=taxpayer_submission_value(submission, "supporting_file_name") or path.name,

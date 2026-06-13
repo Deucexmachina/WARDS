@@ -73,6 +73,7 @@ export const shouldSuppressGlobalErrorModal = (error) => {
     url.includes('/login') ||
     url.includes('/setup-mfa') ||
     url.includes('/verify-mfa') ||
-    url.includes('/receipts/')
+    url.includes('/receipts/') ||
+    url.includes('/tax-assessment/') && url.includes('/file')
   );
 };
