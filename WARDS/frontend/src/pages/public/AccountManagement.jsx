@@ -92,6 +92,11 @@ const AccountManagement = () => {
   const [contactError, setContactError] = useState('');
   const [contactCheckingUniqueness, setContactCheckingUniqueness] = useState(false);
   const [fullNameError, setFullNameError] = useState('');
+  const [addressError, setAddressError] = useState('');
+  const [identifierErrors, setIdentifierErrors] = useState({});
+  const [currentPasswordError, setCurrentPasswordError] = useState('');
+  const [newPasswordError, setNewPasswordError] = useState('');
+  const [confirmPasswordError, setConfirmPasswordError] = useState('');
   const [confirmProfilePassword, setConfirmProfilePassword] = useState('');
   const [showProfileConfirm, setShowProfileConfirm] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -166,6 +171,9 @@ const AccountManagement = () => {
       const normalized = normalizeCitizenFullName(value);
       setFullNameError(validateCitizenFullName(normalized));
     }
+    if (name === 'address') {
+      setAddressError(String(value || '').trim() ? '' : 'Address is required.');
+    }
     if (name === 'taxpayer_type') {
       setIdentifierForm((current) => ({ ...current, taxpayer_type: value }));
     }
@@ -203,6 +211,8 @@ const AccountManagement = () => {
       [name]: name === 'supporting_file' ? files?.[0] || null : value,
       taxpayer_type: name === 'submission_type' && value === 'RPT' ? profile.taxpayer_type : current.taxpayer_type,
     }));
+    setIdentifierErrors((current) => ({ ...current, [name]: '' }));
+    if (name === 'submission_type') setIdentifierErrors({});
     setMessage('');
     setError('');
   };
@@ -227,6 +237,13 @@ const AccountManagement = () => {
     if (nextFullNameError) {
       setFullNameError(nextFullNameError);
       setError('Correct the highlighted full name field before saving.');
+      return;
+    }
+
+    const nextAddressError = String(profile.address || '').trim() ? '' : 'Address is required.';
+    if (nextAddressError) {
+      setAddressError(nextAddressError);
+      setError('Correct the highlighted address field before saving.');
       return;
     }
 
@@ -274,6 +291,7 @@ const AccountManagement = () => {
     setEmailError('');
     setContactError('');
     setFullNameError('');
+    setAddressError('');
     setIsProfileLocked(true);
     setMessage('');
     setError('');
@@ -283,25 +301,33 @@ const AccountManagement = () => {
     const { name, value } = event.target;
     setPasswordForm((current) => ({ ...current, [name]: value }));
     setPasswordError('');
+    if (name === 'current_password') setCurrentPasswordError('');
+    if (name === 'new_password') setNewPasswordError('');
+    if (name === 'confirm_new_password') setConfirmPasswordError('');
     setMessage('');
     setError('');
   };
 
   const handleChangePassword = async (event) => {
     event.preventDefault();
+    let hasError = false;
     if (!passwordForm.current_password) {
-      setPasswordError('Enter your current password.');
-      return;
+      setCurrentPasswordError('Current password is required.');
+      hasError = true;
     }
-    if (passwordForm.new_password !== passwordForm.confirm_new_password) {
-      setPasswordError('New password and confirmation do not match.');
-      return;
+    const nextNewPasswordError = passwordForm.new_password ? validateStrongPassword(passwordForm.new_password) : 'New password is required.';
+    if (nextNewPasswordError) {
+      setNewPasswordError(nextNewPasswordError);
+      hasError = true;
     }
-    const nextPasswordError = validateStrongPassword(passwordForm.new_password);
-    if (nextPasswordError) {
-      setPasswordError(nextPasswordError);
-      return;
+    if (!passwordForm.confirm_new_password) {
+      setConfirmPasswordError('Please confirm your new password.');
+      hasError = true;
+    } else if (passwordForm.new_password !== passwordForm.confirm_new_password) {
+      setConfirmPasswordError('New password and confirmation do not match.');
+      hasError = true;
     }
+    if (hasError) return;
 
     try {
       setChangingPassword(true);
@@ -319,8 +345,16 @@ const AccountManagement = () => {
 
   const handleSubmitIdentifier = async (event) => {
     event.preventDefault();
-    if (!identifierForm.supporting_file) {
-      setError('Upload a supporting document before submitting an identifier.');
+    const nextIdentifierErrors = {};
+    if (identifierForm.submission_type === 'RPT') {
+      if (!String(identifierForm.tdn || '').trim()) nextIdentifierErrors.tdn = 'Tax Declaration Number is required.';
+    } else {
+      if (!String(identifierForm.mayor_permit_number || '').trim()) nextIdentifierErrors.mayor_permit_number = "Mayor's Permit Number is required.";
+      if (!String(identifierForm.sec_dti_cda_number || '').trim()) nextIdentifierErrors.sec_dti_cda_number = 'SEC/DTI/CDA Registration Number is required.';
+    }
+    if (!identifierForm.supporting_file) nextIdentifierErrors.supporting_file = 'A supporting document is required.';
+    if (Object.keys(nextIdentifierErrors).length) {
+      setIdentifierErrors(nextIdentifierErrors);
       return;
     }
 
@@ -447,12 +481,12 @@ const AccountManagement = () => {
                 <div className="grid gap-5 md:grid-cols-2">
                   <label className="block">
                     <span className="mb-2 block text-sm font-semibold text-slate-700">Full Name</span>
-                    <input name="full_name" value={profile.full_name} onChange={handleProfileChange} disabled={isProfileLocked} className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 focus:ring-2 focus:ring-[#0f5b83]/10 ${fullNameError ? 'border-rose-400 bg-rose-50 focus:border-rose-500' : 'border-slate-300 focus:border-[#0f5b83]'}`} required />
+                    <input name="full_name" value={profile.full_name} onChange={handleProfileChange} disabled={isProfileLocked} className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 focus:ring-2 focus:ring-[#0f5b83]/10 ${fullNameError ? 'border-rose-400 bg-rose-50 focus:border-rose-500' : 'border-slate-300 focus:border-[#0f5b83]'}`} />
                     {fullNameError ? <span className="mt-2 block text-xs font-medium text-rose-600">{fullNameError}</span> : null}
                   </label>
                   <label className="block">
                     <span className="mb-2 block text-sm font-semibold text-slate-700">Email Address</span>
-                    <input name="email" type="email" value={profile.email} onChange={handleProfileChange} disabled={isProfileLocked} className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 focus:ring-2 focus:ring-[#0f5b83]/10 ${emailError ? 'border-rose-400 bg-rose-50 focus:border-rose-500' : 'border-slate-300 focus:border-[#0f5b83]'}`} required />
+                    <input name="email" type="email" value={profile.email} onChange={handleProfileChange} disabled={isProfileLocked} className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 focus:ring-2 focus:ring-[#0f5b83]/10 ${emailError ? 'border-rose-400 bg-rose-50 focus:border-rose-500' : 'border-slate-300 focus:border-[#0f5b83]'}`} />
                     {emailError ? <span className="mt-2 block text-xs font-medium text-rose-600">{emailError}</span> : null}
                   </label>
                   <label className="block">
@@ -469,7 +503,6 @@ const AccountManagement = () => {
                         maxLength={10}
                         className="w-full px-4 py-3 text-sm outline-none transition disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
                         placeholder="9123456789"
-                        required
                       />
                     </div>
                     {contactError ? <span className="mt-2 block text-xs font-medium text-rose-600">{contactError}</span> : null}
@@ -483,7 +516,8 @@ const AccountManagement = () => {
                   </label>
                   <label className="block md:col-span-2">
                     <span className="mb-2 block text-sm font-semibold text-slate-700">Address</span>
-                    <input name="address" value={profile.address} onChange={handleProfileChange} disabled={isProfileLocked} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 focus:border-[#0f5b83] focus:ring-2 focus:ring-[#0f5b83]/10" required />
+                    <input name="address" value={profile.address} onChange={handleProfileChange} disabled={isProfileLocked} className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 focus:ring-2 focus:ring-[#0f5b83]/10 ${addressError ? 'border-rose-400 bg-rose-50 focus:border-rose-500' : 'border-slate-300 focus:border-[#0f5b83]'}`} />
+                    {addressError ? <span className="mt-2 block text-xs font-medium text-rose-600">{addressError}</span> : null}
                   </label>
                 </div>
 
@@ -493,6 +527,9 @@ const AccountManagement = () => {
                     onClick={() => {
                       setPasswordForm(DEFAULT_PASSWORD_FORM);
                       setPasswordError('');
+                      setCurrentPasswordError('');
+                      setNewPasswordError('');
+                      setConfirmPasswordError('');
                       setShowPasswordModal(true);
                     }}
                     className="rounded-full border border-[#0f5b83] bg-white px-5 py-2.5 text-sm font-semibold text-[#0f5b83] transition hover:bg-[#eef8fc]"
@@ -522,24 +559,28 @@ const AccountManagement = () => {
                     {identifierForm.submission_type === 'RPT' ? (
                       <label className="block">
                         <span className="mb-2 block text-sm font-semibold text-slate-700">Tax Declaration Number (TDN)</span>
-                        <input name="tdn" value={identifierForm.tdn} onChange={handleIdentifierChange} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm uppercase outline-none transition focus:border-[#0f5b83] focus:ring-2 focus:ring-[#0f5b83]/10" required />
+                        <input name="tdn" value={identifierForm.tdn} onChange={handleIdentifierChange} className={`w-full rounded-2xl border px-4 py-3 text-sm uppercase outline-none transition focus:ring-2 focus:ring-[#0f5b83]/10 ${identifierErrors.tdn ? 'border-rose-400 bg-rose-50 focus:border-rose-500' : 'border-slate-300 focus:border-[#0f5b83]'}`} />
+                        {identifierErrors.tdn ? <span className="mt-2 block text-xs font-medium text-rose-600">{identifierErrors.tdn}</span> : null}
                       </label>
                     ) : (
                       <>
                         <label className="block">
                           <span className="mb-2 block text-sm font-semibold text-slate-700">Mayor&apos;s Permit Number</span>
-                          <input name="mayor_permit_number" value={identifierForm.mayor_permit_number} onChange={handleIdentifierChange} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm uppercase outline-none transition focus:border-[#0f5b83] focus:ring-2 focus:ring-[#0f5b83]/10" required={profile.taxpayer_type === 'Business Owner'} />
+                          <input name="mayor_permit_number" value={identifierForm.mayor_permit_number} onChange={handleIdentifierChange} className={`w-full rounded-2xl border px-4 py-3 text-sm uppercase outline-none transition focus:ring-2 focus:ring-[#0f5b83]/10 ${identifierErrors.mayor_permit_number ? 'border-rose-400 bg-rose-50 focus:border-rose-500' : 'border-slate-300 focus:border-[#0f5b83]'}`} />
+                          {identifierErrors.mayor_permit_number ? <span className="mt-2 block text-xs font-medium text-rose-600">{identifierErrors.mayor_permit_number}</span> : null}
                         </label>
                         <label className="block">
                           <span className="mb-2 block text-sm font-semibold text-slate-700">SEC/DTI/CDA Registration Number</span>
-                          <input name="sec_dti_cda_number" value={identifierForm.sec_dti_cda_number} onChange={handleIdentifierChange} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm uppercase outline-none transition focus:border-[#0f5b83] focus:ring-2 focus:ring-[#0f5b83]/10" required={profile.taxpayer_type === 'Business Owner'} />
+                          <input name="sec_dti_cda_number" value={identifierForm.sec_dti_cda_number} onChange={handleIdentifierChange} className={`w-full rounded-2xl border px-4 py-3 text-sm uppercase outline-none transition focus:ring-2 focus:ring-[#0f5b83]/10 ${identifierErrors.sec_dti_cda_number ? 'border-rose-400 bg-rose-50 focus:border-rose-500' : 'border-slate-300 focus:border-[#0f5b83]'}`} />
+                          {identifierErrors.sec_dti_cda_number ? <span className="mt-2 block text-xs font-medium text-rose-600">{identifierErrors.sec_dti_cda_number}</span> : null}
                         </label>
                       </>
                     )}
 
                     <label className="block">
                       <span className="mb-2 block text-sm font-semibold text-slate-700">Supporting File</span>
-                      <input type="file" name="supporting_file" onChange={handleIdentifierChange} accept=".pdf,.png,.jpg,.jpeg" className="mb-4 w-full cursor-pointer rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm shadow-sm file:mr-4 file:rounded-xl file:border-0 file:bg-[#0f2f5f] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:border-blue-400 hover:bg-slate-50 focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-slate-200 transition" required />
+                      <input type="file" name="supporting_file" onChange={handleIdentifierChange} accept=".pdf,.png,.jpg,.jpeg" className={`mb-1 w-full cursor-pointer rounded-2xl border border-dashed bg-white px-4 py-3 text-sm shadow-sm file:mr-4 file:rounded-xl file:border-0 file:bg-[#0f2f5f] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:border-blue-400 hover:bg-slate-50 focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-slate-200 transition ${identifierErrors.supporting_file ? 'border-rose-400 bg-rose-50' : 'border-slate-300'}`} />
+                      {identifierErrors.supporting_file ? <span className="mb-2 block text-xs font-medium text-rose-600">{identifierErrors.supporting_file}</span> : null}
                       <span className="mt-2 block text-xs text-slate-500">Accepted formats: PDF, PNG, JPG, JPEG only. Maximum 10MB.</span>
                     </label>
 
@@ -742,7 +783,6 @@ const AccountManagement = () => {
                 onChange={(event) => setConfirmProfilePassword(event.target.value)}
                 className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-[#0f5b83] focus:ring-2 focus:ring-[#0f5b83]/10"
                 autoComplete="current-password"
-                required
               />
             </label>
             <div className="mt-6 flex justify-end gap-3">
@@ -781,15 +821,18 @@ const AccountManagement = () => {
             <div className="mt-5 grid gap-4">
               <label className="block">
                 <span className="mb-2 block text-sm font-semibold text-slate-700">Current Password</span>
-                <input name="current_password" type="password" value={passwordForm.current_password} onChange={handlePasswordFormChange} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-[#0f5b83] focus:ring-2 focus:ring-[#0f5b83]/10" autoComplete="current-password" required />
+                <input name="current_password" type="password" value={passwordForm.current_password} onChange={handlePasswordFormChange} className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition focus:ring-2 focus:ring-[#0f5b83]/10 ${currentPasswordError ? 'border-rose-400 bg-rose-50 focus:border-rose-500' : 'border-slate-300 focus:border-[#0f5b83]'}`} autoComplete="current-password" />
+                {currentPasswordError ? <span className="mt-2 block text-xs font-medium text-rose-600">{currentPasswordError}</span> : null}
               </label>
               <label className="block">
                 <span className="mb-2 block text-sm font-semibold text-slate-700">New Password</span>
-                <input name="new_password" type="password" value={passwordForm.new_password} onChange={handlePasswordFormChange} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-[#0f5b83] focus:ring-2 focus:ring-[#0f5b83]/10" autoComplete="new-password" required />
+                <input name="new_password" type="password" value={passwordForm.new_password} onChange={handlePasswordFormChange} className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition focus:ring-2 focus:ring-[#0f5b83]/10 ${newPasswordError ? 'border-rose-400 bg-rose-50 focus:border-rose-500' : 'border-slate-300 focus:border-[#0f5b83]'}`} autoComplete="new-password" />
+                {newPasswordError ? <span className="mt-2 block text-xs font-medium text-rose-600">{newPasswordError}</span> : null}
               </label>
               <label className="block">
                 <span className="mb-2 block text-sm font-semibold text-slate-700">Confirm New Password</span>
-                <input name="confirm_new_password" type="password" value={passwordForm.confirm_new_password} onChange={handlePasswordFormChange} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-[#0f5b83] focus:ring-2 focus:ring-[#0f5b83]/10" autoComplete="new-password" required />
+                <input name="confirm_new_password" type="password" value={passwordForm.confirm_new_password} onChange={handlePasswordFormChange} className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition focus:ring-2 focus:ring-[#0f5b83]/10 ${confirmPasswordError ? 'border-rose-400 bg-rose-50 focus:border-rose-500' : 'border-slate-300 focus:border-[#0f5b83]'}`} autoComplete="new-password" />
+                {confirmPasswordError ? <span className="mt-2 block text-xs font-medium text-rose-600">{confirmPasswordError}</span> : null}
               </label>
             </div>
             <div className="mt-6 flex justify-end gap-3">
@@ -799,6 +842,9 @@ const AccountManagement = () => {
                   setShowPasswordModal(false);
                   setPasswordForm(DEFAULT_PASSWORD_FORM);
                   setPasswordError('');
+                  setCurrentPasswordError('');
+                  setNewPasswordError('');
+                  setConfirmPasswordError('');
                 }}
                 disabled={changingPassword}
                 className="rounded-full border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
