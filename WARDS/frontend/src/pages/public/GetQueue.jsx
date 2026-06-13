@@ -227,6 +227,7 @@ const GetQueue = () => {
   const [appointmentAvailabilityLoading, setAppointmentAvailabilityLoading] = useState(false);
   const [appointmentAvailabilityRefreshKey, setAppointmentAvailabilityRefreshKey] = useState(0);
   const [immediateAvailability, setImmediateAvailability] = useState(null);
+  const [windowFullModal, setWindowFullModal] = useState(false);
   const todayDate = useMemo(() => getUtc8TodayDate(), []);
   const preselectedService = searchParams.get('service') || '';
   const preselectedQueueType = searchParams.get('queueType') || 'immediate';
@@ -686,6 +687,11 @@ const GetQueue = () => {
     } catch (error) {
       console.error('Failed to register queue:', error);
       const errorDetail = error.response?.data?.detail || '';
+      if (errorDetail.includes('maximum capacity') || errorDetail.includes('has reached its maximum capacity')) {
+        setWindowFullModal(true);
+        setRegistering(false);
+        return;
+      }
       if (
         formData.queue_type === 'appointment'
         && (
@@ -846,6 +852,25 @@ const GetQueue = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
+      {windowFullModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-sm w-full mx-4 text-center">
+            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg className="w-9 h-9 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+              </svg>
+            </div>
+            <h3 className="text-xl font-bold text-gray-800 mb-2">Window is Full</h3>
+            <p className="text-gray-600 mb-6">This Window is currently full, please wait.</p>
+            <button
+              onClick={() => setWindowFullModal(false)}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-xl transition-colors"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
       <div className="container mx-auto px-4 max-w-6xl">
         {/* Header */}
         <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
