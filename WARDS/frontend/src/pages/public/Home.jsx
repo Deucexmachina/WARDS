@@ -107,7 +107,7 @@ const ImageGallery = ({ images, onImageClick }) => {
           src={buildAttachmentUrl(att.preview_url || att.download_url)}
           alt={att.filename}
           loading="lazy"
-          className="absolute inset-0 h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
+          className="absolute inset-0 h-full w-full max-w-full object-cover transition duration-300 group-hover:scale-[1.02]"
         />
         {isLastWithExtra && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/55 text-2xl font-semibold text-white">
@@ -121,8 +121,8 @@ const ImageGallery = ({ images, onImageClick }) => {
   // 1 image: full-width 16:9
   if (visible.length === 1) {
     return (
-      <div className="mt-4">
-        <div className="relative w-full overflow-hidden rounded-xl" style={{ aspectRatio: '16 / 9' }}>
+      <div className="mt-4 max-w-full">
+        <div className="relative w-full max-w-full overflow-hidden rounded-xl" style={{ aspectRatio: '16 / 9' }}>
           {renderTile(visible[0], 0, { className: 'h-full', style: { aspectRatio: '16 / 9' } })}
         </div>
       </div>
@@ -132,9 +132,9 @@ const ImageGallery = ({ images, onImageClick }) => {
   // 2 images: 2-col, each 16:9
   if (visible.length === 2) {
     return (
-      <div className="mt-4 grid grid-cols-2 gap-2">
+      <div className="mt-4 grid grid-cols-2 gap-2 max-w-full">
         {visible.map((att, idx) => (
-          <div key={att.id} className="relative" style={{ aspectRatio: '16 / 9' }}>
+          <div key={att.id} className="relative max-w-full" style={{ aspectRatio: '16 / 9' }}>
             {renderTile(att, idx, { className: 'h-full', style: { aspectRatio: '16 / 9' } })}
           </div>
         ))}
@@ -145,13 +145,13 @@ const ImageGallery = ({ images, onImageClick }) => {
   // 3 images: first full-width 16:9, then two below in 2 columns
   if (visible.length === 3) {
     return (
-      <div className="mt-4 space-y-2">
-        <div className="relative" style={{ aspectRatio: '16 / 9' }}>
+      <div className="mt-4 space-y-2 max-w-full">
+        <div className="relative max-w-full" style={{ aspectRatio: '16 / 9' }}>
           {renderTile(visible[0], 0, { className: 'h-full', style: { aspectRatio: '16 / 9' } })}
         </div>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-2 max-w-full">
           {visible.slice(1).map((att, idx) => (
-            <div key={att.id} className="relative" style={{ aspectRatio: '16 / 9' }}>
+            <div key={att.id} className="relative max-w-full" style={{ aspectRatio: '16 / 9' }}>
               {renderTile(att, idx + 1, { className: 'h-full', style: { aspectRatio: '16 / 9' } })}
             </div>
           ))}
@@ -162,9 +162,9 @@ const ImageGallery = ({ images, onImageClick }) => {
 
   // 4 or more images: 2x2 with +N overlay on the last visible
   return (
-    <div className="mt-4 grid grid-cols-2 gap-2">
+    <div className="mt-4 grid grid-cols-2 gap-2 max-w-full">
       {visible.map((att, idx) => (
-        <div key={att.id} className="relative" style={{ aspectRatio: '16 / 9' }}>
+        <div key={att.id} className="relative max-w-full" style={{ aspectRatio: '16 / 9' }}>
           {renderTile(att, idx, { className: 'h-full', showOverlay: true, style: { aspectRatio: '16 / 9' } })}
         </div>
       ))}
@@ -241,6 +241,13 @@ const Home = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedAnnouncement, setSelectedAnnouncement] = useState(null);
   const [showTicketModal, setShowTicketModal] = useState(false);
+  const [viewedIds, setViewedIds] = useState(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem('wards_public_viewed_announcements') || '[]'));
+    } catch {
+      return new Set();
+    }
+  });
 
   const s = homeSettings;
   const isTl = language === 'tl';
@@ -332,6 +339,16 @@ const Home = () => {
     if (searchParams.get('modal') === 'ticket') {
       navigate(appendLanguageParam('/', language), { replace: true });
     }
+  };
+
+  const markViewed = (announcementId) => {
+    setViewedIds((prev) => {
+      if (prev.has(announcementId)) return prev;
+      const next = new Set(prev);
+      next.add(announcementId);
+      localStorage.setItem('wards_public_viewed_announcements', JSON.stringify(Array.from(next)));
+      return next;
+    });
   };
 
   return (
@@ -439,160 +456,90 @@ const Home = () => {
               <p className="text-sm font-medium text-slate-400">No announcements at this time.</p>
             </div>
           ) : (
-            (() => {
-              const featured = paginatedAnnouncements[0];
-              const rest = paginatedAnnouncements.slice(1);
+            <div className="flex flex-col gap-2">
+              {paginatedAnnouncements.map((announcement) => {
+                const colorClass = getIconColorClass(announcement.icon_color);
+                const attachments = announcement.attachments || [];
+                const imageAttachments = attachments.filter(isImageAttachment);
+                const fileAttachments = attachments.filter((att) => !isImageAttachment(att));
+                const sourceName = announcement.branch_name || 'Main Admin';
+                const isBranch = !!announcement.branch_name;
 
-              const renderMeta = (announcement, colorClass, isBranch, sourceName, sourceSubtitle) => (
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className={`${colorClass.bg} flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md`}>
-                    <svg className={`w-3 h-3 ${colorClass.text}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={getIconPath(announcement.icon_type)} />
-                    </svg>
-                  </div>
-                  <span className="text-[11px] font-semibold truncate">{sourceName}</span>
-                  <span className="text-current opacity-30">·</span>
-                  <time className="text-[11px] opacity-60 flex-shrink-0" dateTime={announcement.publish_date}>
-                    {formatDate(announcement.publish_date)}
-                  </time>
-                  <span className={`ml-auto flex-shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
-                    isBranch ? 'bg-white/20 text-current' : 'bg-white/15 text-current'
-                  }`}>
-                    {isBranch ? 'Branch' : 'Office-wide'}
-                  </span>
-                </div>
-              );
-
-              const featuredColorClass = getIconColorClass(featured.icon_color);
-              const featuredAttachments = featured.attachments || [];
-              const featuredImages = featuredAttachments.filter(isImageAttachment);
-              const featuredFiles = featuredAttachments.filter((att) => !isImageAttachment(att));
-              const featuredSource = featured.branch_name || 'Main Admin';
-              const featuredSubtitle = featured.branch_name ? 'Branch advisory' : 'Office-wide update';
-              const featuredIsBranch = !!featured.branch_name;
-
-              return (
-                <div className="flex flex-col gap-3">
-                  {/* Featured card — full width, dark bg */}
+                return (
                   <article
-                    className="group rounded-2xl bg-primary overflow-hidden cursor-pointer hover:shadow-xl transition-all duration-200"
-                    onClick={() => setSelectedAnnouncement(featured)}
+                    key={announcement.id}
+                    className={`group flex items-start gap-4 rounded-xl border bg-white p-4 hover:border-primary/25 hover:shadow-sm transition-all duration-200 cursor-pointer ${
+                      viewedIds.has(announcement.id) ? 'border-slate-100' : 'border-blue-500'
+                    }`}
+                    onClick={() => {
+                      markViewed(announcement.id);
+                      setSelectedAnnouncement(announcement);
+                    }}
                   >
-                    <div className="p-5 sm:p-6">
-                      {/* Meta */}
-                      <div className="text-white mb-3">
-                        {renderMeta(featured, featuredColorClass, featuredIsBranch, featuredSource, featuredSubtitle)}
-                      </div>
-                      {/* Title + content side by side on md+ */}
-                      <div className="sm:flex sm:gap-6 sm:items-start">
-                        <div className="flex-1 min-w-0">
-                          <h3 className="text-2xl sm:text-3xl font-extrabold text-white leading-snug mb-2 group-hover:text-blue-200 transition-colors duration-200">
-                            {featured.title}
-                          </h3>
-                          <p className="text-sm leading-relaxed text-white/75 line-clamp-3">
-                            {featured.content}
-                          </p>
-                        </div>
-                        {featuredImages.length > 0 && (
-                          <div className="mt-3 sm:mt-0 sm:w-44 sm:flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-                            <ImageGallery images={featuredImages} onImageClick={() => setSelectedAnnouncement(featured)} />
-                          </div>
+                    {/* Icon */}
+                    <div className={`${colorClass.bg} flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg`}>
+                      <svg className={`h-5 w-5 ${colorClass.text}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={getIconPath(announcement.icon_type)} />
+                      </svg>
+                    </div>
+
+                    {/* Content */}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xs font-semibold text-slate-600 truncate">{sourceName}</span>
+                        <span className="text-slate-300">·</span>
+                        <time className="text-xs text-slate-400 flex-shrink-0" dateTime={announcement.publish_date}>
+                          {formatDate(announcement.publish_date)}
+                        </time>
+                        {!viewedIds.has(announcement.id) && (
+                          <span className="flex-shrink-0 h-2.5 w-2.5 rounded-full bg-blue-500" aria-label="Unread" />
                         )}
-                      </div>
-                      {featuredFiles.length > 0 && (
-                        <div className="mt-3 space-y-1.5" onClick={(e) => e.stopPropagation()}>
-                          {featuredFiles.map((att) => <FileAttachmentRow key={att.id} attachment={att} />)}
-                        </div>
-                      )}
-                      {/* Footer */}
-                      <div className="mt-4 flex items-center justify-between">
-                        <span className="text-[11px] font-bold uppercase tracking-widest text-white/30">{featuredSubtitle}</span>
-                        <span className="inline-flex items-center gap-1 text-xs font-bold text-white/60 group-hover:text-white transition-colors duration-200">
-                          Read more
-                          <svg className="w-3 h-3 transition-transform duration-200 group-hover:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" />
-                          </svg>
+                        <span className={`ml-auto flex-shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
+                          isBranch ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-400'
+                        }`}>
+                          {isBranch ? 'Branch' : 'Office-wide'}
                         </span>
                       </div>
+
+                      <h3 className="text-base font-bold text-slate-800 leading-snug mb-1 group-hover:text-primary transition-colors duration-200">
+                        {announcement.title}
+                      </h3>
+                      <p className="text-sm leading-relaxed text-slate-500 line-clamp-2">
+                        {announcement.content}
+                      </p>
+
+                      {imageAttachments.length > 0 && (
+                        <div className="mt-2 flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
+                          <img
+                            src={buildAttachmentUrl(imageAttachments[0].preview_url || imageAttachments[0].download_url)}
+                            alt={imageAttachments[0].filename}
+                            className="h-14 w-14 flex-shrink-0 rounded-lg object-cover"
+                            loading="lazy"
+                          />
+                          {imageAttachments.length > 1 && (
+                            <span className="text-xs font-medium text-slate-400">
+                              +{imageAttachments.length - 1} more image{imageAttachments.length > 2 ? 's' : ''}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {fileAttachments.length > 0 && (
+                        <div className="mt-2 space-y-1" onClick={(e) => e.stopPropagation()}>
+                          {fileAttachments.map((att) => <FileAttachmentRow key={att.id} attachment={att} />)}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Chevron */}
+                    <div className="flex-shrink-0 self-center text-slate-300 group-hover:text-primary transition-colors duration-200">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
+                      </svg>
                     </div>
                   </article>
-
-                  {/* Rest — 2-col grid */}
-                  {rest.length > 0 && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {rest.map((announcement, idx) => {
-                        const colorClass = getIconColorClass(announcement.icon_color);
-                        const attachments = announcement.attachments || [];
-                        const imageAttachments = attachments.filter(isImageAttachment);
-                        const fileAttachments = attachments.filter((att) => !isImageAttachment(att));
-                        const sourceName = announcement.branch_name || 'Main Admin';
-                        const sourceSubtitle = announcement.branch_name ? 'Branch advisory' : 'Office-wide update';
-                        const isBranch = !!announcement.branch_name;
-
-                        return (
-                          <article
-                            key={announcement.id}
-                            className="group relative bg-white rounded-2xl border border-slate-100 hover:border-primary/25 hover:shadow-md transition-all duration-200 overflow-hidden cursor-pointer flex flex-col"
-                            onClick={() => setSelectedAnnouncement(announcement)}
-                          >
-                            <div className="p-4 flex flex-col flex-1">
-                              {/* Meta */}
-                              <div className="flex items-center gap-2 mb-2.5 text-slate-500">
-                                <div className={`${colorClass.bg} flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md`}>
-                                  <svg className={`w-3 h-3 ${colorClass.text}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={getIconPath(announcement.icon_type)} />
-                                  </svg>
-                                </div>
-                                <span className="text-xs font-semibold text-slate-600 truncate">{sourceName}</span>
-                                <span className="text-slate-200">·</span>
-                                <time className="text-xs text-slate-400 flex-shrink-0" dateTime={announcement.publish_date}>
-                                  {formatDate(announcement.publish_date)}
-                                </time>
-                                <span className={`ml-auto flex-shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
-                                  isBranch ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-400'
-                                }`}>
-                                  {isBranch ? 'Branch' : 'Office-wide'}
-                                </span>
-                              </div>
-
-                              {/* Title */}
-                              <h3 className="text-base font-bold text-slate-800 leading-snug mb-1.5 group-hover:text-primary transition-colors duration-200">
-                                {announcement.title}
-                              </h3>
-                              <p className="text-sm leading-relaxed text-slate-500 line-clamp-2 flex-1">
-                                {announcement.content}
-                              </p>
-
-                              {imageAttachments.length > 0 && (
-                                <div className="mt-2.5" onClick={(e) => e.stopPropagation()}>
-                                  <ImageGallery images={imageAttachments} onImageClick={() => setSelectedAnnouncement(announcement)} />
-                                </div>
-                              )}
-                              {fileAttachments.length > 0 && (
-                                <div className="mt-2.5 space-y-1.5" onClick={(e) => e.stopPropagation()}>
-                                  {fileAttachments.map((att) => <FileAttachmentRow key={att.id} attachment={att} />)}
-                                </div>
-                              )}
-                            </div>
-
-                            {/* Footer */}
-                            <div className="flex items-center justify-between border-t border-slate-50 px-4 py-2 mt-auto">
-                              <span className="text-[10px] font-bold uppercase tracking-widest text-slate-300">{sourceSubtitle}</span>
-                              <span className="inline-flex items-center gap-1 text-xs font-semibold text-primary/60 group-hover:text-primary transition-colors duration-200">
-                                Read more
-                                <svg className="w-3 h-3 transition-transform duration-200 group-hover:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" />
-                                </svg>
-                              </span>
-                            </div>
-                          </article>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            })()
+                );
+              })}
+            </div>
           )}
 
           {announcements.length > announcementsPerPage && (
@@ -658,13 +605,13 @@ const Home = () => {
 
       {selectedAnnouncement && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-2xl rounded-2xl bg-white shadow-2xl overflow-hidden">
+          <div className="w-full max-w-2xl min-w-0 max-h-[85vh] overflow-y-auto rounded-2xl bg-white shadow-2xl">
             <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-50 px-6 py-5">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
                   Latest Announcement
                 </p>
-                <h3 className="mt-2 text-2xl font-bold text-primary">
+                <h3 className="mt-2 text-2xl font-bold text-primary break-words">
                   {selectedAnnouncement.title}
                 </h3>
               </div>
@@ -680,7 +627,7 @@ const Home = () => {
               </button>
             </div>
 
-            <div className="px-6 py-6">
+            <div className="px-6 py-6 overflow-x-hidden">
               <div className="flex flex-wrap items-center gap-3 mb-5">
                 <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
                   {formatDate(selectedAnnouncement.publish_date)}
@@ -697,7 +644,7 @@ const Home = () => {
               </div>
 
               <div className="rounded-xl border border-slate-200 bg-white px-5 py-5">
-                <p className="whitespace-pre-line text-base leading-7 text-slate-700">
+                <p className="whitespace-pre-line break-words text-base leading-7 text-slate-700">
                   {selectedAnnouncement.content}
                 </p>
                 {modalImages.length > 0 && (

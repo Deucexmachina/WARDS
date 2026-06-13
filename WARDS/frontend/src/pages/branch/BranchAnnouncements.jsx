@@ -312,15 +312,15 @@ const BranchAnnouncements = () => {
           announcements.map((announcement) => (
             <div key={announcement.id} className={`rounded-xl bg-white p-6 shadow-lg transition duration-300 hover:shadow-xl ${!announcement.is_viewed ? UNREAD_CARD_HIGHLIGHT_CLASS : ''}`}>
               <div className="flex justify-between items-start mb-4 gap-4">
-                <div className="flex items-start gap-4 flex-1">
+                <div className="flex items-start gap-4 flex-1 min-w-0">
                   <div className={`${getColorClasses(announcement.icon_color).bg} p-3 rounded-full flex-shrink-0`}>
                     <svg className={`w-6 h-6 ${getColorClasses(announcement.icon_color).text}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={getIconPath(announcement.icon_type)}></path>
                     </svg>
                   </div>
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-3 mb-2">
-                      <h3 className="text-xl font-bold text-primary">{announcement.title}</h3>
+                      <h3 className="text-xl font-bold text-primary break-words">{announcement.title}</h3>
                       {announcement.branch_name && announcement.is_active && (
                         <span className="inline-flex items-center rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 border border-blue-200">
                           Branch Source: {announcement.branch_name}
@@ -332,7 +332,7 @@ const BranchAnnouncements = () => {
                         </span>
                       )}
                     </div>
-                    <p className="text-gray-600 mb-4">{announcement.content}</p>
+                    <p className="text-gray-600 mb-4 break-words overflow-hidden">{announcement.content}</p>
                     <div className="flex gap-4 text-sm text-gray-500 flex-wrap">
                       <span>Published: {formatDate(announcement.publish_date)}</span>
                       <span>Created by: {announcement.created_by || 'Branch Staff'}</span>
