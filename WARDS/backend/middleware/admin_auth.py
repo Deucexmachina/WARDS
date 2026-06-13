@@ -7,6 +7,7 @@ import os
 
 from database.models import Admin, BranchStaff, get_db, ActivityLog
 from utils.token_revocation import is_token_revoked
+from routes.unified_auth import decode_active_account_from_bearer_token
 
 SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "your-admin-secret-key-change-in-production-immediately")
 UNIFIED_SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "your-unified-auth-secret-change-in-production")
@@ -48,47 +49,13 @@ async def get_current_admin_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
     
-    user = None
-
-    # Support the newer unified auth token if it exists in this deployment.
     try:
-        payload = jwt.decode(token, UNIFIED_SECRET_KEY, algorithms=[ALGORITHM])
-        identifier = payload.get("email") or payload.get("sub")
-        role = payload.get("role")
-        token_type = payload.get("type")
-
-        if identifier and token_type == "role_auth" and role == "admin":
-            user = _get_active_admin(db, email=payload.get("email"), username=payload.get("sub"))
-    except JWTError:
-        pass
-
-    # Support direct admin tokens issued by the current admin login flow.
-    if user is None:
-        try:
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-            username = payload.get("sub")
-            email = payload.get("email")
-            token_type = payload.get("type")
-
-            if token_type == "admin":
-                user = _get_active_admin(db, email=email, username=username)
-        except JWTError:
-            pass
-
-    # Support branch-scoped staff/admin tokens for routes that allow them.
-    if user is None:
-        try:
-            payload = jwt.decode(token, BRANCH_SECRET_KEY, algorithms=[ALGORITHM])
-            username = payload.get("sub")
-            email = payload.get("email")
-            token_type = payload.get("type")
-
-            if token_type == "branch":
-                user = _get_active_branch_staff(db, email=email, username=username)
-        except JWTError:
-            pass
-
-    if user is None:
+        _, user, _payload = decode_active_account_from_bearer_token(
+            token,
+            db,
+            allowed_portals=("admin", "branch"),
+        )
+    except HTTPException:
         try:
             from SECURITY.security_engine import record_context_detection
 

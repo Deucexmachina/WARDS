@@ -4,9 +4,13 @@ import difflib
 import hashlib
 import hmac
 import json
+import logging
 import os
 import random
 import shutil
+import subprocess
+import sys
+import tempfile
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -33,11 +37,13 @@ from SECURITY.security_models import (
 )
 
 MASTER_ROOT = Path(__file__).resolve().parents[1]
+logger = logging.getLogger(__name__)
 SECURITY_ROOT = MASTER_ROOT / "SECURITY"
 QUARANTINE_ROOT = MASTER_ROOT / "QUARANTINE"
 DEFAULT_BACKUP_ROOT = SECURITY_ROOT / "local_backups"
 MODEL_STATE_PATH = SECURITY_ROOT / "ml" / "isolation_forest_state.json"
-WAZUH_CONFIG_PATH = SECURITY_ROOT / "wazuh" / "ossec.conf"
+MODEL_METADATA_PATH = SECURITY_ROOT / "ml" / "isolation_forest_metadata.json"
+WAZUH_CONFIG_PATH = Path(os.getenv("WAZUH_CONFIG_PATH", str(SECURITY_ROOT / "wazuh" / "ossec.conf"))).expanduser()
 DATABASE_MONITOR_ROOT = SECURITY_ROOT / "database_monitor"
 DATABASE_SNAPSHOT_PATH = DATABASE_MONITOR_ROOT / "wards_db_snapshot.json"
 DATABASE_CHECKSUM_PATH = DATABASE_MONITOR_ROOT / "wards_db_checksum.json"
@@ -47,6 +53,15 @@ DATABASE_AUDIT_TABLE = "wards_security_db_audit_log"
 DATABASE_AUTH_TABLE = "wards_security_authorized_operations"
 DATABASE_AUDIT_TRIGGER_PREFIX = "wards_security_audit"
 BACKUP_MANIFEST_NAME = "_backup_hashes.json"
+BACKUP_RETENTION_LIMIT = 20
+WAZUH_CONFIG_BACKUP_SUFFIX = ".bak"
+WAZUH_HELPER_SCRIPT = SECURITY_ROOT / "wazuh_admin_helper.py"
+WAZUH_HELPER_LOG_PATH = SECURITY_ROOT / "wazuh" / "wazuh_helper.log"
+MODEL_RELATIVE_BACKUP_DIR = "SECURITY/ml"
+SHARED_MONITORED_FOLDERS_PATH = SECURITY_ROOT / "monitoring" / "monitored_folders.json"
+LOCAL_MONITORED_FOLDERS_SETTING = "custom_monitored_folders"
+MONITORING_REMOVED_STATUS = "monitoring_removed"
+EXTERNAL_MONITOR_PREFIX = "EXTERNAL"
 
 DATABASE_EXCLUDED_TABLES = {
     "activity_logs",
@@ -462,6 +477,66 @@ SYSTEM_ALERT_CATALOG = {
     "invalid_admin_session": "Invalid Admin Session Detected",
 }
 
+CANONICAL_SUPERADMIN_EMAIL = "treasurersuper@gmail.com"
+CANONICAL_MAIN_ADMIN_EMAIL = "treasurermain@gmail.com"
+IMPORTANT_SYSTEM_ALERT_KEYS = {
+    "backup_started",
+    "backup_completed",
+    "backup_failed",
+    "detection_logged",
+    "recovery_completed",
+    "recovery_failed",
+    "incident_created",
+    "incident_resolved",
+    "incident_false_positive",
+    "vpn_risk",
+    "invalid_admin_session",
+}
+
+
+def canonical_admin_recipients() -> list[str]:
+    recipients = [
+        (os.getenv("SUPERADMIN_EMAIL") or CANONICAL_SUPERADMIN_EMAIL).strip().lower(),
+        (os.getenv("ADMIN_EMAIL") or CANONICAL_MAIN_ADMIN_EMAIL).strip().lower(),
+    ]
+    return sorted({email for email in recipients if email})
+
+
+def system_alert_email_recipients(db: Session) -> list[str]:
+    recipients = set(canonical_admin_recipients())
+    for admin in db.query(Admin).filter(Admin.status == "Active", Admin.role.in_(["main_admin", "admin", "superadmin"])).all():
+        email = (admin.email or "").strip().lower()
+        if email:
+            recipients.add(email)
+    return sorted(recipients)
+
+
+def dispatch_system_alert_email(
+    db: Session,
+    alert: Alert,
+    *,
+    incident: dict | None = None,
+    detection: dict | None = None,
+    recoveries: list[dict] | None = None,
+) -> dict | None:
+    if alert.type not in IMPORTANT_SYSTEM_ALERT_KEYS:
+        return None
+    recipients = system_alert_email_recipients(db)
+    incident_payload = incident or {
+        "id": alert.id,
+        "severity_level": alert.severity,
+        "status": "open",
+        "incident_type": alert.type,
+        "description": alert.message,
+    }
+    detection_payload = detection or {
+        "id": alert.id,
+        "target_name": "system_alert",
+        "change_type": alert.type,
+        "trigger_summary": alert.message,
+    }
+    return send_security_incident_alert_email(recipients, incident_payload, detection_payload, recoveries)
+
 
 def create_system_alert(db: Session, alert_key: str, message: str, severity: str = "low", *, title: str | None = None, dedupe_key: str | None = None) -> Alert | None:
     resolved_title = title or SYSTEM_ALERT_CATALOG.get(alert_key, alert_key.replace("_", " ").title())
@@ -477,6 +552,10 @@ def create_system_alert(db: Session, alert_key: str, message: str, severity: str
     db.add(alert)
     db.commit()
     db.refresh(alert)
+    try:
+        dispatch_system_alert_email(db, alert)
+    except Exception:
+        logger.exception("Failed to dispatch system alert email for alert %s", alert.id)
     return alert
 
 
@@ -614,6 +693,10 @@ def safe_rel(path: Path) -> str:
         return resolved.name
 
 
+def relative_to_root(path: Path, root: Path) -> str:
+    return str(path.resolve().relative_to(root.resolve())).replace("\\", "/")
+
+
 def resolve_stored_path(raw_path: Path | str | None, base_root: Path = MASTER_ROOT) -> Path | None:
     if raw_path in {None, ""}:
         return None
@@ -644,12 +727,15 @@ def portable_monitored_path(file_entry: SecurityMonitoredFile) -> Path:
     original = Path(file_entry.file_path)
     relative = str(file_entry.relative_path or "").replace("\\", "/")
     parts = [part for part in relative.split("/") if part]
+    if parts and parts[0] == EXTERNAL_MONITOR_PREFIX:
+        return original
     if parts:
         root_name = parts[0]
         root = MONITORED_ROOTS.get(root_name)
         if root:
             candidate = root.joinpath(*parts[1:]).resolve(strict=False)
             return candidate
+        return (MASTER_ROOT / Path(*parts)).resolve(strict=False)
     return original
 
 
@@ -665,6 +751,135 @@ def normalized_path_key(path: Path | str) -> str:
     except Exception:
         resolved = str(path)
     return resolved.lower() if os.name == "nt" else resolved
+
+
+def is_retired_monitored_file(file_entry: SecurityMonitoredFile) -> bool:
+    return (file_entry.status or "").lower() == MONITORING_REMOVED_STATUS
+
+
+def active_monitored_files_query(db: Session):
+    return db.query(SecurityMonitoredFile).filter(SecurityMonitoredFile.status != MONITORING_REMOVED_STATUS)
+
+
+def path_relative_to_repo(path: Path) -> str | None:
+    try:
+        return str(path.resolve().relative_to(MASTER_ROOT.resolve())).replace("\\", "/")
+    except ValueError:
+        return None
+
+
+def external_monitored_relative_path(path: Path, root: Path) -> str:
+    suffix = hashlib.sha1(str(root.resolve()).encode("utf-8")).hexdigest()[:12]
+    relative = relative_to_root(path, root)
+    return f"{EXTERNAL_MONITOR_PREFIX}/{root.name}_{suffix}/{relative}"
+
+
+def monitored_relative_path(path: Path, root: Path) -> str:
+    repo_relative = path_relative_to_repo(path)
+    if repo_relative:
+        return repo_relative
+    return external_monitored_relative_path(path, root)
+
+
+def shared_monitored_folder_token(path: Path) -> str | None:
+    return path_relative_to_repo(path)
+
+
+def load_shared_monitored_folders() -> list[Path]:
+    if not SHARED_MONITORED_FOLDERS_PATH.exists():
+        return []
+    try:
+        payload = json_loads(SHARED_MONITORED_FOLDERS_PATH.read_text(encoding="utf-8"), {})
+        items = payload.get("folders") or []
+    except Exception:
+        logger.exception("Failed to load shared monitored folders from '%s'.", SHARED_MONITORED_FOLDERS_PATH)
+        return []
+    folders: list[Path] = []
+    seen: set[str] = set()
+    for item in items:
+        resolved = resolve_stored_path(item)
+        if not resolved or not resolved.exists() or not resolved.is_dir():
+            continue
+        key = normalized_path_key(resolved)
+        if key in seen:
+            continue
+        seen.add(key)
+        folders.append(resolved)
+    return folders
+
+
+def save_shared_monitored_folders(paths: list[Path]) -> None:
+    tokens = sorted({token for token in (shared_monitored_folder_token(path) for path in paths) if token})
+    SHARED_MONITORED_FOLDERS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SHARED_MONITORED_FOLDERS_PATH.write_text(
+        json_dumps({"version": 1, "folders": tokens}),
+        encoding="utf-8",
+    )
+
+
+def load_local_monitored_folders(db: Session) -> list[Path]:
+    raw = get_setting(db, LOCAL_MONITORED_FOLDERS_SETTING, "[]")
+    try:
+        items = json_loads(raw, [])
+    except Exception:
+        items = []
+    folders: list[Path] = []
+    seen: set[str] = set()
+    for item in items:
+        resolved = resolve_stored_path(item)
+        if not resolved or not resolved.exists() or not resolved.is_dir():
+            continue
+        key = normalized_path_key(resolved)
+        if key in seen:
+            continue
+        seen.add(key)
+        folders.append(resolved)
+    return folders
+
+
+def save_local_monitored_folders(db: Session, paths: list[Path], updated_by: str) -> None:
+    values = sorted({stored_path_value(path) or str(path.resolve()) for path in paths})
+    set_setting(db, LOCAL_MONITORED_FOLDERS_SETTING, json_dumps(values), updated_by)
+
+
+def configured_custom_monitored_folders(db: Session) -> list[Path]:
+    folders: list[Path] = []
+    seen: set[str] = set()
+    for path in load_shared_monitored_folders() + load_local_monitored_folders(db):
+        key = normalized_path_key(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        folders.append(path)
+    return folders
+
+
+def monitored_folder_scope(path: Path) -> str:
+    return "shared" if shared_monitored_folder_token(path) else "local"
+
+
+def persist_configured_monitored_folder(db: Session, root: Path, updated_by: str) -> str:
+    if shared_monitored_folder_token(root):
+        paths = load_shared_monitored_folders()
+        if normalized_path_key(root) not in {normalized_path_key(item) for item in paths}:
+            paths.append(root)
+            save_shared_monitored_folders(paths)
+        return "shared"
+    paths = load_local_monitored_folders(db)
+    if normalized_path_key(root) not in {normalized_path_key(item) for item in paths}:
+        paths.append(root)
+        save_local_monitored_folders(db, paths, updated_by)
+    return "local"
+
+
+def remove_configured_monitored_folder(db: Session, root: Path, updated_by: str) -> str:
+    if shared_monitored_folder_token(root):
+        paths = [item for item in load_shared_monitored_folders() if normalized_path_key(item) != normalized_path_key(root)]
+        save_shared_monitored_folders(paths)
+        return "shared"
+    paths = [item for item in load_local_monitored_folders(db) if normalized_path_key(item) != normalized_path_key(root)]
+    save_local_monitored_folders(db, paths, updated_by)
+    return "local"
 
 
 def reassign_monitored_file_references(db: Session, source_id: int, target_id: int) -> None:
@@ -1271,14 +1486,15 @@ def is_database_entry(file_entry: SecurityMonitoredFile) -> bool:
     )
 
 
-def is_monitorable(path: Path) -> bool:
+def is_monitorable(path: Path, root_path: Path | None = None) -> bool:
     if not path.is_file():
         return False
     lower_name = path.name.lower()
     if path.suffix.lower() not in MONITORED_SUFFIXES and lower_name not in MONITORED_SPECIAL_FILENAMES and not any(lower_name.endswith(item) for item in MONITORED_SPECIAL_NAME_SUFFIXES):
         return False
     parts = {part.lower() for part in path.parts}
-    if parts.intersection({item.lower() for item in DEFAULT_EXCLUDED_DIRS}):
+    allowed_root_parts = {part.lower() for part in root_path.resolve().parts} if root_path else set()
+    if (parts - allowed_root_parts).intersection({item.lower() for item in DEFAULT_EXCLUDED_DIRS}):
         return False
     return True
 
@@ -1295,12 +1511,88 @@ def iter_monitorable_files(roots: dict[str, Path] | None = None) -> Iterable[tup
                 if dirname.lower() not in excluded and not dirname.startswith(".")
             ]
             current_path = Path(current_root)
-            if {part.lower() for part in current_path.parts}.intersection(excluded):
+            allowed_root_parts = {part.lower() for part in root_path.resolve().parts}
+            if ({part.lower() for part in current_path.parts} - allowed_root_parts).intersection(excluded):
                 continue
             for filename in filenames:
                 path = current_path / filename
-                if is_monitorable(path):
+                if is_monitorable(path, root_path=root_path):
                     yield root_name, path.resolve()
+
+
+def register_monitored_folder_entries(
+    db: Session,
+    root: Path,
+    *,
+    refresh_existing: bool = True,
+    backup_root: Path | None = None,
+) -> tuple[int, int, int]:
+    created = 0
+    backed_up = 0
+    processed = 0
+    roots = {root.name.upper(): root}
+    for root_name, path in iter_monitorable_files(roots):
+        processed += 1
+        current_hash = sha256_file(path)
+        relative = monitored_relative_path(path, root)
+        matches = (
+            db.query(SecurityMonitoredFile)
+            .filter(or_(SecurityMonitoredFile.file_path == str(path), SecurityMonitoredFile.relative_path == relative))
+            .order_by(SecurityMonitoredFile.id.asc())
+            .all()
+        )
+        existing = None
+        if matches:
+            path_key = normalized_path_key(path)
+            existing = next((item for item in matches if normalized_path_key(item.file_path) == path_key), None) or matches[0]
+            for duplicate in matches:
+                if duplicate.id != existing.id:
+                    existing = merge_monitored_file_entry(db, duplicate, existing)
+        if existing:
+            existing.file_path = str(path)
+            existing.relative_path = relative
+            existing.folder_root = root_name
+            existing.file_type = file_type(path)
+            existing.size_bytes = path.stat().st_size
+            existing.last_checked = now_utc()
+            if refresh_existing or is_retired_monitored_file(existing):
+                existing.current_hash = current_hash
+                existing.baseline_hash = existing.baseline_hash or current_hash
+                existing.status = "clean"
+            db.add(existing)
+        else:
+            db.add(
+                SecurityMonitoredFile(
+                    file_path=str(path),
+                    relative_path=relative,
+                    folder_root=root_name,
+                    baseline_hash=current_hash,
+                    current_hash=current_hash,
+                    status="clean",
+                    file_type=file_type(path),
+                    size_bytes=path.stat().st_size,
+                )
+            )
+            created += 1
+        if backup_root:
+            target = backup_file_path(backup_root, relative)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, target)
+            backed_up += 1
+    return created, backed_up, processed
+
+
+def sync_configured_monitored_folders(db: Session, refresh_existing: bool = True) -> int:
+    created = 0
+    for root in configured_custom_monitored_folders(db):
+        if not root.exists() or not root.is_dir():
+            continue
+        folder_created, _, _ = register_monitored_folder_entries(db, root, refresh_existing=refresh_existing, backup_root=None)
+        created += folder_created
+    if created:
+        dedupe_monitored_files_by_relative_path(db)
+        db.commit()
+    return created
 
 
 def get_setting(db: Session, key: str, default: str) -> str:
@@ -1356,6 +1648,7 @@ def seed_settings(db: Session) -> None:
     defaults = {
         "backup_location": stored_path_value(DEFAULT_BACKUP_ROOT) or str(DEFAULT_BACKUP_ROOT),
         "latest_backup_path": "",
+        LOCAL_MONITORED_FOLDERS_SETTING: "[]",
         "last_scan_at": "",
         "backup_schedule": json_dumps({"enabled": False, "frequency": "weekly", "next_run": ""}),
         "ai_retrain_schedule": json_dumps({"day": "Sunday", "time": "23:00", "next_run": next_weekday("Sunday", "23:00")}),
@@ -1376,13 +1669,14 @@ def seed_settings(db: Session) -> None:
     if changed:
         db.commit()
     sync_runtime_env_settings(db)
+    sync_configured_monitored_folders(db, refresh_existing=True)
     backup_location = writable_backup_location(db, "startup")
-    prune_all_backup_types(backup_location, keep=3)
+    prune_all_backup_types(backup_location, keep=BACKUP_RETENTION_LIMIT)
     refresh_backup_integrity_manifests(backup_location, force=False)
     try:
-        update_wazuh_monitored_folder(DATABASE_MONITOR_ROOT, "add")
+        sync_wazuh_monitored_folders(db)
     except Exception:
-        pass
+        logger.exception("Wazuh monitored-folder sync failed during security settings bootstrap.")
 
 
 def get_ai_rules(db: Session) -> dict:
@@ -1487,8 +1781,7 @@ def writable_backup_location(db: Session, updated_by: str = "system") -> Path:
     candidates.append(fallback)
     for candidate in candidates:
         try:
-            target = candidate.resolve(strict=False)
-            target.mkdir(parents=True, exist_ok=True)
+            target = validate_backup_destination(candidate, create=True)
             portable_target = stored_path_value(target) or str(target)
             current_value = get_setting(db, "backup_location", stored_path_value(DEFAULT_BACKUP_ROOT) or str(DEFAULT_BACKUP_ROOT))
             if portable_target != current_value:
@@ -1499,6 +1792,24 @@ def writable_backup_location(db: Session, updated_by: str = "system") -> Path:
     fallback.mkdir(parents=True, exist_ok=True)
     set_setting(db, "backup_location", stored_path_value(fallback) or str(fallback), updated_by)
     return fallback
+
+
+def validate_backup_destination(raw_path: Path | str, create: bool = True) -> Path:
+    target = Path(raw_path).expanduser()
+    if not target.is_absolute():
+        raise ValueError("Backup location must use an absolute filesystem path.")
+    resolved = target.resolve(strict=False)
+    if resolved.exists() and not resolved.is_dir():
+        raise ValueError("Backup location must be a folder, not a file.")
+    if create:
+        resolved.mkdir(parents=True, exist_ok=True)
+    probe = resolved / ".wards_backup_write_test"
+    try:
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+    except Exception as exc:
+        raise ValueError(f"Backup location is not writable: {resolved}") from exc
+    return resolved
 
 
 def copy_into_backup(source: Path, target: Path, previous_source: Path | None = None, can_reuse_previous: bool = False) -> None:
@@ -1518,6 +1829,61 @@ def copy_into_backup(source: Path, target: Path, previous_source: Path | None = 
 
 def relative_backup_path(path: Path, backup_root: Path) -> str:
     return str(path.relative_to(backup_root)).replace("\\", "/")
+
+
+def iter_model_artifact_paths() -> list[Path]:
+    return [path for path in (MODEL_STATE_PATH, MODEL_METADATA_PATH) if path.exists() and path.is_file()]
+
+
+def model_backup_relative_path(path: Path) -> str:
+    return f"{MODEL_RELATIVE_BACKUP_DIR}/{path.name}"
+
+
+def backup_ml_artifacts(
+    backup_root: Path,
+    manifest_files: list[dict[str, object]],
+    previous_backup_root: Path | None = None,
+    previous_manifest: dict[str, dict[str, object]] | None = None,
+) -> int:
+    previous_manifest = previous_manifest or {}
+    copied = 0
+    for path in iter_model_artifact_paths():
+        relative = model_backup_relative_path(path)
+        target = backup_file_path(backup_root, relative)
+        file_hash = sha256_file(path)
+        previous_source = backup_file_path(previous_backup_root, relative) if previous_backup_root else None
+        previous_matches = bool(previous_source and previous_source.exists() and str(previous_manifest.get(relative, {}).get("sha256") or "") == file_hash)
+        copy_into_backup(
+            path,
+            target,
+            previous_source=previous_source,
+            can_reuse_previous=previous_matches,
+        )
+        manifest_files.append({
+            "path": relative,
+            "size_bytes": path.stat().st_size,
+            "sha256": file_hash,
+        })
+        copied += 1
+    return copied
+
+
+def restore_ml_artifacts_from_backup(db: Session) -> int:
+    backup_root = latest_backup_root(db)
+    if not backup_root:
+        return 0
+    restored = 0
+    for artifact_name, destination in (
+        (MODEL_STATE_PATH.name, MODEL_STATE_PATH),
+        (MODEL_METADATA_PATH.name, MODEL_METADATA_PATH),
+    ):
+        source = backup_file_path(backup_root, f"{MODEL_RELATIVE_BACKUP_DIR}/{artifact_name}")
+        if not source.exists() or not source.is_file():
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        restored += 1
+    return restored
 
 
 def backup_manifest_index(backup_root: Path | None) -> dict[str, dict[str, object]]:
@@ -1616,33 +1982,48 @@ def refresh_backup_integrity_manifests(backup_location: Path, force: bool = True
     return updated
 
 
-def prune_backup_type(backup_location: Path, label: str, keep: int = 3) -> None:
-    try:
-        backups = sorted(
-            [
-                item for item in backup_location.iterdir()
-                if item.is_dir() and item.name.startswith(f"{label}_backup_")
-            ],
-            key=lambda item: item.name,
-            reverse=True,
-        )
-        for old_backup in backups[keep:]:
-            shutil.rmtree(old_backup, ignore_errors=True)
-    except Exception:
-        pass
+def is_completed_backup_folder(path: Path) -> bool:
+    return path.is_dir() and "_backup_" in path.name and (path / BACKUP_MANIFEST_NAME).exists()
 
 
-def prune_all_backup_types(backup_location: Path, keep: int = 3) -> None:
+def list_completed_backups(backup_location: Path, label: str | None = None) -> list[Path]:
+    if not backup_location.exists():
+        return []
+    backups = []
+    for item in backup_location.iterdir():
+        if not is_completed_backup_folder(item):
+            continue
+        if label and not item.name.startswith(f"{label}_backup_"):
+            continue
+        backups.append(item)
+    return sorted(backups, key=lambda item: item.name)
+
+
+def prune_backup_type(backup_location: Path, label: str, keep: int = BACKUP_RETENTION_LIMIT) -> int:
+    removed = 0
+    for old_backup in list_completed_backups(backup_location, label=label)[:-keep]:
+        try:
+            shutil.rmtree(old_backup)
+            removed += 1
+            logger.info("Removed old completed backup '%s' during FIFO retention enforcement.", old_backup)
+        except Exception:
+            logger.exception("Failed to remove old completed backup '%s'.", old_backup)
+    return removed
+
+
+def prune_all_backup_types(backup_location: Path, keep: int = BACKUP_RETENTION_LIMIT) -> int:
+    removed = 0
     try:
         labels = {
             item.name.split("_backup_", 1)[0]
             for item in backup_location.iterdir()
-            if item.is_dir() and "_backup_" in item.name
+            if is_completed_backup_folder(item)
         }
         for label in labels:
-            prune_backup_type(backup_location, label, keep=keep)
+            removed += prune_backup_type(backup_location, label, keep=keep)
     except Exception:
-        pass
+        logger.exception("Backup retention scan failed for '%s'.", backup_location)
+    return removed
 
 
 def register_initial_files(db: Session, ensure_backup: bool = True, refresh_existing: bool = True) -> int:
@@ -1785,6 +2166,15 @@ def load_ai_model_state() -> dict:
         return {}
 
 
+def load_ai_model_metadata() -> dict:
+    if not MODEL_METADATA_PATH.exists():
+        return {}
+    try:
+        return json_loads(MODEL_METADATA_PATH.read_text(encoding="utf-8"), {})
+    except Exception:
+        return {}
+
+
 def retrain_ai(db: Session, initiated_by: str = "system") -> dict:
     samples = generate_initial_training_samples()
     admin_changes = (
@@ -1830,6 +2220,7 @@ def retrain_ai(db: Session, initiated_by: str = "system") -> dict:
         )
 
     MODEL_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    version = now_utc().strftime("v%Y%m%d%H%M%S")
     state = {
         "algorithm": "Isolation Forest",
         "strategy": "Continuous incremental retraining with Wazuh-fed admin activity",
@@ -1839,11 +2230,27 @@ def retrain_ai(db: Session, initiated_by: str = "system") -> dict:
         "behavioral_profile": build_behavioral_profile(admin_changes),
         "updated_at": now_utc().isoformat(),
         "updated_by": initiated_by,
+        "version": version,
         "note": "Uses bootstrap normal data plus all historical validated admin behavior, including the newest verified records since the previous retrain.",
     }
+    metadata = {
+        "model_name": "wards_isolation_forest_profile",
+        "version": version,
+        "trained_at": state["updated_at"],
+        "model_type": state["algorithm"],
+        "feature_set": state["features"],
+        "training_parameters": {
+            "strategy": state["strategy"],
+            "bootstrap_samples": len(generate_initial_training_samples()),
+            "historical_admin_samples": len(admin_changes),
+        },
+        "state_path": stored_path_value(MODEL_STATE_PATH) or str(MODEL_STATE_PATH),
+    }
     MODEL_STATE_PATH.write_text(json_dumps(state), encoding="utf-8")
+    MODEL_METADATA_PATH.write_text(json_dumps(metadata), encoding="utf-8")
     set_setting(db, "ai_last_retrained_at", state["updated_at"], initiated_by)
     set_setting(db, "ai_training_sample_count", str(len(samples)), initiated_by)
+    set_setting(db, "ai_model_version", version, initiated_by)
     return state
 
 
@@ -2213,6 +2620,7 @@ def quarantine_file(file_path: Path, detection_id: int) -> str | None:
     target = QUARANTINE_ROOT / f"detection_{detection_id}" / safe_rel(file_path)
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(file_path, target)
+    logger.warning("Quarantined file copy created for detection %s at %s from %s", detection_id, target, file_path)
     return stored_path_value(target) or str(target)
 
 
@@ -2499,7 +2907,7 @@ def restore_quarantined_copy_to_original(
 
 def current_hash_index(db: Session) -> dict[str, list[SecurityMonitoredFile]]:
     index: dict[str, list[SecurityMonitoredFile]] = {}
-    for entry in db.query(SecurityMonitoredFile).all():
+    for entry in active_monitored_files_query(db).all():
         path = portable_monitored_path(entry)
         if not path.exists() or not path.is_file():
             continue
@@ -2633,7 +3041,7 @@ def reconcile_trusted_file_removals(db: Session, actor: str = "trusted_baseline"
     hash_index = current_hash_index(db)
     verified_deleted = 0
     verified_renamed = 0
-    for entry in db.query(SecurityMonitoredFile).order_by(SecurityMonitoredFile.relative_path.asc()).all():
+    for entry in active_monitored_files_query(db).order_by(SecurityMonitoredFile.relative_path.asc()).all():
         path = portable_monitored_path(entry)
         if path.exists():
             continue
@@ -2703,11 +3111,7 @@ def create_incident(db: Session, detection: SecurityDetectionEvent, classificati
     db.commit()
     db.refresh(incident)
     try:
-        recipients = [
-            admin.email
-            for admin in db.query(Admin).filter(Admin.status == "Active", Admin.role.in_(["main_admin", "superadmin"])).all()
-            if admin.email
-        ]
+        recipients = system_alert_email_recipients(db)
         recoveries = [
             serialize_recovery(item)
             for item in db.query(SecurityRecoveryEvent)
@@ -2717,7 +3121,7 @@ def create_incident(db: Session, detection: SecurityDetectionEvent, classificati
         ]
         send_security_incident_alert_email(recipients, serialize_incident(incident), serialize_detection(detection), recoveries)
     except Exception:
-        pass
+        logger.exception("Failed to dispatch incident alert email for detection %s", detection.id)
     return incident
 
 
@@ -2933,7 +3337,7 @@ def scan_all_files(db: Session, context: dict | None = None) -> list[SecurityDet
     set_setting(db, "last_scan_at", now_utc().isoformat(), "security_scanner")
     detections = []
     hash_index = current_hash_index(db)
-    for file_entry in db.query(SecurityMonitoredFile).order_by(SecurityMonitoredFile.relative_path.asc()).all():
+    for file_entry in active_monitored_files_query(db).order_by(SecurityMonitoredFile.relative_path.asc()).all():
         if is_database_entry(file_entry) and database_entry and file_entry.id != database_entry.id:
             file_entry.status = "clean"
             file_entry.last_checked = now_utc()
@@ -2983,6 +3387,7 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
     timestamp = now_utc().strftime("%Y%m%d_%H%M%S")
     backup_root = backup_location / f"{label}_backup_{timestamp}"
     started = time.time()
+    model_artifact_count = 0
     event = SecurityRecoveryEvent(recovery_type="manual_backup", initiated_by=initiated_by, status="in_progress")
     db.add(event)
     db.commit()
@@ -2994,11 +3399,12 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
         "low",
         dedupe_key=f"Backup #{event.id}",
     )
+    logger.info("Backup %s started for label '%s' at '%s'.", event.id, label, backup_root)
     try:
         backup_root.mkdir(parents=True, exist_ok=True)
         database_entry = normalize_database_monitor_entry(db, reset_baseline=False, ensure_snapshot=True)
         manifest_files: list[dict[str, object]] = []
-        for entry in db.query(SecurityMonitoredFile).order_by(SecurityMonitoredFile.relative_path.asc()).all():
+        for entry in active_monitored_files_query(db).order_by(SecurityMonitoredFile.relative_path.asc()).all():
             if is_database_entry(entry) and database_entry and entry.id != database_entry.id:
                 entry.status = "clean"
                 entry.last_checked = now_utc()
@@ -3051,6 +3457,12 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
             entry.size_bytes = path.stat().st_size
             entry.last_checked = now_utc()
         db.commit()
+        model_artifact_count = backup_ml_artifacts(
+            backup_root,
+            manifest_files,
+            previous_backup_root=previous_backup_root,
+            previous_manifest=previous_manifest,
+        )
         manifest_path = write_backup_manifest(backup_root, files=manifest_files)
         event.status = "success"
         event.backup_path = stored_path_value(backup_root) or str(backup_root)
@@ -3061,16 +3473,25 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
         event.summary = (
             f"Local backup completed for WARDS, OCR, and wards_db "
             f"({register_count} new target(s) registered, {verified_deleted + verified_renamed} trusted removal update(s), "
+            f"{model_artifact_count} ML artifact(s), "
             f"manifest: {manifest_path.name})."
         )
         set_setting(db, "latest_backup_path", stored_path_value(backup_root) or str(backup_root), str(initiated_by) if initiated_by else "system")
-        prune_backup_type(backup_location, label, keep=3)
+        removed_backups = prune_backup_type(backup_location, label, keep=BACKUP_RETENTION_LIMIT)
+        logger.info(
+            "Backup %s completed successfully. Retention kept the newest %s completed '%s' backup(s) and removed %s old backup(s).",
+            event.id,
+            BACKUP_RETENTION_LIMIT,
+            label,
+            removed_backups,
+        )
     except Exception as exc:
         event.status = "failed"
         event.error_message = str(exc)
         event.completed_at = now_utc()
         event.recovery_duration_ms = int((time.time() - started) * 1000)
         event.summary = "Local backup failed."
+        logger.exception("Backup %s failed for label '%s'.", event.id, label)
     db.add(event)
     db.commit()
     db.refresh(event)
@@ -3102,7 +3523,13 @@ def full_system_recovery(db: Session, admin_id: int) -> dict:
             restored += 1
         else:
             failed += 1
-    return {"restored": restored, "failed": failed, "first_recovery_event_id": first_event.id if first_event else None}
+    restored_ml_artifacts = restore_ml_artifacts_from_backup(db)
+    return {
+        "restored": restored,
+        "failed": failed,
+        "restored_ml_artifacts": restored_ml_artifacts,
+        "first_recovery_event_id": first_event.id if first_event else None,
+    }
 
 
 def mark_admin_change(db: Session, admin_id: int, file_path: str, token_id: str | None, ip: str | None, user_agent: str | None) -> SecurityAdminFileChange:
@@ -3373,8 +3800,8 @@ def bulk_update_incidents(db: Session, action: str, admin_id: int, confirm_missi
 
 def dashboard_payload(db: Session) -> dict:
     runtime_env = sync_runtime_env_settings(db)
-    monitored_files_count = db.query(SecurityMonitoredFile).count()
-    file_attention_count = db.query(SecurityMonitoredFile).filter(
+    monitored_files_count = active_monitored_files_query(db).count()
+    file_attention_count = active_monitored_files_query(db).filter(
         SecurityMonitoredFile.status.in_(["modified", "missing", "compromised"])
     ).count()
     incidents = db.query(SecurityIncident).filter(SecurityIncident.status.in_(["open", "investigating"])).all()
@@ -3385,6 +3812,7 @@ def dashboard_payload(db: Session) -> dict:
     backup_location = get_setting(db, "backup_location", str(DEFAULT_BACKUP_ROOT))
     backup_location_path = resolve_stored_path(backup_location)
     latest_backup = latest_backup_root(db)
+    model_metadata = load_ai_model_metadata()
     severity = {key: 0 for key in ["info", "low", "medium", "high", "critical"]}
     attack_types = {}
     behaviors = {}
@@ -3429,6 +3857,7 @@ def dashboard_payload(db: Session) -> dict:
             "backup_status": "Active" if latest_backup and backup_location_path and backup_location_path.exists() else "Inactive",
             "backup_location": backup_location,
             "ai_model": "trained" if MODEL_STATE_PATH.exists() else "bootstrap-ready",
+            "ai_model_version": model_metadata.get("version") or get_setting(db, "ai_model_version", ""),
             "ai_rules_enabled": sum(1 for item in get_ai_rules(db).values() if item.get("enabled", True)),
             "deployment_mode": runtime_env.get("deployment_mode") or get_setting(db, "deployment_mode", "development"),
             "monitoring_enabled": "true" if monitoring_enabled else "false",
@@ -3548,19 +3977,15 @@ def weekly_ai_behavior_data(db: Session) -> dict:
 
 def set_backup_location(db: Session, new_location: str, delete_previous: bool, updated_by: str) -> dict:
     previous = resolve_stored_path(get_setting(db, "backup_location", stored_path_value(DEFAULT_BACKUP_ROOT) or str(DEFAULT_BACKUP_ROOT))) or DEFAULT_BACKUP_ROOT.resolve()
-    target = Path(new_location).expanduser().resolve()
-    if target.exists() and not target.is_dir():
-        raise ValueError("Backup location must be a folder, not a file.")
-    target.mkdir(parents=True, exist_ok=True)
+    target = validate_backup_destination(new_location, create=True)
     previous_resolved = previous.expanduser().resolve() if previous.exists() else previous.expanduser()
-    if target != previous_resolved and any(target.iterdir()):
-        raise ValueError("Backup location must be an empty folder.")
     set_setting(db, "backup_location", stored_path_value(target) or str(target), updated_by)
     deleted = False
     if delete_previous and previous.exists() and previous_resolved != target:
         shutil.rmtree(previous, ignore_errors=True)
         deleted = True
-    return {"backup_location": stored_path_value(target) or str(target), "previous_deleted": deleted}
+    logger.info("Backup location updated from '%s' to '%s'.", previous_resolved, target)
+    return {"backup_location": stored_path_value(target) or str(target), "previous_deleted": deleted, "absolute_path": str(target)}
 
 
 def path_is_inside(path: Path, root: Path) -> bool:
@@ -3578,7 +4003,7 @@ def normalize_path_text(path: Path | str) -> str:
 
 def monitored_entries_for_folder(db: Session, root: Path) -> list[SecurityMonitoredFile]:
     rows = []
-    for entry in db.query(SecurityMonitoredFile).all():
+    for entry in active_monitored_files_query(db).all():
         try:
             if path_is_inside(portable_monitored_path(entry), root):
                 rows.append(entry)
@@ -3601,6 +4026,178 @@ def wazuh_syscheck_tree(config_path: Path = WAZUH_CONFIG_PATH) -> tuple[ET.Eleme
         ET.SubElement(syscheck, "scan_on_start").text = "yes"
         ET.SubElement(syscheck, "alert_new_files").text = "yes"
     return tree, syscheck
+
+
+def write_wazuh_tree(tree: ET.ElementTree, config_path: Path) -> None:
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    if config_path.exists():
+        backup_path = config_path.with_suffix(f"{config_path.suffix}{WAZUH_CONFIG_BACKUP_SUFFIX}")
+        shutil.copy2(config_path, backup_path)
+    temp_path = config_path.with_suffix(f"{config_path.suffix}.tmp")
+    tree.write(temp_path, encoding="utf-8", xml_declaration=False)
+    temp_path.replace(config_path)
+
+
+def validate_wazuh_config_tree(tree: ET.ElementTree) -> None:
+    root = tree.getroot()
+    if root.tag != "ossec_config":
+        raise ValueError("Wazuh configuration root element must be <ossec_config>.")
+    syscheck = root.find("syscheck")
+    if syscheck is None:
+        raise ValueError("Wazuh configuration must contain a <syscheck> section.")
+    for item in syscheck.findall("directories"):
+        text = (item.text or "").strip()
+        if not text:
+            raise ValueError("Wazuh <directories> entries cannot be empty.")
+        if not Path(text).is_absolute():
+            raise ValueError(f"Wazuh monitored directory must be absolute: {text}")
+
+
+def is_windows_admin() -> bool:
+    if os.name != "nt":
+        return False
+    try:
+        import ctypes
+
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
+def can_write_path(path: Path) -> bool:
+    target = path if path.exists() else path.parent
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        probe = target / ".wards_probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        return True
+    except Exception:
+        return False
+
+
+def wazuh_service_restart_enabled() -> bool:
+    return (os.getenv("WAZUH_SERVICE_RESTART_ENABLED", "true").strip().lower() == "true")
+
+
+def requires_wazuh_elevation(config_path: Path = WAZUH_CONFIG_PATH) -> bool:
+    if os.name != "nt":
+        return False
+    if is_windows_admin():
+        return False
+    if wazuh_service_restart_enabled():
+        return True
+    return not can_write_path(config_path)
+
+
+def wazuh_desired_directories(db: Session) -> list[Path]:
+    desired_folders: dict[str, Path] = {
+        normalize_path_text(DATABASE_MONITOR_ROOT): DATABASE_MONITOR_ROOT,
+        **{normalize_path_text(path): path for path in MONITORED_ROOTS.values() if path.exists() and path.is_dir()},
+    }
+    for root in configured_custom_monitored_folders(db):
+        if root.exists() and root.is_dir():
+            desired_folders.setdefault(normalize_path_text(root), root)
+    return sorted(desired_folders.values(), key=lambda item: str(item))
+
+
+def reload_wazuh_if_configured() -> bool:
+    command = (os.getenv("WAZUH_RELOAD_COMMAND") or "").strip()
+    if not command:
+        return False
+    try:
+        exit_code = os.system(command)
+        if exit_code != 0:
+            logger.warning("Wazuh reload command exited with status %s.", exit_code)
+            return False
+        return True
+    except Exception:
+        logger.exception("Wazuh reload command failed.")
+        return False
+
+
+def run_elevated_wazuh_helper(desired_folders: list[Path], config_path: Path = WAZUH_CONFIG_PATH) -> dict[str, object]:
+    if os.name != "nt":
+        raise RuntimeError("Windows elevation helper is only available on Windows.")
+    if not WAZUH_HELPER_SCRIPT.exists():
+        raise RuntimeError(f"Wazuh helper script not found: {WAZUH_HELPER_SCRIPT}")
+    payload = {
+        "config_path": str(config_path),
+        "directories": [str(path) for path in desired_folders],
+        "log_path": str(WAZUH_HELPER_LOG_PATH),
+    }
+    with tempfile.TemporaryDirectory(prefix="wards_wazuh_") as temp_dir:
+        temp_root = Path(temp_dir)
+        payload_path = temp_root / "payload.json"
+        result_path = temp_root / "result.json"
+        payload_path.write_text(json_dumps(payload), encoding="utf-8")
+
+        logger.info("Requesting UAC elevation for Wazuh sync of '%s'.", config_path)
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            SEE_MASK_NOCLOSEPROCESS = 0x00000040
+            SW_HIDE = 0
+
+            class SHELLEXECUTEINFOW(ctypes.Structure):
+                _fields_ = [
+                    ("cbSize", wintypes.DWORD),
+                    ("fMask", ctypes.c_ulong),
+                    ("hwnd", wintypes.HWND),
+                    ("lpVerb", wintypes.LPCWSTR),
+                    ("lpFile", wintypes.LPCWSTR),
+                    ("lpParameters", wintypes.LPCWSTR),
+                    ("lpDirectory", wintypes.LPCWSTR),
+                    ("nShow", ctypes.c_int),
+                    ("hInstApp", wintypes.HINSTANCE),
+                    ("lpIDList", ctypes.c_void_p),
+                    ("lpClass", wintypes.LPCWSTR),
+                    ("hkeyClass", wintypes.HKEY),
+                    ("dwHotKey", wintypes.DWORD),
+                    ("hIcon", wintypes.HANDLE),
+                    ("hProcess", wintypes.HANDLE),
+                ]
+
+            params = (
+                f'"{WAZUH_HELPER_SCRIPT}" '
+                f'--payload "{payload_path}" '
+                f'--result "{result_path}"'
+            )
+            python_executable = Path(sys.executable)
+            hidden_executable = python_executable.with_name("pythonw.exe")
+            launch_executable = hidden_executable if hidden_executable.exists() else python_executable
+            sei = SHELLEXECUTEINFOW()
+            sei.cbSize = ctypes.sizeof(SHELLEXECUTEINFOW)
+            sei.fMask = SEE_MASK_NOCLOSEPROCESS
+            sei.hwnd = None
+            sei.lpVerb = "runas"
+            sei.lpFile = str(launch_executable)
+            sei.lpParameters = params
+            sei.lpDirectory = str(MASTER_ROOT)
+            sei.nShow = SW_HIDE
+
+            shell32 = ctypes.windll.shell32
+            if not shell32.ShellExecuteExW(ctypes.byref(sei)):
+                error_code = ctypes.GetLastError()
+                if error_code == 1223:
+                    raise PermissionError("Administrator approval was declined. Wazuh changes were not applied.")
+                raise RuntimeError(f"Unable to start elevated Wazuh helper (error {error_code}).")
+
+            ctypes.windll.kernel32.WaitForSingleObject(sei.hProcess, 300000)
+        except PermissionError:
+            logger.warning("User declined the Wazuh UAC elevation request.")
+            raise
+        except Exception:
+            logger.exception("Elevated Wazuh helper failed to launch.")
+            raise
+
+        if not result_path.exists():
+            raise RuntimeError("Wazuh helper did not produce a result file.")
+        result = json_loads(result_path.read_text(encoding="utf-8"), {})
+        if not result.get("success"):
+            raise RuntimeError(str(result.get("message") or "Elevated Wazuh helper reported a failure."))
+        return result
 
 
 def update_wazuh_monitored_folder(folder_path: Path, action: str, config_path: Path = WAZUH_CONFIG_PATH) -> bool:
@@ -3627,61 +4224,94 @@ def update_wazuh_monitored_folder(folder_path: Path, action: str, config_path: P
     else:
         raise ValueError("Unsupported Wazuh folder action.")
     if changed:
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        tree.write(config_path, encoding="utf-8", xml_declaration=False)
+        write_wazuh_tree(tree, config_path)
     return changed
+
+
+def sync_wazuh_monitored_folders(db: Session, config_path: Path = WAZUH_CONFIG_PATH, allow_elevation: bool = False) -> dict[str, object]:
+    tree, syscheck = wazuh_syscheck_tree(config_path)
+    desired_folders = wazuh_desired_directories(db)
+    directories = list(syscheck.findall("directories"))
+    existing = {normalize_path_text(item.text): item for item in directories if item.text}
+    changed = False
+
+    for normalized, item in list(existing.items()):
+        if normalized not in {normalize_path_text(path) for path in desired_folders}:
+            syscheck.remove(item)
+            changed = True
+
+    for folder in desired_folders:
+        normalized = normalize_path_text(folder)
+        if normalized in existing:
+            continue
+        item = ET.SubElement(syscheck, "directories")
+        item.set("check_all", "yes")
+        item.set("realtime", "yes")
+        item.set("report_changes", "yes")
+        item.text = str(folder)
+        changed = True
+
+    if changed:
+        validate_wazuh_config_tree(tree)
+        if allow_elevation and requires_wazuh_elevation(config_path):
+            helper_result = run_elevated_wazuh_helper(desired_folders, config_path=config_path)
+            logger.info("Wazuh configuration updated through elevated helper for '%s'.", config_path)
+            return {
+                "updated": bool(helper_result.get("updated", True)),
+                "reloaded": bool(helper_result.get("reloaded", False)),
+                "config_path": str(config_path),
+                "used_elevation": True,
+                "message": helper_result.get("message") or "Wazuh configuration updated.",
+            }
+        write_wazuh_tree(tree, config_path)
+    reloaded = reload_wazuh_if_configured() if changed else False
+    logger.info("Wazuh configuration sync completed for '%s' (changed=%s, reloaded=%s).", config_path, changed, reloaded)
+    return {"updated": changed, "reloaded": reloaded, "config_path": str(config_path), "used_elevation": False}
+
+
+def monitored_file_has_history(db: Session, file_id: int) -> bool:
+    detection = db.query(SecurityDetectionEvent.id).filter(SecurityDetectionEvent.file_id == file_id).first()
+    if detection:
+        return True
+    recovery = db.query(SecurityRecoveryEvent.id).filter(SecurityRecoveryEvent.file_id == file_id).first()
+    return bool(recovery)
 
 
 def add_monitored_folder(db: Session, folder_path: str, initiated_by: int | None = None) -> dict:
     root = Path(folder_path).expanduser().resolve()
+    if not root.is_absolute():
+        raise ValueError("Monitored folder must use an absolute filesystem path.")
     if not root.exists() or not root.is_dir():
         raise ValueError("Folder does not exist")
     if monitored_entries_for_folder(db, root):
         raise ValueError("Folder is already monitored.")
-    roots = {root.name.upper(): root}
-    created = 0
-    backed_up = 0
+    scope = persist_configured_monitored_folder(db, root, updated_by=str(initiated_by) if initiated_by else "system")
     backup_root = latest_backup_root(db)
-    for root_name, path in iter_monitorable_files(roots):
-        current_hash = sha256_file(path)
-        existing = db.query(SecurityMonitoredFile).filter(SecurityMonitoredFile.file_path == str(path)).first()
-        if existing:
-            continue
-        relative = str(path.relative_to(root.parent)).replace("\\", "/")
-        db.add(
-            SecurityMonitoredFile(
-                file_path=str(path),
-                relative_path=relative,
-                folder_root=root_name,
-                baseline_hash=current_hash,
-                current_hash=current_hash,
-                status="clean",
-                file_type=file_type(path),
-                size_bytes=path.stat().st_size,
-            )
-        )
-        if backup_root:
-            target = backup_file_path(backup_root, relative)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(path, target)
-            backed_up += 1
-        created += 1
-    if created == 0:
+    created, backed_up, processed = register_monitored_folder_entries(db, root, refresh_existing=True, backup_root=backup_root)
+    if processed == 0:
         raise ValueError("Folder does not contain monitorable files.")
-    wazuh_changed = update_wazuh_monitored_folder(root, "add")
     db.commit()
+    wazuh_result = sync_wazuh_monitored_folders(db, allow_elevation=True)
     backup_event = create_manual_backup(db, initiated_by=initiated_by, label="monitored_folder_added")
+    logger.info("Added monitored folder '%s' with %s file(s).", root, created)
     return {
         "added_files": created,
         "backup_files_added": backed_up,
         "folder": str(root),
-        "wazuh_config_updated": wazuh_changed,
+        "folder_scope": scope,
+        "folder_storage": shared_monitored_folder_token(root) or str(root),
+        "wazuh_config_updated": wazuh_result["updated"],
+        "wazuh_reloaded": wazuh_result["reloaded"],
+        "wazuh_used_elevation": wazuh_result.get("used_elevation", False),
+        "wazuh_config_path": wazuh_result.get("config_path"),
         "backup_refreshed": backup_event.status == "success",
     }
 
 
 def remove_monitored_folder(db: Session, folder_path: str, initiated_by: int | None = None) -> dict:
     root = Path(folder_path).expanduser().resolve()
+    if not root.is_absolute():
+        raise ValueError("Monitored folder must use an absolute filesystem path.")
     if not root.exists() or not root.is_dir():
         raise ValueError("Folder does not exist")
 
@@ -3689,9 +4319,11 @@ def remove_monitored_folder(db: Session, folder_path: str, initiated_by: int | N
     backup_roots = [item for item in backup_location.iterdir() if item.is_dir()] if backup_location.exists() else []
     removed = 0
     removed_backups = 0
+    retired = 0
     entries = monitored_entries_for_folder(db, root)
     if not entries:
         raise ValueError("Folder is not currently monitored.")
+    scope = remove_configured_monitored_folder(db, root, updated_by=str(initiated_by) if initiated_by else "system")
     for entry in entries:
         entry_path = portable_monitored_path(entry)
         if not path_is_inside(entry_path, root):
@@ -3701,16 +4333,30 @@ def remove_monitored_folder(db: Session, folder_path: str, initiated_by: int | N
             if backup_path.exists():
                 backup_path.unlink()
                 removed_backups += 1
-        db.delete(entry)
+        if monitored_file_has_history(db, entry.id):
+            entry.status = MONITORING_REMOVED_STATUS
+            entry.current_hash = None
+            entry.last_checked = now_utc()
+            db.add(entry)
+            retired += 1
+        else:
+            db.delete(entry)
         removed += 1
-    wazuh_changed = update_wazuh_monitored_folder(root, "remove")
     db.commit()
+    wazuh_result = sync_wazuh_monitored_folders(db, allow_elevation=True)
     backup_event = create_manual_backup(db, initiated_by=initiated_by, label="monitored_folder_removed")
+    logger.info("Removed monitored folder '%s' with %s file record(s).", root, removed)
     return {
         "removed_files": removed,
         "removed_backup_files": removed_backups,
+        "retired_files": retired,
         "folder": str(root),
-        "wazuh_config_updated": wazuh_changed,
+        "folder_scope": scope,
+        "folder_storage": shared_monitored_folder_token(root) or str(root),
+        "wazuh_config_updated": wazuh_result["updated"],
+        "wazuh_reloaded": wazuh_result["reloaded"],
+        "wazuh_used_elevation": wazuh_result.get("used_elevation", False),
+        "wazuh_config_path": wazuh_result.get("config_path"),
         "backup_refreshed": backup_event.status == "success",
     }
 

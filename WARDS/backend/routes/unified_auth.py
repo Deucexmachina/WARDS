@@ -258,6 +258,46 @@ def create_access_token(portal: str, data: dict) -> str:
     return jwt.encode(to_encode, PORTAL_CONFIG[portal]["secret_key"], algorithm=ALGORITHM)
 
 
+def decode_active_account_from_bearer_token(
+    token: str,
+    db: Session,
+    allowed_portals: tuple[str, ...] = ("public", "admin", "branch"),
+):
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token")
+    for portal, config in PORTAL_CONFIG.items():
+        if portal not in allowed_portals:
+            continue
+        try:
+            payload = jwt.decode(token, config["secret_key"], algorithms=[ALGORITHM])
+        except JWTError:
+            continue
+
+        token_type = payload.get("type")
+        if token_type != config["token_type"]:
+            continue
+
+        if portal == "public":
+            account = find_citizen_by_email(db, CitizenUser, payload.get("sub"))
+        elif portal == "admin":
+            identifier = payload.get("email") or payload.get("sub")
+            account = db.query(Admin).filter(
+                (Admin.email == identifier) | (Admin.username == payload.get("sub"))
+            ).first()
+        else:
+            identifier = payload.get("email") or payload.get("sub")
+            account = db.query(BranchStaff).filter(
+                (BranchStaff.email == identifier) | (BranchStaff.username == payload.get("sub"))
+            ).first()
+
+        if not account or getattr(account, "status", "Active") != "Active":
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
+
+        return portal, account, payload
+
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+
+
 def log_activity(db: Session, action: str, user: str, details: str, log_type: str = "auth"):
     db.add(ActivityLog(action=action, user=user, details=details, type=log_type))
     db.commit()

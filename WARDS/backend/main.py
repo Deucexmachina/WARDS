@@ -1389,7 +1389,7 @@ def ensure_auth_extensions():
         db.close()
 
 def bootstrap_admin():
-    admin_email = os.getenv("ADMIN_EMAIL")
+    admin_email = os.getenv("ADMIN_EMAIL", "treasurermain@gmail.com")
     admin_password = os.getenv("ADMIN_PASSWORD")
     if not admin_email or not admin_password:
         return
@@ -1424,13 +1424,35 @@ def bootstrap_superadmin():
         pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
         db.add(Admin(
             username="superadmin",
-            email=os.getenv("SUPERADMIN_EMAIL", "superadmin@wards.local"),
+            email=os.getenv("SUPERADMIN_EMAIL", "treasurersuper@gmail.com"),
             hashed_password=pwd_context.hash(os.getenv("SUPERADMIN_PASSWORD", "superadmin123")),
             role="superadmin",
             status="Active",
             is_verified=True,
         ))
         db.commit()
+    finally:
+        db.close()
+
+
+def migrate_canonical_admin_emails():
+    db = SessionLocal()
+    try:
+        changed = False
+        for admin in db.query(Admin).filter(Admin.role.in_(["superadmin", "main_admin", "admin"])).all():
+            current_email = (admin.email or "").strip().lower()
+            target_email = None
+            if admin.role == "superadmin":
+                if not current_email or current_email.endswith(".local") or current_email != "treasurersuper@gmail.com":
+                    target_email = "treasurersuper@gmail.com"
+            elif admin.role in {"main_admin", "admin"}:
+                if not current_email or current_email.endswith(".local") or current_email != "treasurermain@gmail.com":
+                    target_email = "treasurermain@gmail.com"
+            if target_email and current_email != target_email:
+                admin.email = target_email
+                changed = True
+        if changed:
+            db.commit()
     finally:
         db.close()
 
@@ -1618,65 +1640,55 @@ def apply_business_tax_application_security(application: BusinessTaxApplication)
     application.official_receipt_number = build_redacted_text("BT_OR", official_receipt_number, 255)
 
 
+SENSITIVE_FIELD_PROTECTION_REGISTRY = {
+    Branch: apply_branch_security,
+    BusinessRegistry: apply_business_registry_security,
+    CollectionAccount: apply_collection_account_security,
+    Remittance: apply_remittance_security,
+    RemittanceItem: apply_remittance_item_security,
+    BusinessTaxApplication: apply_business_tax_application_security,
+    DiscrepancyReport: apply_discrepancy_report_security,
+    EmailOTP: apply_email_otp_security,
+    EmailVerificationToken: apply_email_verification_token_security,
+    FAQ: apply_faq_security,
+    TaxpayerGuide: apply_taxpayer_guide_security,
+    Invite: apply_invite_security,
+    Memo: apply_memo_security,
+    MemoView: apply_memo_view_security,
+    MFASecret: apply_mfa_secret_security,
+    Payment: apply_payment_security,
+    ServiceWindowConfig: apply_service_window_config_security,
+    Service: apply_service_security,
+    QueueActivity: apply_queue_activity_security,
+    RPTPropertyRecord: apply_rpt_property_record_security,
+    Queue: apply_queue_security,
+    ReceiptRecord: apply_receipt_record_security,
+    ReceiptRequest: apply_receipt_request_security,
+    ReceiptRequestHistory: apply_receipt_request_history_security,
+}
+
+SENSITIVE_FIELD_PROTECTION_NAME_REGISTRY = {
+    "CitizenUser": apply_citizen_user_security,
+    "SystemSetting": apply_system_setting_security,
+    "TaxAssessmentRecord": apply_tax_assessment_record_security,
+    "TaxpayerIdentifierSubmission": apply_taxpayer_identifier_submission_security,
+}
+
+
+def apply_registered_sensitive_field_protection(obj) -> bool:
+    applier = SENSITIVE_FIELD_PROTECTION_REGISTRY.get(type(obj))
+    if not applier:
+        applier = SENSITIVE_FIELD_PROTECTION_NAME_REGISTRY.get(obj.__class__.__name__)
+    if not applier:
+        return False
+    applier(obj)
+    return True
+
+
 @event.listens_for(OrmSession, "before_flush")
 def apply_sensitive_field_protection_before_flush(session, flush_context, instances):
     for obj in set(session.new).union(session.dirty):
-        if isinstance(obj, Branch):
-            apply_branch_security(obj)
-        elif isinstance(obj, BusinessRegistry):
-            apply_business_registry_security(obj)
-        elif isinstance(obj, CollectionAccount):
-            apply_collection_account_security(obj)
-        elif isinstance(obj, Remittance):
-            apply_remittance_security(obj)
-        elif isinstance(obj, RemittanceItem):
-            apply_remittance_item_security(obj)
-        elif obj.__class__.__name__ == "CitizenUser":
-            apply_citizen_user_security(obj)
-        elif isinstance(obj, BusinessTaxApplication):
-            apply_business_tax_application_security(obj)
-        elif isinstance(obj, DiscrepancyReport):
-            apply_discrepancy_report_security(obj)
-        elif isinstance(obj, EmailOTP):
-            apply_email_otp_security(obj)
-        elif isinstance(obj, EmailVerificationToken):
-            apply_email_verification_token_security(obj)
-        elif isinstance(obj, FAQ):
-            apply_faq_security(obj)
-        elif isinstance(obj, TaxpayerGuide):
-            apply_taxpayer_guide_security(obj)
-        elif obj.__class__.__name__ == "TaxpayerIdentifierSubmission":
-            apply_taxpayer_identifier_submission_security(obj)
-        elif isinstance(obj, Invite):
-            apply_invite_security(obj)
-        elif isinstance(obj, Memo):
-            apply_memo_security(obj)
-        elif isinstance(obj, MemoView):
-            apply_memo_view_security(obj)
-        elif isinstance(obj, MFASecret):
-            apply_mfa_secret_security(obj)
-        elif isinstance(obj, Payment):
-            apply_payment_security(obj)
-        elif isinstance(obj, ServiceWindowConfig):
-            apply_service_window_config_security(obj)
-        elif isinstance(obj, Service):
-            apply_service_security(obj)
-        elif obj.__class__.__name__ == "SystemSetting":
-            apply_system_setting_security(obj)
-        elif obj.__class__.__name__ == "TaxAssessmentRecord":
-            apply_tax_assessment_record_security(obj)
-        elif isinstance(obj, QueueActivity):
-            apply_queue_activity_security(obj)
-        elif isinstance(obj, RPTPropertyRecord):
-            apply_rpt_property_record_security(obj)
-        elif isinstance(obj, Queue):
-            apply_queue_security(obj)
-        elif isinstance(obj, ReceiptRecord):
-            apply_receipt_record_security(obj)
-        elif isinstance(obj, ReceiptRequest):
-            apply_receipt_request_security(obj)
-        elif isinstance(obj, ReceiptRequestHistory):
-            apply_receipt_request_history_security(obj)
+        apply_registered_sensitive_field_protection(obj)
 
 
 def _is_assessment_placeholder(value: str | None) -> bool:
@@ -1827,6 +1839,7 @@ def backfill_existing_log_integrity():
 
 
 backfill_existing_log_integrity()
+migrate_canonical_admin_emails()
 bootstrap_admin()
 bootstrap_superadmin()
 seed_business_registry()
@@ -1836,7 +1849,8 @@ backfill_branch_and_business_registry_security()
 def start_security_monitor_if_enabled():
     enabled = (os.getenv("SECURITY_MONITORING_ENABLED") or "false").strip().lower() == "true"
     deployed = (os.getenv("SECURITY_DEPLOYMENT_MODE") or "development").strip().lower() == "deployed"
-    if not deployed:
+    if not deployed or not enabled:
+        print("[SECURITY MONITOR] automatic monitoring disabled; deployed mode and monitoring flag must both be enabled")
         return
 
     default_interval = max(5, int(os.getenv("SECURITY_SCAN_INTERVAL_SECONDS", "30")))
@@ -1856,7 +1870,7 @@ def start_security_monitor_if_enabled():
                 event = create_manual_backup(startup_db, initiated_by=None, label="startup_baseline")
                 if event.status != "success":
                     raise RuntimeError(event.error_message or "Startup baseline backup failed")
-                set_setting(startup_db, "monitoring_enabled", "true" if enabled else "false", "system_startup")
+                set_setting(startup_db, "monitoring_enabled", "true", "system_startup")
                 set_setting(startup_db, "startup_baseline_status", "complete", "system")
                 print("[SECURITY MONITOR] startup baseline backup refreshed")
                 break
@@ -1903,7 +1917,8 @@ start_security_monitor_if_enabled()
 @app.on_event("shutdown")
 def stop_database_runtime_monitoring():
     deployed = (os.getenv("SECURITY_DEPLOYMENT_MODE") or "development").strip().lower() == "deployed"
-    if not deployed:
+    enabled = (os.getenv("SECURITY_MONITORING_ENABLED") or "false").strip().lower() == "true"
+    if not deployed or not enabled:
         return
     try:
         from SECURITY.security_engine import drop_database_audit_triggers, set_setting

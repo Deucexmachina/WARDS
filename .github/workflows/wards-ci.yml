@@ -69,8 +69,11 @@ jobs:
           pip install -r WARDS/backend/requirements.txt
       - name: Compile backend
         run: |
-          python -m py_compile WARDS/backend/main.py
-          python -m py_compile SECURITY/security_engine.py
+          python -m compileall WARDS/backend SECURITY tests
+      - name: Run backend tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}/WARDS/backend:${{ github.workspace }}
+        run: pytest -q tests
 
   frontend:
     needs: repository-hygiene

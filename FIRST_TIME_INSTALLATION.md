@@ -197,8 +197,8 @@ ADMIN_SECRET_KEY=replace-with-a-different-long-random-admin-secret
 # === Admin Account (created on first startup) ===
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=change-this-password-immediately
-ADMIN_EMAIL=admin@wards.local
-SUPERADMIN_EMAIL=superadmin@wards.local
+ADMIN_EMAIL=treasurermain@gmail.com
+SUPERADMIN_EMAIL=treasurersuper@gmail.com
 SUPERADMIN_PASSWORD=superadmin123
 
 # === Rate Limiting ===

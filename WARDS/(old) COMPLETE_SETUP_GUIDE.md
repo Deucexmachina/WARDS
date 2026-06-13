@@ -122,7 +122,7 @@ FRONTEND_BASE_URL=http://localhost:3000
 # ============================================
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=change-this-password-immediately
-ADMIN_EMAIL=admin@wards.local
+ADMIN_EMAIL=treasurermain@gmail.com
 
 # ============================================
 # SECURITY SETTINGS
@@ -307,7 +307,7 @@ npm run dev
 |-------|-------|
 | Username | `admin` |
 | Password | `change-this-password-immediately` |
-| Email | `admin@wards.local` |
+| Email | `treasurermain@gmail.com` |
 
 ### Test Branch Credentials (if seeded)
 

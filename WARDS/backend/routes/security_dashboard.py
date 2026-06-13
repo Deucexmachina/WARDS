@@ -17,6 +17,7 @@ from routes.admin_auth_v2 import get_current_admin_from_token
 from middleware.dos_protection import get_blocked_ips, unblock_ip, block_ip, account_rate_limit_state, record_rate_limit_detection
 from services.ip_reputation import get_permanent_blocks, add_permanent_block, remove_permanent_block, check_ip_reputation
 from SECURITY.security_engine import (
+    active_monitored_files_query,
     add_monitored_folder,
     add_ai_rule,
     available_ai_rule_templates,
@@ -201,12 +202,12 @@ def get_dashboard(db: Session = Depends(get_db), _=Depends(current_admin)):
 
 @router.get("/files")
 def list_files(db: Session = Depends(get_db), _=Depends(current_admin)):
-    return [serialize_file(item) for item in db.query(SecurityMonitoredFile).order_by(SecurityMonitoredFile.relative_path.asc()).all()]
+    return [serialize_file(item) for item in active_monitored_files_query(db).order_by(SecurityMonitoredFile.relative_path.asc()).all()]
 
 
 @router.post("/files/{file_id}/scan")
 def scan_file(file_id: int, db: Session = Depends(get_db), _=Depends(current_admin)):
-    file_entry = db.query(SecurityMonitoredFile).filter(SecurityMonitoredFile.id == file_id).first()
+    file_entry = active_monitored_files_query(db).filter(SecurityMonitoredFile.id == file_id).first()
     if not file_entry:
         raise HTTPException(status_code=404, detail="Monitored file not found")
     detection = scan_single_file(db, file_entry, context={"manual_scan": True})
@@ -439,16 +440,24 @@ def backup_location(payload: BackupLocationRequest, db: Session = Depends(get_db
 def add_folder(payload: AddFolderRequest, db: Session = Depends(get_db), admin=Depends(current_admin)):
     try:
         return add_monitored_folder(db, payload.path, initiated_by=admin.id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.post("/folders/remove")
 def remove_folder(payload: AddFolderRequest, db: Session = Depends(get_db), admin=Depends(current_admin)):
     try:
         return remove_monitored_folder(db, payload.path, initiated_by=admin.id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.get("/folder-browser")

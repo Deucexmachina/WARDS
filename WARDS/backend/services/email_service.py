@@ -143,6 +143,8 @@ def _truncate_user_agent(user_agent: str | None) -> str | None:
 
 
 def _load_email_logos() -> list[dict]:
+    smtp_from_email = (os.getenv("SMTP_FROM_EMAIL") or "").strip()
+    logo_cid_domain = smtp_from_email.split("@", 1)[1] if "@" in smtp_from_email else "treasury.local"
     logos: list[dict] = []
     for logo in EMAIL_LOGOS:
         logo_path = BRANDING_DIR / logo["filename"]
@@ -152,7 +154,7 @@ def _load_email_logos() -> list[dict]:
             {
                 **logo,
                 "path": logo_path,
-                "cid": make_msgid(domain="wards.local")[1:-1],
+                "cid": make_msgid(domain=logo_cid_domain)[1:-1],
             }
         )
     return logos

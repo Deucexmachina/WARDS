@@ -24,7 +24,7 @@ def seed_auth_users():
             # Create default admin user
             admin = Admin(
                 username="admin",
-                email="admin@wards.local",
+                email="treasurermain@gmail.com",
                 hashed_password=pwd_context.hash("admin123"),
                 role="main_admin",
                 status="Active",
@@ -62,7 +62,7 @@ def seed_auth_users():
             # Create default branch staff user
             staff = BranchStaff(
                 username="branch1",
-                email="branch1@wards.local",
+                email="branch1@treasury.gov",
                 full_name="Branch Staff One",
                 hashed_password=pwd_context.hash("branch123"),
                 branch_id=branch.id,
@@ -84,7 +84,7 @@ def seed_auth_users():
         else:
             branch_admin = BranchStaff(
                 username="branchadmin",
-                email="branchadmin@wards.local",
+                email="branchadmin@treasury.gov",
                 full_name="Branch Administrator",
                 hashed_password=pwd_context.hash("branchadmin123"),
                 branch_id=branch.id,

@@ -31,6 +31,7 @@ from database.models import Admin, ActivityLog, MFASecret, get_db
 from utils.system_settings import get_setting_value
 from utils.field_crypto import apply_mfa_secret_security, find_mfa_secret_record, get_decrypted_or_raw
 from utils.token_revocation import is_token_revoked, revoke_token
+from routes.unified_auth import decode_active_account_from_bearer_token
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -227,25 +228,9 @@ def get_current_admin_from_token(request: Request, db: Session) -> Admin:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session has been logged out")
 
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username = payload.get("sub")
-        token_type = payload.get("type")
-
-        if token_type != "admin":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Invalid token type"
-            )
-
-        admin = db.query(Admin).filter(Admin.username == username).first()
-        if not admin or admin.status != "Active":
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User not found or inactive"
-            )
-
-        return admin
-    except JWTError:
+        _portal, account, _payload = decode_active_account_from_bearer_token(token, db, allowed_portals=("admin",))
+        return account
+    except HTTPException:
         log_admin_security_context(
             db,
             actor="unknown_admin_token",

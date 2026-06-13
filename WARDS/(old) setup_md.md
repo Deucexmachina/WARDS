@@ -26,7 +26,7 @@ Current admin bootstrap values in this workspace:
 ```env
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=change-this-password-immediately
-ADMIN_EMAIL=admin@wards.local
+ADMIN_EMAIL=treasurermain@gmail.com
 ```
 
 ## First-Time Setup
@@ -78,7 +78,7 @@ Use these as reference credentials from the repo and current workspace.
 
 - Username: `admin`
 - Password: `change-this-password-immediately`
-- Email: `admin@wards.local`
+- Email: `treasurermain@gmail.com`
 
 ### Seed / Legacy Repo Credentials
 
@@ -91,7 +91,7 @@ These appear in the repo seed files, but may depend on the current database cont
   - Username: `galas_admin`
   - Password: `galas123`
 - Alternate branch/admin seed values found in auth seed scripts:
-  - Email: `branchadmin@wards.local`
+  - Email: `branchadmin@treasury.gov`
   - Password: `branchadmin123`
   - Branch staff seed password: `branch123`
 
