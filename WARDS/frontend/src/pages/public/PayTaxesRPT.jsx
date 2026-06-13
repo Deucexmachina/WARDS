@@ -1415,6 +1415,7 @@ const PayTaxesRPT = () => {
                       }}
                       onContinue={handleGenerateReference}
                       processing={generatingReference}
+                      readOnlyCustomer
                       referenceNumber={paymentReference?.refNumber}
                       title={language === 'en' ? 'RPT Payment Checkout' : 'Checkout ng RPT Payment'}
                       language={language}

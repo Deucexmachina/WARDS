@@ -91,6 +91,7 @@ const PaymentGatewayExperience = ({
   onCustomerChange,
   onMethodChange,
   processing = false,
+  readOnlyCustomer = false,
   referenceNumber,
   title = 'Payment Method',
 }) => {
@@ -374,11 +375,16 @@ const PaymentGatewayExperience = ({
                       </label>
                       <input
                         value={details.name}
-                        onChange={(event) => updateDetail('name', event.target.value)}
+                        onChange={readOnlyCustomer ? undefined : (event) => updateDetail('name', event.target.value)}
+                        readOnly={readOnlyCustomer}
                         placeholder=""
                         disabled={disabled || processing}
                         className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none focus:ring-4 ${
-                          errors.name ? 'border-rose-400 bg-rose-50 focus:ring-rose-100' : 'border-slate-300 bg-white focus:ring-sky-100'
+                          readOnlyCustomer
+                            ? 'border-slate-200 bg-slate-100 text-slate-500 cursor-not-allowed'
+                            : errors.name
+                              ? 'border-rose-400 bg-rose-50 focus:ring-rose-100'
+                              : 'border-slate-300 bg-white focus:ring-sky-100'
                         }`}
                       />
                       <FieldError message={errors.name} />
@@ -407,11 +413,16 @@ const PaymentGatewayExperience = ({
                         <input
                           type="tel"
                           value={details.mobile}
-                          onChange={(event) => updateDetail('mobile', event.target.value)}
+                          onChange={readOnlyCustomer ? undefined : (event) => updateDetail('mobile', event.target.value)}
+                          readOnly={readOnlyCustomer}
                           placeholder="09XXXXXXXXX"
                           disabled={disabled || processing}
                           className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none focus:ring-4 ${
-                            errors.mobile ? 'border-rose-400 bg-rose-50 focus:ring-rose-100' : 'border-slate-300 bg-white focus:ring-sky-100'
+                            readOnlyCustomer
+                              ? 'border-slate-200 bg-slate-100 text-slate-500 cursor-not-allowed'
+                              : errors.mobile
+                                ? 'border-rose-400 bg-rose-50 focus:ring-rose-100'
+                                : 'border-slate-300 bg-white focus:ring-sky-100'
                           }`}
                         />
                         <FieldError message={errors.mobile} />
