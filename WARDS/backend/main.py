@@ -15,7 +15,8 @@ import time
 
 from dotenv import load_dotenv
 from passlib.context import CryptContext
-from sqlalchemy import text, inspect, or_
+from sqlalchemy import text, inspect, or_, event
+from sqlalchemy.orm import Session as OrmSession
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -24,8 +25,8 @@ load_dotenv(Path(__file__).resolve().with_name(".env"), override=True)
 
 from routes import auth, branches, reports, announcements, memos, alerts, logs, backup, users, payments, receipts, settings, policies, privacy, rbac_routes, dashboard, public, public_auth, admin_auth_v2, user_auth_v2, branch_auth_v2, invites, admin_users, branch_portal, branch_settings, unified_auth, discrepancies, tax_assessment, security_dashboard, public_content, window_staff_account
 from services import ocr_routes
-from database.models import Base, engine, SessionLocal, Admin, Announcement, AnnouncementAttachment, Branch, BusinessRegistry, BusinessTaxApplication, DiscrepancyReport, EmailOTP, EmailVerificationToken, FAQ, Invite, Memo, MemoView, MFASecret, Payment, Queue, QueueActivity, ReceiptRecord, ReceiptRequest, ReceiptRequestHistory, RPTPropertyRecord, Service, ServiceWindowConfig, TaxpayerGuide
-from utils.field_crypto import apply_citizen_user_security, apply_discrepancy_report_security, apply_email_otp_security, apply_email_verification_token_security, apply_faq_security, apply_invite_security, apply_memo_security, apply_memo_view_security, apply_mfa_secret_security, apply_payment_security, apply_queue_activity_security, apply_queue_security, apply_receipt_record_security, apply_receipt_request_history_security, apply_receipt_request_security, apply_rpt_property_record_security, apply_service_security, apply_service_window_config_security, apply_system_setting_security, apply_tax_assessment_record_security, apply_taxpayer_guide_security, apply_taxpayer_identifier_submission_security, build_redacted_text, get_decrypted_or_raw, hash_optional_value, set_encrypted_hash_companions
+from database.models import Base, engine, SessionLocal, Admin, Announcement, AnnouncementAttachment, Branch, BusinessRegistry, BusinessTaxApplication, CollectionAccount, DiscrepancyReport, EmailOTP, EmailVerificationToken, FAQ, Invite, Memo, MemoView, MFASecret, Payment, Queue, QueueActivity, ReceiptRecord, ReceiptRequest, ReceiptRequestHistory, Remittance, RemittanceItem, RPTPropertyRecord, Service, ServiceWindowConfig, TaxpayerGuide
+from utils.field_crypto import apply_citizen_user_security, apply_collection_account_security, apply_discrepancy_report_security, apply_email_otp_security, apply_email_verification_token_security, apply_faq_security, apply_invite_security, apply_memo_security, apply_memo_view_security, apply_mfa_secret_security, apply_payment_security, apply_queue_activity_security, apply_queue_security, apply_receipt_record_security, apply_receipt_request_history_security, apply_receipt_request_security, apply_remittance_item_security, apply_remittance_security, apply_rpt_property_record_security, apply_service_security, apply_service_window_config_security, apply_system_setting_security, apply_tax_assessment_record_security, apply_taxpayer_guide_security, apply_taxpayer_identifier_submission_security, build_redacted_text, get_decrypted_or_raw, hash_optional_value, set_encrypted_hash_companions
 from utils import log_integrity  # noqa: F401 - registers tamper-evident log signing hooks
 from utils.system_settings import seed_system_settings
 from utils.branch_system_settings import cleanup_duplicate_branch_system_settings
@@ -419,6 +420,51 @@ def ensure_auth_extensions():
             conn.execute(text("ALTER TABLE payments ADD COLUMN paymongo_source_id VARCHAR(255)"))
         if "paymongo_payment_id" not in payment_columns:
             conn.execute(text("ALTER TABLE payments ADD COLUMN paymongo_payment_id VARCHAR(255)"))
+
+        if "collection_accounts" in table_names:
+            collection_account_columns = {column["name"] for column in inspector.get_columns("collection_accounts")}
+            for column_name, column_type in (
+                ("account_name_hash", "VARCHAR(255)"),
+                ("account_name_enc", "TEXT"),
+                ("current_balance_hash", "VARCHAR(255)"),
+                ("current_balance_enc", "TEXT"),
+                ("total_collected_hash", "VARCHAR(255)"),
+                ("total_collected_enc", "TEXT"),
+                ("total_remitted_hash", "VARCHAR(255)"),
+                ("total_remitted_enc", "TEXT"),
+            ):
+                if column_name not in collection_account_columns:
+                    conn.execute(text(f"ALTER TABLE collection_accounts ADD COLUMN {column_name} {column_type}"))
+
+        if "remittances" in table_names:
+            remittance_columns = {column["name"] for column in inspector.get_columns("remittances")}
+            for column_name, column_type in (
+                ("remittance_number_hash", "VARCHAR(255)"),
+                ("remittance_number_enc", "TEXT"),
+                ("total_amount_hash", "VARCHAR(255)"),
+                ("total_amount_enc", "TEXT"),
+                ("remarks_hash", "VARCHAR(255)"),
+                ("remarks_enc", "TEXT"),
+                ("report_file_path_hash", "VARCHAR(255)"),
+                ("report_file_path_enc", "TEXT"),
+                ("report_file_name_hash", "VARCHAR(255)"),
+                ("report_file_name_enc", "TEXT"),
+                ("submitted_by_hash", "VARCHAR(255)"),
+                ("submitted_by_enc", "TEXT"),
+                ("reviewed_by_hash", "VARCHAR(255)"),
+                ("reviewed_by_enc", "TEXT"),
+            ):
+                if column_name not in remittance_columns:
+                    conn.execute(text(f"ALTER TABLE remittances ADD COLUMN {column_name} {column_type}"))
+
+        if "remittance_items" in table_names:
+            remittance_item_columns = {column["name"] for column in inspector.get_columns("remittance_items")}
+            for column_name, column_type in (
+                ("amount_hash", "VARCHAR(255)"),
+                ("amount_enc", "TEXT"),
+            ):
+                if column_name not in remittance_item_columns:
+                    conn.execute(text(f"ALTER TABLE remittance_items ADD COLUMN {column_name} {column_type}"))
         if "paymongo_checkout_url" not in payment_columns:
             conn.execute(text("ALTER TABLE payments ADD COLUMN paymongo_checkout_url VARCHAR(255)"))
         if "paymongo_status" not in payment_columns:
@@ -1572,6 +1618,67 @@ def apply_business_tax_application_security(application: BusinessTaxApplication)
     application.official_receipt_number = build_redacted_text("BT_OR", official_receipt_number, 255)
 
 
+@event.listens_for(OrmSession, "before_flush")
+def apply_sensitive_field_protection_before_flush(session, flush_context, instances):
+    for obj in set(session.new).union(session.dirty):
+        if isinstance(obj, Branch):
+            apply_branch_security(obj)
+        elif isinstance(obj, BusinessRegistry):
+            apply_business_registry_security(obj)
+        elif isinstance(obj, CollectionAccount):
+            apply_collection_account_security(obj)
+        elif isinstance(obj, Remittance):
+            apply_remittance_security(obj)
+        elif isinstance(obj, RemittanceItem):
+            apply_remittance_item_security(obj)
+        elif obj.__class__.__name__ == "CitizenUser":
+            apply_citizen_user_security(obj)
+        elif isinstance(obj, BusinessTaxApplication):
+            apply_business_tax_application_security(obj)
+        elif isinstance(obj, DiscrepancyReport):
+            apply_discrepancy_report_security(obj)
+        elif isinstance(obj, EmailOTP):
+            apply_email_otp_security(obj)
+        elif isinstance(obj, EmailVerificationToken):
+            apply_email_verification_token_security(obj)
+        elif isinstance(obj, FAQ):
+            apply_faq_security(obj)
+        elif isinstance(obj, TaxpayerGuide):
+            apply_taxpayer_guide_security(obj)
+        elif obj.__class__.__name__ == "TaxpayerIdentifierSubmission":
+            apply_taxpayer_identifier_submission_security(obj)
+        elif isinstance(obj, Invite):
+            apply_invite_security(obj)
+        elif isinstance(obj, Memo):
+            apply_memo_security(obj)
+        elif isinstance(obj, MemoView):
+            apply_memo_view_security(obj)
+        elif isinstance(obj, MFASecret):
+            apply_mfa_secret_security(obj)
+        elif isinstance(obj, Payment):
+            apply_payment_security(obj)
+        elif isinstance(obj, ServiceWindowConfig):
+            apply_service_window_config_security(obj)
+        elif isinstance(obj, Service):
+            apply_service_security(obj)
+        elif obj.__class__.__name__ == "SystemSetting":
+            apply_system_setting_security(obj)
+        elif obj.__class__.__name__ == "TaxAssessmentRecord":
+            apply_tax_assessment_record_security(obj)
+        elif isinstance(obj, QueueActivity):
+            apply_queue_activity_security(obj)
+        elif isinstance(obj, RPTPropertyRecord):
+            apply_rpt_property_record_security(obj)
+        elif isinstance(obj, Queue):
+            apply_queue_security(obj)
+        elif isinstance(obj, ReceiptRecord):
+            apply_receipt_record_security(obj)
+        elif isinstance(obj, ReceiptRequest):
+            apply_receipt_request_security(obj)
+        elif isinstance(obj, ReceiptRequestHistory):
+            apply_receipt_request_history_security(obj)
+
+
 def _is_assessment_placeholder(value: str | None) -> bool:
     return bool(value and isinstance(value, str) and value.startswith("ASSESS_"))
 
@@ -1660,6 +1767,15 @@ def backfill_branch_and_business_registry_security():
 
         for payment in db.query(Payment).all():
             apply_payment_security(payment)
+
+        for account in db.query(CollectionAccount).all():
+            apply_collection_account_security(account)
+
+        for remittance in db.query(Remittance).all():
+            apply_remittance_security(remittance)
+
+        for remittance_item in db.query(RemittanceItem).all():
+            apply_remittance_item_security(remittance_item)
 
         for config in db.query(ServiceWindowConfig).all():
             apply_service_window_config_security(config)

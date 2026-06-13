@@ -33,7 +33,7 @@ from middleware.user_auth import get_current_user
 from services.email_service import send_payment_receipt_email
 from services.paymongo import paymongo_service
 from utils.branch_system_settings import get_branch_setting_value
-from utils.field_crypto import apply_citizen_user_security, apply_payment_security, apply_receipt_request_security, build_redacted_text, find_payment_by_field, find_payment_by_ref_number, get_decrypted_or_raw, hash_aware_match, hash_optional_value, receipt_request_value, set_encrypted_hash_companions, tax_assessment_value
+from utils.field_crypto import apply_citizen_user_security, apply_payment_security, apply_receipt_request_security, build_redacted_text, collection_account_number_value, collection_account_value, find_payment_by_field, find_payment_by_ref_number, get_decrypted_or_raw, hash_aware_match, hash_optional_value, receipt_request_value, remittance_numeric_value, remittance_value, set_encrypted_hash_companions, tax_assessment_value
 from utils.file_delivery import deliver_file_response
 from utils.file_validation import validate_upload_file
 from utils.security_validation import format_tin, normalize_email, normalize_identity_name, normalize_tin, ensure_tin_is_unique
@@ -376,17 +376,17 @@ def serialize_remittance(remittance: Remittance) -> dict:
     items = list(remittance.items or [])
     return {
         "id": remittance.id,
-        "remittance_number": remittance.remittance_number,
+        "remittance_number": remittance_value(remittance, "remittance_number"),
         "branch_id": remittance.branch_id,
         "branch_name": get_decrypted_or_raw(branch, "name") or branch.name if branch else f"Branch {remittance.branch_id}",
-        "total_amount": float(remittance.total_amount or 0),
+        "total_amount": float(remittance_numeric_value(remittance, "total_amount") or 0),
         "payment_count": remittance.payment_count or len(items),
         "status": remittance.status,
-        "remarks": remittance.remarks,
-        "report_file_name": remittance.report_file_name,
-        "report_download_url": f"/api/payments/remittances/{remittance.id}/report" if remittance.report_file_path else None,
-        "submitted_by": remittance.submitted_by,
-        "reviewed_by": remittance.reviewed_by,
+        "remarks": remittance_value(remittance, "remarks"),
+        "report_file_name": remittance_value(remittance, "report_file_name"),
+        "report_download_url": f"/api/payments/remittances/{remittance.id}/report" if remittance_value(remittance, "report_file_path") else None,
+        "submitted_by": remittance_value(remittance, "submitted_by"),
+        "reviewed_by": remittance_value(remittance, "reviewed_by"),
         "submitted_at": to_utc_iso(remittance.submitted_at),
         "reviewed_at": to_utc_iso(remittance.reviewed_at),
         "items": [
@@ -2859,10 +2859,10 @@ async def list_main_remittances(
     return {
         "account": {
             "id": account.id,
-            "account_name": account.account_name,
+            "account_name": collection_account_value(account, "account_name"),
             "owner_type": account.owner_type,
-            "current_balance": account.current_balance,
-            "total_collected": account.total_collected,
+            "current_balance": collection_account_number_value(account, "current_balance"),
+            "total_collected": collection_account_number_value(account, "total_collected"),
         },
         "pending_amount": pending_amount,
         "accepted_amount": accepted_amount,
@@ -2879,14 +2879,16 @@ async def download_remittance_report(
     remittance = db.query(Remittance).filter(Remittance.id == remittance_id).first()
     if not remittance:
         raise HTTPException(status_code=404, detail="Remittance not found")
-    if not remittance.report_file_path:
+    report_file_path = remittance_value(remittance, "report_file_path")
+    report_file_name = remittance_value(remittance, "report_file_name")
+    if not report_file_path:
         raise HTTPException(status_code=404, detail="No remittance report was uploaded for this batch.")
-    report_path = Path(remittance.report_file_path)
+    report_path = Path(report_file_path)
     if not report_path.exists():
         raise HTTPException(status_code=404, detail="Remittance report file is missing.")
     return deliver_file_response(
         report_path,
-        filename=remittance.report_file_name or report_path.name,
+        filename=report_file_name or report_path.name,
         allow_inline_preview=False,
     )
 

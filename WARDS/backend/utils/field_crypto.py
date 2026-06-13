@@ -94,6 +94,23 @@ def get_decrypted_or_raw(entity, field_name: str) -> Optional[str]:
     return raw_value
 
 
+def get_decrypted_or_raw_number(entity, field_name: str) -> Optional[float]:
+    decrypted = decrypt_optional_value(getattr(entity, f"{field_name}_enc", None))
+    if decrypted is not None:
+        try:
+            return float(decrypted)
+        except (TypeError, ValueError):
+            pass
+
+    raw_value = getattr(entity, field_name, None)
+    if raw_value is None:
+        return None
+    try:
+        return float(raw_value)
+    except (TypeError, ValueError):
+        return None
+
+
 def get_preferred_write_value(entity, field_name: str) -> Optional[str]:
     raw_value = getattr(entity, field_name, None)
     decrypted = decrypt_optional_value(getattr(entity, f"{field_name}_enc", None))
@@ -512,6 +529,59 @@ def apply_service_window_config_security(config):
     set_encrypted_hash_companions(config, "window_count", window_count_value)
     config.window_count = build_redacted_text("WINDOW_COUNT", window_count_value, 255)
     return config
+
+
+def apply_collection_account_security(account):
+    account_name_value = get_preferred_write_value(account, "account_name")
+    set_encrypted_hash_companions(account, "account_name", account_name_value)
+    account.account_name = build_redacted_text("COLLECTION_ACCOUNT", account_name_value, 255)
+
+    for field_name in ("current_balance", "total_collected", "total_remitted"):
+        set_encrypted_hash_companions(account, field_name, getattr(account, field_name, None))
+
+    return account
+
+
+def apply_remittance_security(remittance):
+    for field_name, prefix, length in (
+        ("remittance_number", "REMITTANCE_NO", 255),
+        ("remarks", "REMITTANCE_REMARKS", 255),
+        ("report_file_path", "REMITTANCE_REPORT_PATH", 255),
+        ("report_file_name", "REMITTANCE_REPORT_NAME", 255),
+        ("submitted_by", "REMITTANCE_SUBMITTED_BY", 255),
+        ("reviewed_by", "REMITTANCE_REVIEWED_BY", 255),
+    ):
+        value = get_preferred_write_value(remittance, field_name)
+        set_encrypted_hash_companions(remittance, field_name, value)
+        setattr(remittance, field_name, build_redacted_text(prefix, value, length))
+
+    set_encrypted_hash_companions(remittance, "total_amount", getattr(remittance, "total_amount", None))
+    return remittance
+
+
+def apply_remittance_item_security(item):
+    set_encrypted_hash_companions(item, "amount", getattr(item, "amount", None))
+    return item
+
+
+def collection_account_value(account, field_name: str) -> Optional[str]:
+    return get_decrypted_or_raw(account, field_name)
+
+
+def collection_account_number_value(account, field_name: str) -> Optional[float]:
+    return get_decrypted_or_raw_number(account, field_name)
+
+
+def remittance_value(remittance, field_name: str) -> Optional[str]:
+    return get_decrypted_or_raw(remittance, field_name)
+
+
+def remittance_numeric_value(remittance, field_name: str) -> Optional[float]:
+    return get_decrypted_or_raw_number(remittance, field_name)
+
+
+def remittance_item_number_value(item, field_name: str) -> Optional[float]:
+    return get_decrypted_or_raw_number(item, field_name)
 
 
 def hash_aware_match(Model, field_name: str, value: Optional[str]):

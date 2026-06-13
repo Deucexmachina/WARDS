@@ -28,7 +28,7 @@ from utils.announcement_attachments import (
 )
 from services.email_service import send_payment_receipt_email
 from routes.payments import apply_business_tax_application_security_fields, revert_linked_request_status_for_declined_payment, update_linked_request_status
-from utils.field_crypto import apply_announcement_view_security, apply_memo_security, apply_memo_view_security, apply_payment_security, apply_queue_security, apply_receipt_request_security, decrypt_optional_value, find_announcement_view, find_memo_view, get_announcement_viewed_ids, get_decrypted_or_raw, get_memo_viewed_ids, hash_aware_any, hash_aware_match, hash_optional_value, queue_value
+from utils.field_crypto import apply_announcement_view_security, apply_memo_security, apply_memo_view_security, apply_payment_security, apply_queue_security, apply_receipt_request_security, collection_account_number_value, collection_account_value, decrypt_optional_value, find_announcement_view, find_memo_view, get_announcement_viewed_ids, get_decrypted_or_raw, get_memo_viewed_ids, hash_aware_any, hash_aware_match, hash_optional_value, queue_value, remittance_numeric_value, remittance_value
 from utils.security_validation import format_tin
 from utils.branch_system_settings import get_branch_setting_value
 from utils.branch_window_config import (
@@ -1001,16 +1001,16 @@ def serialize_remittance(db: Session, remittance: Remittance) -> dict:
     items = list(remittance.items or [])
     return {
         "id": remittance.id,
-        "remittance_number": remittance.remittance_number,
+        "remittance_number": remittance_value(remittance, "remittance_number"),
         "branch_id": remittance.branch_id,
         "branch_name": get_decrypted_or_raw(branch, "name") or branch.name if branch else f"Branch {remittance.branch_id}",
-        "total_amount": float(remittance.total_amount or 0),
+        "total_amount": float(remittance_numeric_value(remittance, "total_amount") or 0),
         "payment_count": remittance.payment_count or len(items),
         "status": remittance.status,
-        "remarks": remittance.remarks,
-        "report_file_name": remittance.report_file_name,
-        "submitted_by": remittance.submitted_by,
-        "reviewed_by": remittance.reviewed_by,
+        "remarks": remittance_value(remittance, "remarks"),
+        "report_file_name": remittance_value(remittance, "report_file_name"),
+        "submitted_by": remittance_value(remittance, "submitted_by"),
+        "reviewed_by": remittance_value(remittance, "reviewed_by"),
         "submitted_at": serialize_manila_datetime(remittance.submitted_at),
         "reviewed_at": serialize_manila_datetime(remittance.reviewed_at),
         "items": [
@@ -1129,12 +1129,12 @@ def branch_collection_summary(db: Session, branch: Branch, payments: list[Paymen
     return {
         "account": {
             "id": account.id,
-            "account_name": account.account_name,
+            "account_name": collection_account_value(account, "account_name"),
             "owner_type": account.owner_type,
             "branch_id": account.branch_id,
-            "current_balance": account.current_balance,
-            "total_collected": account.total_collected,
-            "total_remitted": account.total_remitted,
+            "current_balance": collection_account_number_value(account, "current_balance"),
+            "total_collected": collection_account_number_value(account, "total_collected"),
+            "total_remitted": collection_account_number_value(account, "total_remitted"),
         },
         "available_amount": available_amount,
         "pending_remittance_amount": pending_amount,
