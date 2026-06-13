@@ -1,7 +1,7 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import api from '../services/api';
-import { activityLogAPI, announcementAPI, branchAnnouncementAPI, discrepancyAPI } from '../services/api';
+import { activityLogAPI, announcementAPI, branchAnnouncementAPI, discrepancyAPI, taxAssessmentAPI } from '../services/api';
 import {
   getUnreadAdminReportCount,
   BRANCH_REPORT_VIEWED_EVENT,
@@ -25,6 +25,7 @@ const DynamicSidebar = () => {
   const [unreadMemoCount, setUnreadMemoCount] = useState(0);
   const [unreadPolicyCount, setUnreadPolicyCount] = useState(0);
   const [unreadDiscrepancyCount, setUnreadDiscrepancyCount] = useState(0);
+  const [unreadTaxAssessmentCount, setUnreadTaxAssessmentCount] = useState(0);
   const [moduleCounts, setModuleCounts] = useState({
     announcements: 0,
     alerts: 0,
@@ -98,12 +99,14 @@ const DynamicSidebar = () => {
     fetchUnreadMemoCount();
     fetchUnreadPolicyCount();
     fetchUnreadDiscrepancyCount();
+    fetchUnreadTaxAssessmentCount();
     fetchSidebarModuleCounts();
     
     const interval = setInterval(() => {
       fetchUnreadMemoCount();
       fetchUnreadPolicyCount();
       fetchUnreadDiscrepancyCount();
+      fetchUnreadTaxAssessmentCount();
       fetchSidebarModuleCounts();
     }, 10000);
     const handleAdminMemoRead = (event) => {
@@ -212,6 +215,11 @@ const DynamicSidebar = () => {
       }));
     };
     const handleAdminAlertRead = () => fetchSidebarModuleCounts();
+    const handleTaxAssessmentUpdated = (event) => {
+      const newCount = resolveUnreadCount(event, unreadTaxAssessmentCount);
+      setUnreadTaxAssessmentCount(newCount);
+      fetchUnreadTaxAssessmentCount();
+    };
     const handleActivityLogsViewed = (event) => {
       const unreadCount = Number(event?.detail?.unreadCount || 0);
       setModuleCounts((current) => ({
@@ -235,6 +243,7 @@ const DynamicSidebar = () => {
     window.addEventListener(BRANCH_QUEUE_UPDATED_EVENT, handleBranchQueueUpdated);
     window.addEventListener('security-notifications-updated', handleSecurityNotificationsUpdated);
     window.addEventListener('admin-alert-read', handleAdminAlertRead);
+    window.addEventListener('tax-assessment-updated', handleTaxAssessmentUpdated);
     window.addEventListener(ACTIVITY_LOGS_VIEWED_EVENT, handleActivityLogsViewed);
     window.addEventListener(ACTIVITY_LOGS_UPDATED_EVENT, handleActivityLogsUpdated);
     return () => {
@@ -254,6 +263,7 @@ const DynamicSidebar = () => {
       window.removeEventListener(BRANCH_QUEUE_UPDATED_EVENT, handleBranchQueueUpdated);
       window.removeEventListener('security-notifications-updated', handleSecurityNotificationsUpdated);
       window.removeEventListener('admin-alert-read', handleAdminAlertRead);
+      window.removeEventListener('tax-assessment-updated', handleTaxAssessmentUpdated);
       window.removeEventListener(ACTIVITY_LOGS_VIEWED_EVENT, handleActivityLogsViewed);
       window.removeEventListener(ACTIVITY_LOGS_UPDATED_EVENT, handleActivityLogsUpdated);
     };
@@ -298,6 +308,18 @@ const DynamicSidebar = () => {
       }
     } catch (error) {
       console.error('Failed to fetch unread discrepancy count:', error);
+    }
+  };
+
+  const fetchUnreadTaxAssessmentCount = async () => {
+    try {
+      const storedRole = getStoredRole();
+      if (storedRole === 'main_admin' || storedRole === 'superadmin') {
+        const response = await taxAssessmentAPI.getUnreadCount();
+        setUnreadTaxAssessmentCount(response.data.unread_count || 0);
+      }
+    } catch (error) {
+      console.error('Failed to fetch unread tax assessment count:', error);
     }
   };
 
@@ -564,9 +586,11 @@ const DynamicSidebar = () => {
           const isAccountsModule = module.icon === 'accounts';
           const isBackupModule = module.icon === 'backup';
           const isLogsModule = module.icon === 'logs';
+          const isAssessmentModule = module.icon === 'assessment';
           const showMemoBadge = isMemoModule && unreadMemoCount > 0;
           const showPolicyBadge = isPolicyModule && unreadPolicyCount > 0;
           const showDiscrepancyBadge = isDiscrepancyModule && unreadDiscrepancyCount > 0;
+          const showAssessmentBadge = isAssessmentModule && unreadTaxAssessmentCount > 0;
           const genericBadgeCount = isAnnouncementModule
             ? moduleCounts.announcements
             : isAlertModule
@@ -592,6 +616,7 @@ const DynamicSidebar = () => {
             !showMemoBadge &&
             !showPolicyBadge &&
             !showDiscrepancyBadge &&
+            !showAssessmentBadge &&
             genericBadgeCount > 0;
           
           return (
@@ -623,6 +648,11 @@ const DynamicSidebar = () => {
               {showDiscrepancyBadge && (
                 <span className={UNREAD_COUNT_BADGE_CLASS}>
                   {formatUnreadCount(unreadDiscrepancyCount)}
+                </span>
+              )}
+              {showAssessmentBadge && (
+                <span className={UNREAD_COUNT_BADGE_CLASS}>
+                  {formatUnreadCount(unreadTaxAssessmentCount)}
                 </span>
               )}
               {showGenericBadge && (

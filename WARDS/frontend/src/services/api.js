@@ -205,6 +205,7 @@ export const taxAssessmentAPI = {
   listAssessments: (params) => api.get('/tax-assessment/admin/assessments', { params }),
   saveAssessment: (data) => api.post('/tax-assessment/admin/assessments', data),
   deleteAssessment: (assessmentId) => api.delete(`/tax-assessment/admin/assessments/${assessmentId}`),
+  getUnreadCount: () => api.get('/tax-assessment/admin/assessments/unread-count'),
 };
 
 export const receiptAPI = {

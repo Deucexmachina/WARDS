@@ -260,6 +260,9 @@ const TaxAssessment = () => {
       const response = await taxAssessmentAPI.reviewSubmission(submission.id, draft);
       setMessage(response.data?.message || 'Submission review saved.');
       setError('');
+      window.dispatchEvent(new CustomEvent('tax-assessment-updated', {
+        detail: { delta: draft.status === 'Pending Verification' ? 0 : -1 },
+      }));
       await loadPageData();
     } catch (reviewError) {
       setError(reviewError.response?.data?.detail || 'Failed to save submission review.');
@@ -375,6 +378,9 @@ const TaxAssessment = () => {
       setMessage(response.data?.message || 'Taxpayer submission deleted successfully.');
       setError('');
       setDeleteTarget(null);
+      window.dispatchEvent(new CustomEvent('tax-assessment-updated', {
+        detail: { delta: -1 },
+      }));
       await loadPageData();
     } catch (deleteError) {
       setError(deleteError.response?.data?.detail || 'Failed to delete taxpayer submission.');
@@ -460,6 +466,9 @@ const TaxAssessment = () => {
       setAssessmentValidationErrors({});
       setAssessmentForm(EMPTY_ASSESSMENT_FORM);
       setShowAssessmentGenerator(false);
+      window.dispatchEvent(new CustomEvent('tax-assessment-updated', {
+        detail: { delta: assessmentForm.assessment_id ? 0 : 1 },
+      }));
       await loadPageData();
     } catch (saveError) {
       setError(saveError.response?.data?.detail || 'Failed to save tax assessment.');
@@ -493,6 +502,9 @@ const TaxAssessment = () => {
         setShowAssessmentGenerator(false);
       }
       setDeleteTarget(null);
+      window.dispatchEvent(new CustomEvent('tax-assessment-updated', {
+        detail: { delta: -1 },
+      }));
       await loadPageData();
     } catch (deleteError) {
       setError(deleteError.response?.data?.detail || 'Failed to delete assessment.');

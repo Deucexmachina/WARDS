@@ -915,6 +915,23 @@ async def download_submission_file(
     )
 
 
+@router.get("/admin/assessments/unread-count")
+async def get_tax_assessment_unread_count(
+    db: Session = Depends(get_db),
+    current_user=Depends(require_main_admin()),
+):
+    count = (
+        db.query(TaxAssessmentRecord)
+        .filter(
+            hash_aware_match(TaxAssessmentRecord, "verification_status", "Verified"),
+            hash_aware_match(TaxAssessmentRecord, "assessment_status", "Active"),
+            TaxAssessmentRecord.visible_to_taxpayer.is_(True),
+        )
+        .count()
+    )
+    return {"unread_count": count}
+
+
 @router.get("/admin/submissions")
 async def list_taxpayer_submissions(
     search: str | None = Query(default=None),
