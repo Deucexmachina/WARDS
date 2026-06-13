@@ -14,11 +14,13 @@ class PayMongoService:
         self.secret_key = os.getenv("PAYMONGO_SECRET_KEY")
         self.public_key = os.getenv("PAYMONGO_PUBLIC_KEY")
         self.base_url = "https://api.paymongo.com/v1"
-        
+        self.auth_header = None
+
+    def _require_key(self):
         if not self.secret_key:
             raise ValueError("PAYMONGO_SECRET_KEY not found in environment variables")
-        
-        self.auth_header = self._create_auth_header()
+        if self.auth_header is None:
+            self.auth_header = self._create_auth_header()
     
     def _create_auth_header(self) -> str:
         credentials = f"{self.secret_key}:"
@@ -26,6 +28,7 @@ class PayMongoService:
         return f"Basic {encoded}"
     
     def _get_headers(self) -> Dict[str, str]:
+        self._require_key()
         return {
             "Authorization": self.auth_header,
             "Content-Type": "application/json",
@@ -33,6 +36,7 @@ class PayMongoService:
         }
 
     def _get_public_headers(self) -> Dict[str, str]:
+        self._require_key()
         if not self.public_key:
             return self._get_headers()
         credentials = f"{self.public_key}:"
