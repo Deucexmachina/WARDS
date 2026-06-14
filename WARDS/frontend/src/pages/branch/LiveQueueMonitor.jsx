@@ -83,29 +83,31 @@ const LiveQueueMonitor = () => {
     const currentServingQueues = queueData.serving || [];
     const previousServingQueues = previousServingQueuesRef.current || [];
 
-    // Find newly added serving queue
-    const newServingQueue = currentServingQueues.find(queue => {
+    // Find all newly added serving queues
+    const newServingQueues = currentServingQueues.filter(queue => {
       return !previousServingQueues.some(prev => prev.queue_number === queue.queue_number);
     });
 
-    if (newServingQueue && newServingQueue.queue_number) {
-      // Check if we already announced this queue
-      if (lastAnnouncedQueueRef.current !== newServingQueue.queue_number) {
-        console.log('🔊 Auto-detected new serving queue:', newServingQueue.queue_number);
-        setIsAnnouncementPlaying(true);
-        lastAnnouncedQueueRef.current = newServingQueue.queue_number;
+    if (newServingQueues.length > 0) {
+      setIsAnnouncementPlaying(true);
 
-        announceQueue(newServingQueue.queue_number, newServingQueue.assigned_window_number || newServingQueue.service_window || 'MISC')
-          .then(() => {
-            console.log('✅ Auto-announcement completed');
-          })
-          .catch(err => {
-            console.error('❌ Auto-announcement failed:', err);
-          })
-          .finally(() => {
-            setIsAnnouncementPlaying(false);
-          });
-      }
+      const announceNext = async () => {
+        for (const queue of newServingQueues) {
+          if (!queue.queue_number) continue;
+          console.log('🔊 Auto-detected new serving queue:', queue.queue_number);
+          lastAnnouncedQueueRef.current = queue.queue_number;
+          try {
+            await announceQueue(queue.queue_number, queue.assigned_window_number || queue.service_window || 'MISC');
+            console.log('✅ Auto-announcement completed for', queue.queue_number);
+          } catch (err) {
+            console.error('❌ Auto-announcement failed for', queue.queue_number, err);
+          }
+        }
+      };
+
+      announceNext().finally(() => {
+        setIsAnnouncementPlaying(false);
+      });
     }
 
     // Update previous serving queues

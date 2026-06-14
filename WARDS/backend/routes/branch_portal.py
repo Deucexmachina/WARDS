@@ -1616,6 +1616,10 @@ async def recall_skipped_queue(
     ensure_queue_window_access(db, current_staff, queue)
     if queue_value(queue, "status") != "Skipped":
         raise HTTPException(status_code=409, detail="Only skipped queue records can be pulled back to the current window.")
+    target_service_window = normalize_service_window_for_branch(db, current_staff.branch_id, queue_value(queue, "service_type"))
+    active_queue = get_active_branch_queue(db, current_staff.branch_id, current_staff=current_staff, service_window=target_service_window)
+    if active_queue:
+        raise HTTPException(status_code=409, detail="Complete or skip the current active queue in this window before pulling back another skipped queue.")
     queue.status = "Called"
     apply_queue_security(queue)
     log_branch_action(db, current_staff, "Skipped Queue Recalled", f"Pulled skipped queue {queue_value(queue, 'queue_number')} back to the current window", request.client.host)
