@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from database.models import (
@@ -11,6 +11,19 @@ from database.models import (
 from middleware.admin_auth import get_current_admin_user
 from utils.rbac import require_permission
 from utils.field_crypto import get_decrypted_or_raw, hash_aware_match, queue_value, hash_optional_value
+
+CONFIRMED_PAYMENT_STATUSES = {
+    "Verified", "PAYMENT_VERIFIED", "OR_GENERATED", "COMPLETED"
+}
+PENDING_PAYMENT_STATUSES = {
+    "Pending", "Pending Transaction", "PAYMENT_SUBMITTED",
+    "PENDING_TREASURY_VALIDATION", "CLARIFICATION_REQUESTED",
+    "PROPERTY_SEARCHED", "PROPERTY_FOUND", "ADDED_TO_CART",
+    "PAYMENT_INITIATED", "VALIDATED", "DOCUMENTS_UPLOADED",
+}
+FAILED_PAYMENT_STATUSES = {
+    "Failed", "PAYMENT_REJECTED", "RETURNED_FOR_CORRECTION",
+}
 
 router = APIRouter()
 
@@ -68,9 +81,9 @@ async def get_dashboard_statistics(
     
     # Get payment statistics
     total_payments = payment_query.count()
-    total_amount = db.query(func.sum(Payment.amount)).filter(
-        Payment.status == "Verified"
-    ).scalar() or 0
+    total_amount = payment_query.filter(
+        Payment.status.in_(CONFIRMED_PAYMENT_STATUSES)
+    ).with_entities(func.sum(Payment.amount)).scalar() or 0
     
     # Get branch-specific data
     branches = db.query(Branch).all()
@@ -97,25 +110,27 @@ async def get_dashboard_statistics(
             "last_updated": branch_queues[0].created_at.isoformat() if branch_queues else None
         })
     
-    # Get served totals for dashboard period cards
-    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    week_start = today_start - timedelta(days=today_start.weekday())
-    month_start = today_start.replace(day=1)
+    # Get served totals for dashboard period cards (using UTC+8 for Philippine time)
+    ph_tz = timezone(timedelta(hours=8))
+    now_ph = datetime.now(ph_tz)
+    today_start = now_ph.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc).replace(tzinfo=None)
+    week_start_ph = now_ph - timedelta(days=now_ph.weekday())
+    week_start = week_start_ph.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc).replace(tzinfo=None)
+    month_start = now_ph.replace(day=1, hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc).replace(tzinfo=None)
     daily_served = queue_query.filter(hash_aware_match(Queue, "status", "Completed"), Queue.completed_at >= today_start).count()
     weekly_served = queue_query.filter(hash_aware_match(Queue, "status", "Completed"), Queue.completed_at >= week_start).count()
     monthly_served = queue_query.filter(hash_aware_match(Queue, "status", "Completed"), Queue.completed_at >= month_start).count()
 
     # Get payment statistics for today
     today_payments = payment_query.filter(Payment.created_at >= today_start)
-    
-    pending_payments = today_payments.filter(Payment.status == "Pending").count()
-    confirmed_payments = today_payments.filter(Payment.status == "Verified").count()
-    failed_payments = today_payments.filter(Payment.status == "Failed").count()
-    
-    today_total = db.query(func.sum(Payment.amount)).filter(
-        Payment.created_at >= today_start,
-        Payment.status == "Verified"
-    ).scalar() or 0
+
+    pending_payments = today_payments.filter(Payment.status.in_(PENDING_PAYMENT_STATUSES)).count()
+    confirmed_payments = today_payments.filter(Payment.status.in_(CONFIRMED_PAYMENT_STATUSES)).count()
+    failed_payments = today_payments.filter(Payment.status.in_(FAILED_PAYMENT_STATUSES)).count()
+
+    today_total = today_payments.filter(
+        Payment.status.in_(CONFIRMED_PAYMENT_STATUSES)
+    ).with_entities(func.sum(Payment.amount)).scalar() or 0
     
     # Get recent payments
     recent_payments = payment_query.order_by(Payment.created_at.desc()).limit(10).all()

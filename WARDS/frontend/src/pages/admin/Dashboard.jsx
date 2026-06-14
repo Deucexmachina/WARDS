@@ -42,15 +42,73 @@ const buildDiscrepancyPendingActionMessage = (report) => {
 const getPaymentStatusClasses = (status) => {
   const normalizedStatus = String(status || '').trim().toLowerCase();
 
+  if (normalizedStatus === 'payment_verified') {
+    return 'bg-emerald-100 text-emerald-800';
+  }
+  if (normalizedStatus === 'or_generated') {
+    return 'bg-blue-100 text-blue-800';
+  }
+  if (normalizedStatus === 'completed') {
+    return 'bg-green-100 text-green-800';
+  }
   if (['confirmed', 'verified', 'paid', 'successful', 'success'].includes(normalizedStatus)) {
     return 'bg-green-100 text-green-800';
   }
-
+  if (['payment_submitted', 'validated', 'documents_uploaded'].includes(normalizedStatus)) {
+    return 'bg-sky-100 text-sky-800';
+  }
+  if (normalizedStatus === 'pending_treasury_validation') {
+    return 'bg-amber-100 text-amber-800';
+  }
+  if (normalizedStatus === 'clarification_requested') {
+    return 'bg-orange-100 text-orange-800';
+  }
+  if (['payment_rejected', 'returned_for_correction'].includes(normalizedStatus)) {
+    return 'bg-red-100 text-red-800';
+  }
   if (normalizedStatus.includes('pending') || normalizedStatus === 'processing') {
     return 'bg-yellow-100 text-yellow-800';
   }
+  if (['failed', 'declined', 'cancelled', 'canceled', 'rejected'].includes(normalizedStatus)) {
+    return 'bg-rose-100 text-rose-800';
+  }
 
-  return 'bg-red-100 text-red-800';
+  return 'bg-gray-100 text-gray-800';
+};
+
+const getPaymentStatusLabel = (status) => {
+  const normalizedStatus = String(status || '').trim().toLowerCase();
+
+  const labels = {
+    payment_verified: 'Payment Verified',
+    or_generated: 'OR Generated',
+    completed: 'Completed',
+    payment_submitted: 'Payment Submitted',
+    pending_treasury_validation: 'Pending Treasury Validation',
+    clarification_requested: 'Clarification Requested',
+    payment_rejected: 'Payment Rejected',
+    returned_for_correction: 'Returned for Correction',
+    property_searched: 'Property Searched',
+    property_found: 'Property Found',
+    added_to_cart: 'Added to Cart',
+    payment_initiated: 'Payment Initiated',
+    validated: 'Validated',
+    documents_uploaded: 'Documents Uploaded',
+    pending: 'Pending',
+    processing: 'Processing',
+    confirmed: 'Confirmed',
+    verified: 'Payment Verified',
+    paid: 'Paid',
+    successful: 'Successful',
+    success: 'Success',
+    failed: 'Failed',
+    declined: 'Declined',
+    cancelled: 'Cancelled',
+    canceled: 'Canceled',
+    rejected: 'Rejected',
+  };
+
+  return labels[normalizedStatus] || status || 'Unknown';
 };
 
 const Dashboard = () => {
@@ -695,7 +753,7 @@ const Dashboard = () => {
                           <td className="whitespace-nowrap px-5 py-4 font-bold text-slate-950">{formatCurrency(payment.amount)}</td>
                           <td className="whitespace-nowrap px-5 py-4">
                             <span className={`rounded-full px-2 py-1 text-xs font-semibold ${getPaymentStatusClasses(payment.status)}`}>
-                              {payment.status}
+                              {getPaymentStatusLabel(payment.status)}
                             </span>
                           </td>
                           <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-500">{formatUtc8Time(payment.created_at)}</td>
