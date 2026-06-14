@@ -18,7 +18,6 @@ from passlib.context import CryptContext
 from sqlalchemy import text, inspect, or_, event
 from sqlalchemy.orm import Session as OrmSession
 from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 load_dotenv(Path(__file__).resolve().with_name(".env"), override=True)
@@ -30,7 +29,7 @@ from utils.field_crypto import apply_citizen_user_security, apply_collection_acc
 from utils import log_integrity  # noqa: F401 - registers tamper-evident log signing hooks
 from utils.system_settings import seed_system_settings
 from utils.branch_system_settings import cleanup_duplicate_branch_system_settings
-from middleware.dos_protection import RequestSizeMiddleware, RequestTimeoutMiddleware, ConnectionLimitMiddleware, AbuseDetectionMiddleware
+from middleware.dos_protection import RequestSizeMiddleware, RequestTimeoutMiddleware, ConnectionLimitMiddleware, AbuseDetectionMiddleware, account_from_request
 
 
 class SecuritySettings:
@@ -189,8 +188,15 @@ async def production_exception_handler(request: Request, exc: Exception):
         return JSONResponse(status_code=500, content={"detail": "An internal server error occurred."})
     raise exc
 
+def hybrid_rate_limit_key(request: Request) -> str:
+    """Return account-based key for authenticated users, IP for anonymous."""
+    client_ip = request.client.host if request.client else "unknown"
+    account_key, _, _ = account_from_request(request, client_ip)
+    return account_key
+
+
 # Rate limiting configuration
-limiter = Limiter(key_func=get_remote_address, headers_enabled=True)
+limiter = Limiter(key_func=hybrid_rate_limit_key, headers_enabled=True)
 app.state.limiter = limiter
 
 
