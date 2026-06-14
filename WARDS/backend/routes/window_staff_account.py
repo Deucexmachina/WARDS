@@ -16,14 +16,14 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import Optional
 
-from database.models import ActivityLog, BranchStaff, MFASecret, get_db
+from database.models import ActivityLog, BranchStaff, CitizenUser, MFASecret, get_db
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 limiter = Limiter(key_func=get_remote_address)
 from middleware.branch_auth import get_current_branch_staff
 from services.email_service import send_account_change_notification_email
-from utils.field_crypto import find_mfa_secret_record
+from utils.field_crypto import find_citizen_by_contact_number, find_mfa_secret_record
 from utils.security_validation import (
     ensure_email_is_unique,
     normalize_citizen_full_name,
@@ -146,6 +146,9 @@ def _ensure_branch_staff_contact_is_unique(db: Session, contact_number: str, exc
     for staff in candidates.all():
         if _normalize_contact_safe(staff.contact_number or "") == canonical:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=DUPLICATE_CONTACT_NUMBER_MESSAGE)
+    citizen_match = find_citizen_by_contact_number(db, CitizenUser, canonical)
+    if citizen_match:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=DUPLICATE_CONTACT_NUMBER_MESSAGE)
 
 
 # ---------------------------------------------------------------------------
