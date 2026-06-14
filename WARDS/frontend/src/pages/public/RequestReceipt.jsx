@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { CustomSelect, CustomDatePicker } from '../../components/FormControls';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 
@@ -793,64 +794,47 @@ const RequestReceipt = () => {
 
                       <div>
                         <label className="mb-2 block text-sm font-semibold text-slate-700">{text.taxType}</label>
-                        <select
-                          name="taxType"
+                        <CustomSelect
                           value={formData.taxType}
-                          onChange={handleInputChange}
+                          onChange={(val) => handleInputChange({ target: { name: 'taxType', value: val } })}
                           disabled={isTaxTypeDisabled}
-                          className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-blue-100"
-                        >
-                          <option value="">{taxTypePlaceholderLabel}</option>
-                          {hasBranchServiceOptions ? branchServices.map((service) => (
-                            <option key={service.code || service.name} value={service.name}>
-                              {localizeTaxType(service.name)}
-                            </option>
-                          )) : null}
-                        </select>
+                          placeholder={taxTypePlaceholderLabel}
+                          options={hasBranchServiceOptions ? branchServices.map((s) => ({ value: s.name, label: localizeTaxType(s.name) })) : []}
+                        />
                       </div>
 
                       <div>
                         <label className="mb-2 block text-sm font-semibold text-slate-700">{text.transactionDate}</label>
-                        <input
-                          type="date"
+                        <CustomDatePicker
                           name="txnDate"
                           value={formData.txnDate}
                           onChange={handleInputChange}
                           max={todayDate}
                           disabled={Boolean(systemStatus && (!systemStatus.receiptRequestEnabled || systemStatus.maintenanceMode))}
-                          className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-blue-100"
+                          placeholder={text.transactionDate}
                         />
                       </div>
 
                       <div className="md:col-span-2">
                         <label className="mb-2 block text-sm font-semibold text-slate-700">{text.branch}</label>
-                        <select
-                          name="branchId"
+                        <CustomSelect
                           value={formData.branchId}
-                          onChange={handleInputChange}
+                          onChange={(val) => handleInputChange({ target: { name: 'branchId', value: val } })}
                           disabled={Boolean(systemStatus && (!systemStatus.receiptRequestEnabled || systemStatus.maintenanceMode))}
-                          className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-blue-100"
-                        >
-                          <option value="">{text.selectBranch}</option>
-                          {branches.map((branch) => (
-                            <option key={branch.id} value={branch.id}>{branch.name}</option>
-                          ))}
-                        </select>
+                          placeholder={text.selectBranch}
+                          options={branches.map((b) => ({ value: b.id, label: b.name }))}
+                        />
                       </div>
 
                       <div className="md:col-span-2">
                         <label className="mb-2 block text-sm font-semibold text-slate-700">{text.reasonForRequest}</label>
-                        <select
-                          name="requestReason"
+                        <CustomSelect
                           value={formData.requestReason}
-                          onChange={handleInputChange}
+                          onChange={(val) => handleInputChange({ target: { name: 'requestReason', value: val } })}
                           disabled={Boolean(systemStatus && (!systemStatus.receiptRequestEnabled || systemStatus.maintenanceMode))}
-                          className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-blue-100"
-                        >
-                          {RECEIPT_REQUEST_REASONS.map((reason) => (
-                            <option key={reason} value={reason}>{localizeReceiptReason(reason)}</option>
-                          ))}
-                        </select>
+                          placeholder=""
+                          options={RECEIPT_REQUEST_REASONS.map((r) => ({ value: r, label: localizeReceiptReason(r) }))}
+                        />
                       </div>
 
                       {formData.requestReason === 'Other' ? (

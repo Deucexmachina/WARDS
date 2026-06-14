@@ -4,7 +4,7 @@ import { formatUtc8Date, formatUtc8Time, isSameUtc8Day } from '../../utils/dateT
 import WardsPageHero from '../../components/WardsPageHero';
 import { UNREAD_CARD_HIGHLIGHT_CLASS, UNREAD_STATUS_BADGE_CLASS } from '../../utils/notificationUI';
 
-const POLICY_PREVIEW_LENGTH = 180;
+const POLICY_PREVIEW_LENGTH = 100;
 const POLICY_MODAL_PREVIEW_LENGTH = 720;
 const POLICIES_PER_PAGE = 5;
 

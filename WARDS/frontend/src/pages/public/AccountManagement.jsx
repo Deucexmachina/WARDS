@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { useEffect, useMemo, useState } from 'react';
+import { CustomSelect } from '../../components/FormControls';
 import { useSearchParams } from 'react-router-dom';
 import { taxpayerAccountAPI, queueAPI, userAuthAPI } from '../../services/api';
 import { getStoredPublicUser, setStoredPublicUser } from '../../utils/publicSession';
@@ -631,10 +632,16 @@ const AccountManagement = () => {
                   </label>
                   <label className="block">
                     <span className="mb-2 block text-sm font-semibold text-slate-700">Taxpayer Type</span>
-                    <select name="taxpayer_type" value={profile.taxpayer_type} onChange={handleProfileChange} disabled={isProfileLocked} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 focus:border-[#0f5b83] focus:ring-2 focus:ring-[#0f5b83]/10">
-                      <option value="Individual">Individual</option>
-                      <option value="Business Owner">Business Owner</option>
-                    </select>
+                    <CustomSelect
+                      value={profile.taxpayer_type}
+                      onChange={(val) => handleProfileChange({ target: { name: 'taxpayer_type', value: val } })}
+                      disabled={isProfileLocked}
+                      placeholder=""
+                      options={[
+                        { value: 'Individual', label: 'Individual' },
+                        { value: 'Business Owner', label: 'Business Owner' },
+                      ]}
+                    />
                   </label>
                   <label className="block md:col-span-2">
                     <span className="mb-2 block text-sm font-semibold text-slate-700">Address</span>
@@ -672,10 +679,15 @@ const AccountManagement = () => {
                   <div className="mt-6 grid gap-5">
                     <label className="block">
                       <span className="mb-2 block text-sm font-semibold text-slate-700">Submission Type</span>
-                      <select name="submission_type" value={identifierForm.submission_type} onChange={handleIdentifierChange} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-[#0f5b83] focus:ring-2 focus:ring-[#0f5b83]/10">
-                        <option value="RPT">Real Property Tax (RPT)</option>
-                        <option value="BT">Business Tax (BT)</option>
-                      </select>
+                      <CustomSelect
+                        value={identifierForm.submission_type}
+                        onChange={(val) => handleIdentifierChange({ target: { name: 'submission_type', value: val } })}
+                        placeholder=""
+                        options={[
+                          { value: 'RPT', label: 'Real Property Tax (RPT)' },
+                          { value: 'BT', label: 'Business Tax (BT)' },
+                        ]}
+                      />
                     </label>
 
                     {identifierForm.submission_type === 'RPT' ? (

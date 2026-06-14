@@ -14,7 +14,7 @@ const CATEGORY_STYLES = {
 };
 const CONFIG_POLICY_CATEGORIES = new Set(['System Configuration Updates', 'Branch Appointment Schedule Updates']);
 
-const POLICY_PREVIEW_LENGTH = 180;
+const POLICY_PREVIEW_LENGTH = 100;
 const POLICY_MODAL_PREVIEW_LENGTH = 720;
 const POLICIES_PER_PAGE = 5;
 
@@ -22,10 +22,8 @@ const formatDateLabel = (value) => formatUtc8Date(value);
 const formatTimeLabel = (value) => formatUtc8Time(value, 'en-US', { second: undefined });
 
 const buildMetaRows = (policy) => ([
-  { label: 'Date Published', value: formatDateLabel(policy?.created_at) },
-  { label: 'Time Published', value: formatTimeLabel(policy?.created_at) },
-  { label: 'Last Updated Date', value: formatDateLabel(policy?.updated_at) },
-  { label: 'Last Updated Time', value: formatTimeLabel(policy?.updated_at) },
+  { label: 'Published', value: `${formatDateLabel(policy?.created_at)} · ${formatTimeLabel(policy?.created_at)}` },
+  { label: 'Last Updated', value: `${formatDateLabel(policy?.updated_at)} · ${formatTimeLabel(policy?.updated_at)}` },
   { label: 'Issued By', value: policy?.author || 'Main Office' },
 ]);
 
@@ -185,19 +183,12 @@ const BranchPolicies = () => {
         <div className="p-5 md:p-6">
           {filteredPolicies.length ? (
             <>
-              <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 shadow-sm">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Visible</p>
-                  <p className="mt-2 text-lg font-bold text-primary">{filteredPolicies.length}</p>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 shadow-sm">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Per Page</p>
-                  <p className="mt-2 text-lg font-bold text-primary">{POLICIES_PER_PAGE}</p>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 shadow-sm">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Current Page</p>
-                  <p className="mt-2 text-lg font-bold text-primary">{currentPage}</p>
-                </div>
+              <div className="mb-5 flex flex-wrap items-center gap-x-5 gap-y-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm">
+                <span className="text-slate-500">Visible: <strong className="text-primary">{filteredPolicies.length}</strong></span>
+                <span className="hidden text-slate-300 sm:inline">|</span>
+                <span className="text-slate-500">Per page: <strong className="text-primary">{POLICIES_PER_PAGE}</strong></span>
+                <span className="hidden text-slate-300 sm:inline">|</span>
+                <span className="text-slate-500">Page: <strong className="text-primary">{currentPage} / {totalPages}</strong></span>
               </div>
 
               <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
@@ -211,46 +202,32 @@ const BranchPolicies = () => {
                 return (
                   <article key={policy.id} className={`overflow-hidden rounded-2xl border bg-white shadow-sm transition duration-300 hover:shadow-md ${isUnread ? UNREAD_CARD_HIGHLIGHT_CLASS : showNewBadge ? 'border-emerald-300 bg-emerald-50/30' : 'border-slate-200'}`}>
                     <div className="border-b border-slate-100 bg-slate-50/80 px-5 py-4">
-                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                        <div className="min-w-0 flex-1">
-                          <div className="mb-3 flex flex-wrap items-center gap-3">
-                            <span className={`rounded-full px-3 py-1 text-xs font-semibold ${CATEGORY_STYLES[policy.category] || 'bg-slate-200 text-slate-700'}`}>
-                              {policy.category || 'Uncategorized'}
-                            </span>
-                            {isUnread ? (
-                              <span className={UNREAD_STATUS_BADGE_CLASS}>Unread</span>
-                            ) : null}
-                            <span className="text-xs font-medium uppercase tracking-[0.2em] text-slate-400">Published Record</span>
-                            {showNewBadge ? (
-                              <span className="rounded-full bg-emerald-600 px-3 py-1 text-xs font-semibold text-white">New</span>
-                            ) : null}
-                          </div>
-                          <h3 className="text-xl font-bold text-primary leading-snug">{policy.title}</h3>
-                          <p className="mt-3 text-sm leading-6 text-slate-600">
-                            {isPreviewTruncated
-                              ? `${previewContent.slice(0, POLICY_PREVIEW_LENGTH)}...`
-                              : previewContent}
-                          </p>
-                        </div>
-                        <div className="grid min-w-[220px] grid-cols-2 gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
-                          <div>
-                            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Published</p>
-                            <p className="mt-2 font-semibold text-primary">{formatDateLabel(policy.created_at)}</p>
-                          </div>
-                          <div>
-                            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Time</p>
-                            <p className="mt-2 font-medium text-slate-700">{formatTimeLabel(policy.created_at)}</p>
-                          </div>
-                        </div>
+                      <div className="mb-2 flex flex-wrap items-center gap-2">
+                        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${CATEGORY_STYLES[policy.category] || 'bg-slate-200 text-slate-700'}`}>
+                          {policy.category || 'Uncategorized'}
+                        </span>
+                        {isUnread ? (
+                          <span className={UNREAD_STATUS_BADGE_CLASS}>Unread</span>
+                        ) : null}
+                        {showNewBadge ? (
+                          <span className="rounded-full bg-emerald-600 px-3 py-1 text-xs font-semibold text-white">New</span>
+                        ) : null}
+                        <span className="ml-auto text-xs text-slate-400">{formatDateLabel(policy.created_at)} · {formatTimeLabel(policy.created_at)}</span>
                       </div>
+                      <h3 className="text-base font-bold text-primary leading-snug">{policy.title}</h3>
+                      <p className="mt-2 text-sm leading-6 text-slate-600">
+                        {isPreviewTruncated
+                          ? `${previewContent.slice(0, POLICY_PREVIEW_LENGTH)}...`
+                          : previewContent}
+                      </p>
                     </div>
 
-                    <div className="space-y-5 px-5 py-5">
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                    <div className="space-y-4 px-5 py-4">
+                      <div className="flex flex-wrap gap-x-4 gap-y-2">
                         {metaRows.map((row) => (
-                          <div key={`${policy.id}-${row.label}`} className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
-                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{row.label}</p>
-                            <p className="mt-2 text-sm font-medium text-slate-700">{row.value}</p>
+                          <div key={`${policy.id}-${row.label}`} className="flex items-center gap-1.5 text-xs text-slate-500">
+                            <span className="font-semibold uppercase tracking-wide text-slate-400">{row.label}:</span>
+                            <span className="font-medium text-slate-700">{row.value}</span>
                           </div>
                         ))}
                       </div>
@@ -358,26 +335,12 @@ const BranchPolicies = () => {
                   <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">Publication Details</p>
                   <div className="mt-4 space-y-3">
                     <div className="rounded-2xl bg-slate-50 px-4 py-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Date Published</p>
-                      <p className="mt-2 text-sm font-medium text-slate-700">{formatDateLabel(viewingPolicy.created_at)}</p>
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Published</p>
+                      <p className="mt-1.5 text-sm font-medium text-slate-700">{formatDateLabel(viewingPolicy.created_at)} · {formatTimeLabel(viewingPolicy.created_at)}</p>
                     </div>
                     <div className="rounded-2xl bg-slate-50 px-4 py-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Time Published</p>
-                      <p className="mt-2 text-sm font-medium text-slate-700">{formatTimeLabel(viewingPolicy.created_at)}</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm">
-                  <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">Last Updated Details</p>
-                  <div className="mt-4 space-y-3">
-                    <div className="rounded-2xl bg-slate-50 px-4 py-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Last Updated Date</p>
-                      <p className="mt-2 text-sm font-medium text-slate-700">{formatDateLabel(viewingPolicy.updated_at)}</p>
-                    </div>
-                    <div className="rounded-2xl bg-slate-50 px-4 py-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Last Updated Time</p>
-                      <p className="mt-2 text-sm font-medium text-slate-700">{formatTimeLabel(viewingPolicy.updated_at)}</p>
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Last Updated</p>
+                      <p className="mt-1.5 text-sm font-medium text-slate-700">{formatDateLabel(viewingPolicy.updated_at)} · {formatTimeLabel(viewingPolicy.updated_at)}</p>
                     </div>
                   </div>
                 </div>

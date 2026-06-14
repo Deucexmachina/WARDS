@@ -168,7 +168,7 @@ const Navbar = () => {
               </button>
 
               {menuOpen && (
-                <div className="absolute right-0 top-full z-50 mt-3 w-[280px] rounded-2xl border border-white/10 bg-[#102b4d]/95 p-3 shadow-[0_18px_45px_rgba(15,23,42,0.35)] backdrop-blur-xl">
+                <div className="absolute right-0 top-full z-50 mt-3 w-[min(280px,calc(100vw-2rem))] rounded-2xl border border-white/10 bg-[#102b4d]/95 p-3 shadow-[0_18px_45px_rgba(15,23,42,0.35)] backdrop-blur-xl">
                   <div className="mb-2 px-3 pb-2 border-b border-white/10">
                     <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-blue-200/60">Navigation</p>
                   </div>

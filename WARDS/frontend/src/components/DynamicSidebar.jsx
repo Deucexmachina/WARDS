@@ -18,7 +18,7 @@ import {
 const BRANCH_QUEUE_UPDATED_EVENT = 'branch-queue-updated';
 const BRANCH_RECEIPT_UPDATED_EVENT = 'branch-receipt-updated';
 
-const DynamicSidebar = () => {
+const DynamicSidebar = ({ open = false, onClose }) => {
   const location = useLocation();
   const [modules, setModules] = useState([]);
   const [userRole, setUserRole] = useState('');
@@ -562,7 +562,7 @@ const DynamicSidebar = () => {
   const badge = getRoleBadge();
 
   return (
-    <aside className="fixed left-0 top-16 h-[calc(100vh-4rem)] w-72 bg-white shadow-lg overflow-y-auto">
+    <aside className={`fixed left-0 top-16 h-[calc(100vh-4rem)] w-72 bg-white shadow-lg overflow-y-auto z-40 transition-transform duration-300 ${open ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}>
       <div className="p-4 border-b">
         <span className={`${badge.color} text-white text-xs px-3 py-1 rounded-full font-semibold`}>
           {badge.text}
@@ -623,6 +623,7 @@ const DynamicSidebar = () => {
             <Link
               key={index}
               to={module.path}
+              onClick={onClose}
               className={`flex items-center justify-between space-x-3 px-4 py-3 rounded-lg mb-2 transition duration-300 ${
                 isActive
                   ? 'bg-primary text-white'

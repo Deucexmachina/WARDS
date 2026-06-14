@@ -48,7 +48,16 @@ const BranchLayout = () => {
   const [reportCount, setReportCount] = useState(0);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const { isDirty, saveRef, registerDirty } = useUnsavedChanges();
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 1024) setSidebarOpen(false);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
   const [showUnsavedModal, setShowUnsavedModal] = useState(false);
   const [pendingPath, setPendingPath] = useState(null);
   const [isSavingNav, setIsSavingNav] = useState(false);
@@ -390,7 +399,14 @@ const BranchLayout = () => {
 
   return (
     <div className="min-h-screen bg-gray-100">
-      <aside className="fixed inset-y-0 left-0 w-64 bg-slate-900 text-white">
+      {/* Sidebar overlay for tablet */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-slate-900/50 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+      <aside className={`fixed inset-y-0 left-0 w-64 bg-slate-900 text-white z-40 transition-transform duration-300 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}>
         <div className="border-b border-white/10 px-4 py-3">
           <div className="flex items-center justify-center gap-2">
             <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-transparent ring-1 ring-white/10">
@@ -417,7 +433,7 @@ const BranchLayout = () => {
               key={item.path}
               to={item.path}
               end={item.path === basePath}
-              onClick={(e) => handleNavClick(e, item.path)}
+              onClick={(e) => { setSidebarOpen(false); handleNavClick(e, item.path); }}
               className={({ isActive }) =>
                 `flex items-center justify-between rounded-lg px-4 py-3 font-semibold transition ${
                   (isActive || (item.label === 'System Settings' && location.pathname.startsWith(`${basePath}/settings`)))
@@ -465,21 +481,35 @@ const BranchLayout = () => {
         </nav>
       </aside>
 
-      <div className="ml-64">
-        <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-8">
-          <div>
-            <p className="text-sm text-gray-500">Branch ID</p>
-            <p className="font-semibold text-gray-800">{staff?.branch_id || 'Unassigned'}</p>
+      <div className="lg:ml-64">
+        <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center gap-3">
+            {/* Hamburger for tablet */}
+            <button
+              type="button"
+              onClick={() => setSidebarOpen((o) => !o)}
+              className="lg:hidden inline-flex items-center justify-center rounded-lg p-2 text-slate-600 hover:bg-slate-100 transition"
+              aria-label="Toggle sidebar"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+            <div>
+              <p className="text-sm text-gray-500">Branch ID</p>
+              <p className="font-semibold text-gray-800">{staff?.branch_id || 'Unassigned'}</p>
+            </div>
           </div>
           <button
             onClick={() => setShowLogoutConfirm(true)}
             disabled={isLoggingOut}
-            className={`${isSuperadminManagedBranch ? 'bg-purple-600 hover:bg-purple-700' : 'bg-red-500 hover:bg-red-600'} text-white px-4 py-2 rounded-lg font-semibold transition disabled:cursor-not-allowed disabled:opacity-70`}
+            className={`${isSuperadminManagedBranch ? 'bg-purple-600 hover:bg-purple-700' : 'bg-red-500 hover:bg-red-600'} text-white px-3 sm:px-4 py-2 rounded-lg font-semibold text-sm transition disabled:cursor-not-allowed disabled:opacity-70`}
           >
-            {isSuperadminManagedBranch ? 'Return to superadmin dashboard' : 'Logout'}
+            <span className="hidden sm:inline">{isSuperadminManagedBranch ? 'Return to superadmin dashboard' : 'Logout'}</span>
+            <span className="sm:hidden">{isSuperadminManagedBranch ? 'Return' : 'Logout'}</span>
           </button>
         </header>
-        <main className="p-8">
+        <main className="p-4 sm:p-6 lg:p-8">
           <Outlet />
         </main>
       </div>

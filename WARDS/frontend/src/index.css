@@ -165,3 +165,24 @@ body {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
 }
+
+/* ─── Responsive helpers ─── */
+
+/* Prevent native <select> from overflowing its container */
+select {
+  max-width: 100%;
+}
+
+/* Any table not already inside an overflow-x-auto wrapper gets one automatically */
+.table-responsive-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* On tablet (< 1024 px) make sure page content doesn't create horizontal scroll */
+@media (max-width: 1023px) {
+  img {
+    max-width: 100%;
+    height: auto;
+  }
+}

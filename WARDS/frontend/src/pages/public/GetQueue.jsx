@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { CustomDatePicker } from '../../components/FormControls';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
 import { buildManilaDateTimeValue, formatUtc8DateTime, parseManilaDateTimeValue } from '../../utils/dateTime';
@@ -200,6 +201,70 @@ const InlineAlert = ({ tone = 'red', title, message, className = '' }) => {
           ))}
         </ul>
       ) : null}
+    </div>
+  );
+};
+
+const AppointmentTimeDropdown = ({ value, onChange, disabled, slots, placeholder }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('touchstart', handleOutsideClick);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('touchstart', handleOutsideClick);
+    };
+  }, []);
+
+  const selectedLabel = slots.find((s) => s.value === value)?.label || '';
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen((o) => !o)}
+        className={`w-full flex items-center justify-between px-4 py-3 border rounded-lg text-left transition
+          ${disabled ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' : 'bg-white border-gray-300 text-gray-800 hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500'}
+          ${open ? 'border-blue-500 ring-2 ring-blue-500' : ''}`}
+      >
+        <span className={selectedLabel ? 'text-gray-800' : 'text-gray-400'}>
+          {selectedLabel || placeholder}
+        </span>
+        <svg
+          className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
+          fill="none" stroke="currentColor" viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {open && !disabled && (
+        <div className="absolute left-0 right-0 z-50 mt-1 bg-white border border-gray-200 rounded-lg shadow-xl overflow-hidden">
+          <div className="max-h-56 overflow-y-auto">
+            {slots.length === 0 ? (
+              <div className="px-4 py-3 text-sm text-gray-400">{placeholder}</div>
+            ) : (
+              slots.map((slot) => (
+                <button
+                  key={slot.value}
+                  type="button"
+                  onClick={() => { onChange(slot.value); setOpen(false); }}
+                  className={`w-full text-left px-4 py-2.5 text-sm hover:bg-blue-50 hover:text-blue-700 transition
+                    ${slot.value === value ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700'}`}
+                >
+                  {slot.label}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -1084,30 +1149,22 @@ const GetQueue = () => {
                     <label className="block text-gray-700 font-semibold mb-2">
                       {language === 'en' ? 'Appointment Date & Time' : 'Petsa at Oras ng Takdang-Araw'}
                     </label>
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <input
-                        type="date"
+                    <div className="grid gap-4 lg:grid-cols-2">
+                      <CustomDatePicker
                         name="appointment_date"
-                        min={todayDate}
                         value={formData.appointment_date}
                         onChange={handleInputChange}
+                        min={todayDate}
                         disabled={queueUnavailable}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                        required
+                        placeholder="Select date"
                       />
-                      <select
-                        name="appointment_slot"
+                      <AppointmentTimeDropdown
                         value={formData.appointment_slot}
-                        onChange={handleInputChange}
+                        onChange={(val) => handleInputChange({ target: { name: 'appointment_slot', value: val } })}
                         disabled={queueUnavailable || !formData.appointment_date || appointmentAvailabilityLoading || !appointmentAvailability?.is_available}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                        required
-                      >
-                        <option value="">{language === 'en' ? 'Select time' : 'Pumili ng oras'}</option>
-                        {(appointmentAvailability?.available_slots || []).map((option) => (
-                          <option key={option.value} value={option.value}>{option.label}</option>
-                        ))}
-                      </select>
+                        slots={appointmentAvailability?.available_slots || []}
+                        placeholder={language === 'en' ? 'Select time' : 'Pumili ng oras'}
+                      />
                     </div>
                     <p className="mt-2 text-sm text-gray-500">
                       {appointmentAvailabilityLoading
