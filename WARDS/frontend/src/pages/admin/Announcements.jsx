@@ -31,6 +31,7 @@ const Announcements = () => {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [formData, setFormData] = useState(defaultForm);
+  const [validationErrors, setValidationErrors] = useState({});
 
   useEffect(() => {
     fetchAnnouncements();
@@ -70,7 +71,11 @@ const Announcements = () => {
   };
 
   const handleInputChange = (event) => {
-    setFormData({ ...formData, [event.target.name]: event.target.value });
+    const { name, value } = event.target;
+    setFormData({ ...formData, [name]: value });
+    if (validationErrors[name]) {
+      setValidationErrors((previous) => ({ ...previous, [name]: '' }));
+    }
   };
 
   const resetEditor = () => {
@@ -80,6 +85,7 @@ const Announcements = () => {
     setExistingAttachments([]);
     setUploadProgress(0);
     setIsUploading(false);
+    setValidationErrors({});
   };
 
   const handleAddAnnouncement = () => {
@@ -141,11 +147,20 @@ const Announcements = () => {
     });
   };
 
-  const handleSaveAnnouncement = async () => {
-    if (!formData.title.trim() || !formData.content.trim()) {
-      setPageError('Please fill in all required fields.');
-      return;
+  const validateForm = () => {
+    const errors = {};
+    if (!formData.title.trim()) {
+      errors.title = 'Please enter the Announcement Title.';
     }
+    if (!formData.content.trim()) {
+      errors.content = 'Please enter the Announcement Content.';
+    }
+    setValidationErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleSaveAnnouncement = async () => {
+    if (!validateForm()) return;
 
     setLoading(true);
     setPageError('');
@@ -403,9 +418,12 @@ const Announcements = () => {
                     name="title"
                     value={formData.title}
                     onChange={handleInputChange}
-                    className="w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
+                    className={`w-full rounded-lg border px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 ${validationErrors.title ? 'border-red-500 bg-red-50 focus:border-red-500 focus:ring-red-500/30' : 'border-slate-300 focus:border-accent focus:ring-accent/30'}`}
                     placeholder="Enter a clear, concise title"
                   />
+                  {validationErrors.title && (
+                    <p className="mt-2 text-sm font-semibold text-red-600">{validationErrors.title}</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-1.5">Content</label>
@@ -414,9 +432,12 @@ const Announcements = () => {
                     value={formData.content}
                     onChange={handleInputChange}
                     rows="5"
-                    className="w-full resize-y rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm leading-6 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
+                    className={`w-full resize-y rounded-lg border px-3.5 py-2.5 text-sm leading-6 focus:outline-none focus:ring-2 ${validationErrors.content ? 'border-red-500 bg-red-50 focus:border-red-500 focus:ring-red-500/30' : 'border-slate-300 focus:border-accent focus:ring-accent/30'}`}
                     placeholder="Write your announcement..."
                   ></textarea>
+                  {validationErrors.content && (
+                    <p className="mt-2 text-sm font-semibold text-red-600">{validationErrors.content}</p>
+                  )}
                 </div>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
