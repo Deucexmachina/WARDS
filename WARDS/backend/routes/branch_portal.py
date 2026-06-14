@@ -378,10 +378,12 @@ def get_active_branch_queue(
     exclude_queue_id: Optional[int] = None,
     current_staff: Optional[BranchStaff] = None,
     service_window: Optional[str] = None,
+    statuses: Optional[list[str]] = None,
 ) -> Optional[Queue]:
+    target_statuses = statuses or ["Called", "Serving"]
     queues = db.query(Queue).filter(
         Queue.branch_id == branch_id,
-        hash_aware_any(Queue, "status", ["Called", "Serving"]),
+        hash_aware_any(Queue, "status", target_statuses),
     ).order_by(Queue.created_at.asc()).all()
 
     if exclude_queue_id is not None:
@@ -477,13 +479,15 @@ def reconcile_active_queue_state(
         if queue.id == primary_queue.id:
             continue
         status_value = (queue_value(queue, "status") or "").strip().lower()
-        queue.status = "Skipped" if status_value == "serving" else "Waiting"
+        if status_value != "serving":
+            continue
+        queue.status = "Skipped"
         apply_queue_security(queue)
         log_branch_action(
             db,
             current_staff,
             "Queue Recovery",
-            f"Recovered duplicate active queue {queue_value(queue, 'queue_number')} by moving it to {queue_value(queue, 'status')}",
+            f"Recovered duplicate active queue {queue_value(queue, 'queue_number')} by moving it to Skipped",
             ip=ip,
         )
         queue_changed = True
@@ -1561,9 +1565,9 @@ async def serve_queue(
     ensure_queue_window_access(db, current_staff, queue)
     if queue_value(queue, "status") != "Called":
         raise HTTPException(status_code=409, detail="Only a called queue can be moved to serving.")
-    active_queue = get_active_branch_queue(db, current_staff.branch_id, exclude_queue_id=queue.id, current_staff=current_staff)
+    active_queue = get_active_branch_queue(db, current_staff.branch_id, exclude_queue_id=queue.id, current_staff=current_staff, statuses=["Serving"])
     if active_queue:
-        raise HTTPException(status_code=409, detail="Only one queue can be active at a time. Complete or skip the current queue before serving another one.")
+        raise HTTPException(status_code=409, detail="Only one queue can be serving at a time. Complete or skip the current serving queue before serving another one.")
 
     queue.status = "Serving"
     queue.served_at = datetime.utcnow()
@@ -1612,10 +1616,6 @@ async def recall_skipped_queue(
     ensure_queue_window_access(db, current_staff, queue)
     if queue_value(queue, "status") != "Skipped":
         raise HTTPException(status_code=409, detail="Only skipped queue records can be pulled back to the current window.")
-    active_queue = get_active_branch_queue(db, current_staff.branch_id, current_staff=current_staff)
-    if active_queue:
-        raise HTTPException(status_code=409, detail="Complete or skip the current active queue before pulling back a skipped queue.")
-
     queue.status = "Called"
     apply_queue_security(queue)
     log_branch_action(db, current_staff, "Skipped Queue Recalled", f"Pulled skipped queue {queue_value(queue, 'queue_number')} back to the current window", request.client.host)
