@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { accountAPI, branchAPI } from '../../services/api';
+import { accountAPI, branchAPI, branchSettingsAPI } from '../../services/api';
 import {
   getEmailValidationMessage,
   normalizeCitizenFullName,
@@ -97,6 +97,7 @@ const Accounts = () => {
     message: '',
     buttonLabel: 'OK',
   });
+  const [pendingMfaReset, setPendingMfaReset] = useState(null);
 
   const managerEyebrow = isBranchPortal ? 'Branch Admin Dashboard' : 'Main Admin Dashboard';
   const managerSubtitle = isBranchPortal
@@ -476,6 +477,26 @@ const Accounts = () => {
     });
   };
 
+  const handleResetStaffMfa = async (account) => {
+    setError('');
+    setSuccessMessage('');
+    try {
+      const res = await branchSettingsAPI.resetStaffMfa({ staff_id: account.id });
+      openActionModal({
+        tone: 'success',
+        title: 'MFA Reset Successful',
+        message: res.data?.message || `MFA for ${account.full_name || account.username} has been reset. They will be prompted to set up MFA on their next login.`,
+      });
+    } catch (err) {
+      const detail = err?.response?.data?.detail || 'Failed to reset staff MFA. Please try again.';
+      openActionModal({
+        tone: 'error',
+        title: 'Reset Failed',
+        message: detail,
+      });
+    }
+  };
+
   const closeAuthModal = () => {
     setError('');
     setAuthPasswordError('');
@@ -685,6 +706,14 @@ const Accounts = () => {
                     className="rounded-lg bg-green-500 px-3 py-1 font-semibold text-white transition duration-300 hover:bg-green-600"
                   >
                     Activate
+                  </button>
+                )}
+                {isBranchPortal && account.role === 'branch_staff' && (
+                  <button
+                    onClick={() => setPendingMfaReset(account)}
+                    className="rounded-lg bg-purple-600 px-3 py-1 font-semibold text-white transition duration-300 hover:bg-purple-700"
+                  >
+                    Reset MFA
                   </button>
                 )}
                 <button
@@ -1214,6 +1243,37 @@ const Accounts = () => {
                   {loading ? 'Verifying...' : `Confirm ${authModal.mode === 'edit' ? 'Update' : authModal.mode === 'deactivate' ? 'Deactivation' : authModal.mode === 'activate' ? 'Activation' : 'Deletion'}`}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingMfaReset && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/60 px-4 py-6">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-[0_30px_80px_rgba(15,23,42,0.28)]">
+            <div className="mb-4">
+              <h3 className="text-xl font-bold text-slate-900">Reset Staff MFA</h3>
+              <p className="mt-2 text-sm text-slate-600">
+                Are you sure you want to reset MFA for <strong>{pendingMfaReset.full_name || pendingMfaReset.username}</strong>?
+                They will be prompted to set up MFA on their next login.
+              </p>
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setPendingMfaReset(null)}
+                className="rounded-xl bg-slate-100 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  handleResetStaffMfa(pendingMfaReset);
+                  setPendingMfaReset(null);
+                }}
+                className="rounded-xl bg-purple-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-purple-700"
+              >
+                Confirm Reset
+              </button>
             </div>
           </div>
         </div>

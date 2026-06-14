@@ -4,6 +4,7 @@ import wardsLogo from '../assets/branding/wards_logo.png';
 import qcLogo from '../assets/branding/qclogo_main.png';
 import galasLogo from '../assets/branding/galas_logo.png';
 import ActionConfirmationModal from '../components/ActionConfirmationModal';
+import StaffMfaSetupModal from '../components/StaffMfaSetupModal';
 import { useUnsavedChanges } from '../contexts/UnsavedChangesContext';
 import api from '../services/api';
 import { branchAnnouncementAPI, discrepancyAPI } from '../services/api';
@@ -23,8 +24,9 @@ const BranchLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { branchSlug } = useParams();
-  const staff = JSON.parse(localStorage.getItem('branchUser') || '{}');
+  const [staff, setStaff] = useState(JSON.parse(localStorage.getItem('branchUser') || '{}'));
   const isSuperadminManagedBranch = Boolean(staff?.superadmin_managed_branch);
+  const showMfaModal = !isSuperadminManagedBranch && Boolean(staff?.mfa_setup_required);
   const isQueueWindowAccount = staff?.account_scope === 'queue_window';
   const isBranchAdmin = !isSuperadminManagedBranch && (staff?.role === 'branch_admin' || staff?.internal_role === 'branch_admin');
   const rawAssignedServiceLabel = staff?.window_label || staff?.service_window_label || (staff?.service_window === 'BUSINESS' ? 'BT' : (staff?.service_window || ''));
@@ -478,17 +480,20 @@ const BranchLayout = () => {
           </button>
         </header>
         <main className="p-8">
-          {staff?.mfa_setup_required && (
-            <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 px-5 py-4 text-amber-900">
-              <p className="font-semibold">MFA reminder</p>
-              <p className="text-sm">
-                Your branch account signed in without MFA setup. Please set up Microsoft Authenticator soon so future logins stay protected.
-              </p>
-            </div>
-          )}
           <Outlet />
         </main>
       </div>
+      <StaffMfaSetupModal
+        isOpen={showMfaModal}
+        user={staff}
+        portal="branch"
+        onLogout={handleLogout}
+        onSuccess={() => {
+          const updated = { ...staff, mfa_setup_required: false };
+          localStorage.setItem('branchUser', JSON.stringify(updated));
+          setStaff(updated);
+        }}
+      />
       <ActionConfirmationModal
         open={showLogoutConfirm}
         title={isSuperadminManagedBranch ? 'Return to the super admin dashboard?' : 'Are you sure you want to logout?'}

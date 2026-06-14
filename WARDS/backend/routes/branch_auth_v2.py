@@ -671,3 +671,97 @@ async def verify_token(request: Request, db: Session = Depends(get_db)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token"
         )
+
+
+# ---------------------------------------------------------------------------
+# Branch Admin Staff Management
+# ---------------------------------------------------------------------------
+
+class ResetStaffMFARequest(BaseModel):
+    staff_id: int
+
+
+@router.get("/admin/staff")
+async def list_branch_staff(
+    current_staff: BranchStaff = Depends(require_branch_admin()),
+    db: Session = Depends(get_db),
+):
+    """List all staff members in the current branch admin's branch."""
+    if not current_staff.branch_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You are not assigned to a branch."
+        )
+
+    staff_list = (
+        db.query(BranchStaff)
+        .filter(
+            BranchStaff.branch_id == current_staff.branch_id,
+            BranchStaff.status == "Active",
+        )
+        .order_by(BranchStaff.role.desc(), BranchStaff.full_name.asc(), BranchStaff.username.asc())
+        .all()
+    )
+
+    return {
+        "staff": [
+            {
+                "id": s.id,
+                "username": s.username,
+                "full_name": s.full_name,
+                "email": s.email,
+                "role": s.role,
+                "account_scope": s.account_scope or "full_branch",
+                "service_window": s.service_window,
+                "service_window_label": get_window_display_label(s),
+                "assigned_window_number": get_assigned_window_number(s),
+                "status": s.status,
+            }
+            for s in staff_list
+        ]
+    }
+
+
+@router.post("/admin/reset-staff-mfa")
+async def reset_staff_mfa(
+    request: Request,
+    payload: ResetStaffMFARequest,
+    current_staff: BranchStaff = Depends(require_branch_admin()),
+    db: Session = Depends(get_db),
+):
+    """Reset MFA for a staff member in the same branch. Removes the MFA secret so the staff member must reconfigure MFA on next login."""
+    if not current_staff.branch_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You are not assigned to a branch."
+        )
+
+    target_staff = db.query(BranchStaff).filter(
+        BranchStaff.id == payload.staff_id,
+        BranchStaff.branch_id == current_staff.branch_id,
+    ).first()
+
+    if not target_staff:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Staff member not found in your branch."
+        )
+
+    # Delete the MFA secret record if it exists
+    mfa_record = find_mfa_secret_record(db, MFASecret, "branch", target_staff.username, enabled_only=False)
+    if mfa_record:
+        db.delete(mfa_record)
+        db.commit()
+
+    client_ip = request.client.host if request.client else "unknown"
+    db.add(ActivityLog(
+        action="Branch Admin Reset Staff MFA",
+        user=current_staff.username,
+        details=f"Admin reset MFA for staff {target_staff.username} (ID: {target_staff.id}) in branch {current_staff.branch_id}. IP: {client_ip}",
+        type="security",
+    ))
+    db.commit()
+
+    return {
+        "message": f"MFA for {target_staff.full_name or target_staff.username} has been reset. They will be prompted to set up MFA on their next login."
+    }

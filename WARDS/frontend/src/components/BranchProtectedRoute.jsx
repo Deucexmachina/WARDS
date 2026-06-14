@@ -54,7 +54,8 @@ const BranchProtectedRoute = ({ children }) => {
 
       if (response.data.valid && response.data.user?.role === 'branch') {
         setIsAuthenticated(true);
-        localStorage.setItem('branchUser', JSON.stringify(response.data.user));
+        const existing = JSON.parse(localStorage.getItem('branchUser') || '{}');
+        localStorage.setItem('branchUser', JSON.stringify({ ...existing, ...response.data.user }));
         if (!localStorage.getItem('branchAuthenticatedAt')) {
           localStorage.setItem('branchAuthenticatedAt', new Date().toISOString());
         }

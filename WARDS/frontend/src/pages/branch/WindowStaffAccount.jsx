@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { useEffect, useState } from 'react';
-import { windowStaffAccountAPI } from '../../services/api';
+import { windowStaffAccountAPI, branchSettingsAPI } from '../../services/api';
 import WardsPageHero from '../../components/WardsPageHero';
 import SystemMessageModal from '../../components/SystemMessageModal';
 import ActionConfirmationModal from '../../components/ActionConfirmationModal';
@@ -698,6 +698,10 @@ const WindowStaffAccount = () => {
   const [showResetMFA, setShowResetMFA] = useState(false);
   const [systemMessage, setSystemMessage] = useState(null);
 
+  const [branchStaff, setBranchStaff] = useState([]);
+  const [loadingStaff, setLoadingStaff] = useState(false);
+  const [staffToReset, setStaffToReset] = useState(null);
+
   const fetchProfile = async () => {
     setLoading(true);
     try {
@@ -711,6 +715,37 @@ const WindowStaffAccount = () => {
   };
 
   useEffect(() => { fetchProfile(); }, []);
+
+  const fetchBranchStaff = async () => {
+    if (!isBranchAdmin) return;
+    setLoadingStaff(true);
+    try {
+      const res = await branchSettingsAPI.listBranchStaff();
+      setBranchStaff(res.data?.staff || []);
+    } catch {
+      setBranchStaff([]);
+    } finally {
+      setLoadingStaff(false);
+    }
+  };
+
+  useEffect(() => { fetchBranchStaff(); }, []);
+
+  const handleResetStaffMfa = async () => {
+    if (!staffToReset) return;
+    try {
+      await branchSettingsAPI.resetStaffMfa({ staff_id: staffToReset.id });
+      setSystemMessage({
+        tone: 'success',
+        title: 'MFA Reset Successful',
+        message: `MFA for ${staffToReset.full_name || staffToReset.username} has been reset. They will be prompted to set up MFA on their next login.`,
+      });
+      setStaffToReset(null);
+    } catch (err) {
+      const detail = err?.response?.data?.detail || 'Failed to reset staff MFA. Please try again.';
+      setSystemMessage({ tone: 'error', title: 'Reset Failed', message: detail });
+    }
+  };
 
   const showSuccess = (title, message) => setSystemMessage({ tone: 'success', title, message });
 
@@ -760,6 +795,7 @@ const WindowStaffAccount = () => {
 
   const initials = (profile?.full_name || profile?.username || 'W').charAt(0).toUpperCase();
   const staff = JSON.parse(localStorage.getItem('branchUser') || '{}');
+  const isBranchAdmin = staff?.internal_role === 'branch_admin' || staff?.role === 'branch_admin';
   const rawLabel = staff?.window_label || staff?.service_window_label || staff?.service_window || '';
   const windowLabel = rawLabel.replace(/\s+Window$/i, '') || 'Queue Window';
   const physicalWindow = staff?.assigned_window_number ? `Window ${staff.assigned_window_number}` : null;
@@ -781,7 +817,7 @@ const WindowStaffAccount = () => {
       <WardsPageHero
         eyebrow="Branch Portal"
         title="Account Management"
-        subtitle="View and manage your own account information and security settings."
+        subtitle={isBranchAdmin ? "Manage your branch staff accounts and security settings." : "View and manage your own account information and security settings."}
         className="mb-6"
       />
 
@@ -877,6 +913,52 @@ const WindowStaffAccount = () => {
         </button>
       </div>
 
+      {/* Branch Admin: Staff Management */}
+      {isBranchAdmin && (
+        <div className="mt-8">
+          <h3 className="text-lg font-bold text-gray-900 mb-4">Branch Staff Management</h3>
+          <div className="bg-white rounded-xl shadow-md overflow-hidden">
+            {loadingStaff ? (
+              <div className="p-8 text-center text-gray-500">Loading staff list...</div>
+            ) : branchStaff.length === 0 ? (
+              <div className="p-8 text-center text-gray-500">No staff members found in this branch.</div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="text-left px-6 py-3 font-semibold text-gray-600">Name</th>
+                    <th className="text-left px-6 py-3 font-semibold text-gray-600">Username</th>
+                    <th className="text-left px-6 py-3 font-semibold text-gray-600">Role</th>
+                    <th className="text-left px-6 py-3 font-semibold text-gray-600">Service Window</th>
+                    <th className="text-right px-6 py-3 font-semibold text-gray-600">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {branchStaff.map((s) => (
+                    <tr key={s.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 font-medium text-gray-900">{s.full_name || '—'}</td>
+                      <td className="px-6 py-4 text-gray-600">{s.username}</td>
+                      <td className="px-6 py-4 text-gray-600 capitalize">{s.role?.replace('_', ' ')}</td>
+                      <td className="px-6 py-4 text-gray-600">{s.service_window_label || s.service_window || '—'}</td>
+                      <td className="px-6 py-4 text-right">
+                        {s.id !== staff?.id && (
+                          <button
+                            onClick={() => setStaffToReset(s)}
+                            className="text-xs font-semibold text-red-600 hover:text-red-700 border border-red-200 hover:border-red-300 rounded-lg px-3 py-1.5 transition"
+                          >
+                            Reset MFA
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Modals */}
       <EditProfileModal
         open={showEditProfile}
@@ -893,6 +975,16 @@ const WindowStaffAccount = () => {
         open={showResetMFA}
         onClose={() => setShowResetMFA(false)}
         onSuccess={handleMFASuccess}
+      />
+
+      <ActionConfirmationModal
+        open={Boolean(staffToReset)}
+        tone="danger"
+        title="Reset Staff MFA"
+        message={staffToReset ? `Are you sure you want to reset MFA for ${staffToReset.full_name || staffToReset.username}? They will be prompted to set up MFA on their next login.` : ''}
+        confirmLabel="Reset MFA"
+        onConfirm={handleResetStaffMfa}
+        onCancel={() => setStaffToReset(null)}
       />
 
       <SystemMessageModal

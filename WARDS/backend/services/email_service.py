@@ -697,6 +697,7 @@ def _build_mfa_recovery_html(verification_code: str, expires_minutes: int, logos
 
 def send_mfa_recovery_email(recipient_email: str, verification_code: str, expires_minutes: int = 10) -> dict:
     if not smtp_is_configured():
+        print(f"\n[DEV] MFA Recovery Email (SMTP not configured)\n  To: {recipient_email}\n  Code: {verification_code}\n  Expires: {expires_minutes} min\n")
         return {
             "sent": False,
             "status": "skipped",

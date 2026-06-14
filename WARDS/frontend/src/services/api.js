@@ -201,6 +201,8 @@ export const userAuthAPI = {
 };
 
 export const unifiedAuthAPI = {
+  setupMfa: (data) => api.post('/auth/unified/setup-mfa', data),
+  verifyMfaSetup: (data) => api.post('/auth/unified/verify-mfa-setup', data),
   sendMfaRecoveryOtp: (data) => api.post('/auth/unified/mfa-recovery/send-otp', data),
   verifyMfaRecoveryOtp: (data) => api.post('/auth/unified/mfa-recovery/verify-otp', data),
 };
@@ -300,6 +302,8 @@ export const branchSettingsAPI = {
   saveAppointmentSettings: (data) => api.put('/branch/settings/appointments', data),
   publishAppointmentSettings: (data) => api.post('/branch/settings/appointments/publish', data),
   setupBranchMfa: () => api.post('/branch/auth/setup-mfa-authenticated'),
+  listBranchStaff: () => api.get('/branch/auth/admin/staff'),
+  resetStaffMfa: (data) => api.post('/branch/auth/admin/reset-staff-mfa', data),
 };
 
 const buildAttachmentFormData = (files) => {

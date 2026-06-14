@@ -365,10 +365,14 @@ def find_account(db: Session, identifier: str) -> Tuple[Optional[str], Optional[
         return "public", public_user
 
     admin = db.query(Admin).filter(Admin.email == normalized).first()
+    if not admin:
+        admin = db.query(Admin).filter(Admin.username == normalized).first()
     if admin:
         return "admin", admin
 
     branch_staff = db.query(BranchStaff).filter(BranchStaff.email == normalized).first()
+    if not branch_staff:
+        branch_staff = db.query(BranchStaff).filter(BranchStaff.username == normalized).first()
     if branch_staff:
         return "branch", branch_staff
 
@@ -387,12 +391,16 @@ def find_account_for_portal(db: Session, identifier: str, requested_portal: Opti
 
     if portal == "admin":
         admin = db.query(Admin).filter(Admin.email == normalized).first()
+        if not admin:
+            admin = db.query(Admin).filter(Admin.username == normalized).first()
         if admin:
             return "admin", admin
         return find_account(db, identifier)
 
     if portal == "branch":
         branch_staff = db.query(BranchStaff).filter(BranchStaff.email == normalized).first()
+        if not branch_staff:
+            branch_staff = db.query(BranchStaff).filter(BranchStaff.username == normalized).first()
         if branch_staff:
             return "branch", branch_staff
         return find_account(db, identifier)
@@ -827,19 +835,8 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
         mfa_username = get_mfa_username(portal, account)
         mfa_secret = get_mfa_secret(db, portal, mfa_username)
         if not mfa_secret:
-            if portal != "public":
-                headers = {
-                    "X-Requires-MFA-Setup": "true",
-                    "X-Auth-Portal": portal,
-                }
-                if requires_captcha(portal, credentials.identifier):
-                    headers["X-Requires-Captcha"] = "true"
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="MFA not configured. Please setup MFA first.",
-                    headers=headers,
-                )
-            # Public portal: MFA is optional; continue without it
+            # MFA not configured; allow login and require setup later via mfa_setup_required flag
+            pass
         else:
             if not credentials.totp_code:
                 return {

@@ -73,7 +73,8 @@ const ProtectedRoute = ({ children }) => {
         && ALLOWED_ADMIN_INTERNAL_ROLES.has(resolvedRole)
       ) {
         setIsAuthenticated(true);
-        localStorage.setItem('adminUser', JSON.stringify(response.data.user));
+        const existing = JSON.parse(localStorage.getItem('adminUser') || '{}');
+        localStorage.setItem('adminUser', JSON.stringify({ ...existing, ...response.data.user }));
         if (!localStorage.getItem('adminAuthenticatedAt')) {
           localStorage.setItem('adminAuthenticatedAt', new Date().toISOString());
         }
