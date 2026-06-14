@@ -104,6 +104,7 @@ const Settings = () => {
   const [mfaSetupData, setMfaSetupData] = useState(null);
   const [mfaError, setMfaError] = useState('');
   const [settingUpMfa, setSettingUpMfa] = useState(false);
+  const [showMfaConfirmModal, setShowMfaConfirmModal] = useState(false);
   const savedSettings = useRef(null);
   const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}');
 
@@ -499,7 +500,7 @@ const Settings = () => {
               </div>
               <button
                 type="button"
-                onClick={handleSetupMfa}
+                onClick={() => setShowMfaConfirmModal(true)}
                 disabled={settingUpMfa}
                 className="w-full rounded-lg bg-yellow-500 px-6 py-3 font-semibold text-white transition hover:bg-yellow-600 disabled:opacity-50"
               >
@@ -724,6 +725,40 @@ const Settings = () => {
                 className="rounded-lg bg-red-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-70"
               >
                 {deletingHistoryId !== null ? 'Deleting…' : 'Confirm Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showMfaConfirmModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl md:p-8">
+            <div className="flex items-start gap-4">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-yellow-100 text-yellow-600">
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v4m0 4h.01M10.29 3.86l-8.082 14A1 1 0 003.082 19h17.836a1 1 0 00.874-1.5l-8.082-14a1 1 0 00-1.74 0z" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">Reset MFA enrollment?</h3>
+                <p className="mt-1 text-sm text-gray-600">
+                  This will invalidate your current Microsoft Authenticator setup and generate a new QR code. You will need to re-enroll your device before your next login.
+                </p>
+              </div>
+            </div>
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                onClick={() => setShowMfaConfirmModal(false)}
+                className="rounded-lg bg-gray-200 px-5 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-300"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => { setShowMfaConfirmModal(false); handleSetupMfa(); }}
+                className="rounded-lg bg-yellow-500 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-yellow-600"
+              >
+                Yes, Reset MFA
               </button>
             </div>
           </div>
