@@ -1039,6 +1039,8 @@ const QueueHistorySection = ({
   </section>
 );
 
+const COMPLETED_PAGE_SIZE = 10;
+
 const CompletedTransactionsSection = ({
   items,
   filters,
@@ -1049,164 +1051,224 @@ const CompletedTransactionsSection = ({
   canDeleteHistory,
   windowOptions,
   maxCompletionDate,
-}) => (
-  <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-    <div className="border-b border-slate-100 bg-slate-50 px-6 py-5">
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Audit Visibility</p>
-            <h2 className="mt-2 text-2xl font-bold text-primary">Completed Queue Transactions</h2>
-            <p className="mt-2 text-sm text-slate-500">
-              Review completed branch queue transactions with dynamic branch-based service and window context.
+}) => {
+  const [page, setPage] = useState(1);
+
+  const totalPages = Math.max(1, Math.ceil(items.length / COMPLETED_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const startIndex = (currentPage - 1) * COMPLETED_PAGE_SIZE;
+  const pageItems = items.slice(startIndex, startIndex + COMPLETED_PAGE_SIZE);
+
+  const hasActiveFilters = filters.queueNumber || filters.taxpayer || filters.queueType !== 'all'
+    || filters.window !== 'all' || filters.servedBy || filters.completionDate || filters.status !== 'all';
+
+  const handleFilterChange = (field, value) => {
+    setPage(1);
+    onFilterChange(field, value);
+  };
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-100 bg-slate-50 px-6 py-5">
+        <div className="flex flex-col gap-5">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Audit Visibility</p>
+              <h2 className="mt-2 text-2xl font-bold text-primary">Completed Queue Transactions</h2>
+              <p className="mt-2 text-sm text-slate-500">
+                Review completed branch queue transactions with dynamic branch-based service and window context.
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-3">
+              <span className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200">
+                {items.length} completed entr{items.length === 1 ? 'y' : 'ies'}
+              </span>
+              {hasActiveFilters ? (
+                <button
+                  onClick={() => {
+                    setPage(1);
+                    ['queueNumber', 'taxpayer', 'servedBy', 'completionDate'].forEach((f) => onFilterChange(f, ''));
+                    ['queueType', 'window', 'status'].forEach((f) => onFilterChange(f, 'all'));
+                  }}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 shadow-sm"
+                >
+                  Clear Filters
+                </button>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <input
+              type="text"
+              value={filters.queueNumber}
+              onChange={(event) => handleFilterChange('queueNumber', event.target.value)}
+              placeholder="Filter by queue number"
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700 outline-none placeholder:text-slate-400 focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
+            />
+            <input
+              type="text"
+              value={filters.taxpayer}
+              onChange={(event) => handleFilterChange('taxpayer', event.target.value)}
+              placeholder="Search taxpayer or customer"
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700 outline-none placeholder:text-slate-400 focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
+            />
+            <select
+              value={filters.queueType}
+              onChange={(event) => handleFilterChange('queueType', event.target.value)}
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700 outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
+            >
+              <option value="all">All queue types</option>
+              <option value="immediate">Immediate</option>
+              <option value="appointment">Appointment</option>
+            </select>
+            <select
+              value={filters.window}
+              onChange={(event) => handleFilterChange('window', event.target.value)}
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700 outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
+            >
+              <option value="all">All windows</option>
+              {windowOptions.map((option) => (
+                <option key={option.key} value={option.key}>{option.label}</option>
+              ))}
+            </select>
+            <input
+              type="text"
+              value={filters.servedBy}
+              onChange={(event) => handleFilterChange('servedBy', event.target.value)}
+              placeholder="Filter by served by"
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700 outline-none placeholder:text-slate-400 focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
+            />
+            <input
+              type="date"
+              value={filters.completionDate}
+              onChange={(event) => handleFilterChange('completionDate', event.target.value)}
+              max={maxCompletionDate}
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700 outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
+            />
+            <select
+              value={filters.status}
+              onChange={(event) => handleFilterChange('status', event.target.value)}
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700 outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
+            >
+              <option value="all">All statuses</option>
+              <option value="completed">Completed</option>
+              <option value="skipped">Skipped</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {items.length === 0 ? (
+        <div className="px-6 py-12 text-center">
+          <p className="text-sm font-medium text-slate-500">No completed queue transactions match the current filters.</p>
+          {hasActiveFilters ? (
+            <p className="mt-1 text-xs text-slate-400">Try adjusting or clearing the filters above.</p>
+          ) : null}
+        </div>
+      ) : (
+        <>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="bg-white">
+                <tr className="border-b border-slate-100 text-left text-slate-500">
+                  <th className="px-6 py-3 font-semibold">Queue No.</th>
+                  <th className="px-6 py-3 font-semibold">Taxpayer</th>
+                  <th className="px-6 py-3 font-semibold">Queue Type</th>
+                  <th className="px-6 py-3 font-semibold">Assigned Window</th>
+                  <th className="px-6 py-3 font-semibold">Service</th>
+                  <th className="px-6 py-3 font-semibold">Status</th>
+                  <th className="px-6 py-3 font-semibold">Served At</th>
+                  <th className="px-6 py-3 font-semibold">Completed At</th>
+                  <th className="px-6 py-3 font-semibold">Served By</th>
+                  <th className="px-6 py-3 font-semibold">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {pageItems.map((queue) => (
+                  <tr key={queue.id} className="align-middle hover:bg-slate-50/80">
+                    <td className="px-6 py-4">
+                      <p className="font-semibold text-primary">{queue.queue_number}</p>
+                      <p className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-400">
+                        {queue.document_processing_status}
+                      </p>
+                    </td>
+                    <td className="px-6 py-4">
+                      <p className="font-medium text-slate-800">{queue.taxpayer_name || 'Walk-in'}</p>
+                      <p className="mt-1 text-xs text-slate-500">{queue.email || queue.contact_number || 'No contact provided'}</p>
+                    </td>
+                    <td className="px-6 py-4 text-slate-700">
+                      {queueTypeLabels[queue.queue_type] || 'Immediate'}
+                    </td>
+                    <td className="px-6 py-4 text-slate-700">
+                      <p className="font-medium text-slate-800">{queue.window_label}</p>
+                      {queue.window_assignment && queue.window_assignment !== 'Window not assigned' ? (
+                        <p className="mt-1 text-xs text-slate-500">{queue.window_assignment}</p>
+                      ) : null}
+                    </td>
+                    <td className="px-6 py-4 text-slate-700">{queue.service_type || 'N/A'}</td>
+                    <td className="px-6 py-4">
+                      <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${completedStatusClasses[queue.status] || 'bg-slate-100 text-slate-700'}`}>
+                        {queue.status_label || 'Completed'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-slate-600">
+                      {queue.served_at ? formatUtc8DateTime(queue.served_at) : 'N/A'}
+                    </td>
+                    <td className="px-6 py-4 text-slate-600">
+                      {queue.completed_at ? formatUtc8DateTime(queue.completed_at) : 'N/A'}
+                    </td>
+                    <td className="px-6 py-4 text-slate-700">{queue.completed_by || 'N/A'}</td>
+                    <td className="px-6 py-4">
+                      <div className="flex flex-col items-center gap-2">
+                        <button
+                          onClick={() => onOpenView(queue)}
+                          className="w-full rounded-lg bg-blue-600 px-3 py-1.5 text-center font-semibold text-white transition hover:bg-blue-700"
+                        >
+                          View
+                        </button>
+                        <button
+                          onClick={() => onDeleteHistory(queue)}
+                          disabled={!canDeleteHistory || deletingHistoryId === queue.id}
+                          className="w-full rounded-lg bg-rose-600 px-3 py-1.5 text-center font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-40"
+                          title={canDeleteHistory ? 'Delete completed transaction' : 'You do not have permission to delete completed transactions'}
+                        >
+                          {deletingHistoryId === queue.id ? 'Deleting...' : 'Delete'}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex flex-col gap-3 border-t border-slate-100 px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-slate-500">
+              Showing {startIndex + 1}–{Math.min(startIndex + COMPLETED_PAGE_SIZE, items.length)} of {items.length} entr{items.length === 1 ? 'y' : 'ies'}
             </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage <= 1}
+                className="rounded-xl bg-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-300 disabled:opacity-60"
+              >
+                Previous
+              </button>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage >= totalPages}
+                className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-secondary disabled:opacity-60"
+              >
+                Next
+              </button>
+            </div>
           </div>
-          <div className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-slate-700">
-            {items.length} completed entr{items.length === 1 ? 'y' : 'ies'}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">
-          <input
-            type="text"
-            value={filters.queueNumber}
-            onChange={(event) => onFilterChange('queueNumber', event.target.value)}
-            placeholder="Filter by queue number"
-            className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none"
-          />
-          <input
-            type="text"
-            value={filters.taxpayer}
-            onChange={(event) => onFilterChange('taxpayer', event.target.value)}
-            placeholder="Search taxpayer or customer"
-            className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none"
-          />
-          <select
-            value={filters.queueType}
-            onChange={(event) => onFilterChange('queueType', event.target.value)}
-            className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none"
-          >
-            <option value="all">All queue types</option>
-            <option value="immediate">Immediate</option>
-            <option value="appointment">Appointment</option>
-          </select>
-          <select
-            value={filters.window}
-            onChange={(event) => onFilterChange('window', event.target.value)}
-            className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none"
-          >
-            <option value="all">All windows</option>
-            {windowOptions.map((option) => (
-              <option key={option.key} value={option.key}>{option.label}</option>
-            ))}
-          </select>
-          <input
-            type="text"
-            value={filters.servedBy}
-            onChange={(event) => onFilterChange('servedBy', event.target.value)}
-            placeholder="Filter by served by"
-            className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none"
-          />
-          <input
-            type="date"
-            value={filters.completionDate}
-            onChange={(event) => onFilterChange('completionDate', event.target.value)}
-            max={maxCompletionDate}
-            className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none"
-          />
-          <select
-            value={filters.status}
-            onChange={(event) => onFilterChange('status', event.target.value)}
-            className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none"
-          >
-            <option value="all">All statuses</option>
-            <option value="completed">Completed</option>
-            <option value="skipped">Skipped</option>
-          </select>
-        </div>
-      </div>
-    </div>
-
-    {items.length === 0 ? (
-      <div className="px-6 py-10 text-center text-sm text-slate-500">
-        No completed queue transactions match the current filters.
-      </div>
-    ) : (
-      <div className="overflow-x-auto">
-        <table className="min-w-full text-sm">
-          <thead className="bg-white">
-            <tr className="border-b border-slate-100 text-left text-slate-500">
-              <th className="px-6 py-3 font-semibold">Queue No.</th>
-              <th className="px-6 py-3 font-semibold">Taxpayer</th>
-              <th className="px-6 py-3 font-semibold">Queue Type</th>
-              <th className="px-6 py-3 font-semibold">Assigned Window</th>
-              <th className="px-6 py-3 font-semibold">Service</th>
-              <th className="px-6 py-3 font-semibold">Status</th>
-              <th className="px-6 py-3 font-semibold">Served At</th>
-              <th className="px-6 py-3 font-semibold">Completed At</th>
-              <th className="px-6 py-3 font-semibold">Served By</th>
-              <th className="px-6 py-3 font-semibold">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {items.map((queue) => (
-              <tr key={queue.id} className="align-top hover:bg-slate-50/80">
-                <td className="px-6 py-4">
-                  <p className="font-semibold text-primary">{queue.queue_number}</p>
-                  <p className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-400">
-                    {queue.document_processing_status}
-                  </p>
-                </td>
-                <td className="px-6 py-4">
-                  <p className="font-medium text-slate-800">{queue.taxpayer_name || 'Walk-in'}</p>
-                  <p className="mt-1 text-xs text-slate-500">{queue.email || queue.contact_number || 'No contact provided'}</p>
-                </td>
-                <td className="px-6 py-4 text-slate-700">
-                  {queueTypeLabels[queue.queue_type] || 'Immediate'}
-                </td>
-                <td className="px-6 py-4 text-slate-700">
-                  <p className="font-medium text-slate-800">{queue.window_label}</p>
-                  <p className="mt-1 text-xs text-slate-500">{queue.window_assignment}</p>
-                </td>
-                <td className="px-6 py-4 text-slate-700">{queue.service_type || 'N/A'}</td>
-                <td className="px-6 py-4">
-                  <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${completedStatusClasses[queue.status] || 'bg-slate-100 text-slate-700'}`}>
-                    {queue.status_label || 'Completed'}
-                  </span>
-                </td>
-                <td className="px-6 py-4 text-slate-600">
-                  {queue.served_at ? formatUtc8DateTime(queue.served_at) : 'N/A'}
-                </td>
-                <td className="px-6 py-4 text-slate-600">
-                  {queue.completed_at ? formatUtc8DateTime(queue.completed_at) : 'N/A'}
-                </td>
-                <td className="px-6 py-4 text-slate-700">{queue.completed_by || 'N/A'}</td>
-                <td className="px-6 py-4">
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      onClick={() => onOpenView(queue)}
-                      className="rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white transition hover:bg-blue-700"
-                    >
-                      View
-                    </button>
-                    <button
-                      onClick={() => onDeleteHistory(queue)}
-                      disabled={!canDeleteHistory || deletingHistoryId === queue.id}
-                      className="rounded-lg bg-rose-600 px-3 py-1.5 font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-40"
-                      title={canDeleteHistory ? 'Delete completed transaction' : 'You do not have permission to delete completed transactions'}
-                    >
-                      {deletingHistoryId === queue.id ? 'Deleting...' : 'Delete'}
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    )}
-  </section>
-);
+        </>
+      )}
+    </section>
+  );
+};
 
 const QueueManagement = () => {
   const { branchSlug } = useParams();
