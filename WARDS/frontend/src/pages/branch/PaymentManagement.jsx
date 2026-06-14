@@ -191,22 +191,44 @@ const PaginationControls = ({ page, totalPages, totalItems, onPageChange }) => {
   }
 
   return (
-    <div className="mt-5 flex flex-col gap-4 border-t border-slate-100 pt-5 md:flex-row md:items-center md:justify-between">
-      <div className="text-sm text-slate-500">Page {page} of {totalPages}</div>
-      <div className="flex items-center gap-3">
+    <div className="mt-5 flex flex-col gap-3 border-t border-slate-100 px-4 py-5 md:flex-row md:items-center md:justify-between">
+      <div className="text-sm text-slate-500">
+        <span className="font-medium text-slate-700">
+          {(page - 1) * TRANSACTIONS_PER_PAGE + 1}–{Math.min(page * TRANSACTIONS_PER_PAGE, totalItems)}
+        </span>
+        <span className="text-slate-400"> of {totalItems}</span>
+      </div>
+      <div className="flex items-center gap-2">
         <button
           onClick={() => onPageChange(page - 1)}
           disabled={page <= 1}
-          className="rounded-2xl border border-slate-300 px-4 py-2 font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex items-center gap-1.5 rounded-xl border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          Previous
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg>
+          Prev
         </button>
+        <div className="flex items-center gap-1">
+          {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+            <button
+              key={p}
+              onClick={() => onPageChange(p)}
+              className={`h-8 w-8 rounded-lg text-sm font-semibold transition ${
+                p === page
+                  ? 'bg-emerald-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
         <button
           onClick={() => onPageChange(page + 1)}
           disabled={page >= totalPages}
-          className="rounded-2xl border border-slate-300 px-4 py-2 font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex items-center gap-1.5 rounded-xl border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
         >
           Next
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path></svg>
         </button>
       </div>
     </div>
@@ -516,6 +538,7 @@ const PaymentManagement = () => {
     pending: 1,
     processedVerified: 1,
     processedDeclined: 1,
+    remittance: 1,
   });
   const [feedback, setFeedback] = useState({ type: '', message: '' });
 
@@ -816,6 +839,7 @@ const PaymentManagement = () => {
       pending: 1,
       processedVerified: 1,
       processedDeclined: 1,
+      remittance: 1,
     });
   }, [appliedFilters]);
 
@@ -824,8 +848,9 @@ const PaymentManagement = () => {
       pending: Math.min(current.pending, Math.max(1, Math.ceil(pendingTransactions.length / TRANSACTIONS_PER_PAGE))),
       processedVerified: Math.min(current.processedVerified, Math.max(1, Math.ceil(verifiedTransactions.length / TRANSACTIONS_PER_PAGE))),
       processedDeclined: Math.min(current.processedDeclined, Math.max(1, Math.ceil(declinedTransactions.length / TRANSACTIONS_PER_PAGE))),
+      remittance: Math.min(current.remittance, Math.max(1, Math.ceil((remittanceSummary?.available_payments || []).length / TRANSACTIONS_PER_PAGE))),
     }));
-  }, [pendingTransactions.length, verifiedTransactions.length, declinedTransactions.length]);
+  }, [pendingTransactions.length, verifiedTransactions.length, declinedTransactions.length, remittanceSummary?.available_payments?.length]);
 
   const stats = useMemo(() => {
     const total = filteredPayments.length;
@@ -964,51 +989,59 @@ const PaymentManagement = () => {
         </div>
       ) : (
         <>
-          <div className="overflow-x-auto rounded-2xl border border-slate-300 bg-white shadow-inner">
-            <table className="min-w-[1180px] w-full text-sm">
-              <thead className="sticky top-0 z-10 bg-slate-100 text-slate-600 shadow-sm">
+          <div className="rounded-2xl border border-slate-200 bg-white">
+            <table className="w-full table-auto divide-y divide-slate-200 text-xs">
+              <thead className="bg-slate-50 text-left text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
                 <tr>
-                  <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Reference Number</th>
-                  <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Date</th>
-                  <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Time</th>
-                  <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Citizen Name</th>
-                  <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Branch</th>
-                  <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">TIN</th>
-                  <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Tax Type</th>
-                  <th className="px-5 py-4 text-right font-semibold uppercase tracking-[0.12em]">Amount</th>
-                  <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Status</th>
-                  <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">Actions</th>
+                  <th className="px-3 py-2.5">Reference</th>
+                  <th className="px-3 py-2.5">Date & Time</th>
+                  <th className="px-3 py-2.5">Citizen</th>
+                  <th className="px-3 py-2.5">TIN</th>
+                  <th className="px-3 py-2.5">Tax Type</th>
+                  <th className="px-3 py-2.5 text-right">Amount</th>
+                  <th className="px-3 py-2.5">Status</th>
+                  <th className="px-3 py-2.5 text-center">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-200 bg-white">
-                {visibleItems.map((payment) => (
-                  <tr key={payment.id} className="transition hover:bg-slate-50">
-                    <td className="px-5 py-4 align-top">
-                      <p className="font-mono text-sm font-semibold text-[#0f2f5f]">{payment.ref_number || 'N/A'}</p>
-                      <p className="mt-1 text-xs text-slate-500">{payment.transaction_id || 'No transaction ID'}</p>
+              <tbody className="divide-y divide-slate-100">
+                {visibleItems.map((payment, index) => (
+                  <tr
+                    key={payment.id}
+                    className={`transition-colors hover:bg-slate-50/60 ${index % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}`}
+                  >
+                    <td className="px-3 py-2.5">
+                      <span className="inline-block max-w-[120px] truncate rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] font-semibold tracking-wide text-slate-700" title={payment.ref_number}>
+                        {payment.ref_number || 'N/A'}
+                      </span>
+                      {payment.transaction_id ? (
+                        <p className="mt-0.5 max-w-[120px] truncate text-[10px] text-slate-400" title={payment.transaction_id}>{payment.transaction_id}</p>
+                      ) : null}
                     </td>
-                    <td className="px-5 py-4 align-top text-slate-700">
-                      {formatPaymentDate(payment.created_at, { year: 'numeric', month: 'short', day: 'numeric' })}
+                    <td className="px-3 py-2.5 text-slate-600">
+                      <p className="text-[11px] font-medium">{formatPaymentDate(payment.created_at, { year: 'numeric', month: 'short', day: 'numeric' })}</p>
+                      <p className="text-[10px] text-slate-400">{formatPaymentDate(payment.created_at, { hour: '2-digit', minute: '2-digit', hour12: true })}</p>
                     </td>
-                    <td className="px-5 py-4 align-top text-slate-700">
-                      {formatPaymentDate(payment.created_at, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
+                    <td className="px-3 py-2.5">
+                      <p className="max-w-[110px] truncate text-sm font-medium text-slate-700" title={payment.taxpayer_name}>{payment.taxpayer_name || 'N/A'}</p>
+                      <p className="max-w-[110px] truncate text-[10px] text-slate-400">{payment.email || 'No email'}</p>
                     </td>
-                    <td className="px-5 py-4 align-top">
-                      <p className="font-semibold text-slate-900">{payment.taxpayer_name || 'N/A'}</p>
-                      <p className="mt-1 text-xs text-slate-500">{payment.email || 'No email provided'}</p>
+                    <td className="px-3 py-2.5 font-mono text-[11px] text-slate-600">{payment.tin || 'N/A'}</td>
+                    <td className="px-3 py-2.5">
+                      <span className="inline-block max-w-[90px] truncate rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700" title={payment.tax_type}>
+                        {payment.tax_type || 'N/A'}
+                      </span>
                     </td>
-                    <td className="px-5 py-4 align-top text-slate-700">{payment.branch || 'Unassigned Branch'}</td>
-                    <td className="px-5 py-4 align-top text-slate-700">{payment.tin || 'N/A'}</td>
-                    <td className="px-5 py-4 align-top text-slate-700">{payment.tax_type || 'N/A'}</td>
-                    <td className="px-5 py-4 text-right align-top font-semibold text-slate-900">{formatCurrency(payment.amount)}</td>
-                    <td className="px-5 py-4 align-top">
+                    <td className="px-3 py-2.5 text-right text-sm">
+                      <span className="font-bold text-emerald-700">{formatCurrency(payment.amount)}</span>
+                    </td>
+                    <td className="px-3 py-2.5">
                       <StatusBadge status={getPaymentBucket(payment)} />
                     </td>
-                    <td className="px-5 py-4 align-top">
-                      <div className="flex flex-wrap gap-2">
+                    <td className="px-2 py-2.5">
+                      <div className="flex items-center justify-center gap-1.5">
                         <button
                           onClick={() => handleViewDetails(payment)}
-                          className="rounded-xl bg-[#0f2f5f] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#19498d]"
+                          className="rounded-lg bg-blue-600 px-2.5 py-1 text-[10px] font-bold text-white transition hover:bg-blue-700"
                         >
                           View
                         </button>
@@ -1016,13 +1049,13 @@ const PaymentManagement = () => {
                           <>
                             <button
                               onClick={() => handleVerifyClick(payment)}
-                              className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100"
+                              className="rounded-lg bg-emerald-600 px-2.5 py-1 text-[10px] font-bold text-white transition hover:bg-emerald-700"
                             >
                               Verify
                             </button>
                             <button
                               onClick={() => handleDeclineClick(payment)}
-                              className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 transition hover:bg-amber-100"
+                              className="rounded-lg bg-amber-500 px-2.5 py-1 text-[10px] font-bold text-white transition hover:bg-amber-600"
                             >
                               Decline
                             </button>
@@ -1030,12 +1063,17 @@ const PaymentManagement = () => {
                         ) : null}
                         <button
                           onClick={() => handleDeleteClick(payment)}
-                          className="rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
+                          className="rounded-lg bg-red-600 px-2.5 py-1 text-[10px] font-bold text-white transition hover:bg-red-700"
                         >
                           Delete
                         </button>
                       </div>
                     </td>
+                  </tr>
+                ))}
+                {paginated && Array.from({ length: TRANSACTIONS_PER_PAGE - visibleItems.length }).map((_, i) => (
+                  <tr key={`empty-${i}`} className="h-[54px]">
+                    <td colSpan="8" className="px-3 py-2.5">&nbsp;</td>
                   </tr>
                 ))}
               </tbody>
@@ -1208,41 +1246,74 @@ const PaymentManagement = () => {
         </div>
 
         <div className="mt-6 grid gap-6 xl:grid-cols-[1.4fr,1fr]">
-          <div className="overflow-x-auto rounded-2xl border border-slate-200">
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+          <div className="rounded-2xl border border-slate-200">
+            <table className="w-full table-auto divide-y divide-slate-200 text-xs">
+              <thead className="bg-slate-50 text-left text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
                 <tr>
-                  <th className="px-4 py-3">Select</th>
-                  <th className="px-4 py-3">Reference</th>
-                  <th className="px-4 py-3">Taxpayer</th>
-                  <th className="px-4 py-3">Tax Type</th>
-                  <th className="px-4 py-3 text-right">Amount</th>
+                  <th className="w-12 px-3 py-2.5 text-center">Select</th>
+                  <th className="px-3 py-2.5">Reference</th>
+                  <th className="px-3 py-2.5">Taxpayer</th>
+                  <th className="px-3 py-2.5">Tax Type</th>
+                  <th className="px-3 py-2.5 text-right">Amount</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 bg-white">
-                {(remittanceSummary?.available_payments || []).map((payment) => (
-                  <tr key={payment.id}>
-                    <td className="px-4 py-3">
-                      <input
-                        type="checkbox"
-                        checked={selectedRemittancePayments.includes(payment.id)}
-                        onChange={() => toggleRemittancePayment(payment.id)}
-                        className="h-4 w-4 rounded border-slate-300"
-                      />
-                    </td>
-                    <td className="px-4 py-3 font-semibold text-slate-900">{payment.ref_number}</td>
-                    <td className="px-4 py-3 text-slate-600">{payment.taxpayer_name}</td>
-                    <td className="px-4 py-3 text-slate-600">{payment.tax_type}</td>
-                    <td className="px-4 py-3 text-right font-semibold text-slate-900">{formatCurrency(payment.amount)}</td>
-                  </tr>
-                ))}
+              <tbody className="divide-y divide-slate-100">
+                {(() => {
+                  const visible = (remittanceSummary?.available_payments || [])
+                    .slice((sectionPages.remittance - 1) * TRANSACTIONS_PER_PAGE, sectionPages.remittance * TRANSACTIONS_PER_PAGE);
+                  return (
+                    <>
+                      {visible.map((payment, index) => (
+                        <tr
+                          key={payment.id}
+                          className={`transition-colors hover:bg-emerald-50/60 ${index % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}
+                        >
+                          <td className="px-3 py-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={selectedRemittancePayments.includes(payment.id)}
+                              onChange={() => toggleRemittancePayment(payment.id)}
+                              className="h-4 w-4 cursor-pointer rounded border-slate-300 accent-emerald-600"
+                            />
+                          </td>
+                          <td className="px-3 py-3">
+                            <span className="inline-block max-w-[120px] truncate rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] font-semibold tracking-wide text-slate-700" title={payment.ref_number}>
+                              {payment.ref_number}
+                            </span>
+                          </td>
+                          <td className="px-3 py-3 text-sm font-medium text-slate-700">{payment.taxpayer_name}</td>
+                          <td className="px-3 py-3">
+                            <span className="inline-block max-w-[100px] truncate rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700" title={payment.tax_type}>
+                              {payment.tax_type}
+                            </span>
+                          </td>
+                          <td className="px-3 py-3 text-right text-sm">
+                            <span className="font-bold text-emerald-700">{formatCurrency(payment.amount)}</span>
+                          </td>
+                        </tr>
+                      ))}
+                      {Array.from({ length: TRANSACTIONS_PER_PAGE - visible.length }).map((_, i) => (
+                        <tr key={`empty-${i}`} className="h-[58px]">
+                          <td colSpan="5" className="px-3 py-3">&nbsp;</td>
+                        </tr>
+                      ))}
+                    </>
+                  );
+                })()}
               </tbody>
             </table>
             {!(remittanceSummary?.available_payments || []).length ? (
               <div className="bg-white px-4 py-8 text-center text-sm text-slate-500">
                 No verified payments are currently available for remittance.
               </div>
-            ) : null}
+            ) : (
+              <PaginationControls
+                page={sectionPages.remittance}
+                totalPages={Math.max(1, Math.ceil((remittanceSummary?.available_payments || []).length / TRANSACTIONS_PER_PAGE))}
+                totalItems={(remittanceSummary?.available_payments || []).length}
+                onPageChange={(newPage) => setSectionPages((current) => ({ ...current, remittance: newPage }))}
+              />
+            )}
           </div>
 
           <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
@@ -1273,8 +1344,8 @@ const PaymentManagement = () => {
           </div>
         </div>
 
-        <div className="mt-6 overflow-x-auto rounded-2xl border border-slate-200">
-          <table className="min-w-full divide-y divide-slate-200 text-sm">
+        <div className="mt-6 rounded-2xl border border-slate-200">
+          <table className="w-full divide-y divide-slate-200 text-sm">
             <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
               <tr>
                 <th className="px-4 py-3">Remittance No.</th>

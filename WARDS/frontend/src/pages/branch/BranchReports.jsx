@@ -679,8 +679,8 @@ const BranchReports = () => {
           <div className="px-6 py-12 text-center text-slate-500">Loading branch reports...</div>
         ) : reportsState.items.length ? (
           <>
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
+            <div className="rounded-2xl border border-slate-200 overflow-hidden">
+              <table className="w-full table-auto text-sm">
                 <thead className="bg-slate-50">
                   <tr>
                     <th className="px-6 py-3 text-left font-semibold text-slate-600">Title</th>
@@ -781,8 +781,8 @@ const BranchReports = () => {
               <div className="px-6 py-12 text-center text-slate-500">Loading report history...</div>
             ) : historyState.items.length ? (
               <>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-sm">
+                <div className="rounded-2xl border border-slate-200 overflow-hidden">
+                  <table className="w-full table-auto text-sm">
                     <thead className="bg-slate-50">
                       <tr>
                         <th className="px-6 py-3 text-left font-semibold text-slate-600">Title</th>

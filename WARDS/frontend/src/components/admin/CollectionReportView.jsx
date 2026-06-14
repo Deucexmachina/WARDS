@@ -147,7 +147,7 @@ const CollectionReportView = ({
 
         {/* Ranking Table */}
         <h2 className="mb-3 text-lg font-bold text-[#0f2f5f]">Branch Performance Ranking</h2>
-        <div className="mb-6 overflow-x-auto rounded-xl border border-slate-200">
+        <div className="mb-6 rounded-xl border border-slate-200">
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-slate-50 text-left text-slate-600">
@@ -183,7 +183,7 @@ const CollectionReportView = ({
 
         {/* Details Table */}
         <h2 className="mb-3 text-lg font-bold text-[#0f2f5f]">Branch Collection Details</h2>
-        <div className="mb-4 overflow-x-auto rounded-xl border border-slate-200">
+        <div className="mb-4 rounded-xl border border-slate-200">
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-slate-50 text-left text-slate-600">

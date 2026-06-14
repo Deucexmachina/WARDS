@@ -469,8 +469,8 @@ const BranchDiscrepancies = () => {
         ) : reports.length === 0 ? (
           <div className="py-8 text-center text-gray-500">No discrepancy reports submitted for this branch yet.</div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
+          <div className="rounded-2xl border border-gray-200 overflow-hidden">
+            <table className="w-full table-auto text-sm">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-4 py-3 text-left">Report ID</th>

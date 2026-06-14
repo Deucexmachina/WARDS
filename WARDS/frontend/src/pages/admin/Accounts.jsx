@@ -16,6 +16,7 @@ import PasswordField from '../../components/PasswordField';
 import SystemMessageModal from '../../components/SystemMessageModal';
 
 const DEFAULT_PAGE_SIZE = 100;
+const ACCOUNTS_PER_PAGE = 5;
 const INTERNAL_BRANCH_EMAIL_PATTERN = /^[A-Za-z0-9._-]+@branch\.local$/i;
 
 const EMPTY_FORM = {
@@ -98,6 +99,7 @@ const Accounts = () => {
     buttonLabel: 'OK',
   });
   const [pendingMfaReset, setPendingMfaReset] = useState(null);
+  const [accountPages, setAccountPages] = useState({});
 
   const managerEyebrow = isBranchPortal ? 'Branch Admin Dashboard' : 'Main Admin Dashboard';
   const managerSubtitle = isBranchPortal
@@ -162,6 +164,10 @@ const Accounts = () => {
     window.addEventListener('wards-accounts-refresh', handleAccountsRefresh);
     return () => window.removeEventListener('wards-accounts-refresh', handleAccountsRefresh);
   }, [canCreateAccounts, pagination.page]);
+
+  useEffect(() => {
+    setAccountPages({});
+  }, [accounts]);
 
   const fetchAccounts = async (page = pagination.page) => {
     try {
@@ -638,104 +644,159 @@ const Accounts = () => {
       }),
     ]);
 
-  const renderAccountRows = (rows, primaryLabel = 'Username') => (
-    <div className="overflow-x-auto">
-      <table className="w-full">
-        <thead className="bg-gray-50">
-          <tr>
-            <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">{primaryLabel}</th>
-            <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">Email</th>
-            <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">Branch</th>
-            <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">Role</th>
-            <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">Queue Role</th>
-            <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">Status</th>
-            <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">Last Login</th>
-            <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">Actions</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-200 bg-white">
-          {rows.length === 0 ? (
+  const renderAccountRows = (rows, primaryLabel = 'Username', pageKey = null) => {
+    const currentPage = pageKey ? (accountPages[pageKey] || 1) : 1;
+    const totalPages = pageKey ? Math.ceil(rows.length / ACCOUNTS_PER_PAGE) : 1;
+    const startIndex = (currentPage - 1) * ACCOUNTS_PER_PAGE;
+    const endIndex = startIndex + ACCOUNTS_PER_PAGE;
+    const pagedRows = pageKey ? rows.slice(startIndex, endIndex) : rows;
+    return (
+      <div className="overflow-hidden rounded-2xl border border-gray-200">
+        <table className="w-full table-auto text-xs">
+          <thead className="bg-gray-50">
             <tr>
-              <td colSpan="8" className="px-6 py-6 text-center text-sm text-gray-500">No accounts found.</td>
+              <th className="px-2 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-600">{primaryLabel}</th>
+              <th className="px-2 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-600">Email</th>
+              <th className="px-2 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-600">Branch</th>
+              <th className="px-2 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-600">Role</th>
+              <th className="px-2 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-600">Queue</th>
+              <th className="px-2 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-600">Status</th>
+              <th className="px-2 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-600">Login</th>
+              <th className="px-2 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-600">Actions</th>
             </tr>
-          ) : rows.map((account) => (
-            <tr key={`${account.role}-${account.id}`} className="transition duration-200 hover:bg-gray-50">
-              <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-gray-900">
-                {account.username || account.full_name || 'N/A'}
-              </td>
-              <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-600">{account.email}</td>
-              <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-600">{account.branch_name || 'All Branches'}</td>
-              <td className="whitespace-nowrap px-6 py-4">
-                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${getRoleColor(account.role)}`}>
-                  {getRoleDisplay(account.role)}
-                </span>
-              </td>
-              <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-600">
-                {account.role === 'branch_staff'
-                  ? `${getServiceWindowLabel(account.service_window_label || account.service_window)} - Window ${account.assigned_window_number || 1}`
-                  : account.role === 'branch_admin'
-                    ? 'Full Branch'
-                    : 'N/A'}
-              </td>
-              <td className="whitespace-nowrap px-6 py-4">
-                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${account.status === 'Active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                  {account.status}
-                </span>
-              </td>
-              <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-600">
-                {account.last_login ? formatUtc8DateTime(account.last_login) : 'Never'}
-              </td>
-              <td className="whitespace-nowrap px-6 py-4 text-sm space-x-2">
+          </thead>
+          <tbody className="divide-y divide-gray-200 bg-white">
+            {pagedRows.length === 0 ? (
+              <tr>
+                <td colSpan="8" className="px-6 py-6 text-center text-sm text-gray-500">No accounts found.</td>
+              </tr>
+            ) : (
+              <>
+                {pagedRows.map((account) => (
+                  <tr key={`${account.role}-${account.id}`} className="transition duration-200 hover:bg-gray-50">
+                    <td className="px-2 py-2.5 text-[11px] font-medium text-gray-900">
+                      {account.username || account.full_name || 'N/A'}
+                    </td>
+                    <td className="px-2 py-2.5 text-[11px] text-gray-600">{account.email}</td>
+                    <td className="px-2 py-2.5 text-[11px] text-gray-600">{account.branch_name || 'All'}</td>
+                    <td className="px-2 py-2.5">
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${getRoleColor(account.role)}`}>
+                        {getRoleDisplay(account.role)}
+                      </span>
+                    </td>
+                    <td className="px-2 py-2.5 text-[11px] text-gray-600">
+                      {account.role === 'branch_staff'
+                        ? `${getServiceWindowLabel(account.service_window_label || account.service_window)} W${account.assigned_window_number || 1}`
+                        : account.role === 'branch_admin'
+                          ? 'Full'
+                          : 'N/A'}
+                    </td>
+                    <td className="px-2 py-2.5">
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${account.status === 'Active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                        {account.status}
+                      </span>
+                    </td>
+                    <td className="px-2 py-2.5 text-[11px] text-gray-600">
+                      {account.last_login ? formatUtc8DateTime(account.last_login) : 'Never'}
+                    </td>
+                    <td className="px-2 py-2.5">
+                      <div className="flex flex-wrap gap-1">
+                        <button
+                          onClick={() => handleEditAccount(account)}
+                          className="rounded-md bg-accent px-2 py-1 text-[10px] font-bold text-white transition hover:bg-blue-600"
+                        >
+                          Edit
+                        </button>
+                        {account.status === 'Active' && (
+                          <button
+                            onClick={() => handleDeactivateAccount(account)}
+                            className="rounded-md bg-yellow-500 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-yellow-600"
+                          >
+                            Deact
+                          </button>
+                        )}
+                        {account.status === 'Inactive' && (
+                          <button
+                            onClick={() => handleActivateAccount(account)}
+                            className="rounded-md bg-green-500 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-green-600"
+                          >
+                            Act
+                          </button>
+                        )}
+                        {isBranchPortal && account.role === 'branch_staff' && (
+                          <button
+                            onClick={() => setPendingMfaReset(account)}
+                            className="rounded-md bg-purple-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-purple-700"
+                          >
+                            MFA
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleDeleteAccount(account)}
+                          className="rounded-md bg-red-500 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-red-600"
+                        >
+                          Del
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {Array.from({ length: ACCOUNTS_PER_PAGE - pagedRows.length }).map((_, i) => (
+                  <tr key={`empty-${i}`} className="h-[43px]">
+                    <td colSpan="8" className="px-2 py-2.5">&nbsp;</td>
+                  </tr>
+                ))}
+              </>
+            )}
+          </tbody>
+        </table>
+        {pageKey && totalPages > 1 && (
+          <div className="flex items-center justify-between border-t border-gray-100 px-4 py-3 text-[11px] font-semibold text-gray-600">
+            <span>{startIndex + 1}-{Math.min(endIndex, rows.length)} of {rows.length}</span>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                disabled={currentPage === 1}
+                onClick={() => setAccountPages((prev) => ({ ...prev, [pageKey]: currentPage - 1 }))}
+                className="rounded-md bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-700 transition hover:bg-gray-200 disabled:opacity-40"
+              >
+                Prev
+              </button>
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
                 <button
-                  onClick={() => handleEditAccount(account)}
-                  className="rounded-lg bg-accent px-3 py-1 font-semibold text-white transition duration-300 hover:bg-blue-600"
+                  key={page}
+                  type="button"
+                  onClick={() => setAccountPages((prev) => ({ ...prev, [pageKey]: page }))}
+                  className={`rounded-md px-2 py-1 text-[10px] font-bold transition ${
+                    page === currentPage
+                      ? 'bg-primary text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
                 >
-                  Edit
+                  {page}
                 </button>
-                {account.status === 'Active' && (
-                  <button
-                    onClick={() => handleDeactivateAccount(account)}
-                    className="rounded-lg bg-yellow-500 px-3 py-1 font-semibold text-white transition duration-300 hover:bg-yellow-600"
-                  >
-                    Deactivate
-                  </button>
-                )}
-                {account.status === 'Inactive' && (
-                  <button
-                    onClick={() => handleActivateAccount(account)}
-                    className="rounded-lg bg-green-500 px-3 py-1 font-semibold text-white transition duration-300 hover:bg-green-600"
-                  >
-                    Activate
-                  </button>
-                )}
-                {isBranchPortal && account.role === 'branch_staff' && (
-                  <button
-                    onClick={() => setPendingMfaReset(account)}
-                    className="rounded-lg bg-purple-600 px-3 py-1 font-semibold text-white transition duration-300 hover:bg-purple-700"
-                  >
-                    Reset MFA
-                  </button>
-                )}
-                <button
-                  onClick={() => handleDeleteAccount(account)}
-                  className="rounded-lg bg-red-500 px-3 py-1 font-semibold text-white transition duration-300 hover:bg-red-600"
-                >
-                  Delete
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
+              ))}
+              <button
+                type="button"
+                disabled={currentPage === totalPages}
+                onClick={() => setAccountPages((prev) => ({ ...prev, [pageKey]: currentPage + 1 }))}
+                className="rounded-md bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-700 transition hover:bg-gray-200 disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
-  const renderAccountTable = (title, rows, primaryLabel = 'Username') => (
+  const renderAccountTable = (title, rows, primaryLabel = 'Username', pageKey = null) => (
     <div className="mb-6 overflow-hidden rounded-xl bg-white shadow-lg">
       <div className="bg-primary px-6 py-4">
         <h3 className="text-xl font-bold text-white">{title}</h3>
       </div>
-      {renderAccountRows(rows, primaryLabel)}
+      {renderAccountRows(rows, primaryLabel, pageKey)}
     </div>
   );
 
@@ -774,7 +835,7 @@ const Accounts = () => {
                     </span>
                   </div>
                 </div>
-                {renderAccountRows(rows)}
+                {renderAccountRows(rows, 'Username', `branch-${branchName}`)}
               </section>
             );
           })}
@@ -823,9 +884,9 @@ const Accounts = () => {
         </div>
       )}
 
-      {!isBranchPortal && renderAccountTable('Main Admin Accounts', adminAccounts)}
+      {!isBranchPortal && renderAccountTable('Main Admin Accounts', adminAccounts, 'Username', 'main_admin')}
       {renderBranchAccountTable()}
-      {renderAccountTable('Citizen Accounts', citizenAccounts, 'Full Name')}
+      {renderAccountTable('Citizen Accounts', citizenAccounts, 'Full Name', 'citizen')}
       </div>
 
       <div className="flex flex-col gap-3 border-t border-gray-100 px-2 py-4 sm:flex-row sm:items-center sm:justify-between">

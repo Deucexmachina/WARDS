@@ -6,6 +6,7 @@ import CollectionReportView from '../../components/admin/CollectionReportView';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 const PAYMENT_TIME_ZONE = 'Asia/Manila';
+const LEDGER_PER_PAGE = 5;
 
 const parsePaymentDate = (value) => {
   if (!value) return null;
@@ -276,6 +277,7 @@ const PaymentManagement = () => {
   const [pageError, setPageError] = useState('');
   const [messageModal, setMessageModal] = useState(null);
   const [successMessage, setSuccessMessage] = useState('');
+  const [ledgerPages, setLedgerPages] = useState({});
   const currentMonthValue = useMemo(() => getMonthValueFromDate(), []);
   const [selectedMonth, setSelectedMonth] = useState(() => getMonthValueFromDate());
   const collectionMonthLabel = useMemo(() => getCollectionMonthLabelFromValue(selectedMonth), [selectedMonth]);
@@ -288,6 +290,10 @@ const PaymentManagement = () => {
   useEffect(() => {
     fetchPayments();
   }, []);
+
+  useEffect(() => {
+    setLedgerPages({});
+  }, [filter, selectedMonth]);
 
   const closeRemittanceActionModal = () => {
     if (remittanceActionLoading) {
@@ -932,36 +938,36 @@ const PaymentManagement = () => {
             </button>
           </div>
         </div>
-        <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200">
-          <table className="min-w-[1650px] divide-y divide-slate-200 text-sm">
-            <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
+        <div className="mt-5 rounded-2xl border border-slate-200 overflow-hidden">
+          <table className="w-full table-auto divide-y divide-slate-200 text-xs">
+            <thead className="bg-slate-50 text-left text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">
               <tr>
-                <th className="px-5 py-4">Branch</th>
-                <th className="px-5 py-4">Payments</th>
-                <th className="px-5 py-4 text-right">Verified Collection</th>
-                <th className="px-5 py-4 text-right">Remitted To Main</th>
-                <th className="px-5 py-4 text-right">Pending Remittance</th>
-                <th className="px-5 py-4">Remitted By</th>
-                <th className="px-5 py-4">Remitted Date</th>
-                <th className="px-5 py-4">Verified By Main</th>
-                <th className="px-5 py-4">Verified Date</th>
-                <th className="px-5 py-4">Status Mix</th>
+                <th className="px-2 py-2.5">Branch</th>
+                <th className="px-2 py-2.5">Pay</th>
+                <th className="px-2 py-2.5 text-right">Verified</th>
+                <th className="px-2 py-2.5 text-right">Remitted</th>
+                <th className="px-2 py-2.5 text-right">Pending</th>
+                <th className="px-2 py-2.5">By</th>
+                <th className="px-2 py-2.5">Remit Date</th>
+                <th className="px-2 py-2.5">Reviewer</th>
+                <th className="px-2 py-2.5">Review Date</th>
+                <th className="px-2 py-2.5">Mix</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 bg-white">
+            <tbody className="divide-y divide-slate-100">
               {branchSummaries.map((branch) => (
                 <tr key={branch.branch} className="hover:bg-slate-50">
-                  <td className="px-5 py-4 font-bold text-[#0f2f5f]">{branch.branch}</td>
-                  <td className="px-5 py-4 text-slate-700">{branch.totalPayments}</td>
-                  <td className="px-5 py-4 text-right font-bold text-slate-950">{formatCurrency(branch.verifiedAmount)}</td>
-                  <td className="px-5 py-4 text-right font-semibold text-emerald-700">{formatCurrency(branch.remittedAmount)}</td>
-                  <td className="px-5 py-4 text-right font-semibold text-amber-700">{formatCurrency(branch.pendingRemittanceAmount)}</td>
-                  <td className="px-5 py-4 text-slate-700">{branch.remittedBy || 'N/A'}</td>
-                  <td className="px-5 py-4 text-slate-600">{formatBranchRemittanceDate(branch.remittedAt)}</td>
-                  <td className="px-5 py-4 text-slate-700">{branch.verifiedBy || 'Pending Main Review'}</td>
-                  <td className="px-5 py-4 text-slate-600">{formatBranchRemittanceDate(branch.verifiedAt)}</td>
-                  <td className="px-5 py-4 text-slate-600">
-                    {branch.verifiedCount} verified / {branch.pendingCount} pending / {branch.failedCount} failed
+                  <td className="px-2 py-2.5 text-[11px] font-bold text-[#0f2f5f]">{branch.branch}</td>
+                  <td className="px-2 py-2.5 text-slate-700">{branch.totalPayments}</td>
+                  <td className="px-2 py-2.5 text-right text-[11px] font-bold text-slate-950">{formatCurrency(branch.verifiedAmount)}</td>
+                  <td className="px-2 py-2.5 text-right text-[11px] font-semibold text-emerald-700">{formatCurrency(branch.remittedAmount)}</td>
+                  <td className="px-2 py-2.5 text-right text-[11px] font-semibold text-amber-700">{formatCurrency(branch.pendingRemittanceAmount)}</td>
+                  <td className="px-2 py-2.5 text-[11px] text-slate-700">{branch.remittedBy || 'N/A'}</td>
+                  <td className="px-2 py-2.5 text-[10px] text-slate-600">{formatBranchRemittanceDate(branch.remittedAt)}</td>
+                  <td className="px-2 py-2.5 text-[11px] text-slate-700">{branch.verifiedBy || 'Pending'}</td>
+                  <td className="px-2 py-2.5 text-[10px] text-slate-600">{formatBranchRemittanceDate(branch.verifiedAt)}</td>
+                  <td className="px-2 py-2.5 text-[10px] text-slate-600">
+                    {branch.verifiedCount}V / {branch.pendingCount}P / {branch.failedCount}F
                   </td>
                 </tr>
               ))}
@@ -1002,82 +1008,131 @@ const PaymentManagement = () => {
         </div>
 
         <div className="mt-5 space-y-5">
-          {groupedLedgerPayments.map(({ branchName, records }) => (
-            <div key={branchName} className="overflow-hidden rounded-2xl border border-slate-200">
-              <div className="border-b border-slate-200 bg-[#0f2f5f] px-5 py-3 text-white">
-                <p className="text-xs font-black uppercase tracking-[0.22em]">{branchName}</p>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="min-w-[1100px] w-full divide-y divide-slate-200 text-sm">
-                  <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
-                    <tr>
-                      <th className="px-5 py-4">Transaction ID</th>
-                      <th className="px-5 py-4">Taxpayer</th>
-                      <th className="px-5 py-4">Branch</th>
-                      <th className="px-5 py-4 text-right">Amount</th>
-                      <th className="px-5 py-4">Status</th>
-                      <th className="px-5 py-4">Created</th>
-                      <th className="px-5 py-4">Verified</th>
-                      <th className="px-5 py-4">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 bg-white">
-                    {records.map((payment) => {
-                      const status = normalizeStatus(payment.status);
-                      return (
-                        <tr key={payment.id} className="hover:bg-slate-50">
-                          <td className="px-5 py-4 font-mono text-sm font-semibold text-slate-900">{payment.transaction_id || payment.ref_number || 'N/A'}</td>
-                          <td className="px-5 py-4 font-semibold text-slate-900">{payment.taxpayer_name || 'N/A'}</td>
-                          <td className="px-5 py-4 text-slate-600">{branchName}</td>
-                          <td className="px-5 py-4 text-right font-bold text-slate-950">{formatCurrency(payment.amount)}</td>
-                          <td className="px-5 py-4">
-                            <span className={`rounded-full px-3 py-1 text-xs font-bold ${statusStyles[status] || statusStyles.failed}`}>
-                              {getStatusLabel(payment.status)}
-                            </span>
-                          </td>
-                          <td className="px-5 py-4 text-slate-500">
-                            <div className="font-medium text-slate-700">
-                              {formatPaymentDate(payment.created_at, { year: 'numeric', month: 'short', day: 'numeric' })}
-                            </div>
-                            <div className="text-xs text-slate-400">
-                              {formatPaymentDate(payment.created_at, { hour: '2-digit', minute: '2-digit', hour12: true })}
-                            </div>
-                          </td>
-                          <td className="px-5 py-4 text-slate-500">
-                            {payment.verified_at ? (
-                              <>
-                                <div className="font-medium text-slate-700">
-                                  {formatPaymentDate(payment.verified_at, { year: 'numeric', month: 'short', day: 'numeric' })}
-                                </div>
-                                <div className="text-xs text-slate-400">
-                                  {formatPaymentDate(payment.verified_at, { hour: '2-digit', minute: '2-digit', hour12: true })}
-                                </div>
-                              </>
-                            ) : (
-                              'N/A'
-                            )}
-                          </td>
-                          <td className="px-5 py-4">
-                            {status === 'pending' ? (
-                              <button
-                                type="button"
-                                onClick={() => handleVerifyPayment(payment.id)}
-                                className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-emerald-700"
-                              >
-                                Verify
-                              </button>
-                            ) : (
-                              <span className="text-xs font-semibold text-slate-400">Recorded</span>
-                            )}
-                          </td>
+          {groupedLedgerPayments.map(({ branchName, records }) => {
+            const currentPage = ledgerPages[branchName] || 1;
+            const totalPages = Math.ceil(records.length / LEDGER_PER_PAGE);
+            const startIndex = (currentPage - 1) * LEDGER_PER_PAGE;
+            const endIndex = startIndex + LEDGER_PER_PAGE;
+            const pagedRecords = records.slice(startIndex, endIndex);
+            return (
+              <div key={branchName} className="overflow-hidden rounded-2xl border border-slate-200">
+                <div className="border-b border-slate-200 bg-[#0f2f5f] px-5 py-3 text-white">
+                  <p className="text-xs font-black uppercase tracking-[0.22em]">{branchName}</p>
+                </div>
+                <div className="overflow-hidden">
+                  <table className="w-full table-auto divide-y divide-slate-200 text-xs">
+                    <thead className="bg-slate-50 text-left text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                      <tr>
+                        <th className="px-2 py-2.5">Txn ID</th>
+                        <th className="px-2 py-2.5">Taxpayer</th>
+                        <th className="px-2 py-2.5">Branch</th>
+                        <th className="px-2 py-2.5 text-right">Amount</th>
+                        <th className="px-2 py-2.5">Status</th>
+                        <th className="px-2 py-2.5">Created</th>
+                        <th className="px-2 py-2.5">Verified</th>
+                        <th className="px-2 py-2.5">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {pagedRecords.map((payment) => {
+                        const status = normalizeStatus(payment.status);
+                        return (
+                          <tr key={payment.id} className="hover:bg-slate-50">
+                            <td className="px-2 py-2.5 font-mono text-[10px] font-semibold text-slate-900">{payment.transaction_id || payment.ref_number || 'N/A'}</td>
+                            <td className="px-2 py-2.5 text-[11px] font-semibold text-slate-900">{payment.taxpayer_name || 'N/A'}</td>
+                            <td className="px-2 py-2.5 text-[11px] text-slate-600">{branchName}</td>
+                            <td className="px-2 py-2.5 text-right text-[11px] font-bold text-slate-950">{formatCurrency(payment.amount)}</td>
+                            <td className="px-2 py-2.5">
+                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${statusStyles[status] || statusStyles.failed}`}>
+                                {getStatusLabel(payment.status)}
+                              </span>
+                            </td>
+                            <td className="px-2 py-2.5 text-slate-500">
+                              <div className="text-[11px] font-medium text-slate-700">
+                                {formatPaymentDate(payment.created_at, { year: 'numeric', month: 'short', day: 'numeric' })}
+                              </div>
+                              <div className="text-[10px] text-slate-400">
+                                {formatPaymentDate(payment.created_at, { hour: '2-digit', minute: '2-digit', hour12: true })}
+                              </div>
+                            </td>
+                            <td className="px-2 py-2.5 text-slate-500">
+                              {payment.verified_at ? (
+                                <>
+                                  <div className="text-[11px] font-medium text-slate-700">
+                                    {formatPaymentDate(payment.verified_at, { year: 'numeric', month: 'short', day: 'numeric' })}
+                                  </div>
+                                  <div className="text-[10px] text-slate-400">
+                                    {formatPaymentDate(payment.verified_at, { hour: '2-digit', minute: '2-digit', hour12: true })}
+                                  </div>
+                                </>
+                              ) : (
+                                'N/A'
+                              )}
+                            </td>
+                            <td className="px-2 py-2.5">
+                              {status === 'pending' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleVerifyPayment(payment.id)}
+                                  className="rounded-md bg-emerald-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-emerald-700"
+                                >
+                                  Verify
+                                </button>
+                              ) : (
+                                <span className="text-[10px] font-semibold text-slate-400">Recorded</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {Array.from({ length: LEDGER_PER_PAGE - pagedRecords.length }).map((_, i) => (
+                        <tr key={`empty-${i}`} className="h-[43px]">
+                          <td colSpan="8" className="px-2 py-2.5">&nbsp;</td>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3 text-[11px] font-semibold text-slate-600">
+                    <span>{startIndex + 1}-{Math.min(endIndex, records.length)} of {records.length}</span>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        disabled={currentPage === 1}
+                        onClick={() => setLedgerPages((prev) => ({ ...prev, [branchName]: currentPage - 1 }))}
+                        className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-700 transition hover:bg-slate-200 disabled:opacity-40"
+                      >
+                        Prev
+                      </button>
+                      {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                        <button
+                          key={page}
+                          type="button"
+                          onClick={() => setLedgerPages((prev) => ({ ...prev, [branchName]: page }))}
+                          className={`rounded-md px-2 py-1 text-[10px] font-bold transition ${
+                            page === currentPage
+                              ? 'bg-[#0f2f5f] text-white'
+                              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                          }`}
+                        >
+                          {page}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        disabled={currentPage === totalPages}
+                        onClick={() => setLedgerPages((prev) => ({ ...prev, [branchName]: currentPage + 1 }))}
+                        className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-700 transition hover:bg-slate-200 disabled:opacity-40"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
           {!filteredPayments.length ? (
             <div className="rounded-2xl border border-slate-200 bg-white px-5 py-10 text-center text-sm text-slate-500">No payments match the selected filter for {collectionMonthLabel}.</div>
           ) : null}
@@ -1100,63 +1155,63 @@ const PaymentManagement = () => {
           </button>
         </div>
 
-        <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200">
-          <table className="min-w-[1000px] w-full divide-y divide-slate-200 text-sm">
-            <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
+        <div className="mt-5 rounded-2xl border border-slate-200 overflow-hidden">
+          <table className="w-full table-auto divide-y divide-slate-200 text-xs">
+            <thead className="bg-slate-50 text-left text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">
               <tr>
-                <th className="px-5 py-4">Remittance No.</th>
-                <th className="px-5 py-4">Branch</th>
-                <th className="px-5 py-4">Payments</th>
-                <th className="px-5 py-4 text-right">Amount</th>
-                <th className="px-5 py-4">Report</th>
-                <th className="px-5 py-4">Status</th>
-                <th className="px-5 py-4">Submitted</th>
-                <th className="px-5 py-4">Actions</th>
+                <th className="px-2 py-2.5">Remit No.</th>
+                <th className="px-2 py-2.5">Branch</th>
+                <th className="px-2 py-2.5">Pay</th>
+                <th className="px-2 py-2.5 text-right">Amount</th>
+                <th className="px-2 py-2.5">Report</th>
+                <th className="px-2 py-2.5">Status</th>
+                <th className="px-2 py-2.5">Submitted</th>
+                <th className="px-2 py-2.5">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 bg-white">
+            <tbody className="divide-y divide-slate-100">
               {pendingReviewRemittances.map((remittance) => (
                 <tr key={remittance.id} className="hover:bg-slate-50">
-                  <td className="px-5 py-4 font-mono text-sm font-semibold text-slate-900">{remittance.remittance_number}</td>
-                  <td className="px-5 py-4 font-semibold text-slate-700">{branchLookup[remittance.branch_id] || formatBranchLabel(remittance.branch_name, remittance.branch_id)}</td>
-                  <td className="px-5 py-4 text-slate-600">{remittance.payment_count}</td>
-                  <td className="px-5 py-4 text-right font-bold text-slate-950">{formatCurrency(remittance.total_amount)}</td>
-                  <td className="px-5 py-4 text-sm">
+                  <td className="px-2 py-2.5 font-mono text-[10px] font-semibold text-slate-900">{remittance.remittance_number}</td>
+                  <td className="px-2 py-2.5 text-[11px] font-semibold text-slate-700">{branchLookup[remittance.branch_id] || formatBranchLabel(remittance.branch_name, remittance.branch_id)}</td>
+                  <td className="px-2 py-2.5 text-slate-600">{remittance.payment_count}</td>
+                  <td className="px-2 py-2.5 text-right text-[11px] font-bold text-slate-950">{formatCurrency(remittance.total_amount)}</td>
+                  <td className="px-2 py-2.5">
                     {remittance.report_file_name ? (
                       <button
                         type="button"
                         onClick={() => downloadRemittanceReport(remittance)}
-                        className="rounded-xl bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 transition hover:bg-blue-100"
+                        className="rounded-lg bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-700 transition hover:bg-blue-100"
                       >
-                        Download
+                        DL
                       </button>
                     ) : (
-                      <span className="text-slate-400">No report</span>
+                      <span className="text-[10px] text-slate-400">None</span>
                     )}
                   </td>
-                  <td className="px-5 py-4">
-                    <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700 ring-1 ring-amber-200">
+                  <td className="px-2 py-2.5">
+                    <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700 ring-1 ring-amber-200">
                       {remittance.status}
                     </span>
                   </td>
-                  <td className="px-5 py-4 text-slate-500">
+                  <td className="px-2 py-2.5 text-[10px] text-slate-500">
                     {formatPaymentDate(remittance.submitted_at, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                   </td>
-                  <td className="px-5 py-4">
-                    <div className="flex flex-wrap gap-2">
+                  <td className="px-2 py-2.5">
+                    <div className="flex flex-wrap gap-1">
                       <button
                         type="button"
                         onClick={() => openRemittanceActionModal(remittance, 'accept')}
-                        className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-emerald-700"
+                        className="rounded-md bg-emerald-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-emerald-700"
                       >
                         Accept
                       </button>
                       <button
                         type="button"
                         onClick={() => openRemittanceActionModal(remittance, 'reject')}
-                        className="rounded-xl bg-rose-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-rose-700"
+                        className="rounded-md bg-rose-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-rose-700"
                       >
-                        Delete
+                        Reject
                       </button>
                     </div>
                   </td>

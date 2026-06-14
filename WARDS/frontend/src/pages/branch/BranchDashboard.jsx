@@ -241,7 +241,7 @@ const BranchDashboard = () => {
 
       <div className="bg-white rounded-xl shadow p-6">
         <h2 className="text-xl font-bold text-gray-900 mb-4">Recent Queue Activity</h2>
-        <div className="overflow-x-auto">
+        <div className="overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-gray-50">
               <tr>
@@ -486,7 +486,7 @@ const BranchDashboard = () => {
         ) : recentDiscrepancies.length === 0 ? (
           <div className="py-8 text-center text-gray-500">No discrepancy reports submitted for this branch yet.</div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-gray-50">
                 <tr>

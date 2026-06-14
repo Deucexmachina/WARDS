@@ -1130,8 +1130,8 @@ const PayTaxesRPT = () => {
                   {!showPaymentOptionStage ? (
                     <OutlineCard title={language === 'en' ? 'Possible properties you might own' : 'Mga posibleng property na Pagmamay-ari mo'}>
                       <div className="overflow-hidden rounded-[24px] border border-slate-200">
-                        <div className="overflow-x-auto">
-                          <table className="min-w-full divide-y divide-slate-200 text-sm">
+                        <div className="overflow-hidden">
+                          <table className="w-full divide-y divide-slate-200 text-sm">
                             <thead className="bg-white text-slate-500">
                               <tr>
                                 <th className="px-4 py-3 text-left font-semibold">
@@ -1235,8 +1235,8 @@ const PayTaxesRPT = () => {
                       </div>
 
                       <div className="overflow-hidden rounded-[24px] border border-slate-200">
-                        <div className="overflow-x-auto">
-                          <table className="min-w-full divide-y divide-slate-200 text-sm">
+                        <div className="overflow-hidden">
+                          <table className="w-full divide-y divide-slate-200 text-sm">
                             <thead className="bg-white text-slate-500">
                               <tr>
                                 <th className="px-4 py-3 text-left font-semibold">{language === 'en' ? 'Tax Declaration No.' : 'Tax Declaration No.'}</th>

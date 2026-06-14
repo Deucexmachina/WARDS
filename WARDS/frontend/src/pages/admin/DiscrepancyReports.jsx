@@ -216,8 +216,8 @@ const DiscrepancyReports = () => {
         ) : reports.length === 0 ? (
           <div className="py-12 text-center text-gray-500">No discrepancy reports submitted yet.</div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
+          <div className="overflow-hidden rounded-2xl border border-gray-200">
+            <table className="w-full table-auto text-sm">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-4 py-3 text-left">Report ID</th>

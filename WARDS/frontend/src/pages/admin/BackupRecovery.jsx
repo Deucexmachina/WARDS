@@ -1123,7 +1123,7 @@ const BackupRecovery = () => {
                 />
               )}
             >
-              <div className="overflow-x-auto">
+              <div className="overflow-hidden">
                 <table className="w-full text-left text-sm">
                   <thead className="border-b text-xs uppercase tracking-[0.16em] text-slate-500">
                     <tr>

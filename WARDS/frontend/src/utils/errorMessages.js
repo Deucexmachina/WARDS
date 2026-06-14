@@ -41,6 +41,10 @@ export const getFriendlyErrorMessage = (error, fallback = 'Something went wrong.
     return 'Your session has expired. Please sign in again.';
   }
   if (status === 403) {
+    const detail = extractDetail(error);
+    if (detail && !isTechnicalMessage(detail)) {
+      return detail;
+    }
     return 'You do not have permission to perform this action.';
   }
   if (status === 404) {

@@ -1517,20 +1517,19 @@ const ReceiptManagement = () => {
         return (
           <>
       <div className="overflow-hidden rounded-2xl border border-slate-200">
-        <div className="overflow-x-auto">
-          <table className="w-full table-fixed text-sm text-slate-700">
-            <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-              <tr>
-                {showReferenceColumn ? (
-                  <th className="whitespace-nowrap px-4 py-3.5 text-left w-[14%]">{referenceLabelText}</th>
-                ) : null}
-                {showTaxpayerColumn ? <th className="whitespace-nowrap px-4 py-3.5 text-left w-[24%]">Taxpayer</th> : null}
-                {showAmountColumn ? <th className="whitespace-nowrap px-4 py-3.5 text-left w-[12%]">Amount</th> : null}
-                <th className="whitespace-nowrap px-4 py-3.5 text-left w-[14%]">Saved By</th>
-                <th className="whitespace-nowrap px-4 py-3.5 text-left w-[16%]">Created</th>
-                {showActionColumn ? <th className="whitespace-nowrap px-4 py-3.5 text-left w-[20%]">Action</th> : null}
-              </tr>
-            </thead>
+        <table className="w-full table-fixed text-sm text-slate-700">
+          <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+            <tr>
+              {showReferenceColumn ? (
+                <th className="whitespace-nowrap px-4 py-3.5 text-left w-[14%]">{referenceLabelText}</th>
+              ) : null}
+              {showTaxpayerColumn ? <th className="whitespace-nowrap px-4 py-3.5 text-left w-[24%]">Taxpayer</th> : null}
+              {showAmountColumn ? <th className="whitespace-nowrap px-4 py-3.5 text-left w-[12%]">Amount</th> : null}
+              <th className="whitespace-nowrap px-4 py-3.5 text-left w-[14%]">Saved By</th>
+              <th className="whitespace-nowrap px-4 py-3.5 text-left w-[16%]">Created</th>
+              {showActionColumn ? <th className="whitespace-nowrap px-4 py-3.5 text-left w-[20%]">Action</th> : null}
+            </tr>
+          </thead>
             <tbody className="divide-y divide-slate-100 bg-white">
               {rows.length === 0 ? (
                 <tr>
@@ -1547,19 +1546,26 @@ const ReceiptManagement = () => {
                     {showTaxpayerColumn ? <td className="px-4 py-4 font-medium text-slate-900">{record.taxpayer_name || 'N/A'}</td> : null}
                     {showAmountColumn ? <td className="px-4 py-4">{record.amount != null ? `P${Number(record.amount).toFixed(2)}` : 'N/A'}</td> : null}
                     <td className="px-4 py-4">{record.uploaded_by || 'N/A'}</td>
-                    <td className="px-4 py-4 text-slate-500">{record.created_at ? formatUtc8DateTime(record.created_at) : 'N/A'}</td>
+                    <td className="px-3 py-3 text-slate-500">
+                      {record.created_at ? (
+                        <>
+                          <p className="text-[11px] font-medium">{formatUtc8DateTime(record.created_at).split(',')[0]}</p>
+                          <p className="text-[10px] text-slate-400">{formatUtc8DateTime(record.created_at).split(',').slice(1).join(',').trim()}</p>
+                        </>
+                      ) : 'N/A'}
+                    </td>
                     {showActionColumn ? (
-                      <td className="px-4 py-4">
-                        <div className="flex items-center gap-2">
+                      <td className="px-2 py-3">
+                        <div className="flex items-center gap-1">
                           <button
                             onClick={() => handleDownloadRecordImage(record.id, record.taxpayer_name)}
-                            className="inline-flex items-center rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white transition hover:bg-blue-700"
+                            className="rounded-md bg-blue-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-blue-700"
                           >
                             Download
                           </button>
                           <button
                             onClick={() => handlePrintRecordImage(record.id)}
-                            className="inline-flex items-center rounded-lg bg-purple-600 px-3 py-1.5 font-semibold text-white transition hover:bg-purple-700"
+                            className="rounded-md bg-purple-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-purple-700"
                           >
                             Print
                           </button>
@@ -1575,9 +1581,9 @@ const ReceiptManagement = () => {
                               ],
                             })}
                             disabled={deletingRecordId === record.id}
-                            className="inline-flex items-center rounded-lg bg-red-600 px-3 py-1.5 font-semibold text-white transition hover:bg-red-700 disabled:opacity-40"
+                            className="rounded-md bg-red-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-red-700 disabled:opacity-40"
                           >
-                            {deletingRecordId === record.id ? 'Deleting...' : 'Delete'}
+                            {deletingRecordId === record.id ? '...' : 'Delete'}
                           </button>
                         </div>
                       </td>
@@ -1588,20 +1594,19 @@ const ReceiptManagement = () => {
             </tbody>
           </table>
         </div>
-      </div>
-      <PaginationControls
-        page={sectionPages[pageKey]}
-        totalPages={totalPages}
-        totalItems={rows.length}
-        onPageChange={(nextPage) => setSectionPages((current) => ({ ...current, [pageKey]: nextPage }))}
-      />
-          </>
-        );
-      })()}
-    </div>
-  );
+        <PaginationControls
+          page={sectionPages[pageKey]}
+          totalPages={totalPages}
+          totalItems={rows.length}
+          onPageChange={(nextPage) => setSectionPages((current) => ({ ...current, [pageKey]: nextPage }))}
+        />
+      </>
+    );
+  })()}
+</div>
+);
 
-  const renderMarketVerifiedRecordSection = (rows) => (
+const renderMarketVerifiedRecordSection = (rows) => (
     <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
       <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div className="space-y-1">
@@ -1630,8 +1635,7 @@ const ReceiptManagement = () => {
         return (
           <>
             <div className="overflow-hidden rounded-2xl border border-slate-200">
-              <div className="overflow-x-auto">
-                <table className="w-full table-fixed text-sm text-slate-700">
+              <table className="w-full table-fixed text-sm text-slate-700">
                   <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
                     <tr>
                       <th className="whitespace-nowrap px-4 py-3.5 text-left w-[10%]">Certificate No.</th>
@@ -1660,18 +1664,25 @@ const ReceiptManagement = () => {
                           <td className="px-4 py-4">{record.market_purpose_of_renewal || 'N/A'}</td>
                           <td className="px-4 py-4">{record.market_valid_until || 'N/A'}</td>
                           <td className="px-4 py-4">{record.uploaded_by || 'N/A'}</td>
-                          <td className="px-4 py-4 text-slate-500">{record.created_at ? formatUtc8DateTime(record.created_at) : 'N/A'}</td>
-                          <td className="px-4 py-4">
-                            <div className="flex items-center gap-2">
+                          <td className="px-3 py-3 text-slate-500">
+                            {record.created_at ? (
+                              <>
+                                <p className="text-[11px] font-medium">{formatUtc8DateTime(record.created_at).split(',')[0]}</p>
+                                <p className="text-[10px] text-slate-400">{formatUtc8DateTime(record.created_at).split(',').slice(1).join(',').trim()}</p>
+                              </>
+                            ) : 'N/A'}
+                          </td>
+                          <td className="px-2 py-3">
+                            <div className="flex items-center gap-1">
                               <button
                                 onClick={() => handleDownloadRecordImage(record.id, record.taxpayer_name)}
-                                className="inline-flex items-center rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white transition hover:bg-blue-700"
+                                className="rounded-md bg-blue-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-blue-700"
                               >
                                 Download
                               </button>
                               <button
                                 onClick={() => handlePrintRecordImage(record.id)}
-                                className="inline-flex items-center rounded-lg bg-purple-600 px-3 py-1.5 font-semibold text-white transition hover:bg-purple-700"
+                                className="rounded-md bg-purple-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-purple-700"
                               >
                                 Print
                               </button>
@@ -1687,9 +1698,9 @@ const ReceiptManagement = () => {
                                   ],
                                 })}
                                 disabled={deletingRecordId === record.id}
-                                className="inline-flex items-center rounded-lg bg-red-600 px-3 py-1.5 font-semibold text-white transition hover:bg-red-700 disabled:opacity-40"
+                                className="rounded-md bg-red-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-red-700 disabled:opacity-40"
                               >
-                                {deletingRecordId === record.id ? 'Deleting...' : 'Delete'}
+                                {deletingRecordId === record.id ? '...' : 'Delete'}
                               </button>
                             </div>
                           </td>
@@ -1699,7 +1710,6 @@ const ReceiptManagement = () => {
                   </tbody>
                 </table>
               </div>
-            </div>
             <PaginationControls
               page={sectionPages[pageKey]}
               totalPages={totalPages}
@@ -1777,20 +1787,19 @@ const ReceiptManagement = () => {
         return (
           <>
       <div className="overflow-hidden rounded-2xl border border-slate-200">
-        <div className="overflow-x-auto">
-          <table className="w-full table-fixed text-sm text-slate-700">
-            <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-              <tr>
-                <th className="whitespace-nowrap px-4 py-3.5 text-left w-[10%]">Request ID</th>
-                <th className="whitespace-nowrap px-4 py-3.5 text-left w-[16%]">Taxpayer</th>
-                <th className="whitespace-nowrap px-4 py-3.5 text-left w-[12%]">Reason</th>
-                <th className="whitespace-nowrap px-4 py-3.5 text-left w-[12%]">Reference</th>
-                <th className="whitespace-nowrap px-4 py-3.5 text-left w-[10%]">Status</th>
-                <th className="whitespace-nowrap px-4 py-3.5 text-left w-[12%]">Processed</th>
-                <th className="whitespace-nowrap px-4 py-3.5 text-left w-[10%]">Completed By</th>
-                <th className="whitespace-nowrap px-4 py-3.5 text-left w-[18%]">Action</th>
-              </tr>
-            </thead>
+        <table className="w-full table-fixed text-sm text-slate-700">
+          <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+            <tr>
+              <th className="whitespace-nowrap px-4 py-3.5 text-left w-[10%]">Request ID</th>
+              <th className="whitespace-nowrap px-4 py-3.5 text-left w-[16%]">Taxpayer</th>
+              <th className="whitespace-nowrap px-4 py-3.5 text-left w-[12%]">Reason</th>
+              <th className="whitespace-nowrap px-4 py-3.5 text-left w-[12%]">Reference</th>
+              <th className="whitespace-nowrap px-4 py-3.5 text-left w-[10%]">Status</th>
+              <th className="whitespace-nowrap px-4 py-3.5 text-left w-[12%]">Processed</th>
+              <th className="whitespace-nowrap px-4 py-3.5 text-left w-[10%]">Completed By</th>
+              <th className="whitespace-nowrap px-4 py-3.5 text-left w-[18%]">Action</th>
+            </tr>
+          </thead>
             <tbody className="divide-y divide-slate-100 bg-white">
               {rows.length === 0 ? (
                 <tr>
@@ -1810,13 +1819,20 @@ const ReceiptManagement = () => {
                         {request.status || 'Done'}
                       </span>
                     </td>
-                    <td className="px-4 py-4 text-slate-500">{request.processedAt ? formatUtc8DateTime(request.processedAt) : 'N/A'}</td>
-                    <td className="px-4 py-4">{request.completedBy || 'N/A'}</td>
-                    <td className="px-4 py-4">
-                      <div className="flex items-center gap-2">
+                    <td className="px-3 py-3 text-slate-500">
+                      {request.processedAt ? (
+                        <>
+                          <p className="text-[11px] font-medium">{formatUtc8DateTime(request.processedAt).split(',')[0]}</p>
+                          <p className="text-[10px] text-slate-400">{formatUtc8DateTime(request.processedAt).split(',').slice(1).join(',').trim()}</p>
+                        </>
+                      ) : 'N/A'}
+                    </td>
+                    <td className="px-3 py-3 text-[11px]">{request.completedBy || 'N/A'}</td>
+                    <td className="px-2 py-3">
+                      <div className="flex items-center gap-1">
                         <button
                           onClick={() => setSelectedCompletedRequest(request)}
-                          className="inline-flex items-center rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white transition hover:bg-blue-700"
+                          className="rounded-md bg-blue-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-blue-700"
                         >
                           View
                         </button>
@@ -1832,9 +1848,9 @@ const ReceiptManagement = () => {
                             ],
                           })}
                           disabled={deletingHistoryId === request.requestId}
-                          className="inline-flex items-center rounded-lg bg-red-600 px-3 py-1.5 font-semibold text-white transition hover:bg-red-700 disabled:opacity-40"
+                          className="rounded-md bg-red-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-red-700 disabled:opacity-40"
                         >
-                          {deletingHistoryId === request.requestId ? 'Deleting...' : 'Delete'}
+                          {deletingHistoryId === request.requestId ? '...' : 'Delete'}
                         </button>
                       </div>
                     </td>
@@ -1844,20 +1860,19 @@ const ReceiptManagement = () => {
             </tbody>
           </table>
         </div>
-      </div>
-      <PaginationControls
-        page={sectionPages[pageKey]}
-        totalPages={totalPages}
-        totalItems={rows.length}
-        onPageChange={(nextPage) => setSectionPages((current) => ({ ...current, [pageKey]: nextPage }))}
-      />
-          </>
-        );
-      })()}
-    </div>
-  );
+        <PaginationControls
+          page={sectionPages[pageKey]}
+          totalPages={totalPages}
+          totalItems={rows.length}
+          onPageChange={(nextPage) => setSectionPages((current) => ({ ...current, [pageKey]: nextPage }))}
+        />
+      </>
+    );
+  })()}
+</div>
+);
 
-  const handleCancelScan = () => {
+const handleCancelScan = () => {
     if (previewUrl) {
       URL.revokeObjectURL(previewUrl);
     }

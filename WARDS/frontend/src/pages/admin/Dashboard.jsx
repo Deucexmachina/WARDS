@@ -619,8 +619,8 @@ const Dashboard = () => {
 
       <div className="mb-6 rounded-xl bg-white p-6 shadow-lg">
         <h3 className="mb-4 text-xl font-bold text-primary">Branch Queue Activity</h3>
-        <div className="overflow-x-auto">
-          <table className="min-w-full">
+        <div className="overflow-hidden">
+          <table className="w-full table-auto">
             <thead>
               <tr className="bg-gray-50">
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
@@ -733,8 +733,8 @@ const Dashboard = () => {
                     <span className="rounded-full bg-amber-50 px-3 py-2 text-amber-700 ring-1 ring-amber-100">{branchGroup.pendingCount} pending</span>
                   </div>
                 </div>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full">
+                <div className="overflow-hidden">
+                  <table className="w-full table-auto">
                     <thead>
                       <tr className="bg-white">
                         <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Transaction ID</th>
@@ -860,8 +860,8 @@ const Dashboard = () => {
         {recentDiscrepancies.length === 0 ? (
           <p className="py-8 text-center text-gray-500">No discrepancy reports submitted yet.</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
+          <div className="overflow-hidden">
+            <table className="w-full table-auto text-sm">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-4 py-3 text-left">Report ID</th>

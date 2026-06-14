@@ -307,8 +307,8 @@ const LiveQueueMonitor = () => {
           </div>
 
         {(() => {
-            const configuredWindowCount = Number(queueData.branchInfo?.counters || Object.keys(queueData.windows).length || 1);
-            const windowCount = Math.max(configuredWindowCount, Object.keys(queueData.windows).length);
+            const windowCount = Object.keys(queueData.windows).length || 1;
+            const isSingleWindow = windowCount === 1;
             const isDenseLayout = windowCount >= 5;
             const isUltraDenseLayout = windowCount >= 6;
             
@@ -347,32 +347,32 @@ const LiveQueueMonitor = () => {
                   .sort(([, a], [, b]) => (a.assigned_window_number || 0) - (b.assigned_window_number || 0))
                   .map(([windowKey, windowData]) => {
                   const currentServing = windowData.serving?.[0] || null;
-                  const waitingQueues = windowData.waiting?.slice(0, isUltraDenseLayout ? 1 : (isDenseLayout ? 2 : 8)) || [];
+                  const waitingQueues = windowData.waiting?.slice(0, isUltraDenseLayout ? 1 : (isDenseLayout ? 2 : 2)) || [];
                   const remainingWaitingCount = Math.max(0, (windowData.waiting?.length || 0) - waitingQueues.length);
                   
                   return (
-                    <div key={windowKey} className="flex min-h-0 flex-col overflow-hidden rounded-2xl bg-white shadow-lg">
+                    <div key={windowKey} className={`flex min-h-0 flex-col overflow-hidden rounded-2xl bg-white shadow-lg ${isSingleWindow ? 'mx-auto h-full w-full max-w-4xl' : ''}`}>
                       {/* Blue Top Banner */}
-                      <div className={`bg-blue-600 text-white ${isUltraDenseLayout ? 'px-2 py-2.5' : isDenseLayout ? 'px-3 py-3' : 'px-3 py-4 sm:px-4'}`}>
-                        <h3 className={`text-center font-bold ${isUltraDenseLayout ? 'text-sm sm:text-base' : isDenseLayout ? 'text-base sm:text-lg' : 'text-lg sm:text-xl'}`}>
+                      <div className={`bg-blue-600 text-white ${isUltraDenseLayout ? 'px-2 py-2.5' : isDenseLayout ? 'px-3 py-3' : isSingleWindow ? 'px-3 py-2.5' : 'px-3 py-4 sm:px-4'}`}>
+                        <h3 className={`text-center font-bold ${isUltraDenseLayout ? 'text-sm sm:text-base' : isDenseLayout ? 'text-base sm:text-lg' : isSingleWindow ? 'text-base' : 'text-lg sm:text-xl'}`}>
                           {getWindowLabel(windowKey, windowData)}
                         </h3>
                       </div>
                       
                       {/* NOW SERVING Section */}
-                      <div className={`flex flex-1 items-center justify-center border-b border-gray-200 ${isUltraDenseLayout ? 'p-2.5 sm:p-3' : isDenseLayout ? 'p-3 sm:p-4' : 'p-4 sm:p-5 lg:p-6'}`}>
+                      <div className={`flex items-center justify-center border-b border-gray-200 ${isUltraDenseLayout ? 'p-2.5 sm:p-3' : isDenseLayout ? 'p-3 sm:p-4' : isSingleWindow ? 'p-6' : 'p-4 sm:p-5 lg:p-6'}`}>
                         <div className="text-center">
-                          <p className={`font-semibold text-gray-700 ${isUltraDenseLayout ? 'mb-2 text-xs sm:text-sm' : isDenseLayout ? 'mb-3 text-sm sm:text-base' : 'mb-4 text-base sm:text-lg'}`}>NOW SERVING</p>
+                          <p className={`font-semibold text-gray-700 ${isUltraDenseLayout ? 'mb-2 text-xs sm:text-sm' : isDenseLayout ? 'mb-3 text-sm sm:text-base' : isSingleWindow ? 'mb-2 text-sm' : 'mb-4 text-base sm:text-lg'}`}>NOW SERVING</p>
                           {currentServing ? (
                             <div>
-                              <p className={`break-words font-bold text-blue-600 ${isUltraDenseLayout ? 'text-xl sm:text-2xl' : isDenseLayout ? 'text-2xl sm:text-3xl' : 'text-3xl sm:text-4xl'}`}>{currentServing.queue_number}</p>
-                              <div className={`inline-flex rounded-full bg-blue-100 font-bold text-blue-800 ${isUltraDenseLayout ? 'mt-2 px-2.5 py-1 text-[11px] sm:text-xs' : isDenseLayout ? 'mt-3 px-3 py-1.5 text-xs sm:text-sm' : 'mt-3 px-4 py-2 text-sm'}`}>
+                              <p className={`break-words font-bold text-blue-600 ${isUltraDenseLayout ? 'text-xl sm:text-2xl' : isDenseLayout ? 'text-2xl sm:text-3xl' : isSingleWindow ? 'text-2xl' : 'text-3xl sm:text-4xl'}`}>{currentServing.queue_number}</p>
+                              <div className={`inline-flex rounded-full bg-blue-100 font-bold text-blue-800 ${isUltraDenseLayout ? 'mt-2 px-2.5 py-1 text-[11px] sm:text-xs' : isDenseLayout ? 'mt-3 px-3 py-1.5 text-xs sm:text-sm' : isSingleWindow ? 'mt-2 px-3 py-1 text-xs' : 'mt-3 px-4 py-2 text-sm'}`}>
                                 {currentServing.status === 'serving' ? 'SERVING' : 'CALLED'}
                               </div>
                             </div>
                           ) : (
-                            <div className={isUltraDenseLayout ? 'py-1.5' : isDenseLayout ? 'py-2' : 'py-4 sm:py-6'}>
-                              <p className={`font-semibold text-gray-400 ${isUltraDenseLayout ? 'text-lg sm:text-xl' : isDenseLayout ? 'text-xl sm:text-2xl' : 'text-2xl sm:text-3xl'}`}>NO QUEUE</p>
+                            <div className={isUltraDenseLayout ? 'py-1.5' : isDenseLayout ? 'py-2' : isSingleWindow ? 'py-6' : 'py-4 sm:py-6'}>
+                              <p className={`font-semibold text-gray-400 ${isUltraDenseLayout ? 'text-lg sm:text-xl' : isDenseLayout ? 'text-xl sm:text-2xl' : isSingleWindow ? 'text-xl' : 'text-2xl sm:text-3xl'}`}>NO QUEUE</p>
                               <p className={`mt-1.5 text-gray-500 ${isUltraDenseLayout ? 'text-[11px] sm:text-xs' : isDenseLayout ? 'text-xs sm:text-sm' : 'text-sm'}`}>Waiting for next customer</p>
                             </div>
                           )}
@@ -380,9 +380,9 @@ const LiveQueueMonitor = () => {
                       </div>
                       
                       {/* WAITING QUEUE Section */}
-                      <div className={`min-h-0 border-b border-gray-200 ${isUltraDenseLayout ? 'p-2.5 sm:p-3' : isDenseLayout ? 'p-3 sm:p-4' : 'p-4 sm:p-5 lg:p-6'}`}>
+                      <div className={`min-h-0 border-b border-gray-200 ${isUltraDenseLayout ? 'p-2.5 sm:p-3' : isDenseLayout ? 'p-3 sm:p-4' : isSingleWindow ? 'p-4' : 'p-4 sm:p-5 lg:p-6'}`}>
                         <div className={isUltraDenseLayout ? 'mb-2' : isDenseLayout ? 'mb-3' : 'mb-4'}>
-                          <p className={`font-semibold text-gray-700 ${isUltraDenseLayout ? 'text-xs sm:text-sm' : isDenseLayout ? 'text-sm sm:text-base' : 'text-base sm:text-lg'}`}>Waiting Queue</p>
+                          <p className={`font-semibold text-gray-700 ${isUltraDenseLayout ? 'text-xs sm:text-sm' : isDenseLayout ? 'text-sm sm:text-base' : isSingleWindow ? 'text-sm' : 'text-base sm:text-lg'}`}>Waiting Queue</p>
                           <p className={`text-gray-500 ${isUltraDenseLayout ? 'text-[11px] sm:text-xs' : isDenseLayout ? 'text-xs sm:text-sm' : 'text-sm'}`}>{windowData.waiting?.length || 0} in line</p>
                         </div>
                         <div className={`space-y-2 ${isDenseLayout ? 'max-h-full overflow-hidden' : ''}`}>
@@ -392,21 +392,21 @@ const LiveQueueMonitor = () => {
                                 <div
                                   key={index}
                                   className={`flex flex-wrap items-center justify-between gap-3 rounded-lg border border-yellow-200 bg-yellow-50 ${
-                                    isUltraDenseLayout ? 'p-2.5' : isDenseLayout ? 'p-3' : 'p-4 sm:p-5'
+                                    isUltraDenseLayout ? 'p-2.5' : isDenseLayout ? 'p-3' : isSingleWindow ? 'p-4' : 'p-4 sm:p-5'
                                   }`}
                                 >
                                   <div className={`flex min-w-0 items-center ${isUltraDenseLayout ? 'gap-2.5' : isDenseLayout ? 'gap-3' : 'gap-4'}`}>
                                     <div className={`flex items-center justify-center rounded-full bg-yellow-200 font-bold text-yellow-800 ${
-                                      isUltraDenseLayout ? 'h-7 w-7 text-[11px]' : isDenseLayout ? 'h-8 w-8 text-xs' : 'h-10 w-10 text-sm'
+                                      isUltraDenseLayout ? 'h-7 w-7 text-[11px]' : isDenseLayout ? 'h-8 w-8 text-xs' : isSingleWindow ? 'h-10 w-10 text-sm' : 'h-10 w-10 text-sm'
                                     }`}>
                                       {index + 1}
                                     </div>
-                                    <p className={`min-w-0 break-all font-bold text-gray-800 ${isUltraDenseLayout ? 'text-base sm:text-lg' : isDenseLayout ? 'text-lg sm:text-xl' : 'text-xl sm:text-2xl'}`}>
+                                    <p className={`min-w-0 break-all font-bold text-gray-800 ${isUltraDenseLayout ? 'text-base sm:text-lg' : isDenseLayout ? 'text-lg sm:text-xl' : isSingleWindow ? 'text-xl' : 'text-xl sm:text-2xl'}`}>
                                       {queue.queue_number}
                                     </p>
                                   </div>
                                   <div className={`rounded-full bg-yellow-100 font-bold text-yellow-700 ${
-                                    isUltraDenseLayout ? 'px-2.5 py-1 text-[11px] sm:text-xs' : isDenseLayout ? 'px-3 py-1 text-xs sm:text-sm' : 'px-4 py-2 text-sm'
+                                    isUltraDenseLayout ? 'px-2.5 py-1 text-[11px] sm:text-xs' : isDenseLayout ? 'px-3 py-1 text-xs sm:text-sm' : isSingleWindow ? 'px-4 py-2 text-sm' : 'px-4 py-2 text-sm'
                                   }`}>
                                     Waiting
                                   </div>

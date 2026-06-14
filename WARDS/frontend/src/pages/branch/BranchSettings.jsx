@@ -1111,8 +1111,8 @@ const BranchSettings = () => {
         </div>
 
         {historyState.items.length ? (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
+          <div className="rounded-xl border border-gray-200 overflow-hidden">
+            <table className="w-full table-auto text-sm">
               <thead className="bg-gray-50">
                 <tr>
                   {['Entry', 'Type', 'When', 'Changed By', 'Actions'].map((h) => (

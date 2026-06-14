@@ -266,8 +266,8 @@ export const ComparisonGrid = ({ title, subtitle, rows = [], formatter = (value)
 
   return (
     <SectionCard title={title} subtitle={subtitle}>
-      <div className="overflow-x-auto">
-        <table className="min-w-full text-sm">
+      <div className="">
+        <table className="w-full table-auto text-sm">
           <thead className="bg-slate-50">
             <tr>
               <th className="px-4 py-3 text-left font-semibold text-slate-600">Metric</th>

@@ -377,8 +377,8 @@ const DetailSectionCard = ({ section }) => (
 
     <div className="px-4 py-4 sm:px-6 sm:py-5">
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70">
-        <div className="overflow-x-auto">
-          <table className="min-w-[980px] w-full table-fixed text-sm">
+        <div className="">
+          <table className="w-full table-auto text-sm">
             <colgroup>
               <col className="w-[16%]" />
               <col className="w-[11%]" />

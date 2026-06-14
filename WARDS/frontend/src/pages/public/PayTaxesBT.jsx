@@ -637,8 +637,8 @@ const PayTaxesBT = () => {
                   </div>
                 </div>
 
-                <div className="mt-4 overflow-x-auto rounded-[28px] border border-slate-200">
-                  <table className="min-w-[1100px] w-full text-sm">
+                <div className="mt-4  rounded-[28px] border border-slate-200">
+                  <table className="w-full table-auto text-sm">
                     <thead className="bg-[#203e63] text-white">
                       <tr>
                         <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">{text.tableTracking}</th>

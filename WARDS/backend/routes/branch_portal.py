@@ -13,9 +13,9 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError
 
-from database.models import ActivityLog, Announcement, AnnouncementAttachment, AnnouncementView, Branch, BranchStaff, BusinessTaxApplication, CollectionAccount, Memo, MemoView, Payment, Policy, PolicyView, Queue, QueueHistory, ReceiptRequest, ReceiptRequestHistory, Remittance, RemittanceItem, get_db
+from database.models import ActivityLog, Announcement, AnnouncementAttachment, AnnouncementView, Branch, BranchStaff, BusinessTaxApplication, CollectionAccount, Memo, MemoView, Payment, Policy, PolicyView, Queue, QueueHistory, ReceiptRequest, ReceiptRequestHistory, Remittance, RemittanceItem, Service, get_db
 from middleware.branch_auth import get_current_branch_staff, require_any_branch_staff
 from utils.file_delivery import deliver_file_response
 from utils.file_validation import validate_upload_file
@@ -29,7 +29,7 @@ from utils.announcement_attachments import (
 from services.email_service import send_payment_receipt_email
 from routes.payments import apply_business_tax_application_security_fields, revert_linked_request_status_for_declined_payment, update_linked_request_status
 from utils.field_crypto import apply_announcement_view_security, apply_memo_security, apply_memo_view_security, apply_payment_security, apply_queue_security, apply_receipt_request_security, collection_account_number_value, collection_account_value, decrypt_optional_value, find_announcement_view, find_memo_view, get_announcement_viewed_ids, get_decrypted_or_raw, get_memo_viewed_ids, hash_aware_any, hash_aware_match, hash_optional_value, queue_value, remittance_numeric_value, remittance_value
-from utils.security_validation import format_tin
+from utils.security_validation import format_tin, normalize_citizen_full_name, normalize_ph_contact_number
 from utils.branch_system_settings import get_branch_setting_value
 from utils.branch_window_config import (
     default_assigned_window_number as resolve_default_assigned_window_number,
@@ -41,6 +41,15 @@ from utils.branch_window_config import (
     normalize_service_window as normalize_window_service_code,
 )
 from utils.system_settings import SYSTEM_DISABLED_MESSAGE, BRANCH_QUEUE_DISABLED_MESSAGE, get_setting_value
+from utils.branch_appointment_settings import get_window_capacity_snapshot, get_branch_immediate_queue_availability
+from routes.public import (
+    generate_next_queue_number,
+    calculate_immediate_wait_metrics,
+    get_service_processing_time_minutes,
+    get_window_scoped_queue_snapshot,
+    ACTIVE_PUBLIC_QUEUE_STATUSES,
+    get_branch_configured_service_names,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -1549,6 +1558,131 @@ async def call_next_queue(
                 queue_id,
             )
             raise
+
+
+class WalkInRegistration(BaseModel):
+    service_type: str
+    taxpayer_name: str
+    contact_number: Optional[str] = None
+
+
+@router.post("/queue/walk-in")
+async def register_walk_in_queue(
+    request: Request,
+    registration: WalkInRegistration,
+    current_staff: BranchStaff = Depends(get_current_branch_staff),
+    db: Session = Depends(get_db),
+):
+    ensure_branch_queue_operations_enabled(db, current_staff.branch_id)
+    if is_queue_window_staff(current_staff):
+        staff_service_window = infer_service_window(current_staff.service_window)
+        enabled_services = get_branch_setting_value(db, "enabledServices", current_staff.branch_id) or []
+        enabled_service_windows = {infer_service_window(s) for s in enabled_services}
+        if staff_service_window not in enabled_service_windows:
+            raise HTTPException(
+                status_code=403,
+                detail="This Service Window is currently disabled. New queue registrations are not allowed until the window is re-enabled by a Branch Admin.",
+            )
+
+    branch = db.query(Branch).filter(Branch.id == current_staff.branch_id, Branch.status == "Active").first()
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+
+    configured_services = get_branch_configured_service_names(db, current_staff.branch_id)
+    if not configured_services:
+        raise HTTPException(status_code=403, detail=BRANCH_QUEUE_DISABLED_MESSAGE)
+
+    normalized_service_type = infer_service_window(registration.service_type)
+    if normalized_service_type not in configured_services:
+        raise HTTPException(status_code=400, detail="Invalid service type selected.")
+
+    if is_queue_window_staff(current_staff):
+        queue_window = infer_service_window(registration.service_type)
+        if queue_window != current_staff.service_window:
+            raise HTTPException(status_code=403, detail="Selected service does not belong to your assigned queue window.")
+
+    active_queue_count = db.query(Queue).filter(
+        Queue.branch_id == current_staff.branch_id,
+        hash_aware_any(Queue, "status", ACTIVE_PUBLIC_QUEUE_STATUSES),
+    ).count()
+    max_queue_per_branch = get_branch_setting_value(db, "maxQueuePerBranch", current_staff.branch_id)
+    if active_queue_count >= max_queue_per_branch:
+        raise HTTPException(status_code=403, detail="This branch has reached the current queue capacity limit.")
+
+    window_capacity = get_window_capacity_snapshot(db, branch_id=current_staff.branch_id, service_type=registration.service_type)
+    if window_capacity and window_capacity["is_full"]:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Queue registration failed: The {window_capacity['window_label']} has reached its maximum capacity of {window_capacity['max_capacity']}. Queueing for this window is temporarily closed.",
+        )
+
+    immediate_availability = get_branch_immediate_queue_availability(db, branch=branch, service_type=registration.service_type)
+    if not immediate_availability.get("is_available"):
+        raise HTTPException(
+            status_code=400,
+            detail=immediate_availability.get("message") or "This branch is currently unavailable for the selected queue service based on its published operating schedule.",
+        )
+
+    branch_name = get_decrypted_or_raw(branch, "name") or branch.name
+    queue_number = generate_next_queue_number(db, branch_name, "immediate")
+
+    service = db.query(Service).filter(hash_aware_match(Service, "name", registration.service_type), Service.is_active == True).first()
+    avg_processing_time = get_service_processing_time_minutes(service, db, current_staff.branch_id)
+    queue_snapshot = get_window_scoped_queue_snapshot(db, current_staff.branch_id, registration.service_type)
+    wait_metrics = calculate_immediate_wait_metrics(
+        branch=branch,
+        average_processing_time=avg_processing_time,
+        waiting_count=queue_snapshot["waiting_count"],
+        serving_count=queue_snapshot["serving_count"],
+    )
+    estimated_wait = wait_metrics["estimated_wait_time"]
+
+    validated_name = normalize_citizen_full_name(registration.taxpayer_name)
+
+    validated_contact = None
+    if registration.contact_number:
+        validated_contact = normalize_ph_contact_number(registration.contact_number)
+
+    new_queue = Queue(
+        queue_number=queue_number,
+        branch_id=current_staff.branch_id,
+        service_type=registration.service_type,
+        taxpayer_name=validated_name,
+        contact_number=validated_contact,
+        queue_type="immediate",
+        status="Waiting",
+        estimated_wait_time=estimated_wait,
+        recommended_arrival=wait_metrics["recommended_arrival"],
+    )
+    apply_queue_security(new_queue)
+
+    persisted = False
+    for attempt in range(2):
+        db.add(new_queue)
+        try:
+            db.commit()
+            db.refresh(new_queue)
+            persisted = bool(new_queue.id)
+            if persisted:
+                break
+        except IntegrityError as exc:
+            db.rollback()
+            integrity_message = str(getattr(exc, "orig", exc)).lower()
+            if attempt == 0:
+                new_queue.queue_number = generate_next_queue_number(db, branch_name, "immediate")
+                apply_queue_security(new_queue)
+                continue
+            raise HTTPException(status_code=409, detail="Queue registration failed. Please try again.")
+        except Exception as exc:
+            db.rollback()
+            raise HTTPException(status_code=500, detail="Queue registration failed. Please try again.") from exc
+
+    if not persisted:
+        raise HTTPException(status_code=500, detail="Queue registration failed. Please try again.")
+
+    log_branch_action(db, current_staff, "Walk-in Registered", f"Registered walk-in queue {queue_value(new_queue, 'queue_number')}", request.client.host)
+    service_window = normalize_service_window_for_branch(db, current_staff.branch_id, queue_value(new_queue, "service_type"))
+    return serialize_branch_queue(db, new_queue, current_staff.branch_id, assigned_window_number=get_effective_assigned_window_number(db, current_staff, service_window))
 
 
 @router.post("/queue/{queue_id}/serve")

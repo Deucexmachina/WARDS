@@ -5,7 +5,7 @@ import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 import { isAnnouncementActive } from '../../utils/queueAnnouncement';
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 5;
 const DEFAULT_DISABLED_MESSAGE = 'This service is currently unavailable because it has been disabled by system administration.';
 const ACTIVE_QUEUE_STATUSES = ['appointment', 'waiting', 'called', 'serving'];
 
@@ -451,6 +451,7 @@ const QueueSection = ({
   now,
   skippedOnly = false,
   canManageQueues = true,
+  headerAction = null,
 }) => {
   const paginated = useMemo(() => paginateQueues(queues, page), [queues, page]);
 
@@ -462,8 +463,13 @@ const QueueSection = ({
             <h2 className="text-2xl font-bold text-primary">{title}</h2>
             <p className="mt-2 text-sm text-slate-500">{description}</p>
           </div>
-          <div className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-slate-700">
-            {queues.length} entr{queues.length === 1 ? 'y' : 'ies'}
+          <div className="flex flex-wrap items-center gap-3">
+            {headerAction}
+            {queues.length > 0 && (
+              <div className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm">
+                {queues.length} entr{queues.length === 1 ? 'y' : 'ies'}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -474,98 +480,103 @@ const QueueSection = ({
         </div>
       ) : (
         <>
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead className="bg-white">
-                <tr className="border-b border-slate-100 text-left text-slate-500">
-                  <th className="px-6 py-3 font-semibold">Queue No.</th>
-                  <th className="px-6 py-3 font-semibold">Taxpayer</th>
-                  <th className="px-6 py-3 font-semibold">Service</th>
-                  <th className="px-6 py-3 font-semibold">Status</th>
-                  <th className="px-6 py-3 font-semibold">Date / Time</th>
-                  {canManageQueues ? (
-                    <th className="px-6 py-3 font-semibold">Actions</th>
-                  ) : null}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {paginated.items.map((queue) => {
-                  const derivedStatus = getDerivedStatus(queue, now);
-                  const relevantDateTime = getRelevantDateTime(queue);
+          <table className="w-full table-auto text-xs">
+            <thead className="bg-white">
+              <tr className="border-b border-slate-100 text-left text-slate-500">
+                <th className="px-3 py-2.5 text-[10px] font-semibold">Queue No.</th>
+                <th className="px-3 py-2.5 text-[10px] font-semibold">Taxpayer</th>
+                <th className="px-3 py-2.5 text-[10px] font-semibold">Service</th>
+                <th className="px-3 py-2.5 text-[10px] font-semibold">Status</th>
+                <th className="px-3 py-2.5 text-[10px] font-semibold">Date / Time</th>
+                {canManageQueues ? (
+                  <th className="px-3 py-2.5 text-[10px] font-semibold">Actions</th>
+                ) : null}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {paginated.items.map((queue) => {
+                const derivedStatus = getDerivedStatus(queue, now);
+                const relevantDateTime = getRelevantDateTime(queue);
 
-                  return (
-                    <tr key={queue.id} className="align-top hover:bg-slate-50/80">
-                      <td className="px-6 py-4">
-                        <p className="font-semibold text-primary">{queue.queue_number}</p>
-                        <p className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-400">
+                return (
+                  <tr key={queue.id} className="align-top hover:bg-slate-50/80">
+                    <td className="px-3 py-2.5">
+                        <p className="text-[11px] font-semibold text-primary">{queue.queue_number}</p>
+                        <p className="mt-0.5 text-[10px] uppercase tracking-[0.18em] text-slate-400">
                           {queueTypeLabels[queue.queue_type] || 'Immediate'}
                         </p>
                       </td>
-                      <td className="px-6 py-4">
-                        <p className="font-medium text-slate-800">{queue.taxpayer_name || 'Walk-in'}</p>
-                        <p className="mt-1 text-xs text-slate-500">{queue.email || queue.contact_number || 'No contact provided'}</p>
+                      <td className="px-3 py-2.5">
+                        <p className="text-[11px] font-medium text-slate-800">{queue.taxpayer_name || 'Walk-in'}</p>
+                        <p className="mt-0.5 text-[10px] text-slate-500">{queue.email || queue.contact_number || 'No contact'}</p>
                       </td>
-                      <td className="px-6 py-4">
-                        <p className="font-medium text-slate-800">{queue.service_type}</p>
+                      <td className="px-3 py-2.5">
+                        <p className="text-[11px] font-medium text-slate-800">{queue.service_type}</p>
                         {queue.estimated_wait_time ? (
-                          <p className="mt-1 text-xs text-slate-500">Estimated wait: {queue.estimated_wait_time} min</p>
+                          <p className="mt-0.5 text-[10px] text-slate-500">~{queue.estimated_wait_time}m</p>
                         ) : null}
                       </td>
-                      <td className="px-6 py-4">
-                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusClasses[derivedStatus] || 'bg-slate-100 text-slate-700'}`}>
+                      <td className="px-3 py-2.5">
+                        <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${statusClasses[derivedStatus] || 'bg-slate-100 text-slate-700'}`}>
                           {getStatusLabel(queue, now)}
                         </span>
                       </td>
-                      <td className="px-6 py-4 text-slate-600">
-                        <p className="font-medium text-slate-700">
+                      <td className="px-3 py-2.5 text-slate-600">
+                        <p className="text-[11px] font-medium text-slate-700">
                           {queue.queue_type === 'appointment' && queue.appointment_time
                             ? formatAppointmentDateTimeLabel(queue.appointment_time)
                             : (relevantDateTime ? formatUtc8DateTime(relevantDateTime) : 'N/A')}
                         </p>
                         {queue.queue_type === 'appointment' && queue.appointment_time ? (
-                          <p className="mt-1 text-xs text-slate-500">Slot: {formatTimeLabel(queue.appointment_time)}</p>
+                          <p className="mt-0.5 text-[10px] text-slate-500">{formatTimeLabel(queue.appointment_time)}</p>
                         ) : null}
                       </td>
                       {canManageQueues ? (
-                        <td className="px-6 py-4">
-                          <div className="flex flex-wrap gap-2">
+                        <td className="px-3 py-2.5">
+                          <div className="flex flex-wrap gap-1">
                             {skippedOnly || derivedStatus === 'skipped' ? (
                               <button
                                 onClick={() => onAction('recall-skipped', queue)}
                                 disabled={queueUnavailable}
-                                className="rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white transition hover:bg-blue-700 disabled:opacity-40"
+                                className="rounded-md bg-blue-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-blue-700 disabled:opacity-40"
                               >
                                 Pull Up
                               </button>
                             ) : (
                               <>
-                                <button
-                                  onClick={() => onAction('serve', queue)}
-                                  disabled={(queue.status || '').toLowerCase() !== 'called' || queueUnavailable}
-                                  className="rounded-lg bg-blue-600 px-3 py-1.5 font-semibold text-white transition hover:bg-blue-700 disabled:opacity-40"
-                                >
-                                  Serve
-                                </button>
-                                <button
-                                  onClick={() => onAction('skip', queue)}
-                                  disabled={!['called', 'serving'].includes((queue.status || '').toLowerCase()) || queueUnavailable}
-                                  className="rounded-lg bg-yellow-500 px-3 py-1.5 font-semibold text-white transition hover:bg-yellow-600 disabled:opacity-40"
-                                >
-                                  Skip
-                                </button>
-                                <button
-                                  onClick={() => onAction('complete', queue)}
-                                  disabled={(queue.status || '').toLowerCase() !== 'serving' || queueUnavailable}
-                                  className="rounded-lg bg-emerald-600 px-3 py-1.5 font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-40"
-                                >
-                                  Complete
-                                </button>
+                                {(queue.status || '').toLowerCase() === 'called' && (
+                                  <button
+                                    onClick={() => onAction('serve', queue)}
+                                    disabled={queueUnavailable}
+                                    className="rounded-md bg-blue-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-blue-700 disabled:opacity-40"
+                                  >
+                                    Serve
+                                  </button>
+                                )}
+                                {['called', 'serving'].includes((queue.status || '').toLowerCase()) && (
+                                  <button
+                                    onClick={() => onAction('skip', queue)}
+                                    disabled={queueUnavailable}
+                                    className="rounded-md bg-yellow-500 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-yellow-600 disabled:opacity-40"
+                                  >
+                                    Skip
+                                  </button>
+                                )}
+                                {(queue.status || '').toLowerCase() === 'serving' && (
+                                  <button
+                                    onClick={() => onAction('complete', queue)}
+                                    disabled={queueUnavailable}
+                                    className="rounded-md bg-emerald-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-emerald-700 disabled:opacity-40"
+                                  >
+                                    Complete
+                                  </button>
+                                )}
                               </>
                             )}
                             <button
                               onClick={() => onDeleteRequest(queue)}
                               disabled={queueUnavailable}
-                              className="rounded-lg bg-red-600 px-3 py-1.5 font-semibold text-white transition hover:bg-red-700 disabled:opacity-40"
+                              className="rounded-md bg-red-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-red-700 disabled:opacity-40"
                             >
                               Delete
                             </button>
@@ -575,9 +586,13 @@ const QueueSection = ({
                     </tr>
                   );
                 })}
+                {Array.from({ length: PAGE_SIZE - paginated.items.length }).map((_, i) => (
+                  <tr key={`empty-${i}`} className="h-[54px]">
+                    <td colSpan={canManageQueues ? 6 : 5} className="px-3 py-2.5">&nbsp;</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
-          </div>
 
           <div className="flex flex-col gap-3 border-t border-slate-100 px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-slate-500">
@@ -981,53 +996,53 @@ const QueueHistorySection = ({
         No completed queue history found for this category.
       </div>
     ) : (
-      <div className="overflow-x-auto">
-        <table className="min-w-full text-sm">
+      <div className="rounded-2xl border border-slate-200 overflow-hidden">
+        <table className="w-full table-auto text-xs">
           <thead className="bg-white">
             <tr className="border-b border-slate-100 text-left text-slate-500">
-              <th className="px-6 py-3 font-semibold">Queue No.</th>
-              <th className="px-6 py-3 font-semibold">Taxpayer</th>
-              <th className="px-6 py-3 font-semibold">Queue Type</th>
-              <th className="px-6 py-3 font-semibold">Service</th>
-              <th className="px-6 py-3 font-semibold">Status</th>
-              <th className="px-6 py-3 font-semibold">Completed At</th>
-              <th className="px-6 py-3 font-semibold">Completed By</th>
-              <th className="px-6 py-3 font-semibold">Action</th>
+              <th className="px-3 py-2.5 text-[10px] font-semibold">Queue No.</th>
+              <th className="px-3 py-2.5 text-[10px] font-semibold">Taxpayer</th>
+              <th className="px-3 py-2.5 text-[10px] font-semibold">Queue Type</th>
+              <th className="px-3 py-2.5 text-[10px] font-semibold">Service</th>
+              <th className="px-3 py-2.5 text-[10px] font-semibold">Status</th>
+              <th className="px-3 py-2.5 text-[10px] font-semibold">Completed At</th>
+              <th className="px-3 py-2.5 text-[10px] font-semibold">Completed By</th>
+              <th className="px-3 py-2.5 text-[10px] font-semibold">Action</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {items.map((queue) => (
               <tr key={queue.id} className="align-top hover:bg-slate-50/80">
-                <td className="px-6 py-4">
-                  <p className="font-semibold text-primary">{queue.queue_number}</p>
-                  <p className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-400">
+                <td className="px-3 py-2.5">
+                  <p className="text-[11px] font-semibold text-primary">{queue.queue_number}</p>
+                  <p className="mt-0.5 text-[10px] uppercase tracking-[0.18em] text-slate-400">
                     {getQueueWindowLabel(queue)}
                   </p>
                 </td>
-                <td className="px-6 py-4">
-                  <p className="font-medium text-slate-800">{queue.taxpayer_name || 'Walk-in'}</p>
-                  <p className="mt-1 text-xs text-slate-500">{queue.email || queue.contact_number || 'No contact provided'}</p>
+                <td className="px-3 py-2.5">
+                  <p className="text-[11px] font-medium text-slate-800">{queue.taxpayer_name || 'Walk-in'}</p>
+                  <p className="mt-0.5 text-[10px] text-slate-500">{queue.email || queue.contact_number || 'No contact'}</p>
                 </td>
-                <td className="px-6 py-4 text-slate-700">
+                <td className="px-3 py-2.5 text-[11px] text-slate-700">
                   {queueTypeLabels[queue.queue_type] || 'Immediate'}
                 </td>
-                <td className="px-6 py-4 text-slate-700">{queue.service_type || 'N/A'}</td>
-                <td className="px-6 py-4">
-                  <span className="inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
+                <td className="px-3 py-2.5 text-[11px] text-slate-700">{queue.service_type || 'N/A'}</td>
+                <td className="px-3 py-2.5">
+                  <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800">
                     {queue.status_label || 'Completed'}
                   </span>
                 </td>
-                <td className="px-6 py-4 text-slate-600">
+                <td className="px-3 py-2.5 text-[11px] text-slate-600">
                   {queue.completed_at ? formatUtc8DateTime(queue.completed_at) : 'N/A'}
                 </td>
-                <td className="px-6 py-4 text-slate-700">{queue.completed_by || 'N/A'}</td>
-                <td className="px-6 py-4">
+                <td className="px-3 py-2.5 text-[11px] text-slate-700">{queue.completed_by || 'N/A'}</td>
+                <td className="px-3 py-2.5">
                   <button
                     onClick={() => onDeleteHistory(queue)}
                     disabled={deletingHistoryId === queue.id}
-                    className="rounded-lg bg-rose-600 px-3 py-1.5 font-semibold text-white transition hover:bg-rose-700 disabled:opacity-40"
+                    className="rounded-md bg-rose-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-rose-700 disabled:opacity-40"
                   >
-                    {deletingHistoryId === queue.id ? 'Deleting...' : 'Delete'}
+                    {deletingHistoryId === queue.id ? '...' : 'Delete'}
                   </button>
                 </td>
               </tr>
@@ -1039,7 +1054,7 @@ const QueueHistorySection = ({
   </section>
 );
 
-const COMPLETED_PAGE_SIZE = 10;
+const COMPLETED_PAGE_SIZE = 5;
 
 const CompletedTransactionsSection = ({
   items,
@@ -1168,75 +1183,80 @@ const CompletedTransactionsSection = ({
         </div>
       ) : (
         <>
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
+          <div className="rounded-2xl border border-slate-200 overflow-hidden">
+            <table className="w-full text-xs">
               <thead className="bg-white">
                 <tr className="border-b border-slate-100 text-left text-slate-500">
-                  <th className="px-6 py-3 font-semibold">Queue No.</th>
-                  <th className="px-6 py-3 font-semibold">Taxpayer</th>
-                  <th className="px-6 py-3 font-semibold">Queue Type</th>
-                  <th className="px-6 py-3 font-semibold">Assigned Window</th>
-                  <th className="px-6 py-3 font-semibold">Service</th>
-                  <th className="px-6 py-3 font-semibold">Status</th>
-                  <th className="px-6 py-3 font-semibold">Served At</th>
-                  <th className="px-6 py-3 font-semibold">Completed At</th>
-                  <th className="px-6 py-3 font-semibold">Served By</th>
-                  <th className="px-6 py-3 font-semibold">Actions</th>
+                  <th className="px-3 py-2 font-semibold">Queue No.</th>
+                  <th className="px-3 py-2 font-semibold">Taxpayer</th>
+                  <th className="px-3 py-2 font-semibold">Type</th>
+                  <th className="px-3 py-2 font-semibold">Window</th>
+                  <th className="px-3 py-2 font-semibold">Service</th>
+                  <th className="px-3 py-2 font-semibold">Status</th>
+                  <th className="px-3 py-2 font-semibold">Served</th>
+                  <th className="px-3 py-2 font-semibold">Completed</th>
+                  <th className="px-3 py-2 font-semibold">By</th>
+                  <th className="px-3 py-2 font-semibold">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {pageItems.map((queue) => (
                   <tr key={queue.id} className="align-middle hover:bg-slate-50/80">
-                    <td className="px-6 py-4">
+                    <td className="px-3 py-2.5">
                       <p className="font-semibold text-primary">{queue.queue_number}</p>
-                      <p className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-400">
+                      <p className="mt-0.5 text-[10px] uppercase tracking-wider text-slate-400">
                         {queue.document_processing_status}
                       </p>
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-3 py-2.5">
                       <p className="font-medium text-slate-800">{queue.taxpayer_name || 'Walk-in'}</p>
-                      <p className="mt-1 text-xs text-slate-500">{queue.email || queue.contact_number || 'No contact provided'}</p>
+                      <p className="mt-0.5 text-[10px] text-slate-500">{queue.email || queue.contact_number || 'No contact'}</p>
                     </td>
-                    <td className="px-6 py-4 text-slate-700">
+                    <td className="px-3 py-2.5 text-slate-700">
                       {queueTypeLabels[queue.queue_type] || 'Immediate'}
                     </td>
-                    <td className="px-6 py-4 text-slate-700">
+                    <td className="px-3 py-2.5 text-slate-700">
                       <p className="font-medium text-slate-800">{queue.window_label}</p>
                       {queue.window_assignment && queue.window_assignment !== 'Window not assigned' ? (
-                        <p className="mt-1 text-xs text-slate-500">{queue.window_assignment}</p>
+                        <p className="mt-0.5 text-[10px] text-slate-500">{queue.window_assignment}</p>
                       ) : null}
                     </td>
-                    <td className="px-6 py-4 text-slate-700">{queue.service_type || 'N/A'}</td>
-                    <td className="px-6 py-4">
-                      <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${completedStatusClasses[queue.status] || 'bg-slate-100 text-slate-700'}`}>
+                    <td className="px-3 py-2.5 text-slate-700">{queue.service_type || 'N/A'}</td>
+                    <td className="px-3 py-2.5">
+                      <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${completedStatusClasses[queue.status] || 'bg-slate-100 text-slate-700'}`}>
                         {queue.status_label || 'Completed'}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-slate-600">
+                    <td className="px-3 py-2.5 text-slate-600 whitespace-nowrap">
                       {queue.served_at ? formatUtc8DateTime(queue.served_at) : 'N/A'}
                     </td>
-                    <td className="px-6 py-4 text-slate-600">
+                    <td className="px-3 py-2.5 text-slate-600 whitespace-nowrap">
                       {queue.completed_at ? formatUtc8DateTime(queue.completed_at) : 'N/A'}
                     </td>
-                    <td className="px-6 py-4 text-slate-700">{queue.completed_by || 'N/A'}</td>
-                    <td className="px-6 py-4">
-                      <div className="flex flex-col items-center gap-2">
+                    <td className="px-3 py-2.5 text-slate-700">{queue.completed_by || 'N/A'}</td>
+                    <td className="px-3 py-2.5">
+                      <div className="flex flex-wrap gap-1.5">
                         <button
                           onClick={() => onOpenView(queue)}
-                          className="w-full rounded-lg bg-blue-600 px-3 py-1.5 text-center font-semibold text-white transition hover:bg-blue-700"
+                          className="rounded-md bg-blue-600 px-2 py-1 text-center text-[10px] font-semibold text-white transition hover:bg-blue-700"
                         >
                           View
                         </button>
                         <button
                           onClick={() => onDeleteHistory(queue)}
                           disabled={!canDeleteHistory || deletingHistoryId === queue.id}
-                          className="w-full rounded-lg bg-rose-600 px-3 py-1.5 text-center font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-40"
+                          className="rounded-md bg-rose-600 px-2 py-1 text-center text-[10px] font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-40"
                           title={canDeleteHistory ? 'Delete completed transaction' : 'You do not have permission to delete completed transactions'}
                         >
-                          {deletingHistoryId === queue.id ? 'Deleting...' : 'Delete'}
+                          {deletingHistoryId === queue.id ? '...' : 'Delete'}
                         </button>
                       </div>
                     </td>
+                  </tr>
+                ))}
+                {Array.from({ length: COMPLETED_PAGE_SIZE - pageItems.length }).map((_, i) => (
+                  <tr key={`empty-${i}`} className="h-[54px]">
+                    <td colSpan="10" className="px-3 py-2.5">&nbsp;</td>
                   </tr>
                 ))}
               </tbody>
@@ -1339,6 +1359,12 @@ const QueueManagement = () => {
   const [skippedPage, setSkippedPage] = useState(1);
   const [lastCalledQueue, setLastCalledQueue] = useState(null);
   const lastCalledQueueRef = useRef(null);
+  const [showWalkInModal, setShowWalkInModal] = useState(false);
+  const [walkInServiceType, setWalkInServiceType] = useState('');
+  const [walkInTaxpayerName, setWalkInTaxpayerName] = useState('');
+  const [walkInContactNumber, setWalkInContactNumber] = useState('');
+  const [walkInError, setWalkInError] = useState('');
+  const [addingWalkIn, setAddingWalkIn] = useState(false);
   const receiptDraftCategory = (receiptDraft?.selected_category || receiptDraft?.tax_type || resolveReceiptCategory(completionQueue)).trim().toUpperCase();
   const completionReceiptCategory = resolveReceiptCategory(completionQueue);
   const isCtcFileOnlyCompletion = completionReceiptCategory === 'CTC';
@@ -1839,6 +1865,37 @@ const QueueManagement = () => {
       } else if (action === 'complete') {
         setCompletingQueueId(null);
       }
+    }
+  };
+
+  const handleAddWalkIn = async () => {
+    setWalkInError('');
+    const effectiveServiceType = isQueueWindowAccount ? assignedWindowKey : walkInServiceType.trim();
+    if (!effectiveServiceType) {
+      setWalkInError('Service type is required.');
+      return;
+    }
+    if (!walkInTaxpayerName.trim()) {
+      setWalkInError('Taxpayer name is required.');
+      return;
+    }
+    try {
+      setAddingWalkIn(true);
+      await api.post('/branch/queue/walk-in', {
+        service_type: effectiveServiceType,
+        taxpayer_name: walkInTaxpayerName.trim(),
+        contact_number: walkInContactNumber.trim() || undefined,
+      });
+      setShowWalkInModal(false);
+      setWalkInServiceType('');
+      setWalkInTaxpayerName('');
+      setWalkInContactNumber('');
+      setWalkInError('');
+      await fetchQueues();
+    } catch (err) {
+      setWalkInError(err.response?.data?.detail || 'Failed to register walk-in queue.');
+    } finally {
+      setAddingWalkIn(false);
     }
   };
 
@@ -2351,7 +2408,7 @@ const QueueManagement = () => {
         </div>
       ) : null}
 
-      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <div className="rounded-2xl bg-white p-5 shadow">
           <p className="text-sm font-medium text-slate-500">Immediate Queue</p>
           <p className="mt-2 text-3xl font-bold text-primary">{summary.immediate}</p>
@@ -2525,23 +2582,39 @@ const QueueManagement = () => {
       {!isSuperadminManagedBranch && (
         <div className="space-y-6">
           <QueueSection
-            title="Appointment Queue"
-            description="Appointment queue taxpayers stay separate so branch users can clearly distinguish scheduled appointments from ready, called, serving, completed, or skipped records."
-            queues={appointmentQueues}
-            page={appointmentPage}
-            onPageChange={setAppointmentPage}
-            queueUnavailable={queueUnavailable}
-            onAction={performAction}
-            onDeleteRequest={openDeleteModal}
-            now={now}
-            canManageQueues={canManageQueueOperations}
-          />
-          <QueueSection
             title="Immediate Queue"
             description="Immediate queue taxpayers are grouped here with active records shown first and completed history moved below them."
             queues={immediateQueues}
             page={immediatePage}
             onPageChange={setImmediatePage}
+            queueUnavailable={queueUnavailable}
+            onAction={performAction}
+            onDeleteRequest={openDeleteModal}
+            now={now}
+            canManageQueues={canManageQueueOperations}
+            headerAction={
+              canManageQueueOperations ? (
+                <button
+                  onClick={() => {
+                    setWalkInError('');
+                    setShowWalkInModal(true);
+                  }}
+                  className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                  </svg>
+                  Add Walk-in
+                </button>
+              ) : null
+            }
+          />
+          <QueueSection
+            title="Appointment Queue"
+            description="Appointment queue taxpayers stay separate so branch users can clearly distinguish scheduled appointments from ready, called, serving, completed, or skipped records."
+            queues={appointmentQueues}
+            page={appointmentPage}
+            onPageChange={setAppointmentPage}
             queueUnavailable={queueUnavailable}
             onAction={performAction}
             onDeleteRequest={openDeleteModal}
@@ -3088,6 +3161,109 @@ const QueueManagement = () => {
           </div>
         </div>
       ) : null}
+
+      {showWalkInModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl md:p-8">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600">
+                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                </svg>
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-emerald-400">Walk-in</p>
+                <h3 className="mt-2 text-2xl font-bold text-primary">Register Walk-in</h3>
+                <p className="mt-3 text-sm leading-6 text-slate-600">
+                  Create a queue entry for a walk-in citizen. They will be placed in the queue based on arrival time (FIFO).
+                </p>
+              </div>
+            </div>
+
+            {walkInError ? (
+              <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                <p className="font-semibold">{walkInError}</p>
+              </div>
+            ) : null}
+
+            <div className="mt-6 space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-semibold text-slate-700">Service Type <span className="text-red-500">*</span></label>
+                {isQueueWindowAccount ? (
+                  <input
+                    type="text"
+                    value={assignedWindowLabel}
+                    disabled
+                    className="w-full rounded-xl border border-slate-200 bg-slate-100 px-4 py-3 text-sm text-slate-500 outline-none cursor-not-allowed"
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    value={walkInServiceType}
+                    onChange={(e) => setWalkInServiceType(e.target.value)}
+                    placeholder="e.g. Real Property Tax"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                  />
+                )}
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-semibold text-slate-700">Taxpayer Name <span className="text-red-500">*</span></label>
+                <input
+                  type="text"
+                  value={walkInTaxpayerName}
+                  onChange={(e) => setWalkInTaxpayerName(e.target.value)}
+                  placeholder="Enter taxpayer name"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-semibold text-slate-700">Contact Number <span className="font-normal text-slate-500">(optional)</span></label>
+                <input
+                  type="text"
+                  value={walkInContactNumber}
+                  onChange={(e) => {
+                    const raw = e.target.value.replace(/\D/g, '');
+                    if (raw.startsWith('0')) {
+                      setWalkInContactNumber(raw.slice(0, 11));
+                    } else if (raw.startsWith('63')) {
+                      setWalkInContactNumber(raw.slice(0, 12));
+                    } else {
+                      setWalkInContactNumber(raw.slice(0, 11));
+                    }
+                  }}
+                  placeholder="09XXXXXXXXX"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                />
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-col-reverse gap-3 md:flex-row md:justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowWalkInModal(false);
+                  setWalkInServiceType('');
+                  setWalkInTaxpayerName('');
+                  setWalkInContactNumber('');
+                  setWalkInError('');
+                }}
+                disabled={addingWalkIn}
+                className="rounded-2xl bg-slate-200 px-5 py-3 font-semibold text-slate-700 transition hover:bg-slate-300 disabled:opacity-70"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleAddWalkIn}
+                disabled={addingWalkIn || !(isQueueWindowAccount ? assignedWindowKey : walkInServiceType.trim()) || !walkInTaxpayerName.trim()}
+                className="rounded-2xl bg-emerald-600 px-5 py-3 font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-70"
+              >
+                {addingWalkIn ? 'Registering...' : 'Register Walk-in'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
