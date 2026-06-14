@@ -185,6 +185,14 @@ const TaxAssessment = () => {
   const [assessmentSearch, setAssessmentSearch] = useState('');
   const [assessmentPage, setAssessmentPage] = useState(1);
   const ASSESSMENTS_PER_PAGE = 5;
+  const [totalAssessmentCount, setTotalAssessmentCount] = useState(0);
+  const [totalAssessmentPages, setTotalAssessmentPages] = useState(1);
+  const [assessmentTaxTypeFilter, setAssessmentTaxTypeFilter] = useState('');
+  const [assessmentStatusFilter, setAssessmentStatusFilter] = useState('');
+  const [pendingPage, setPendingPage] = useState(1);
+  const [verifiedPage, setVerifiedPage] = useState(1);
+  const [rejectedPage, setRejectedPage] = useState(1);
+  const SUBMISSIONS_PER_PAGE = 5;
   const [reviewDrafts, setReviewDrafts] = useState({});
   const [assessmentForm, setAssessmentForm] = useState(EMPTY_ASSESSMENT_FORM);
   const [assessmentValidationErrors, setAssessmentValidationErrors] = useState({});
@@ -205,18 +213,33 @@ const TaxAssessment = () => {
     errorMessage: '',
   });
 
+  const loadAssessments = async (page = 1, search = '', taxType = '', status = '') => {
+    const response = await taxAssessmentAPI.listAssessments({
+      page,
+      page_size: ASSESSMENTS_PER_PAGE,
+      search: search.trim() || undefined,
+      tax_type: taxType.trim() || undefined,
+      assessment_status: status.trim() || undefined,
+    });
+    setAssessments(response.data?.items || []);
+    setAssessmentPage(response.data?.page || page);
+    setTotalAssessmentCount(response.data?.total || 0);
+    setTotalAssessmentPages(response.data?.total_pages || 1);
+  };
+
   const loadPageData = async () => {
     try {
       setLoading(true);
-      const [branchResponse, submissionResponse, assessmentResponse] = await Promise.all([
+      const [branchResponse, submissionResponse] = await Promise.all([
         branchAPI.getAll(),
         taxAssessmentAPI.listSubmissions(),
-        taxAssessmentAPI.listAssessments(),
       ]);
       setBranches(branchResponse.data || []);
       setSubmissions(submissionResponse.data?.items || []);
-      setAssessments(assessmentResponse.data?.items || []);
-      setAssessmentPage(1);
+      await loadAssessments(1, assessmentSearch, assessmentTaxTypeFilter, assessmentStatusFilter);
+      setPendingPage(1);
+      setVerifiedPage(1);
+      setRejectedPage(1);
       setError('');
     } catch (fetchError) {
       setError(fetchError.response?.data?.detail || 'Failed to load tax assessment data.');
@@ -268,26 +291,83 @@ const TaxAssessment = () => {
     );
   }, [submissions, rejectedSubmissionSearch]);
 
-  const filteredAssessments = useMemo(() => {
-    const term = assessmentSearch.trim().toLowerCase();
-    if (!term) return assessments;
-    return assessments.filter((item) =>
-      [item.taxpayer_name, item.tdn, item.mayor_permit_number, item.sec_dti_cda_number, item.business_name].some((value) =>
-        String(value || '').toLowerCase().includes(term)
-      )
-    );
-  }, [assessments, assessmentSearch]);
+  const handleAssessmentPageChange = async (newPage) => {
+    setAssessmentPage(newPage);
+    try {
+      await loadAssessments(newPage, assessmentSearch, assessmentTaxTypeFilter, assessmentStatusFilter);
+      setError('');
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to load assessments.');
+    }
+  };
 
-  const paginatedAssessments = useMemo(() => {
-    const start = (assessmentPage - 1) * ASSESSMENTS_PER_PAGE;
-    return filteredAssessments.slice(start, start + ASSESSMENTS_PER_PAGE);
-  }, [filteredAssessments, assessmentPage]);
+  const paginatedPendingSubmissions = useMemo(() => {
+    const start = (pendingPage - 1) * SUBMISSIONS_PER_PAGE;
+    return filteredSubmissions.slice(start, start + SUBMISSIONS_PER_PAGE);
+  }, [filteredSubmissions, pendingPage]);
 
-  const totalAssessmentPages = Math.ceil(filteredAssessments.length / ASSESSMENTS_PER_PAGE) || 1;
+  const totalPendingPages = Math.ceil(filteredSubmissions.length / SUBMISSIONS_PER_PAGE) || 1;
 
-  const handleAssessmentSearchChange = (value) => {
+  const paginatedVerifiedSubmissions = useMemo(() => {
+    const start = (verifiedPage - 1) * SUBMISSIONS_PER_PAGE;
+    return filteredVerifiedSubmissions.slice(start, start + SUBMISSIONS_PER_PAGE);
+  }, [filteredVerifiedSubmissions, verifiedPage]);
+
+  const totalVerifiedPages = Math.ceil(filteredVerifiedSubmissions.length / SUBMISSIONS_PER_PAGE) || 1;
+
+  const paginatedRejectedSubmissions = useMemo(() => {
+    const start = (rejectedPage - 1) * SUBMISSIONS_PER_PAGE;
+    return filteredRejectedSubmissions.slice(start, start + SUBMISSIONS_PER_PAGE);
+  }, [filteredRejectedSubmissions, rejectedPage]);
+
+  const totalRejectedPages = Math.ceil(filteredRejectedSubmissions.length / SUBMISSIONS_PER_PAGE) || 1;
+
+  const handleAssessmentSearchChange = async (value) => {
     setAssessmentSearch(value);
     setAssessmentPage(1);
+    try {
+      await loadAssessments(1, value, assessmentTaxTypeFilter, assessmentStatusFilter);
+      setError('');
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to search assessments.');
+    }
+  };
+
+  const handleAssessmentTaxTypeChange = async (value) => {
+    setAssessmentTaxTypeFilter(value);
+    setAssessmentPage(1);
+    try {
+      await loadAssessments(1, assessmentSearch, value, assessmentStatusFilter);
+      setError('');
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to filter assessments.');
+    }
+  };
+
+  const handleAssessmentStatusChange = async (value) => {
+    setAssessmentStatusFilter(value);
+    setAssessmentPage(1);
+    try {
+      await loadAssessments(1, assessmentSearch, assessmentTaxTypeFilter, value);
+      setError('');
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to filter assessments.');
+    }
+  };
+
+  const handleSubmissionSearchChange = (value) => {
+    setSubmissionSearch(value);
+    setPendingPage(1);
+  };
+
+  const handleVerifiedSubmissionSearchChange = (value) => {
+    setVerifiedSubmissionSearch(value);
+    setVerifiedPage(1);
+  };
+
+  const handleRejectedSubmissionSearchChange = (value) => {
+    setRejectedSubmissionSearch(value);
+    setRejectedPage(1);
   };
 
   const handleReviewDraftChange = (submissionId, field, value) => {
@@ -842,11 +922,11 @@ const TaxAssessment = () => {
             <p className="text-xs font-semibold uppercase tracking-[0.26em] text-slate-500">Verification Queue</p>
             <h2 className="mt-2 text-2xl font-bold text-slate-900">Taxpayer Submissions</h2>
           </div>
-          <input value={submissionSearch} onChange={(event) => setSubmissionSearch(event.target.value)} placeholder="Search TDN, permit, registration, taxpayer" className="w-full max-w-sm rounded-full border border-slate-300 px-4 py-2.5 text-sm" />
+          <input value={submissionSearch} onChange={(event) => handleSubmissionSearchChange(event.target.value)} placeholder="Search TDN, permit, registration, taxpayer" className="w-full max-w-sm rounded-full border border-slate-300 px-4 py-2.5 text-sm" />
         </div>
 
         <div className="space-y-4">
-            {filteredSubmissions.map((submission) => {
+            {paginatedPendingSubmissions.map((submission) => {
               const draft = reviewDrafts[submission.id] || { status: submission.status, remarks: submission.remarks || '' };
               return (
                 <div key={submission.id} className="rounded-2xl border border-slate-200 bg-[#fbfdff] p-5">
@@ -894,6 +974,32 @@ const TaxAssessment = () => {
             })}
             {!filteredSubmissions.length ? <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center text-sm text-slate-500">No taxpayer submissions found.</div> : null}
         </div>
+
+        {filteredSubmissions.length > 0 && (
+          <div className="mt-5 flex items-center justify-between border-t border-slate-200 pt-4">
+            <p className="text-sm text-slate-500">
+              Page {pendingPage} of {totalPendingPages} &middot; {filteredSubmissions.length} total
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingPage((p) => Math.max(1, p - 1))}
+                disabled={pendingPage <= 1}
+                className="rounded-full bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-300 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                onClick={() => setPendingPage((p) => Math.min(totalPendingPages, p + 1))}
+                disabled={pendingPage >= totalPendingPages}
+                className="rounded-full bg-[#0f5b83] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#0c4d6f] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </section>
 
       <section className="rounded-[30px] border border-slate-200 bg-white p-6 shadow-[0_18px_40px_rgba(15,23,42,0.05)]">
@@ -902,11 +1008,31 @@ const TaxAssessment = () => {
             <p className="text-xs font-semibold uppercase tracking-[0.26em] text-slate-500">Live Assessment Records</p>
             <h2 className="mt-2 text-2xl font-bold text-slate-900">Online Payment Assessments</h2>
           </div>
-          <input value={assessmentSearch} onChange={(event) => handleAssessmentSearchChange(event.target.value)} placeholder="Search taxpayer, TDN, permit, business" className="w-full max-w-sm rounded-full border border-slate-300 px-4 py-2.5 text-sm" />
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            <select
+              value={assessmentTaxTypeFilter}
+              onChange={(event) => handleAssessmentTaxTypeChange(event.target.value)}
+              className="rounded-full border border-slate-300 bg-white px-4 py-2.5 text-sm"
+            >
+              <option value="">All Tax Types</option>
+              <option value="RPT">RPT</option>
+              <option value="BT">BT</option>
+            </select>
+            <select
+              value={assessmentStatusFilter}
+              onChange={(event) => handleAssessmentStatusChange(event.target.value)}
+              className="rounded-full border border-slate-300 bg-white px-4 py-2.5 text-sm"
+            >
+              <option value="">All Statuses</option>
+              <option value="Active">Active</option>
+              <option value="Inactive">Inactive</option>
+            </select>
+            <input value={assessmentSearch} onChange={(event) => handleAssessmentSearchChange(event.target.value)} placeholder="Search taxpayer, TDN, permit, business" className="w-full max-w-sm rounded-full border border-slate-300 px-4 py-2.5 text-sm" />
+          </div>
         </div>
 
         <div className="space-y-4">
-          {paginatedAssessments.map((assessment) => (
+          {assessments.map((assessment) => (
             <div key={assessment.id} className="rounded-2xl border border-slate-200 bg-[#fbfdff] p-5">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
@@ -940,18 +1066,18 @@ const TaxAssessment = () => {
               </div>
             </div>
           ))}
-          {!filteredAssessments.length ? <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center text-sm text-slate-500">No assessment records found.</div> : null}
+          {!assessments.length ? <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center text-sm text-slate-500">No assessment records found.</div> : null}
         </div>
 
-        {filteredAssessments.length > 0 && (
+        {totalAssessmentCount > 0 && (
           <div className="mt-5 flex items-center justify-between border-t border-slate-200 pt-4">
             <p className="text-sm text-slate-500">
-              Page {assessmentPage} of {totalAssessmentPages} &middot; {filteredAssessments.length} total
+              Page {assessmentPage} of {totalAssessmentPages} &middot; {totalAssessmentCount} total
             </p>
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setAssessmentPage((p) => Math.max(1, p - 1))}
+                onClick={() => handleAssessmentPageChange(Math.max(1, assessmentPage - 1))}
                 disabled={assessmentPage <= 1}
                 className="rounded-full bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-300 disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -959,7 +1085,7 @@ const TaxAssessment = () => {
               </button>
               <button
                 type="button"
-                onClick={() => setAssessmentPage((p) => Math.min(totalAssessmentPages, p + 1))}
+                onClick={() => handleAssessmentPageChange(Math.min(totalAssessmentPages, assessmentPage + 1))}
                 disabled={assessmentPage >= totalAssessmentPages}
                 className="rounded-full bg-[#0f5b83] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#0c4d6f] disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -976,11 +1102,11 @@ const TaxAssessment = () => {
             <p className="text-xs font-semibold uppercase tracking-[0.26em] text-slate-500">Verified Table</p>
             <h2 className="mt-2 text-2xl font-bold text-slate-900">Verified Taxpayer Submissions</h2>
           </div>
-          <input value={verifiedSubmissionSearch} onChange={(event) => setVerifiedSubmissionSearch(event.target.value)} placeholder="Search verified taxpayer, TDN, permit, status" className="w-full max-w-sm rounded-full border border-slate-300 px-4 py-2.5 text-sm" />
+          <input value={verifiedSubmissionSearch} onChange={(event) => handleVerifiedSubmissionSearchChange(event.target.value)} placeholder="Search verified taxpayer, TDN, permit, status" className="w-full max-w-sm rounded-full border border-slate-300 px-4 py-2.5 text-sm" />
         </div>
 
         <div className="space-y-4">
-          {filteredVerifiedSubmissions.map((submission) => (
+          {paginatedVerifiedSubmissions.map((submission) => (
             <div key={submission.id} className="rounded-2xl border border-slate-200 bg-[#fbfdff] p-5">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
@@ -1029,6 +1155,32 @@ const TaxAssessment = () => {
           ))}
           {!filteredVerifiedSubmissions.length ? <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center text-sm text-slate-500">No verified taxpayer submissions found.</div> : null}
         </div>
+
+        {filteredVerifiedSubmissions.length > 0 && (
+          <div className="mt-5 flex items-center justify-between border-t border-slate-200 pt-4">
+            <p className="text-sm text-slate-500">
+              Page {verifiedPage} of {totalVerifiedPages} &middot; {filteredVerifiedSubmissions.length} total
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setVerifiedPage((p) => Math.max(1, p - 1))}
+                disabled={verifiedPage <= 1}
+                className="rounded-full bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-300 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                onClick={() => setVerifiedPage((p) => Math.min(totalVerifiedPages, p + 1))}
+                disabled={verifiedPage >= totalVerifiedPages}
+                className="rounded-full bg-[#0f5b83] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#0c4d6f] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </section>
 
       <section className="rounded-[30px] border border-slate-200 bg-white p-6 shadow-[0_18px_40px_rgba(15,23,42,0.05)]">
@@ -1037,11 +1189,11 @@ const TaxAssessment = () => {
             <p className="text-xs font-semibold uppercase tracking-[0.26em] text-slate-500">Rejected Table</p>
             <h2 className="mt-2 text-2xl font-bold text-slate-900">Rejected Taxpayer Submissions</h2>
           </div>
-          <input value={rejectedSubmissionSearch} onChange={(event) => setRejectedSubmissionSearch(event.target.value)} placeholder="Search rejected taxpayer, TDN, permit, status" className="w-full max-w-sm rounded-full border border-slate-300 px-4 py-2.5 text-sm" />
+          <input value={rejectedSubmissionSearch} onChange={(event) => handleRejectedSubmissionSearchChange(event.target.value)} placeholder="Search rejected taxpayer, TDN, permit, status" className="w-full max-w-sm rounded-full border border-slate-300 px-4 py-2.5 text-sm" />
         </div>
 
         <div className="space-y-4">
-          {filteredRejectedSubmissions.map((submission) => (
+          {paginatedRejectedSubmissions.map((submission) => (
             <div key={submission.id} className="rounded-2xl border border-slate-200 bg-[#fbfdff] p-5">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
@@ -1087,6 +1239,32 @@ const TaxAssessment = () => {
           ))}
           {!filteredRejectedSubmissions.length ? <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center text-sm text-slate-500">No rejected taxpayer submissions found.</div> : null}
         </div>
+
+        {filteredRejectedSubmissions.length > 0 && (
+          <div className="mt-5 flex items-center justify-between border-t border-slate-200 pt-4">
+            <p className="text-sm text-slate-500">
+              Page {rejectedPage} of {totalRejectedPages} &middot; {filteredRejectedSubmissions.length} total
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setRejectedPage((p) => Math.max(1, p - 1))}
+                disabled={rejectedPage <= 1}
+                className="rounded-full bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-300 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                onClick={() => setRejectedPage((p) => Math.min(totalRejectedPages, p + 1))}
+                disabled={rejectedPage >= totalRejectedPages}
+                className="rounded-full bg-[#0f5b83] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#0c4d6f] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </section>
       <FileViewerModal
         open={fileViewer.open}

@@ -74,6 +74,9 @@ MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 TAXPAYER_TYPES = {"Individual", "Business Owner"}
 SUBMISSION_TYPES = {"RPT", "BT"}
 
+DEFAULT_ASSESSMENT_PAGE_SIZE = 5
+MAX_ASSESSMENT_PAGE_SIZE = 50
+
 
 def normalize_mime_type(mime_type: str) -> str:
     """Normalize MIME type, handling stored enum string representations.
@@ -1182,12 +1185,20 @@ async def delete_taxpayer_submission(
 async def list_tax_assessments(
     search: str | None = Query(default=None),
     tax_type: str | None = Query(default=None),
+    assessment_status: str | None = Query(default=None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(DEFAULT_ASSESSMENT_PAGE_SIZE, ge=1, le=MAX_ASSESSMENT_PAGE_SIZE),
     db: Session = Depends(get_db),
     current_user=Depends(require_main_admin()),
 ):
     query = db.query(TaxAssessmentRecord)
     if tax_type:
         query = query.filter(hash_aware_match(TaxAssessmentRecord, "tax_type", normalize_submission_type(tax_type)))
+    if assessment_status:
+        status = assessment_status.strip()
+        if status not in ACTIVE_ASSESSMENT_STATUSES:
+            raise HTTPException(status_code=400, detail="Unsupported assessment status.")
+        query = query.filter(hash_aware_match(TaxAssessmentRecord, "assessment_status", status))
     items = query.order_by(TaxAssessmentRecord.created_at.desc()).all()
     if search:
         term = search.strip().lower()
@@ -1198,7 +1209,17 @@ async def list_tax_assessments(
                 for field_name in ("taxpayer_name", "tdn", "mayor_permit_number", "sec_dti_cda_number", "business_name")
             )
         ]
-    return {"items": [serialize_assessment(item) for item in items]}
+    total = len(items)
+    total_pages = max(1, (total + page_size - 1) // page_size) if total else 1
+    start = (page - 1) * page_size
+    paginated_items = items[start:start + page_size]
+    return {
+        "items": [serialize_assessment(item) for item in paginated_items],
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "total_pages": total_pages,
+    }
 
 
 @router.post("/admin/assessments")
