@@ -684,7 +684,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
       <div className="w-full max-w-4xl bg-white rounded-3xl shadow-2xl overflow-hidden flex min-h-[560px]">
 
         {/* Left — Login Form */}
-        <div className="flex flex-col justify-center w-full md:w-1/2 px-10 py-12">
+        <div className="flex flex-col justify-center w-full md:w-[60%] px-10 py-12">
           <div className="mb-8">
             <span className={`inline-block text-xs font-semibold tracking-widest uppercase px-3 py-1 rounded-full mb-3 ${copy.badgeBg}`}>
               {copy.badge}
@@ -991,7 +991,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
         </div>
 
         {/* Right — City Hall Image */}
-        <div className="hidden md:block w-1/2 relative">
+        <div className="hidden md:block w-[40%] relative">
           <img
             src={cityHall}
             alt="Quezon City Hall"
