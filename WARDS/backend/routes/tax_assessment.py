@@ -930,15 +930,13 @@ async def download_submission_file(
         if ('/' in raw_path or '\\' in raw_path) and not is_redacted_placeholder(raw_path):
             file_path_value = raw_path
 
-    # Fallback: search upload directory by stored file name
+    # Fallback: search upload directory by exact stored file name
     if not file_path_value and submission:
         stored_name = taxpayer_submission_value(submission, "supporting_file_name") or submission.supporting_file_name
         if stored_name:
-            safe_suffix = Path(stored_name).suffix
-            for candidate in UPLOAD_DIR.iterdir():
-                if candidate.is_file() and candidate.suffix.lower() == safe_suffix.lower():
-                    file_path_value = str(candidate)
-                    break
+            candidate = UPLOAD_DIR / Path(stored_name).name
+            if candidate.is_file():
+                file_path_value = str(candidate)
 
     if not submission or not file_path_value:
         raise HTTPException(status_code=404, detail="Supporting file not found.")
@@ -950,15 +948,8 @@ async def download_submission_file(
     if not path.exists():
         filename = Path(file_path_value).name
         candidate = UPLOAD_DIR / filename
-        if candidate.exists():
+        if candidate.is_file():
             path = candidate
-        else:
-            safe_suffix = Path(filename).suffix
-            if safe_suffix:
-                for item in UPLOAD_DIR.iterdir():
-                    if item.is_file() and item.suffix.lower() == safe_suffix.lower():
-                        path = item
-                        break
 
     if not path.exists():
         raise HTTPException(status_code=404, detail="Supporting file is no longer available.")
@@ -1052,14 +1043,12 @@ async def download_submission_file_admin(
         if ('/' in raw_path or '\\' in raw_path) and not is_redacted_placeholder(raw_path):
             file_path_value = raw_path
 
-    # Fallback: search upload directory by stored file name
+    # Fallback: search upload directory by exact stored file name
     if not file_path_value and submission:
         if stored_name:
-            safe_suffix = Path(stored_name).suffix
-            for candidate in UPLOAD_DIR.iterdir():
-                if candidate.is_file() and candidate.suffix.lower() == safe_suffix.lower():
-                    file_path_value = str(candidate)
-                    break
+            candidate = UPLOAD_DIR / Path(stored_name).name
+            if candidate.is_file():
+                file_path_value = str(candidate)
 
     if not submission or not file_path_value:
         print(f"[TAX_ASSESSMENT_FILE_DEBUG] 404: file not found")
@@ -1071,16 +1060,8 @@ async def download_submission_file_admin(
     if not path.exists():
         filename = Path(file_path_value).name
         candidate = UPLOAD_DIR / filename
-        if candidate.exists():
+        if candidate.is_file():
             path = candidate
-        else:
-            # Last resort: search UPLOAD_DIR for any file with same suffix
-            safe_suffix = Path(filename).suffix
-            if safe_suffix:
-                for item in UPLOAD_DIR.iterdir():
-                    if item.is_file() and item.suffix.lower() == safe_suffix.lower():
-                        path = item
-                        break
 
     if not path.exists():
         print(f"[TAX_ASSESSMENT_FILE_DEBUG] 404: path not found after fallbacks. final_path={path}")
