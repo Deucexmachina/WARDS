@@ -160,6 +160,40 @@ let isAnnouncementPlaying = false;
 
 export const isAnnouncementActive = () => isAnnouncementPlaying;
 
+const announcementQueue = [];
+let isProcessingQueue = false;
+
+const processAnnouncementQueue = async () => {
+  if (isProcessingQueue) return;
+  isProcessingQueue = true;
+
+  while (announcementQueue.length > 0) {
+    const { type, queueNumber, serviceWindow, resolve } = announcementQueue.shift();
+    isAnnouncementPlaying = true;
+    try {
+      if (type === 'recall') {
+        await playRecallAnnouncement(queueNumber, serviceWindow);
+      } else {
+        await playQueueAnnouncement(queueNumber, serviceWindow);
+      }
+    } catch (error) {
+      console.error('❌ Error processing queued announcement:', error);
+    } finally {
+      isAnnouncementPlaying = false;
+    }
+    resolve();
+  }
+
+  isProcessingQueue = false;
+};
+
+const enqueueAnnouncement = (type, queueNumber, serviceWindow) => {
+  return new Promise((resolve) => {
+    announcementQueue.push({ type, queueNumber, serviceWindow, resolve });
+    processAnnouncementQueue();
+  });
+};
+
 /**
  * Play recall queue announcement with strict sequential playback
  * @param {string} queueNumber - Queue number (e.g., "LA-001")
@@ -217,49 +251,19 @@ export const playRecallAnnouncement = async (queueNumber, serviceWindow) => {
 };
 
 /**
- * Play queue announcement with state management
+ * Play queue announcement with state management (queued sequentially)
  */
 export const announceQueue = async (queueNumber, serviceWindow) => {
   console.log(`🔊 announceQueue called with: ${queueNumber}, window: ${serviceWindow}`);
-  
-  if (isAnnouncementPlaying) {
-    console.warn('⚠️ Announcement already in progress, skipping...');
-    return;
-  }
-  
-  isAnnouncementPlaying = true;
-  console.log('🎵 Starting announcement playback...');
-  
-  try {
-    await playQueueAnnouncement(queueNumber, serviceWindow);
-  } catch (error) {
-    console.error('❌ Error in announceQueue:', error);
-  } finally {
-    isAnnouncementPlaying = false;
-    console.log('🔇 Announcement playback finished');
-  }
+  await enqueueAnnouncement('announce', queueNumber, serviceWindow);
+  console.log('🔇 Announcement playback finished');
 };
 
 /**
- * Recall (replay) the last called queue announcement
+ * Recall (replay) the last called queue announcement (queued sequentially)
  */
 export const recallQueue = async (queueNumber, serviceWindow) => {
   console.log(`🔁 recallQueue called with: ${queueNumber}, window: ${serviceWindow}`);
-  
-  if (isAnnouncementPlaying) {
-    console.warn('⚠️ Announcement already in progress, skipping recall...');
-    return;
-  }
-  
-  isAnnouncementPlaying = true;
-  console.log('🎵 Starting RECALL announcement playback...');
-  
-  try {
-    await playRecallAnnouncement(queueNumber, serviceWindow);
-  } catch (error) {
-    console.error('❌ Error in recallQueue:', error);
-  } finally {
-    isAnnouncementPlaying = false;
-    console.log('🔇 Recall announcement playback finished');
-  }
+  await enqueueAnnouncement('recall', queueNumber, serviceWindow);
+  console.log('🔇 Recall announcement playback finished');
 };

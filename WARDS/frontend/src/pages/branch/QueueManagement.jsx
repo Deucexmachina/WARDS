@@ -549,7 +549,7 @@ const QueueSection = ({
                                 <button
                                   onClick={() => onAction('skip', queue)}
                                   disabled={!['called', 'serving'].includes((queue.status || '').toLowerCase()) || queueUnavailable}
-                                  className="rounded-lg bg-slate-600 px-3 py-1.5 font-semibold text-white transition hover:bg-slate-700 disabled:opacity-40"
+                                  className="rounded-lg bg-yellow-500 px-3 py-1.5 font-semibold text-white transition hover:bg-yellow-600 disabled:opacity-40"
                                 >
                                   Skip
                                 </button>
@@ -565,7 +565,7 @@ const QueueSection = ({
                             <button
                               onClick={() => onDeleteRequest(queue)}
                               disabled={queueUnavailable}
-                              className="rounded-lg bg-rose-600 px-3 py-1.5 font-semibold text-white transition hover:bg-rose-700 disabled:opacity-40"
+                              className="rounded-lg bg-red-600 px-3 py-1.5 font-semibold text-white transition hover:bg-red-700 disabled:opacity-40"
                             >
                               Delete
                             </button>
@@ -622,6 +622,7 @@ const WindowMonitoringSection = ({
   onWindowComplete,
   onWindowRecallSkipped,
   isAnnouncementPlaying,
+  onDeleteRequest,
 }) => {
   const queueTypeEntries = Object.entries(windowsByQueueType);
   const hasWindows = queueTypeEntries.some(([, windows]) => windows.length > 0);
@@ -888,9 +889,16 @@ const WindowMonitoringSection = ({
                             <button
                               onClick={() => setSkipConfirmQueue(activeQueue)}
                               disabled={queueUnavailable || !activeQueue}
-                              className="rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:opacity-50"
+                              className="rounded-xl bg-yellow-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-yellow-600 disabled:opacity-50"
                             >
                               Skip
+                            </button>
+                            <button
+                              onClick={() => onDeleteRequest(activeQueue)}
+                              disabled={queueUnavailable || !activeQueue}
+                              className="rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-50"
+                            >
+                              Delete
                             </button>
                           </div>
                         )}
@@ -2498,6 +2506,7 @@ const QueueManagement = () => {
           onWindowComplete={handleWindowComplete}
           onWindowRecallSkipped={handleWindowRecallSkipped}
           isAnnouncementPlaying={isAnnouncementPlaying}
+          onDeleteRequest={openDeleteModal}
         />
       ) : null}
 
