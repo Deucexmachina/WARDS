@@ -2,8 +2,10 @@ from datetime import datetime, timedelta
 from typing import Optional, Tuple
 import base64
 import binascii
+import hashlib
 import io
 import os
+import secrets
 import time
 
 import pyotp
@@ -20,12 +22,13 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
-from database.models import ActivityLog, Admin, BranchStaff, CitizenUser, MFASecret, get_db
+from database.models import ActivityLog, Admin, BranchStaff, CitizenUser, EmailOTP, MFASecret, get_db
 from services.email_service import (
     send_login_notification_email,
+    send_mfa_recovery_email,
     send_password_reset_email,
 )
-from utils.field_crypto import apply_citizen_user_security, apply_mfa_secret_security, find_citizen_by_email, find_mfa_secret_record, get_decrypted_or_raw, serialize_citizen_user
+from utils.field_crypto import apply_citizen_user_security, apply_email_otp_security, apply_mfa_secret_security, find_citizen_by_email, find_mfa_secret_record, get_decrypted_or_raw, hash_optional_value, serialize_citizen_user
 from utils.token_revocation import revoke_token
 
 router = APIRouter()
@@ -82,6 +85,13 @@ RATE_LIMIT_WINDOW = 60
 MAX_REQUESTS_PER_WINDOW = 30
 MFA_VALID_WINDOW_STEPS = 2
 
+MFA_RECOVERY_ROLE = "mfa_recovery"
+MFA_RECOVERY_OTP_EXPIRES_MINUTES = 10
+MFA_RECOVERY_RESEND_COOLDOWN_SECONDS = 120
+
+mfa_recovery_rate_limits: dict[str, list[float]] = {}
+mfa_recovery_confirm_rate_limits: dict[str, list[float]] = {}
+
 login_attempts = {}
 locked_accounts = {}
 
@@ -100,6 +110,26 @@ class UnifiedSetupMFARequest(BaseModel):
     portal: Optional[str] = None
 
 
+class UnifiedVerifyMFASetup(BaseModel):
+    identifier: str
+    password: str
+    portal: Optional[str] = None
+    totp_code: str
+
+
+class UnifiedMFARecoverySendOTPRequest(BaseModel):
+    identifier: str
+    password: str
+    portal: Optional[str] = None
+
+
+class UnifiedMFARecoveryVerifyOTPRequest(BaseModel):
+    identifier: str
+    password: str
+    portal: Optional[str] = None
+    otp_code: str
+
+
 class UnifiedToken(BaseModel):
     access_token: str
     token_type: str
@@ -107,6 +137,7 @@ class UnifiedToken(BaseModel):
     user: dict
     requires_mfa: Optional[bool] = False
     requires_captcha: Optional[bool] = False
+    mfa_setup_required: Optional[bool] = False
 
 
 class UnifiedPasswordResetRequest(BaseModel):
@@ -399,19 +430,124 @@ def get_mfa_secret(db: Session, portal: str, username: str) -> Optional[str]:
     return normalized_secret
 
 
-def save_mfa_secret(db: Session, portal: str, username: str, secret: str):
-    record = find_mfa_secret_record(db, MFASecret, portal, username)
+def save_mfa_secret(db: Session, portal: str, username: str, secret: str, enabled: bool = True):
+    record = find_mfa_secret_record(db, MFASecret, portal, username, enabled_only=False)
     if record:
         record.portal = portal
         record.username = username
         record.secret = secret
-        record.enabled = True
+        record.enabled = enabled
         apply_mfa_secret_security(record)
     else:
-        record = MFASecret(portal=portal, username=username, secret=secret, enabled=True)
+        record = MFASecret(portal=portal, username=username, secret=secret, enabled=enabled)
         apply_mfa_secret_security(record)
         db.add(record)
     db.commit()
+
+
+def get_mfa_secret_raw(db: Session, portal: str, username: str) -> Optional[MFASecret]:
+    return find_mfa_secret_record(db, MFASecret, portal, username, enabled_only=False)
+
+
+def hash_mfa_recovery_code(code: str) -> str:
+    return hashlib.sha256(code.encode("utf-8")).hexdigest()
+
+
+def generate_mfa_recovery_code() -> str:
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+
+def find_active_mfa_recovery_otp(db: Session, email: str) -> Optional[EmailOTP]:
+    now = datetime.utcnow()
+    email_hash = hash_optional_value(email)
+    role_hash = hash_optional_value(MFA_RECOVERY_ROLE)
+    return (
+        db.query(EmailOTP)
+        .filter(
+            EmailOTP.email_hash == email_hash,
+            EmailOTP.role_hash == role_hash,
+            EmailOTP.consumed_at.is_(None),
+            EmailOTP.expires_at > now,
+        )
+        .order_by(EmailOTP.created_at.desc(), EmailOTP.id.desc())
+        .first()
+    )
+
+
+def issue_mfa_recovery_otp(
+    db: Session,
+    email: str,
+    *,
+    allow_recent_existing: bool = False,
+) -> tuple[EmailOTP, int]:
+    now = datetime.utcnow()
+    active_otp = find_active_mfa_recovery_otp(db, email)
+
+    if active_otp and active_otp.last_sent_at:
+        elapsed = int((now - active_otp.last_sent_at).total_seconds())
+        remaining = max(MFA_RECOVERY_RESEND_COOLDOWN_SECONDS - elapsed, 0)
+        if remaining > 0:
+            if allow_recent_existing:
+                return active_otp, remaining
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Please wait {remaining} seconds before requesting another verification code.",
+            )
+
+    if active_otp:
+        active_otp.consumed_at = now
+
+    verification_code = generate_mfa_recovery_code()
+    otp_record = EmailOTP(
+        email=email,
+        role=MFA_RECOVERY_ROLE,
+        code_hash=hash_mfa_recovery_code(verification_code),
+        expires_at=now + timedelta(minutes=MFA_RECOVERY_OTP_EXPIRES_MINUTES),
+        attempts=0,
+        resend_count=(active_otp.resend_count + 1) if active_otp else 0,
+        last_sent_at=now,
+    )
+    db.add(otp_record)
+    db.flush()
+    apply_email_otp_security(otp_record)
+
+    email_result = send_mfa_recovery_email(
+        recipient_email=email,
+        verification_code=verification_code,
+        expires_minutes=MFA_RECOVERY_OTP_EXPIRES_MINUTES,
+    )
+    if not email_result["sent"]:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=email_result["message"],
+        )
+
+    return otp_record, MFA_RECOVERY_RESEND_COOLDOWN_SECONDS
+
+
+def check_mfa_recovery_rate_limit(email: str) -> bool:
+    current_time = time.time()
+    email_lower = email.lower()
+    window = mfa_recovery_rate_limits.get(email_lower, [])
+    window = [t for t in window if current_time - t < 3600]
+    if len(window) >= 3:
+        return False
+    window.append(current_time)
+    mfa_recovery_rate_limits[email_lower] = window
+    return True
+
+
+def check_mfa_recovery_confirm_rate_limit(email: str) -> bool:
+    current_time = time.time()
+    email_lower = email.lower()
+    window = mfa_recovery_confirm_rate_limits.get(email_lower, [])
+    window = [t for t in window if current_time - t < 60]
+    if len(window) >= 5:
+        return False
+    window.append(current_time)
+    mfa_recovery_confirm_rate_limits[email_lower] = window
+    return True
 
 
 def build_user_response(portal: str, account: object) -> dict:
@@ -691,41 +827,43 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
         mfa_username = get_mfa_username(portal, account)
         mfa_secret = get_mfa_secret(db, portal, mfa_username)
         if not mfa_secret:
-            headers = {
-                "X-Requires-MFA-Setup": "true",
-                "X-Auth-Portal": portal,
-            }
-            if requires_captcha(portal, credentials.identifier):
-                headers["X-Requires-Captcha"] = "true"
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="MFA not configured. Please setup MFA first.",
-                headers=headers,
-            )
+            if portal != "public":
+                headers = {
+                    "X-Requires-MFA-Setup": "true",
+                    "X-Auth-Portal": portal,
+                }
+                if requires_captcha(portal, credentials.identifier):
+                    headers["X-Requires-Captcha"] = "true"
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="MFA not configured. Please setup MFA first.",
+                    headers=headers,
+                )
+            # Public portal: MFA is optional; continue without it
+        else:
+            if not credentials.totp_code:
+                return {
+                    "access_token": "",
+                    "token_type": "bearer",
+                    "portal": portal,
+                    "user": {
+                        "email": get_account_email(portal, account),
+                    },
+                    "requires_mfa": True,
+                    "requires_captcha": requires_captcha(portal, credentials.identifier),
+                }
 
-        if not credentials.totp_code:
-            return {
-                "access_token": "",
-                "token_type": "bearer",
-                "portal": portal,
-                "user": {
-                    "email": get_account_email(portal, account),
-                },
-                "requires_mfa": True,
-                "requires_captcha": requires_captcha(portal, credentials.identifier),
-            }
-
-        totp = pyotp.TOTP(mfa_secret)
-        if not totp.verify(credentials.totp_code, valid_window=MFA_VALID_WINDOW_STEPS):
-            record_failed_attempt(portal, credentials.identifier)
-            headers = {"X-Auth-Portal": portal}
-            if requires_captcha(portal, credentials.identifier):
-                headers["X-Requires-Captcha"] = "true"
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or expired authenticator code. Check that your device time is set automatically, then try again.",
-                headers=headers,
-            )
+            totp = pyotp.TOTP(mfa_secret)
+            if not totp.verify(credentials.totp_code, valid_window=MFA_VALID_WINDOW_STEPS):
+                record_failed_attempt(portal, credentials.identifier)
+                headers = {"X-Auth-Portal": portal}
+                if requires_captcha(portal, credentials.identifier):
+                    headers["X-Requires-Captcha"] = "true"
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid or expired authenticator code. Check that your device time is set automatically, then try again.",
+                    headers=headers,
+                )
 
     reset_failed_attempts(portal, credentials.identifier)
     clear_tracking(credentials.identifier)
@@ -754,17 +892,18 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
     )
     log_unified_security_context(db, portal=portal, actor=get_mfa_username(portal, account), client_ip=client_ip, account=account)
 
-    user_response = build_user_response(portal, account)
+    mfa_setup_required = False
     if portal in {"public", "admin", "branch"}:
-        user_response["mfa_setup_required"] = get_mfa_secret(db, portal, get_mfa_username(portal, account)) is None
+        mfa_setup_required = get_mfa_secret(db, portal, get_mfa_username(portal, account)) is None
 
     return {
         "access_token": access_token,
         "token_type": "bearer",
         "portal": portal,
-        "user": user_response,
+        "user": build_user_response(portal, account),
         "requires_mfa": False,
         "requires_captcha": False,
+        "mfa_setup_required": mfa_setup_required,
     }
 
 
@@ -820,7 +959,8 @@ async def unified_setup_mfa(request: Request, credentials: UnifiedSetupMFAReques
 
     secret = pyotp.random_base32()
     mfa_username = get_mfa_username(portal, account)
-    save_mfa_secret(db, portal, mfa_username, secret)
+    is_public = portal == "public"
+    save_mfa_secret(db, portal, mfa_username, secret, enabled=not is_public)
     log_activity(
         db,
         "Unified MFA Setup Initiated",
@@ -829,6 +969,69 @@ async def unified_setup_mfa(request: Request, credentials: UnifiedSetupMFAReques
         "security",
     )
     return generate_mfa_payload(portal, mfa_username, secret)
+
+
+@router.post("/verify-mfa-setup")
+async def unified_verify_mfa_setup(
+    request: Request,
+    credentials: UnifiedVerifyMFASetup,
+    db: Session = Depends(get_db),
+):
+    client_ip = request.client.host
+    portal, account = find_account_for_portal(db, credentials.identifier, credentials.portal)
+
+    if portal not in {"public", "admin", "branch"} or not account:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="MFA verification is only available for citizen, staff, and admin accounts.",
+        )
+
+    if not pwd_context.verify(credentials.password, account.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+            headers={"X-Auth-Portal": portal},
+        )
+
+    if getattr(account, "status", "Active") != "Active":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is not active",
+            headers={"X-Auth-Portal": portal},
+        )
+
+    mfa_username = get_mfa_username(portal, account)
+    mfa_record = get_mfa_secret_raw(db, portal, mfa_username)
+    if not mfa_record:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="MFA setup not initiated. Please start setup first.",
+        )
+
+    secret = get_decrypted_or_raw(mfa_record, "secret")
+    if not secret:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to read MFA secret.",
+        )
+
+    totp = pyotp.TOTP(secret)
+    if not totp.verify(credentials.totp_code, valid_window=MFA_VALID_WINDOW_STEPS):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired authenticator code. Please try again.",
+        )
+
+    mfa_record.enabled = True
+    db.commit()
+    log_activity(
+        db,
+        "Unified MFA Setup Verified",
+        credentials.identifier,
+        f"Portal: {portal}, IP: {client_ip}",
+        "security",
+    )
+    return {"message": "MFA enabled successfully", "portal": portal}
 
 
 @router.post("/request-password-reset")
@@ -909,3 +1112,172 @@ async def unified_reset_password(
     )
 
     return {"message": "Password reset successful. You can now sign in with your new password."}
+
+
+@router.post("/mfa-recovery/send-otp")
+@limiter.limit("100/hour")
+async def unified_mfa_recovery_send_otp(
+    request: Request,
+    credentials: UnifiedMFARecoverySendOTPRequest,
+    db: Session = Depends(get_db),
+):
+    client_ip = request.client.host
+    portal, account = find_account_for_portal(db, credentials.identifier, credentials.portal)
+
+    if portal not in {"public", "admin", "branch"} or not account:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Account not found.",
+        )
+
+    if not pwd_context.verify(credentials.password, account.hashed_password):
+        log_activity(
+            db,
+            "Failed MFA Recovery OTP Request",
+            credentials.identifier,
+            f"Portal: {portal}, IP: {client_ip}",
+            "security",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+            headers={"X-Auth-Portal": portal},
+        )
+
+    if getattr(account, "status", "Active") != "Active":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is not active",
+            headers={"X-Auth-Portal": portal},
+        )
+
+    mfa_username = get_mfa_username(portal, account)
+    mfa_record = get_mfa_secret_raw(db, portal, mfa_username)
+    if not mfa_record or not mfa_record.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="MFA is not enabled for this account. Please sign in normally.",
+        )
+
+    email = serialize_citizen_user(account)["email"] if portal == "public" else account.email
+
+    if not check_mfa_recovery_rate_limit(email):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many recovery requests. Please try again later.",
+        )
+
+    otp_record, resend_wait = issue_mfa_recovery_otp(db, email, allow_recent_existing=False)
+    db.commit()
+
+    log_activity(
+        db,
+        "MFA Recovery OTP Sent",
+        credentials.identifier,
+        f"Portal: {portal}, IP: {client_ip}",
+        "security",
+    )
+
+    return {
+        "message": f"A verification code was sent to {email}.",
+        "resend_available_in_seconds": resend_wait,
+        "expires_in_seconds": max(int((otp_record.expires_at - datetime.utcnow()).total_seconds()), 0),
+    }
+
+
+@router.post("/mfa-recovery/verify-otp")
+@limiter.limit("100/hour")
+async def unified_mfa_recovery_verify_otp(
+    request: Request,
+    credentials: UnifiedMFARecoveryVerifyOTPRequest,
+    db: Session = Depends(get_db),
+):
+    client_ip = request.client.host
+    portal, account = find_account_for_portal(db, credentials.identifier, credentials.portal)
+
+    if portal not in {"public", "admin", "branch"} or not account:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Account not found.",
+        )
+
+    if not pwd_context.verify(credentials.password, account.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+            headers={"X-Auth-Portal": portal},
+        )
+
+    if getattr(account, "status", "Active") != "Active":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is not active",
+            headers={"X-Auth-Portal": portal},
+        )
+
+    email = serialize_citizen_user(account)["email"] if portal == "public" else account.email
+
+    if not check_mfa_recovery_confirm_rate_limit(email):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many verification attempts. Please try again later.",
+        )
+
+    active_otp = find_active_mfa_recovery_otp(db, email)
+    if not active_otp:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active verification code was found. Please request a new one.",
+        )
+
+    submitted_code = (credentials.otp_code or "").strip()
+    if len(submitted_code) != 6 or not submitted_code.isdigit():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Enter the 6-digit verification code from your email.",
+        )
+
+    if active_otp.expires_at <= datetime.utcnow():
+        active_otp.consumed_at = datetime.utcnow()
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This verification code has expired. Please request a new one.",
+        )
+
+    if active_otp.code_hash != hash_mfa_recovery_code(submitted_code):
+        active_otp.attempts = (active_otp.attempts or 0) + 1
+        db.commit()
+
+        if active_otp.attempts >= 5:
+            active_otp.consumed_at = datetime.utcnow()
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Too many failed attempts. Please request a new verification code.",
+            )
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid verification code. Please try again.",
+        )
+
+    # OTP verified — reset old MFA and generate new setup
+    active_otp.consumed_at = datetime.utcnow()
+
+    mfa_username = get_mfa_username(portal, account)
+    secret = pyotp.random_base32()
+    is_public = portal == "public"
+    save_mfa_secret(db, portal, mfa_username, secret, enabled=not is_public)
+
+    db.commit()
+
+    log_activity(
+        db,
+        "MFA Recovery Completed — Old MFA Reset",
+        credentials.identifier,
+        f"Portal: {portal}, IP: {client_ip}",
+        "security",
+    )
+
+    return generate_mfa_payload(portal, mfa_username, secret)

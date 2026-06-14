@@ -241,6 +241,8 @@ const Home = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedAnnouncement, setSelectedAnnouncement] = useState(null);
   const [showTicketModal, setShowTicketModal] = useState(false);
+  const [showMfaPrompt, setShowMfaPrompt] = useState(false);
+  const [mfaPromptLang, setMfaPromptLang] = useState(language);
   const [viewedIds, setViewedIds] = useState(() => {
     try {
       return new Set(JSON.parse(localStorage.getItem('wards_public_viewed_announcements') || '[]'));
@@ -278,6 +280,29 @@ const Home = () => {
   useEffect(() => {
     setCurrentPage(1);
   }, [announcements.length]);
+
+  useEffect(() => {
+    const shouldPrompt = sessionStorage.getItem('wards:publicMfaPrompt') === 'true';
+    if (shouldPrompt) {
+      setShowMfaPrompt(true);
+      sessionStorage.removeItem('wards:publicMfaPrompt');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (showMfaPrompt) {
+      setMfaPromptLang(language);
+    }
+  }, [showMfaPrompt, language]);
+
+  const handleDismissMfaPrompt = () => {
+    setShowMfaPrompt(false);
+  };
+
+  const handleStartMfaSetup = () => {
+    setShowMfaPrompt(false);
+    navigate('/account-management?mfaSetup=1');
+  };
 
   const fetchAnnouncements = async () => {
     try {
@@ -675,6 +700,52 @@ const Home = () => {
 
       {showTicketModal && (
         <ViewMyTicket onClose={closeTicketModal} />
+      )}
+
+      {/* MFA Prompt Modal */}
+      {showMfaPrompt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
+              {mfaPromptLang === 'en' ? 'Account Security' : 'Seguridad ng Account'}
+            </p>
+            <h2 className="mt-2 text-2xl font-bold text-slate-900">
+              {mfaPromptLang === 'en'
+                ? 'Set Up Multi-Factor Authentication?'
+                : 'Mag-set up ng Multi-Factor Authentication?'}
+            </h2>
+            <p className="mt-3 text-sm leading-6 text-slate-600">
+              {mfaPromptLang === 'en'
+                ? 'MFA adds extra security to your account. If enabled, future logins will require your email/password and a 6-digit code from Microsoft Authenticator.'
+                : 'Ang MFA ay dagdag na proteksyon para sa iyong account. Kapag naka-enable, kakailanganin ang email/password at 6-digit code mula sa Microsoft Authenticator sa susunod na login.'}
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={handleDismissMfaPrompt}
+                className="rounded-full border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              >
+                Maybe Later
+              </button>
+              <button
+                type="button"
+                onClick={handleStartMfaSetup}
+                className="rounded-full bg-[#0f5b83] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#0c4d6f]"
+              >
+                Set Up MFA
+              </button>
+            </div>
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setMfaPromptLang((prev) => (prev === 'en' ? 'tl' : 'en'))}
+                className="text-xs font-medium text-blue-600 hover:text-blue-700 transition-colors"
+              >
+                {mfaPromptLang === 'en' ? 'Translate to Tagalog' : 'Translate to English'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

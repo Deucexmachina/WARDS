@@ -56,6 +56,11 @@ class PublicUserSetupMFA(BaseModel):
     email: str
     password: str
 
+class VerifyPublicMFASetup(BaseModel):
+    email: str
+    password: str
+    totp_code: str
+
 class Token(BaseModel):
     access_token: Optional[str] = None
     token_type: str
@@ -78,19 +83,23 @@ def get_mfa_secret(db: Session, email: str) -> Optional[str]:
     record = find_mfa_secret_record(db, MFASecret, "public", email, enabled_only=True)
     return (get_decrypted_or_raw(record, "secret") or record.secret) if record else None
 
-def save_mfa_secret(db: Session, email: str, secret: str):
-    record = find_mfa_secret_record(db, MFASecret, "public", email)
+def save_mfa_secret(db: Session, email: str, secret: str, enabled: bool = True):
+    record = find_mfa_secret_record(db, MFASecret, "public", email, enabled_only=False)
     if record:
         record.portal = "public"
         record.username = email
         record.secret = secret
-        record.enabled = True
+        record.enabled = enabled
         apply_mfa_secret_security(record)
     else:
-        record = MFASecret(portal="public", username=email, secret=secret, enabled=True)
+        record = MFASecret(portal="public", username=email, secret=secret, enabled=enabled)
         apply_mfa_secret_security(record)
         db.add(record)
     db.commit()
+
+
+def get_mfa_secret_raw(db: Session, email: str) -> Optional[MFASecret]:
+    return find_mfa_secret_record(db, MFASecret, "public", email, enabled_only=False)
 
 def generate_mfa_payload(email: str, secret: str) -> dict:
     totp_uri = pyotp.TOTP(secret).provisioning_uri(
@@ -222,8 +231,36 @@ async def setup_public_user_mfa(request: Request, credentials: PublicUserSetupMF
 
     email = serialize_citizen_user(user)["email"]
     secret = pyotp.random_base32()
-    save_mfa_secret(db, email, secret)
+    save_mfa_secret(db, email, secret, enabled=False)
     return generate_mfa_payload(email, secret)
+
+
+@router.post("/verify-mfa-setup")
+async def verify_public_mfa_setup(request: Request, credentials: VerifyPublicMFASetup, db: Session = Depends(get_db)):
+    normalized_email = normalize_email(credentials.email)
+    user = find_citizen_by_email(db, PublicUser, normalized_email)
+    if not user or not pwd_context.verify(credentials.password, user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+    if not user.is_verified:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Please verify your email before setting up MFA.")
+
+    email = serialize_citizen_user(user)["email"]
+    mfa_record = get_mfa_secret_raw(db, email)
+    if not mfa_record:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="MFA setup not initiated. Please start setup first.")
+
+    secret = get_decrypted_or_raw(mfa_record, "secret")
+    if not secret:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to read MFA secret.")
+
+    totp = pyotp.TOTP(secret)
+    if not totp.verify(credentials.totp_code, valid_window=1):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired authenticator code. Please try again.")
+
+    mfa_record.enabled = True
+    db.commit()
+    return {"message": "MFA enabled successfully", "portal": "public"}
+
 
 @router.post("/login", response_model=Token)
 async def login_public_user(credentials: PublicUserLogin, db: Session = Depends(get_db)):
@@ -252,28 +289,22 @@ async def login_public_user(credentials: PublicUserLogin, db: Session = Depends(
 
     email = serialize_citizen_user(user)["email"]
     totp_secret = get_mfa_secret(db, email)
-    if not totp_secret:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="MFA not configured. Please setup MFA first.",
-            headers={"X-Requires-MFA-Setup": "true", "X-Auth-Portal": "public"},
-        )
+    if totp_secret:
+        if not credentials.totp_code:
+            return {
+                "access_token": "",
+                "token_type": "bearer",
+                "user": {"email": email},
+                "requires_mfa": True,
+            }
 
-    if not credentials.totp_code:
-        return {
-            "access_token": "",
-            "token_type": "bearer",
-            "user": {"email": email},
-            "requires_mfa": True,
-        }
-
-    totp = pyotp.TOTP(totp_secret)
-    if not totp.verify(credentials.totp_code, valid_window=1):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired authenticator code. Check that your device time is set automatically, then try again.",
-            headers={"X-Auth-Portal": "public"},
-        )
+        totp = pyotp.TOTP(totp_secret)
+        if not totp.verify(credentials.totp_code, valid_window=1):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired authenticator code. Check that your device time is set automatically, then try again.",
+                headers={"X-Auth-Portal": "public"},
+            )
     
     # Update last login
     user.last_login = datetime.utcnow()
@@ -295,7 +326,8 @@ async def login_public_user(credentials: PublicUserLogin, db: Session = Depends(
             "email": serialize_citizen_user(user)["email"],
             "full_name": serialize_citizen_user(user)["full_name"],
             "contact_number": serialize_citizen_user(user)["contact_number"]
-        }
+        },
+        "mfa_setup_required": get_mfa_secret(db, email) is None,
     }
 
 @router.get("/me")

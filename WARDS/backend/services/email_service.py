@@ -639,6 +639,92 @@ def send_new_window_accounts_email(
         }
 
 
+def _build_mfa_recovery_text(verification_code: str, expires_minutes: int) -> str:
+    return "\n".join(
+        [
+            "City Treasurer's Office",
+            "WARDS Security Verification",
+            "",
+            "You requested to reset your Multi-Factor Authentication (MFA) setup.",
+            "",
+            "Use the verification code below to continue:",
+            verification_code,
+            "",
+            f"This code will expire in {expires_minutes} minutes. Please do not share this code with anyone.",
+            "",
+            "If you did not request this MFA reset, please ignore this email or contact the system administrator immediately.",
+            "",
+            "WARDS Public Service System",
+            "City Treasurer's Office",
+        ]
+    )
+
+
+def _build_mfa_recovery_html(verification_code: str, expires_minutes: int, logos: list[dict]) -> str:
+    return f"""
+<!DOCTYPE html>
+<html lang="en">
+  <body style="margin:0;padding:0;background:#f3f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;">
+    <div style="max-width:640px;margin:0 auto;padding:32px 20px;">
+      {_build_email_shell_header("MFA Reset Verification", "Verify your identity to reset your Multi-Factor Authentication setup and restore secure access to your account.", logos)}
+      <div style="background:#ffffff;border-radius:0 0 24px 24px;padding:30px 30px 32px;box-shadow:0 18px 40px rgba(15,39,68,.10);border:1px solid #dbe3ef;border-top:none;">
+        <div style="background:#f8fbff;border:1px solid #dbe7f3;border-radius:18px;padding:20px 22px;margin:0 0 22px;">
+          <h2 style="margin:0 0 10px;font-size:17px;color:#0f2744;">Security Verification</h2>
+          <p style="margin:0;font-size:14px;line-height:1.7;color:#546273;">
+            You requested to reset your Multi-Factor Authentication (MFA) setup.
+            Enter the verification code below in WARDS to continue.
+          </p>
+        </div>
+        <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:16px;padding:18px 20px;margin:0 0 22px;text-align:center;">
+          <p style="margin:0 0 8px;font-size:13px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#64748b;">Verification Code</p>
+          <p style="margin:0;font-size:34px;line-height:1.2;font-weight:800;letter-spacing:.28em;color:#166534;">{_safe_html(verification_code)}</p>
+          <p style="margin:10px 0 0;font-size:13px;line-height:1.7;color:#5b6471;">This code expires in {_safe_html(str(expires_minutes))} minutes.</p>
+        </div>
+        <div style="background:#fff8e8;border:1px solid #f4d58d;border-radius:14px;padding:14px 18px;margin:0 0 22px;">
+          <p style="margin:0;font-size:13px;line-height:1.7;color:#7c4a03;">
+            <strong>Security Reminder:</strong> Please do not share this code with anyone. If you did not request this MFA reset, please ignore this email or contact the system administrator immediately.
+          </p>
+        </div>
+        <p style="margin:24px 0 0;font-size:14px;line-height:1.7;color:#1f2937;">
+          City Treasurer's Office<br><strong>WARDS Public Service System</strong>
+        </p>
+      </div>
+    </div>
+  </body>
+</html>
+"""
+
+
+def send_mfa_recovery_email(recipient_email: str, verification_code: str, expires_minutes: int = 10) -> dict:
+    if not smtp_is_configured():
+        return {
+            "sent": False,
+            "status": "skipped",
+            "message": "SMTP is not configured. Recovery email was not sent.",
+        }
+
+    smtp_from_email = os.getenv("SMTP_FROM_EMAIL")
+    smtp_from_name = os.getenv("SMTP_FROM_NAME", "WARDS Admin")
+    logos = _load_email_logos()
+    message = EmailMessage()
+    message["Subject"] = "WARDS MFA Reset Verification Code"
+    message["From"] = f"{smtp_from_name} <{smtp_from_email}>"
+    message["To"] = recipient_email
+    message.set_content(_build_mfa_recovery_text(verification_code, expires_minutes))
+    message.add_alternative(_build_mfa_recovery_html(verification_code, expires_minutes, logos), subtype="html")
+    _attach_inline_logos(message, logos)
+
+    try:
+        result = _send_email_message(message)
+        return {**result, "message": f"MFA recovery email sent to {recipient_email}."}
+    except Exception as exc:
+        return {
+            "sent": False,
+            "status": "failed",
+            "message": f"MFA recovery email could not be sent: {exc}",
+        }
+
+
 def send_citizen_verification_email(recipient_email: str, verification_code: str, expires_minutes: int = 10) -> dict:
     if not smtp_is_configured():
         return {

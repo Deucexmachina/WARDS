@@ -41,11 +41,20 @@ const PublicLogin = () => {
 
     try {
       const response = await axios.post(`${API_BASE_URL}/public/auth/login`, formData);
-      
+
+      if (response.data.requires_mfa) {
+        navigate(`/login?portal=public`);
+        return;
+      }
+
       // Store token and user data
-      localStorage.setItem('publicToken', response.data.access_token);
+      localStorage.setItem('userToken', response.data.access_token);
       setStoredPublicUser(response.data.user);
-      
+
+      if (response.data.mfa_setup_required) {
+        sessionStorage.setItem('wards:publicMfaPrompt', 'true');
+      }
+
       // Redirect to the page they were trying to access or home
       const redirectTo = localStorage.getItem('redirectAfterLogin') || '/';
       localStorage.removeItem('redirectAfterLogin');

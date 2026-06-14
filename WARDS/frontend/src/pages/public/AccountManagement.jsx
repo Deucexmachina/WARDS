@@ -1,7 +1,9 @@
 import axios from 'axios';
 import { useEffect, useMemo, useState } from 'react';
-import { taxpayerAccountAPI, queueAPI } from '../../services/api';
+import { useSearchParams } from 'react-router-dom';
+import { taxpayerAccountAPI, queueAPI, userAuthAPI } from '../../services/api';
 import { getStoredPublicUser, setStoredPublicUser } from '../../utils/publicSession';
+import { usePublicLanguage } from '../../utils/publicLanguage';
 import {
   getEmailValidationMessage,
   normalizePhilippineContactDigits,
@@ -76,6 +78,8 @@ const isProfileReady = (profile) =>
   );
 
 const AccountManagement = () => {
+  const [searchParams] = useSearchParams();
+  const [language] = usePublicLanguage();
   const [profile, setProfile] = useState(DEFAULT_PROFILE);
   const [originalProfile, setOriginalProfile] = useState(DEFAULT_PROFILE);
   const [identifierForm, setIdentifierForm] = useState(DEFAULT_IDENTIFIER_FORM);
@@ -104,6 +108,17 @@ const AccountManagement = () => {
   const [passwordError, setPasswordError] = useState('');
   const [changingPassword, setChangingPassword] = useState(false);
 
+  const [mfaEnabled, setMfaEnabled] = useState(false);
+  const [showMfaSetup, setShowMfaSetup] = useState(false);
+  const [mfaSetupLang, setMfaSetupLang] = useState(language);
+  const [mfaSetupData, setMfaSetupData] = useState(null);
+  const [mfaTotpCode, setMfaTotpCode] = useState('');
+  const [mfaTotpError, setMfaTotpError] = useState('');
+  const [mfaPassword, setMfaPassword] = useState('');
+  const [mfaLoading, setMfaLoading] = useState(false);
+  const [mfaMessage, setMfaMessage] = useState('');
+  const [mfaError, setMfaError] = useState('');
+
   const loadAccount = async () => {
     try {
       setLoading(true);
@@ -127,7 +142,8 @@ const AccountManagement = () => {
       }));
       setSubmissions(response.data?.submissions || []);
       setAssessments(response.data?.assessments || []);
-      
+      setMfaEnabled(Boolean(response.data?.mfa_enabled));
+
       // Load queue history
       try {
         const queueResponse = await queueAPI.getMyHistory();
@@ -148,6 +164,112 @@ const AccountManagement = () => {
   useEffect(() => {
     loadAccount();
   }, []);
+
+  useEffect(() => {
+    if (mfaEnabled) return;
+    const autoOpen = searchParams.get('mfaSetup') === '1';
+    if (autoOpen) {
+      setShowMfaSetup(true);
+      setMfaError('');
+      setMfaMessage('');
+      setMfaPassword('');
+      setMfaTotpCode('');
+      setMfaTotpError('');
+    }
+  }, [mfaEnabled, searchParams]);
+
+  useEffect(() => {
+    if (showMfaSetup) {
+      setMfaSetupLang(language);
+    }
+  }, [showMfaSetup, language]);
+
+  const handleStartMfaSetup = async () => {
+    setShowMfaSetup(true);
+    setMfaError('');
+    setMfaMessage('');
+    setMfaPassword('');
+    setMfaTotpCode('');
+    setMfaTotpError('');
+  };
+
+  const handleRequestMfaSetup = async () => {
+    if (!mfaPassword) {
+      setMfaError(
+        language === 'en'
+          ? 'Please enter your current password to continue.'
+          : 'Mangyaring ilagay ang iyong kasalukuyang password para magpatuloy.'
+      );
+      return;
+    }
+    try {
+      setMfaLoading(true);
+      setMfaError('');
+      const response = await userAuthAPI.setupMfa({
+        email: profile.email,
+        password: mfaPassword,
+      });
+      setMfaSetupData(response.data);
+      setMfaMessage('');
+    } catch (err) {
+      setMfaError(
+        err.response?.data?.detail ||
+        (language === 'en' ? 'Failed to start MFA setup.' : 'Nabigo ang pagumpisa ng MFA setup.')
+      );
+    } finally {
+      setMfaLoading(false);
+    }
+  };
+
+  const handleVerifyMfaSetup = async () => {
+    if (!mfaTotpCode || mfaTotpCode.length !== 6) {
+      setMfaTotpError(
+        language === 'en'
+          ? 'Please enter the 6-digit code from your authenticator app.'
+          : 'Mangyaring ilagay ang 6-digit code mula sa iyong authenticator app.'
+      );
+      return;
+    }
+    try {
+      setMfaLoading(true);
+      setMfaError('');
+      setMfaTotpError('');
+      await userAuthAPI.verifyMfaSetup({
+        email: profile.email,
+        password: mfaPassword,
+        totp_code: mfaTotpCode,
+      });
+      setMfaEnabled(true);
+      setShowMfaSetup(false);
+      setMfaSetupData(null);
+      setMfaMessage(
+        language === 'en'
+          ? 'MFA enabled successfully. Future logins will require your authenticator code.'
+          : 'Tagumpay na na-enable ang MFA. Kakailanganin ang iyong authenticator code sa susunod na login.'
+      );
+      setMfaPassword('');
+      setMfaTotpCode('');
+    } catch (err) {
+      setMfaError(
+        err.response?.data?.detail ||
+        (language === 'en'
+          ? 'Verification failed. Please check the code and try again.'
+          : 'Nabigo ang verification. Mangyaring suriin ang code at subukang muli.')
+      );
+    } finally {
+      setMfaLoading(false);
+    }
+  };
+
+  const handleCancelMfaSetup = () => {
+    setShowMfaSetup(false);
+    setMfaSetupData(null);
+    setMfaError('');
+    setMfaMessage('');
+    setMfaPassword('');
+    setMfaTotpCode('');
+    setMfaTotpError('');
+  };
 
   const rptAssessments = useMemo(() => assessments.filter((item) => item.tax_type === 'RPT'), [assessments]);
   const btAssessments = useMemo(() => assessments.filter((item) => item.tax_type === 'BT'), [assessments]);
@@ -600,6 +722,50 @@ const AccountManagement = () => {
               )}
             </div>
 
+            {/* MFA Security Section */}
+            <div className="mt-8 rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
+              <div className="mb-5 flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">
+                    {language === 'en' ? 'Account Security' : 'Seguridad ng Account'}
+                  </p>
+                  <h2 className="mt-2 text-2xl font-bold text-slate-900">
+                    {language === 'en' ? 'Multi-Factor Authentication' : 'Multi-Factor Authentication'}
+                  </h2>
+                </div>
+                <span className={`rounded-full border px-3 py-1 text-xs font-bold ${mfaEnabled ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : 'bg-slate-100 text-slate-700 border-slate-200'}`}>
+                  {mfaEnabled
+                    ? (language === 'en' ? 'MFA Enabled' : 'MFA Naka-enable')
+                    : (language === 'en' ? 'MFA Not Enabled' : 'MFA Hindi Naka-enable')}
+                </span>
+              </div>
+              <p className="text-sm leading-6 text-slate-600">
+                {mfaEnabled
+                  ? (language === 'en'
+                      ? 'Your account is protected with Multi-Factor Authentication. Each time you log in, you will need to enter a code from your Microsoft Authenticator app.'
+                      : 'Protektado ang iyong account sa Multi-Factor Authentication. Sa bawat pag-login, kakailanganin mong ilagay ang code mula sa Microsoft Authenticator app.')
+                  : (language === 'en'
+                      ? 'Multi-Factor Authentication (MFA) adds an extra layer of security to your account. If enabled, your future logins will require both your email/password and a verification code from your Microsoft Authenticator app.'
+                      : 'Ang Multi-Factor Authentication (MFA) ay nagdadagdag ng extra proteksyon sa iyong account. Kapag naka-enable, kakailanganin ang email/password at verification code mula sa Microsoft Authenticator app sa susunod na login.')}
+              </p>
+              {!mfaEnabled && (
+                <div className="mt-5">
+                  <button
+                    type="button"
+                    onClick={handleStartMfaSetup}
+                    className="rounded-full bg-[#0f5b83] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#0c4d6f]"
+                  >
+                    Set Up MFA
+                  </button>
+                </div>
+              )}
+              {mfaMessage && (
+                <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                  {mfaMessage}
+                </div>
+              )}
+            </div>
+
             <div className="mt-10 grid gap-8 xl:grid-cols-2">
               <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
                 <div className="mb-5 flex items-center justify-between">
@@ -858,6 +1024,146 @@ const AccountManagement = () => {
           </form>
         </div>
       ) : null}
+
+      {/* MFA Setup Modal */}
+      {showMfaSetup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
+          <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
+              {mfaSetupLang === 'en' ? 'Account Security' : 'Seguridad ng Account'}
+            </p>
+            <h2 className="mt-2 text-2xl font-bold text-slate-900">MFA Setup</h2>
+            <p className="mt-3 text-sm leading-6 text-slate-600">
+              {mfaSetupData
+                ? (mfaSetupLang === 'en'
+                    ? 'Please scan this QR code using your Microsoft Authenticator app to link your account. After scanning, enter the 6-digit verification code generated by the app to complete MFA setup.'
+                    : 'I-scan ang QR code na ito gamit ang Microsoft Authenticator app para ma-link ang iyong account. Pagkatapos mag-scan, ilagay ang 6-digit verification code mula sa app para makumpleto ang MFA setup.')
+                : (mfaSetupLang === 'en'
+                    ? 'Enter your current password to start MFA setup.'
+                    : 'Ilagay ang iyong kasalukuyang password para simulan ang MFA setup.')}
+            </p>
+
+            {mfaError && (
+              <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                {mfaError}
+              </div>
+            )}
+
+            {!mfaSetupData ? (
+              <div className="mt-5">
+                <label className="block">
+                  <span className="mb-2 block text-sm font-semibold text-slate-700">
+                    {mfaSetupLang === 'en' ? 'Current Password' : 'Kasalukuyang Password'}
+                  </span>
+                  <input
+                    type="password"
+                    value={mfaPassword}
+                    onChange={(event) => {
+                      setMfaPassword(event.target.value);
+                      setMfaError('');
+                    }}
+                    className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-[#0f5b83] focus:ring-2 focus:ring-[#0f5b83]/10"
+                    autoComplete="current-password"
+                  />
+                </label>
+                <div className="mt-6 flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={handleCancelMfaSetup}
+                    disabled={mfaLoading}
+                    className="rounded-full border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+                  >
+                    {mfaSetupLang === 'en' ? 'Cancel' : 'Kanselahin'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRequestMfaSetup}
+                    disabled={mfaLoading || !mfaPassword}
+                    className="rounded-full bg-[#0f5b83] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#0c4d6f] disabled:opacity-60"
+                  >
+                    {mfaLoading
+                      ? (mfaSetupLang === 'en' ? 'Generating...' : 'Nag-ge-generate...')
+                      : (mfaSetupLang === 'en' ? 'Continue' : 'Magpatuloy')}
+                  </button>
+                </div>
+                <div className="mt-4 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setMfaSetupLang((prev) => (prev === 'en' ? 'tl' : 'en'))}
+                    className="text-xs font-medium text-blue-600 hover:text-blue-700 transition-colors"
+                  >
+                    {mfaSetupLang === 'en' ? 'Translate to Tagalog' : 'Translate to English'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-5 space-y-5">
+                <div className="flex justify-center">
+                  <img
+                    src={mfaSetupData.qr_code}
+                    alt={mfaSetupLang === 'en' ? 'MFA QR code' : 'MFA QR code'}
+                    className="w-44 h-44 rounded-xl border-4 border-white shadow-lg object-contain"
+                  />
+                </div>
+                <code className="block bg-slate-100 text-slate-700 p-3 rounded-xl text-xs break-all">
+                  {mfaSetupData.manual_entry_key}
+                </code>
+                <label className="block">
+                  <span className="mb-2 block text-sm font-semibold text-slate-700">
+                    {mfaSetupLang === 'en' ? 'Authenticator Code' : 'Authenticator Code'}
+                  </span>
+                  <input
+                    type="text"
+                    value={mfaTotpCode}
+                    onChange={(event) => {
+                      const nextValue = event.target.value.replace(/\D/g, '').slice(0, 6);
+                      setMfaTotpCode(nextValue);
+                      setMfaTotpError('');
+                      setMfaError('');
+                    }}
+                    maxLength={6}
+                    placeholder="000000"
+                    className={`w-full rounded-2xl border px-4 py-3 text-sm text-center text-2xl tracking-[0.5em] font-mono outline-none transition ${mfaTotpError ? 'border-rose-400 bg-rose-50 focus:border-rose-500' : 'border-slate-300 focus:border-[#0f5b83]'} focus:ring-2 focus:ring-[#0f5b83]/10`}
+                    autoComplete="one-time-code"
+                  />
+                  {mfaTotpError && (
+                    <span className="mt-2 block text-xs font-medium text-rose-600">{mfaTotpError}</span>
+                  )}
+                </label>
+                <div className="flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={handleCancelMfaSetup}
+                    disabled={mfaLoading}
+                    className="rounded-full border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+                  >
+                    {mfaSetupLang === 'en' ? 'Cancel' : 'Kanselahin'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleVerifyMfaSetup}
+                    disabled={mfaLoading || mfaTotpCode.length !== 6}
+                    className="rounded-full bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
+                  >
+                    {mfaLoading
+                      ? (mfaSetupLang === 'en' ? 'Verifying...' : 'Nagve-verify...')
+                      : (mfaSetupLang === 'en' ? 'Verify & Enable MFA' : 'I-verify at I-enable ang MFA')}
+                  </button>
+                </div>
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setMfaSetupLang((prev) => (prev === 'en' ? 'tl' : 'en'))}
+                    className="text-xs font-medium text-blue-600 hover:text-blue-700 transition-colors"
+                  >
+                    {mfaSetupLang === 'en' ? 'Translate to Tagalog' : 'Translate to English'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </section>
   );
 };

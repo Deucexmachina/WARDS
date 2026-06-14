@@ -21,6 +21,7 @@ from database.models import (
     Branch,
     BusinessRegistry,
     CitizenUser,
+    MFASecret,
     Payment,
     Queue,
     QueueHistory,
@@ -35,7 +36,7 @@ from services.email_service import (
     send_taxpayer_identifier_submission_email,
     send_taxpayer_verification_status_email,
 )
-from utils.field_crypto import apply_citizen_user_security, apply_tax_assessment_record_security, apply_taxpayer_identifier_submission_security, build_redacted_text, get_decrypted_or_raw, hash_aware_match, hash_optional_value, is_redacted_placeholder, set_encrypted_hash_companions, tax_assessment_value, taxpayer_submission_value
+from utils.field_crypto import apply_citizen_user_security, apply_tax_assessment_record_security, apply_taxpayer_identifier_submission_security, build_redacted_text, find_mfa_secret_record, get_decrypted_or_raw, hash_aware_match, hash_optional_value, is_redacted_placeholder, set_encrypted_hash_companions, tax_assessment_value, taxpayer_submission_value
 from utils.file_validation import SafeFileType, validate_upload_file
 from utils.security_validation import (
     ensure_contact_number_is_unique,
@@ -661,6 +662,12 @@ async def get_public_account_management(
         .all()
     )
     assessments = filter_unsettled_public_assessments(db, current_user, assessments)
+
+    mfa_record = find_mfa_secret_record(
+        db, MFASecret, "public", citizen_email(current_user), enabled_only=True
+    )
+    mfa_enabled = bool(mfa_record and get_decrypted_or_raw(mfa_record, "secret"))
+
     return {
         "profile": {
             "id": current_user.id,
@@ -673,6 +680,7 @@ async def get_public_account_management(
         },
         "submissions": [serialize_submission(record) for record in submissions],
         "assessments": [serialize_assessment(record) for record in assessments],
+        "mfa_enabled": mfa_enabled,
     }
 
 

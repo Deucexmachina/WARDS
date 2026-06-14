@@ -195,6 +195,16 @@ export const taxpayerAccountAPI = {
   }),
 };
 
+export const userAuthAPI = {
+  setupMfa: (data) => api.post('/user/auth/setup-mfa', data),
+  verifyMfaSetup: (data) => api.post('/user/auth/verify-mfa-setup', data),
+};
+
+export const unifiedAuthAPI = {
+  sendMfaRecoveryOtp: (data) => api.post('/auth/unified/mfa-recovery/send-otp', data),
+  verifyMfaRecoveryOtp: (data) => api.post('/auth/unified/mfa-recovery/verify-otp', data),
+};
+
 export const taxAssessmentAPI = {
   listSubmissions: (params) => api.get('/tax-assessment/admin/submissions', { params }),
   reviewSubmission: (submissionId, data) => api.put(`/tax-assessment/admin/submissions/${submissionId}/review`, data),

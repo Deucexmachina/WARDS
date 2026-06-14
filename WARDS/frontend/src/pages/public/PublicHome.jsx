@@ -245,7 +245,7 @@ const PublicHome = () => {
       <footer className="bg-gray-800 text-white py-8 mt-12">
         <div className="container mx-auto px-4 text-center">
           <p className="text-gray-300">
-            {language === 'en' 
+            {language === 'en'
               ? '© 2024 City Treasurer\'s Office. All rights reserved.'
               : '© 2024 Tanggapan ng Ingat-Yaman ng Lungsod. Lahat ng karapatan ay nakalaan.'}
           </p>
@@ -262,6 +262,7 @@ const PublicHome = () => {
           </div>
         </div>
       </footer>
+
     </div>
   );
 };
