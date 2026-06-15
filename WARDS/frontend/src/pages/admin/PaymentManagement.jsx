@@ -397,7 +397,16 @@ const PaymentManagement = () => {
   };
 
   const monthlyPayments = useMemo(() => (
-    payments.filter((payment) => isRecordInMonth(payment.verified_at || payment.created_at, selectedMonth))
+    payments
+      .filter((payment) => isRecordInMonth(payment.verified_at || payment.created_at, selectedMonth))
+      .sort((a, b) => {
+        const dateA = parsePaymentDate(a.created_at);
+        const dateB = parsePaymentDate(b.created_at);
+        if (!dateA && !dateB) return 0;
+        if (!dateA) return 1;
+        if (!dateB) return -1;
+        return dateB.getTime() - dateA.getTime();
+      })
   ), [payments, selectedMonth]);
 
   const monthlyRemittances = useMemo(() => (
