@@ -10,7 +10,6 @@ from utils.token_revocation import is_token_revoked
 
 SECRET_KEY = os.getenv("USER_SECRET_KEY", "your-user-secret-key-change-in-production")
 UNIFIED_SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "your-unified-auth-secret-change-in-production")
-LEGACY_PUBLIC_SECRET_KEY = "your-secret-key-change-in-production"
 ALGORITHM = "HS256"
 
 security = HTTPBearer()
@@ -51,17 +50,7 @@ async def get_current_user(
 
             user = find_citizen_by_email(db, CitizenUser, email)
         except JWTError:
-            try:
-                payload = jwt.decode(token, LEGACY_PUBLIC_SECRET_KEY, algorithms=[ALGORITHM])
-                email: str = payload.get("sub")
-                token_type: str = payload.get("type")
-
-                if email is None or token_type != "public":
-                    raise credentials_exception
-
-                user = find_citizen_by_email(db, CitizenUser, email)
-            except JWTError:
-                raise credentials_exception
+            raise credentials_exception
 
     if user is None:
         raise credentials_exception
