@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
 import WardsPageHero from '../../components/WardsPageHero';
+import { CustomSelect } from '../../components/FormControls';
 import {
   DiscrepancyInfoCard,
   DiscrepancySection,
@@ -117,6 +118,10 @@ const BranchDiscrepancies = () => {
       return next;
     });
     setError('');
+  };
+
+  const handleSelectChange = (fieldName) => (value) => {
+    handleInputChange({ target: { name: fieldName, value, type: 'select-one', checked: false } });
   };
 
   const resetForm = () => {
@@ -340,27 +345,13 @@ const BranchDiscrepancies = () => {
             </div>
             <div>
               <label className="mb-2 block text-sm font-semibold text-gray-700">Discrepancy Type</label>
-              <select
-                name="discrepancy_type"
+              <CustomSelect
                 value={formData.discrepancy_type}
-                onChange={handleInputChange}
-                aria-invalid={validationErrors.discrepancy_type ? 'true' : 'false'}
-                className={`w-full rounded-2xl border px-4 py-3 ${
-                  validationErrors.discrepancy_type ? 'border-rose-400 bg-rose-50' : 'border-gray-300'
-                }`}
-                required
-              >
-                <option value="">Select type</option>
-                  <option value="No Internet Connection">No Internet Connection</option>
-                  <option value="Slow Internet Connection">Slow Internet Connection</option>
-                  <option value="Complete Network Outage">Complete Network Outage</option>
-                  <option value="No Electricity / Power Interruption">No Electricity / Power Interruption</option>
-                  <option value="Receipt Printer Not Working">Receipt Printer Not Working</option>
-                  <option value="Flooding in Branch Office">Flooding in Branch Office</option>
-                  <option value="Branch Closure Due to Emergency">Branch Closure Due to Emergency</option>
-                  <option value="Revenue Collection Interruption">Revenue Collection Interruption</option>
-                  <option value="Other">Other</option>
-              </select>
+                onChange={handleSelectChange('discrepancy_type')}
+                options={[{ value: '', label: 'Select type' }, { value: 'No Internet Connection', label: 'No Internet Connection' }, { value: 'Slow Internet Connection', label: 'Slow Internet Connection' }, { value: 'Complete Network Outage', label: 'Complete Network Outage' }, { value: 'No Electricity / Power Interruption', label: 'No Electricity / Power Interruption' }, { value: 'Receipt Printer Not Working', label: 'Receipt Printer Not Working' }, { value: 'Flooding in Branch Office', label: 'Flooding in Branch Office' }, { value: 'Branch Closure Due to Emergency', label: 'Branch Closure Due to Emergency' }, { value: 'Revenue Collection Interruption', label: 'Revenue Collection Interruption' }, { value: 'Other', label: 'Other' }]}
+                placeholder="Select type"
+                hasError={!!validationErrors.discrepancy_type}
+              />
               {validationErrors.discrepancy_type ? (
                 <p className="mt-2 text-xs font-medium text-rose-600">{validationErrors.discrepancy_type}</p>
               ) : null}

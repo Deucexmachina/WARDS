@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../../services/api';
 import WardsPageHero from '../../components/WardsPageHero';
+import { CustomSelect } from '../../components/FormControls';
 
 const PAYMENT_TIME_ZONE = 'Asia/Manila';
 const TRANSACTIONS_PER_PAGE = 5;
@@ -1483,43 +1484,15 @@ const PaymentManagement = () => {
           </div>
           <div>
             <label className="mb-2 block text-sm font-semibold text-slate-700">Payment Status</label>
-            <select
-              value={draftFilters.status}
-              onChange={(event) => updateDraftFilter('status', event.target.value)}
-              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm shadow-sm focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-slate-200"
-            >
-              <option value="all">All Statuses</option>
-              <option value="confirmed">Verified</option>
-              <option value="pending">Pending</option>
-              <option value="failed">Failed / Declined</option>
-              <option value="expired">Expired</option>
-            </select>
+            <CustomSelect value={draftFilters.status} onChange={(value) => updateDraftFilter('status', value)} options={[{ value: 'all', label: 'All Statuses' }, { value: 'confirmed', label: 'Verified' }, { value: 'pending', label: 'Pending' }, { value: 'failed', label: 'Failed / Declined' }, { value: 'expired', label: 'Expired' }]} placeholder="All Statuses" />
           </div>
           <div>
             <label className="mb-2 block text-sm font-semibold text-slate-700">Payment Method</label>
-            <select
-              value={draftFilters.paymentMethod}
-              onChange={(event) => updateDraftFilter('paymentMethod', event.target.value)}
-              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm shadow-sm focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-slate-200"
-            >
-              <option value="all">All Methods</option>
-              {paymentMethodOptions.map((method) => (
-                <option key={method} value={method}>{method}</option>
-              ))}
-            </select>
+            <CustomSelect value={draftFilters.paymentMethod} onChange={(value) => updateDraftFilter('paymentMethod', value)} options={[{ value: 'all', label: 'All Methods' }, ...paymentMethodOptions.map((method) => ({ value: method, label: method }))]} placeholder="All Methods" />
           </div>
           <div>
             <label className="mb-2 block text-sm font-semibold text-slate-700">Tax Type / Service Type</label>
-            <select
-              value={draftFilters.taxType}
-              onChange={(event) => updateDraftFilter('taxType', event.target.value)}
-              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm shadow-sm focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-slate-200"
-            >
-              <option value="all">All Tax Types</option>
-              {taxTypeOptions.map((taxType) => (
-                <option key={taxType} value={taxType}>{taxType}</option>
-              ))}
-            </select>
+            <CustomSelect value={draftFilters.taxType} onChange={(value) => updateDraftFilter('taxType', value)} options={[{ value: 'all', label: 'All Tax Types' }, ...taxTypeOptions.map((taxType) => ({ value: taxType, label: taxType }))]} placeholder="All Tax Types" />
           </div>
           <div>
             <label className="mb-2 block text-sm font-semibold text-slate-700">Date From</label>

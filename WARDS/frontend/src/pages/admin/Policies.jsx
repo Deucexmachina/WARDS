@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { policyAPI } from '../../services/api';
 import { formatUtc8Date, formatUtc8Time, isSameUtc8Day } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
+import { CustomSelect } from '../../components/FormControls';
 import { UNREAD_CARD_HIGHLIGHT_CLASS, UNREAD_STATUS_BADGE_CLASS } from '../../utils/notificationUI';
 
 const POLICY_PREVIEW_LENGTH = 100;
@@ -302,16 +303,7 @@ const Policies = () => {
               </label>
               <label className="block">
                 <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Category</span>
-                <select
-                  value={categoryFilter}
-                  onChange={(event) => setCategoryFilter(event.target.value)}
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-accent focus:bg-white focus:ring-2 focus:ring-blue-100"
-                >
-                  <option value="">All categories</option>
-                  {categories.map((category) => (
-                    <option key={category} value={category}>{category}</option>
-                  ))}
-                </select>
+                <CustomSelect value={categoryFilter} onChange={(value) => setCategoryFilter(value)} options={[{ value: '', label: 'All categories' }, ...categories.map((category) => ({ value: category, label: category }))]} placeholder="All categories" />
               </label>
               <div className="flex items-end">
                 <button

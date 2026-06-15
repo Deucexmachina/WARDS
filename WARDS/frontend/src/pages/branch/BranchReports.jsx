@@ -5,6 +5,7 @@ import { formatUtc8Date, formatUtc8DateTime } from '../../utils/dateTime';
 import GeneratedReportContent from '../../components/reports/GeneratedReportContent';
 import WardsPageHero from '../../components/WardsPageHero';
 import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
+import { CustomSelect } from '../../components/FormControls';
 import {
   applyBranchReportViewedState,
   BRANCH_REPORT_VIEWED_EVENT,
@@ -384,14 +385,7 @@ const BranchReports = () => {
 
         <div className="max-w-md">
           <label className="mb-2 block text-sm font-semibold text-slate-700">Submission Mode</label>
-          <select
-            value={generationMode}
-            onChange={(event) => setGenerationMode(event.target.value)}
-            className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
-          >
-            <option value="manual">Manual Report Generation</option>
-            <option value="automatic">Automatic Report Generation</option>
-          </select>
+          <CustomSelect value={generationMode} onChange={(value) => setGenerationMode(value)} options={[{ value: 'manual', label: 'Manual Report Generation' }, { value: 'automatic', label: 'Automatic Report Generation' }]} placeholder="Select mode" />
         </div>
       </section>
 
@@ -412,46 +406,17 @@ const BranchReports = () => {
           <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-5">
             <div>
               <label className="mb-2 block text-sm font-semibold text-slate-700">Report Type</label>
-              <select
-                value={filters.reportType}
-                onChange={(event) => setFilters((current) => ({ ...current, reportType: event.target.value }))}
-                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
-              >
-                {REPORT_TYPES.map((type) => (
-                  <option key={type} value={type}>{type}</option>
-                ))}
-              </select>
+              <CustomSelect value={filters.reportType} onChange={(value) => setFilters((current) => ({ ...current, reportType: value }))} options={REPORT_TYPES.map((type) => ({ value: type, label: type }))} placeholder="Select report type" />
             </div>
 
             <div>
               <label className="mb-2 block text-sm font-semibold text-slate-700">Service Type</label>
-              <select
-                value={filters.service_type}
-                onChange={(event) => setFilters((current) => ({
-                  ...current,
-                  service_type: event.target.value,
-                  transaction_category: event.target.value === 'Document Request' ? 'All Categories' : current.transaction_category,
-                }))}
-                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
-              >
-                {SERVICE_TYPES.map((type) => (
-                  <option key={type} value={type}>{type}</option>
-                ))}
-              </select>
+              <CustomSelect value={filters.service_type} onChange={(value) => setFilters((current) => ({ ...current, service_type: value, transaction_category: value === 'Document Request' ? 'All Categories' : current.transaction_category }))} options={SERVICE_TYPES.map((type) => ({ value: type, label: type }))} placeholder="Select service type" />
             </div>
 
             <div>
               <label className="mb-2 block text-sm font-semibold text-slate-700">Transaction Category</label>
-              <select
-                value={filters.transaction_category}
-                disabled={filters.service_type === 'Document Request'}
-                onChange={(event) => setFilters((current) => ({ ...current, transaction_category: event.target.value }))}
-                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm disabled:bg-slate-100"
-              >
-                {TRANSACTION_CATEGORIES.map((type) => (
-                  <option key={type} value={type}>{type}</option>
-                ))}
-              </select>
+              <CustomSelect value={filters.transaction_category} onChange={(value) => setFilters((current) => ({ ...current, transaction_category: value }))} disabled={filters.service_type === 'Document Request'} options={TRANSACTION_CATEGORIES.map((type) => ({ value: type, label: type }))} placeholder="Select category" />
             </div>
 
             <div>
@@ -531,15 +496,7 @@ const BranchReports = () => {
 
             <div>
               <label className="mb-2 block text-sm font-semibold text-slate-700">Frequency</label>
-              <select
-                value={automation.frequency}
-                onChange={(event) => setAutomation((current) => ({ ...current, frequency: event.target.value }))}
-                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
-              >
-                {AUTO_FREQUENCIES.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
+              <CustomSelect value={automation.frequency} onChange={(value) => setAutomation((current) => ({ ...current, frequency: value }))} options={AUTO_FREQUENCIES.map((option) => ({ value: option.value, label: option.label }))} placeholder="Select frequency" />
             </div>
 
             <div>
@@ -554,60 +511,24 @@ const BranchReports = () => {
 
             <div>
               <label className="mb-2 block text-sm font-semibold text-slate-700">Scheduled Report Type</label>
-              <select
-                value={automation.reportType}
-                onChange={(event) => setAutomation((current) => ({ ...current, reportType: event.target.value }))}
-                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
-              >
-                {REPORT_TYPES.map((type) => (
-                  <option key={type} value={type}>{type}</option>
-                ))}
-              </select>
+              <CustomSelect value={automation.reportType} onChange={(value) => setAutomation((current) => ({ ...current, reportType: value }))} options={REPORT_TYPES.map((type) => ({ value: type, label: type }))} placeholder="Select report type" />
             </div>
           </div>
 
           <div className="mt-5 grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
             <div>
               <label className="mb-2 block text-sm font-semibold text-slate-700">Service Type</label>
-              <select
-                value={automation.service_type}
-                onChange={(event) => setAutomation((current) => ({ ...current, service_type: event.target.value }))}
-                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
-              >
-                {SERVICE_TYPES.map((type) => (
-                  <option key={type} value={type}>{type}</option>
-                ))}
-              </select>
+              <CustomSelect value={automation.service_type} onChange={(value) => setAutomation((current) => ({ ...current, service_type: value }))} options={SERVICE_TYPES.map((type) => ({ value: type, label: type }))} placeholder="Select service type" />
             </div>
 
             <div>
               <label className="mb-2 block text-sm font-semibold text-slate-700">Transaction Category</label>
-              <select
-                value={automation.transaction_category}
-                onChange={(event) => setAutomation((current) => ({ ...current, transaction_category: event.target.value }))}
-                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
-              >
-                {TRANSACTION_CATEGORIES.map((type) => (
-                  <option key={type} value={type}>{type}</option>
-                ))}
-              </select>
+              <CustomSelect value={automation.transaction_category} onChange={(value) => setAutomation((current) => ({ ...current, transaction_category: value }))} options={TRANSACTION_CATEGORIES.map((type) => ({ value: type, label: type }))} placeholder="Select category" />
             </div>
 
             <div>
               <label className="mb-2 block text-sm font-semibold text-slate-700">Weekly Day</label>
-              <select
-                value={automation.weekday}
-                onChange={(event) => setAutomation((current) => ({ ...current, weekday: Number(event.target.value) }))}
-                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
-              >
-                <option value={0}>Monday</option>
-                <option value={1}>Tuesday</option>
-                <option value={2}>Wednesday</option>
-                <option value={3}>Thursday</option>
-                <option value={4}>Friday</option>
-                <option value={5}>Saturday</option>
-                <option value={6}>Sunday</option>
-              </select>
+              <CustomSelect value={String(automation.weekday)} onChange={(value) => setAutomation((current) => ({ ...current, weekday: Number(value) }))} options={[{ value: '0', label: 'Monday' }, { value: '1', label: 'Tuesday' }, { value: '2', label: 'Wednesday' }, { value: '3', label: 'Thursday' }, { value: '4', label: 'Friday' }, { value: '5', label: 'Saturday' }, { value: '6', label: 'Sunday' }]} placeholder="Select day" />
             </div>
 
             <div>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { branchAPI, settingsAPI } from '../../services/api';
 import { formatUtc8Date, formatUtc8Time } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
+import { CustomSelect } from '../../components/FormControls';
 
 const DEFAULT_PAGE_SIZE = 5;
 const defaultSettings = {
@@ -581,16 +582,7 @@ const Settings = () => {
               placeholder="Search configuration, updated by, or reason…"
               className="rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-transparent focus:ring-2 focus:ring-accent"
             />
-            <select
-              value={historyCategory}
-              onChange={(event) => setHistoryCategory(event.target.value)}
-              className="rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-transparent focus:ring-2 focus:ring-accent"
-            >
-              <option value="">All categories</option>
-              {historyState.categories.map((cat) => (
-                <option key={cat} value={cat}>{cat}</option>
-              ))}
-            </select>
+            <CustomSelect value={historyCategory} onChange={(value) => setHistoryCategory(value)} options={[{ value: '', label: 'All categories' }, ...historyState.categories.map((cat) => ({ value: cat, label: cat }))]} placeholder="All categories" />
             <div className="flex gap-2">
               <button
                 onClick={() => setHistorySearch(historySearchDraft.trim())}

@@ -3,6 +3,7 @@ import { branchAPI, taxAssessmentAPI } from '../../services/api';
 import WardsPageHero from '../../components/WardsPageHero';
 import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
 import FileViewerModal from '../../components/FileViewerModal';
+import { CustomSelect } from '../../components/FormControls';
 
 const EMPTY_ASSESSMENT_FORM = {
   assessment_id: null,
@@ -587,8 +588,10 @@ const TaxAssessment = () => {
       delete next[name];
       return next;
     });
-    setMessage('');
-    setError('');
+  };
+
+  const handleSelectChange = (fieldName) => (value) => {
+    handleAssessmentFormChange({ target: { name: fieldName, value, type: 'select-one', checked: false } });
   };
 
   const handleSaveAssessment = async (event) => {
@@ -721,32 +724,19 @@ const TaxAssessment = () => {
           <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
             <label className="block">
               <span className="mb-2 block text-sm font-semibold text-slate-700">Submission Type</span>
-              <select name="tax_type" value={assessmentForm.tax_type} onChange={handleAssessmentFormChange} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm">
-                <option value="RPT">RPT</option>
-                <option value="BT">BT</option>
-              </select>
+              <CustomSelect value={assessmentForm.tax_type} onChange={handleSelectChange('tax_type')} options={[{ value: 'RPT', label: 'RPT' }, { value: 'BT', label: 'BT' }]} placeholder="Select type" />
             </label>
             <label className="block">
               <span className="mb-2 block text-sm font-semibold text-slate-700">Branch</span>
-              <select name="branch_id" value={assessmentForm.branch_id} onChange={handleAssessmentFormChange} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm">
-                <option value="">Unassigned</option>
-                {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
-              </select>
+              <CustomSelect value={assessmentForm.branch_id} onChange={handleSelectChange('branch_id')} options={[{ value: '', label: 'Unassigned' }, ...branches.map((branch) => ({ value: String(branch.id), label: branch.name }))]} placeholder="Select branch" />
             </label>
             <label className="block">
               <span className="mb-2 block text-sm font-semibold text-slate-700">Verification Status</span>
-              <select name="verification_status" value={assessmentForm.verification_status} onChange={handleAssessmentFormChange} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm">
-                <option value="Pending Verification">Pending Verification</option>
-                <option value="Verified">Verified</option>
-                <option value="Rejected">Rejected</option>
-              </select>
+              <CustomSelect value={assessmentForm.verification_status} onChange={handleSelectChange('verification_status')} options={[{ value: 'Pending Verification', label: 'Pending Verification' }, { value: 'Verified', label: 'Verified' }, { value: 'Rejected', label: 'Rejected' }]} placeholder="Select status" />
             </label>
             <label className="block">
               <span className="mb-2 block text-sm font-semibold text-slate-700">Assessment Status</span>
-              <select name="assessment_status" value={assessmentForm.assessment_status} onChange={handleAssessmentFormChange} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm">
-                <option value="Active">Active</option>
-                <option value="Inactive">Inactive</option>
-              </select>
+              <CustomSelect value={assessmentForm.assessment_status} onChange={handleSelectChange('assessment_status')} options={[{ value: 'Active', label: 'Active' }, { value: 'Inactive', label: 'Inactive' }]} placeholder="Select status" />
             </label>
             <label className="block xl:col-span-2">
               <span className="mb-2 block text-sm font-semibold text-slate-700">Taxpayer Name</span>
@@ -760,10 +750,7 @@ const TaxAssessment = () => {
             </label>
             <label className="block">
               <span className="mb-2 block text-sm font-semibold text-slate-700">Taxpayer Type</span>
-              <select name="taxpayer_type" value={assessmentForm.taxpayer_type} onChange={handleAssessmentFormChange} className={`w-full rounded-2xl border px-4 py-3 text-sm ${assessmentValidationErrors.taxpayer_type ? 'border-rose-400 bg-rose-50' : 'border-slate-300'}`}>
-                <option value="Individual">Individual</option>
-                <option value="Business Owner">Business Owner</option>
-              </select>
+              <CustomSelect value={assessmentForm.taxpayer_type} onChange={handleSelectChange('taxpayer_type')} options={[{ value: 'Individual', label: 'Individual' }, { value: 'Business Owner', label: 'Business Owner' }]} placeholder="Select type" hasError={!!assessmentValidationErrors.taxpayer_type} />
               {assessmentValidationErrors.taxpayer_type ? <span className="mt-2 block text-xs font-medium text-rose-600">{assessmentValidationErrors.taxpayer_type}</span> : null}
             </label>
             <label className="block">
@@ -786,57 +773,7 @@ const TaxAssessment = () => {
               </label>
               <label className="block">
                 <span className="mb-2 block text-sm font-semibold text-slate-700">Property Type</span>
-                <select name="property_type" value={assessmentForm.property_type} onChange={handleAssessmentFormChange} className={`w-full rounded-2xl border px-4 py-3 text-sm ${assessmentValidationErrors.property_type ? 'border-rose-400 bg-rose-50' : 'border-slate-300'}`}>
-                  <option value="">Select property type</option>
-                  <optgroup label="Residential">
-                    <option value="Residential Lot">Residential Lot</option>
-                    <option value="Residential House and Lot">Residential House and Lot</option>
-                    <option value="Condominium Unit">Condominium Unit</option>
-                    <option value="Townhouse">Townhouse</option>
-                    <option value="Apartment Building">Apartment Building</option>
-                  </optgroup>
-                  <optgroup label="Commercial">
-                    <option value="Commercial Lot">Commercial Lot</option>
-                    <option value="Commercial Building">Commercial Building</option>
-                    <option value="Office Building">Office Building</option>
-                    <option value="Shopping Center">Shopping Center</option>
-                    <option value="Warehouse">Warehouse</option>
-                    <option value="Mixed Commercial Building">Mixed Commercial Building</option>
-                  </optgroup>
-                  <optgroup label="Industrial">
-                    <option value="Industrial Lot">Industrial Lot</option>
-                    <option value="Factory">Factory</option>
-                    <option value="Manufacturing Plant">Manufacturing Plant</option>
-                    <option value="Processing Facility">Processing Facility</option>
-                    <option value="Industrial Warehouse">Industrial Warehouse</option>
-                  </optgroup>
-                  <optgroup label="Agricultural">
-                    <option value="Agricultural Land">Agricultural Land</option>
-                    <option value="Farmland">Farmland</option>
-                    <option value="Orchard">Orchard</option>
-                    <option value="Fishpond">Fishpond</option>
-                    <option value="Poultry Farm">Poultry Farm</option>
-                  </optgroup>
-                  <optgroup label="Institutional">
-                    <option value="School">School</option>
-                    <option value="University">University</option>
-                    <option value="Hospital">Hospital</option>
-                    <option value="Government Building">Government Building</option>
-                    <option value="Religious Institution">Religious Institution</option>
-                  </optgroup>
-                  <optgroup label="Special Purpose">
-                    <option value="Cemetery">Cemetery</option>
-                    <option value="Utility Facility">Utility Facility</option>
-                    <option value="Telecommunications Site">Telecommunications Site</option>
-                    <option value="Power Substation">Power Substation</option>
-                    <option value="Water Treatment Facility">Water Treatment Facility</option>
-                  </optgroup>
-                  <optgroup label="Mixed Use">
-                    <option value="Residential-Commercial">Residential-Commercial</option>
-                    <option value="Commercial-Industrial">Commercial-Industrial</option>
-                    <option value="Residential-Institutional">Residential-Institutional</option>
-                  </optgroup>
-                </select>
+                <CustomSelect value={assessmentForm.property_type} onChange={handleSelectChange('property_type')} options={[{ value: '', label: 'Select property type' }, { value: 'Residential Lot', label: 'Residential Lot' }, { value: 'Residential House and Lot', label: 'Residential House and Lot' }, { value: 'Condominium Unit', label: 'Condominium Unit' }, { value: 'Townhouse', label: 'Townhouse' }, { value: 'Apartment Building', label: 'Apartment Building' }, { value: 'Commercial Lot', label: 'Commercial Lot' }, { value: 'Commercial Building', label: 'Commercial Building' }, { value: 'Office Building', label: 'Office Building' }, { value: 'Shopping Center', label: 'Shopping Center' }, { value: 'Warehouse', label: 'Warehouse' }, { value: 'Mixed Commercial Building', label: 'Mixed Commercial Building' }, { value: 'Industrial Lot', label: 'Industrial Lot' }, { value: 'Factory', label: 'Factory' }, { value: 'Manufacturing Plant', label: 'Manufacturing Plant' }, { value: 'Processing Facility', label: 'Processing Facility' }, { value: 'Industrial Warehouse', label: 'Industrial Warehouse' }, { value: 'Agricultural Land', label: 'Agricultural Land' }, { value: 'Farmland', label: 'Farmland' }, { value: 'Orchard', label: 'Orchard' }, { value: 'Fishpond', label: 'Fishpond' }, { value: 'Poultry Farm', label: 'Poultry Farm' }, { value: 'School', label: 'School' }, { value: 'University', label: 'University' }, { value: 'Hospital', label: 'Hospital' }, { value: 'Government Building', label: 'Government Building' }, { value: 'Religious Institution', label: 'Religious Institution' }, { value: 'Cemetery', label: 'Cemetery' }, { value: 'Utility Facility', label: 'Utility Facility' }, { value: 'Telecommunications Site', label: 'Telecommunications Site' }, { value: 'Power Substation', label: 'Power Substation' }, { value: 'Water Treatment Facility', label: 'Water Treatment Facility' }, { value: 'Residential-Commercial', label: 'Residential-Commercial' }, { value: 'Commercial-Industrial', label: 'Commercial-Industrial' }, { value: 'Residential-Institutional', label: 'Residential-Institutional' }]} placeholder="Select property type" hasError={!!assessmentValidationErrors.property_type} />
                 {assessmentValidationErrors.property_type ? <span className="mt-2 block text-xs font-medium text-rose-600">{assessmentValidationErrors.property_type}</span> : null}
               </label>
               <label className="block xl:col-span-2">
@@ -942,11 +879,7 @@ const TaxAssessment = () => {
                   </div>
 
                   <div className="mt-4 flex flex-col gap-3 lg:flex-row lg:items-start">
-                    <select value={draft.status} onChange={(event) => handleReviewDraftChange(submission.id, 'status', event.target.value)} className="w-full shrink-0 rounded-2xl border border-slate-300 px-4 py-3 text-sm lg:w-[180px]">
-                      <option value="Pending Verification">Pending Verification</option>
-                      <option value="Verified">Verified</option>
-                      <option value="Rejected">Rejected</option>
-                    </select>
+                    <CustomSelect value={draft.status} onChange={(value) => handleReviewDraftChange(submission.id, 'status', value)} options={[{ value: 'Pending Verification', label: 'Pending Verification' }, { value: 'Verified', label: 'Verified' }, { value: 'Rejected', label: 'Rejected' }]} placeholder="Select status" className="lg:w-[180px]" />
                     <input value={draft.remarks} onChange={(event) => handleReviewDraftChange(submission.id, 'remarks', event.target.value)} placeholder="Verification remarks or rejection reason" className="min-w-0 flex-1 rounded-2xl border border-slate-300 px-4 py-3 text-sm" />
                     <div className="flex shrink-0 flex-nowrap items-center gap-2">
                       <button type="button" onClick={() => handleReviewSubmission(submission)} disabled={reviewingSubmissionId === submission.id} className="whitespace-nowrap rounded-full bg-[#0f5b83] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#0c4d6f] disabled:cursor-not-allowed disabled:opacity-70">
@@ -1010,24 +943,8 @@ const TaxAssessment = () => {
             <h2 className="mt-2 text-2xl font-bold text-slate-900">Online Payment Assessments</h2>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-3">
-            <select
-              value={assessmentTaxTypeFilter}
-              onChange={(event) => handleAssessmentTaxTypeChange(event.target.value)}
-              className="rounded-full border border-slate-300 bg-white px-4 py-2.5 text-sm"
-            >
-              <option value="">All Tax Types</option>
-              <option value="RPT">RPT</option>
-              <option value="BT">BT</option>
-            </select>
-            <select
-              value={assessmentStatusFilter}
-              onChange={(event) => handleAssessmentStatusChange(event.target.value)}
-              className="rounded-full border border-slate-300 bg-white px-4 py-2.5 text-sm"
-            >
-              <option value="">All Statuses</option>
-              <option value="Active">Active</option>
-              <option value="Inactive">Inactive</option>
-            </select>
+            <CustomSelect value={assessmentTaxTypeFilter} onChange={handleAssessmentTaxTypeChange} options={[{ value: '', label: 'All Tax Types' }, { value: 'RPT', label: 'RPT' }, { value: 'BT', label: 'BT' }]} placeholder="All Tax Types" />
+            <CustomSelect value={assessmentStatusFilter} onChange={handleAssessmentStatusChange} options={[{ value: '', label: 'All Statuses' }, { value: 'Active', label: 'Active' }, { value: 'Inactive', label: 'Inactive' }]} placeholder="All Statuses" />
             <input value={assessmentSearch} onChange={(event) => handleAssessmentSearchChange(event.target.value)} placeholder="Search taxpayer, TDN, permit, business" className="w-full max-w-sm rounded-full border border-slate-300 px-4 py-2.5 text-sm" />
           </div>
         </div>

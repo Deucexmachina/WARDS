@@ -3,6 +3,7 @@ import { branchSettingsAPI } from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 import ActionConfirmationModal from '../../components/ActionConfirmationModal';
+import { CustomSelect } from '../../components/FormControls';
 import { useUnsavedChanges } from '../../contexts/UnsavedChangesContext';
 
 const PAGE_SIZE = 5;
@@ -950,9 +951,7 @@ const BranchSettings = () => {
                     </div>
                     <div>
                       <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">Status</label>
-                      <select value={override.status} disabled={!isBranchAdmin} onChange={(event) => updateOverride(index, 'status', event.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:bg-gray-100 disabled:opacity-70">
-                        {STATUS_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-                      </select>
+                      <CustomSelect value={override.status} disabled={!isBranchAdmin} onChange={(value) => updateOverride(index, 'status', value)} options={STATUS_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label }))} placeholder="Select status" />
                     </div>
                     <div>
                       <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">Label / Event Name</label>

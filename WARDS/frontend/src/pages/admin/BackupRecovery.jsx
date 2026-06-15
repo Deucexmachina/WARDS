@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { CustomSelect } from '../../components/FormControls';
 import { Link, useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import wardsLogo from '../../assets/branding/wards_logo.png';
@@ -141,34 +142,18 @@ const Filters = ({ filters, setFilters, showType, showStatus, showClassification
     <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" type="date" value={filters.date_from} onChange={(e) => setFilters({ ...filters, date_from: e.target.value })} />
     <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" type="date" value={filters.date_to} onChange={(e) => setFilters({ ...filters, date_to: e.target.value })} />
     {showType ? (
-      <select className="rounded-xl border border-slate-200 px-3 py-2 text-sm" value={filters.type} onChange={(e) => setFilters({ ...filters, type: e.target.value })}>
-        <option value="">All types</option>
-        {showType.map((item) => <option key={item} value={item}>{titleize(item)}</option>)}
-      </select>
+      <CustomSelect value={filters.type} onChange={(value) => setFilters({ ...filters, type: value })} options={[{ value: '', label: 'All types' }, ...showType.map((item) => ({ value: item, label: titleize(item) }))]} placeholder="All types" />
     ) : showClassification ? (
-      <select className="rounded-xl border border-slate-200 px-3 py-2 text-sm" value={filters.classification} onChange={(e) => setFilters({ ...filters, classification: e.target.value })}>
-        <option value="">All classifications</option>
-        <option value="malicious">Malicious</option>
-        <option value="suspicious">Suspicious</option>
-        <option value="legitimate">Legitimate</option>
-      </select>
+      <CustomSelect value={filters.classification} onChange={(value) => setFilters({ ...filters, classification: value })} options={[{ value: '', label: 'All classifications' }, { value: 'malicious', label: 'Malicious' }, { value: 'suspicious', label: 'Suspicious' }, { value: 'legitimate', label: 'Legitimate' }]} placeholder="All classifications" />
     ) : (
       <div />
     )}
     {showStatus ? (
-      <select className="rounded-xl border border-slate-200 px-3 py-2 text-sm" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}>
-        <option value="">All statuses</option>
-        {showStatus.map((item) => <option key={item} value={item}>{titleize(item)}</option>)}
-      </select>
+      <CustomSelect value={filters.status} onChange={(value) => setFilters({ ...filters, status: value })} options={[{ value: '', label: 'All statuses' }, ...showStatus.map((item) => ({ value: item, label: titleize(item) }))]} placeholder="All statuses" />
     ) : (
-      <select className="rounded-xl border border-slate-200 px-3 py-2 text-sm" value={filters.severity} onChange={(e) => setFilters({ ...filters, severity: e.target.value })}>
-        <option value="">All severities</option>
-        {severities.map((item) => <option key={item} value={item}>{titleize(item)}</option>)}
-      </select>
+      <CustomSelect value={filters.severity} onChange={(value) => setFilters({ ...filters, severity: value })} options={[{ value: '', label: 'All severities' }, ...severities.map((item) => ({ value: item, label: titleize(item) }))]} placeholder="All severities" />
     )}
-    <select className="rounded-xl border border-slate-200 px-3 py-2 text-sm" value={filters.sort || 'newest'} onChange={(e) => setFilters({ ...filters, sort: e.target.value })}>
-      {sortOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-    </select>
+    <CustomSelect value={filters.sort || 'newest'} onChange={(value) => setFilters({ ...filters, sort: value })} options={sortOptions} placeholder="Sort" />
   </div>
 );
 
@@ -1283,17 +1268,9 @@ const BackupRecovery = () => {
                   <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Search incidents" value={incidentFilters.keyword} onChange={(e) => setIncidentFilters({ ...incidentFilters, keyword: e.target.value })} />
                   <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" type="date" value={incidentFilters.date_from} onChange={(e) => setIncidentFilters({ ...incidentFilters, date_from: e.target.value })} />
                   <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" type="date" value={incidentFilters.date_to} onChange={(e) => setIncidentFilters({ ...incidentFilters, date_to: e.target.value })} />
-                  <select className="rounded-xl border border-slate-200 px-3 py-2 text-sm" value={incidentFilters.status} onChange={(e) => setIncidentFilters({ ...incidentFilters, status: e.target.value })}>
-                    <option value="">All statuses</option>
-                    {['open', 'investigating', 'resolved', 'false_positive'].map((item) => <option key={item} value={item}>{badgeText(item)}</option>)}
-                  </select>
-                  <select className="rounded-xl border border-slate-200 px-3 py-2 text-sm" value={incidentFilters.severity} onChange={(e) => setIncidentFilters({ ...incidentFilters, severity: e.target.value })}>
-                    <option value="">All severities</option>
-                    {severities.map((item) => <option key={item} value={item}>{titleize(item)}</option>)}
-                  </select>
-                  <select className="rounded-xl border border-slate-200 px-3 py-2 text-sm" value={incidentFilters.sort} onChange={(e) => setIncidentFilters({ ...incidentFilters, sort: e.target.value })}>
-                    {sortOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-                  </select>
+                  <CustomSelect value={incidentFilters.status} onChange={(value) => setIncidentFilters({ ...incidentFilters, status: value })} options={[{ value: '', label: 'All statuses' }, ...['open', 'investigating', 'resolved', 'false_positive'].map((item) => ({ value: item, label: badgeText(item) }))]} placeholder="All statuses" />
+                  <CustomSelect value={incidentFilters.severity} onChange={(value) => setIncidentFilters({ ...incidentFilters, severity: value })} options={[{ value: '', label: 'All severities' }, ...severities.map((item) => ({ value: item, label: titleize(item) }))]} placeholder="All severities" />
+                  <CustomSelect value={incidentFilters.sort} onChange={(value) => setIncidentFilters({ ...incidentFilters, sort: value })} options={sortOptions} placeholder="Sort" />
                 </div>
               }
             >
@@ -1458,9 +1435,7 @@ const BackupRecovery = () => {
               <Section title="AI Retraining">
                 <div className="space-y-3">
                   <div className="grid gap-3 md:grid-cols-3">
-                    <select className="rounded-xl border border-slate-200 px-3 py-2 text-sm" value={controls.aiDay} onChange={(e) => setControls({ ...controls, aiDay: e.target.value })}>
-                      {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((item) => <option key={item} value={item}>{item}</option>)}
-                    </select>
+                    <CustomSelect value={controls.aiDay} onChange={(value) => setControls({ ...controls, aiDay: value })} options={['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((item) => ({ value: item, label: item }))} placeholder="Select day" />
                     <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" type="time" value={controls.aiTime} onChange={(e) => setControls({ ...controls, aiTime: e.target.value })} />
                     <button disabled={busy} className={`rounded-xl bg-slate-900 px-4 py-2 font-semibold text-white${disabledButtonClass}`} onClick={() => askConfirm('Save AI retraining schedule?', `WARDS will retrain the anomaly model every ${controls.aiDay} at ${controls.aiTime}.`, () => api.post('/security/ai/schedule', { day: controls.aiDay, time: controls.aiTime }), 'AI retraining schedule saved.', 'Save AI schedule')}>Scheduled AI Retrain</button>
                   </div>
@@ -1539,12 +1514,7 @@ const BackupRecovery = () => {
                             <p className="text-xs text-slate-500">Controls the overall detection threshold for all AI rules.</p>
                           </div>
                           <div className="flex items-center gap-3">
-                            <select className="rounded-lg border border-slate-200 px-3 py-2 text-sm" value={controls.aiSensitivity} onChange={(e) => setControls({ ...controls, aiSensitivity: e.target.value })}>
-                              <option value="low">Low - 0.85 threshold</option>
-                              <option value="medium">Medium - 0.70 threshold</option>
-                              <option value="high">High - 0.55 threshold</option>
-                              <option value="very_high">Very High - 0.40 threshold</option>
-                            </select>
+                            <CustomSelect value={controls.aiSensitivity} onChange={(value) => setControls({ ...controls, aiSensitivity: value })} options={[{ value: 'low', label: 'Low - 0.85 threshold' }, { value: 'medium', label: 'Medium - 0.70 threshold' }, { value: 'high', label: 'High - 0.55 threshold' }, { value: 'very_high', label: 'Very High - 0.40 threshold' }]} placeholder="Select sensitivity" />
                             <button disabled={busy} className={`rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white${disabledButtonClass}`} onClick={() => askConfirm('Save AI sensitivity?', 'WARDS will update the global AI sensitivity threshold used by anomaly scoring.', saveAiSensitivity, 'Global AI sensitivity saved.', 'Save sensitivity')}>Save</button>
                           </div>
                         </div>
@@ -1553,12 +1523,7 @@ const BackupRecovery = () => {
                         <p className="text-sm font-bold text-blue-950">Add approved defacement rule</p>
                         <p className="mt-1 text-xs leading-5 text-blue-900">Only predefined rules based on the defacement dictionary can be added, so every new rule stays compatible with the AI scoring model and receives initial sample patterns.</p>
                         <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto]">
-                          <select className="rounded-xl border border-blue-200 px-3 py-2 text-sm" value={controls.aiRuleTemplate} onChange={(e) => setControls({ ...controls, aiRuleTemplate: e.target.value })}>
-                            <option value="">Select an approved rule</option>
-                            {aiRuleTemplates.filter((item) => !item.already_added).map((item) => (
-                              <option key={item.key} value={item.key}>{item.label}</option>
-                            ))}
-                          </select>
+                          <CustomSelect value={controls.aiRuleTemplate} onChange={(value) => setControls({ ...controls, aiRuleTemplate: value })} options={[{ value: '', label: 'Select an approved rule' }, ...aiRuleTemplates.filter((item) => !item.already_added).map((item) => ({ value: item.key, label: item.label }))]} placeholder="Select an approved rule" />
                           <button disabled={busy} className={`rounded-xl bg-primary px-4 py-2 text-sm font-bold text-white${disabledButtonClass}`} onClick={() => askConfirm('Add AI rule?', 'WARDS will add this approved rule to anomaly scoring with its initial sample configuration.', addSelectedAiRule, 'AI rule added with initial samples.', 'Add rule')}>Add AI Rule</button>
                         </div>
                       </div>
@@ -1605,12 +1570,7 @@ const BackupRecovery = () => {
                     <p className="mb-3 text-sm font-bold text-slate-900">Temporary User Restriction</p>
                     <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
                       <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Account ID" value={restrictionInput.account_id} onChange={(e) => setRestrictionInput({ ...restrictionInput, account_id: e.target.value })} />
-                      <select className="rounded-xl border border-slate-200 px-3 py-2 text-sm" value={restrictionInput.account_type} onChange={(e) => setRestrictionInput({ ...restrictionInput, account_type: e.target.value })}>
-                        <option value="citizen">Citizen</option>
-                        <option value="branch">Branch Admin</option>
-                        <option value="admin">Main Admin</option>
-                        <option value="superadmin">Super Admin</option>
-                      </select>
+                      <CustomSelect value={restrictionInput.account_type} onChange={(value) => setRestrictionInput({ ...restrictionInput, account_type: value })} options={[{ value: 'citizen', label: 'Citizen' }, { value: 'branch', label: 'Branch Admin' }, { value: 'admin', label: 'Main Admin' }, { value: 'superadmin', label: 'Super Admin' }]} placeholder="Select account type" />
                       <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Scope" value={restrictionInput.scope} onChange={(e) => setRestrictionInput({ ...restrictionInput, scope: e.target.value })} />
                       <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" type="number" min="60" max="604800" value={restrictionInput.duration} onChange={(e) => setRestrictionInput({ ...restrictionInput, duration: e.target.value })} />
                       <button disabled={busy} className={`rounded-xl bg-red-600 px-4 py-2 font-semibold text-white${disabledButtonClass}`} onClick={() => askConfirm('Temporarily restrict this account?', `WARDS will restrict ${restrictionInput.account_type}:${restrictionInput.account_id || 'the entered account'} for ${restrictionInput.duration} seconds.`, restrictUser, 'Temporary user restriction added.', 'Restrict user')}>Restrict User</button>

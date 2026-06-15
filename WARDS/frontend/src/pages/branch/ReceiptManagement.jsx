@@ -4,6 +4,7 @@ import { receiptAPI } from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
+import { CustomSelect } from '../../components/FormControls';
 import ProcessingModal from '../../components/ProcessingModal';
 import { useUnsavedChanges } from '../../contexts/UnsavedChangesContext';
 
@@ -1912,19 +1913,7 @@ const handleCancelScan = () => {
           <h2 className="text-xl font-bold text-gray-900 mb-4">Upload Receipt Image</h2>
           <div className="mb-4">
             <label className="block text-sm font-semibold text-gray-700 mb-1">Receipt Category</label>
-            <select
-              value={selectedCategory}
-              onChange={(event) => setSelectedCategory(event.target.value)}
-              disabled={uploading || saving}
-              className="w-full px-4 py-2 border rounded-lg"
-            >
-              <option value="RPT">RPT</option>
-              <option value="BUSINESS">Business Tax</option>
-              <option value="MISC">Miscellaneous</option>
-              <option value="CTC">CTC</option>
-              <option value="PTR">PTR</option>
-              <option value="MARKET">MARKET</option>
-            </select>
+            <CustomSelect value={selectedCategory} onChange={(value) => setSelectedCategory(value)} disabled={uploading || saving} options={[{ value: 'RPT', label: 'RPT' }, { value: 'BUSINESS', label: 'Business Tax' }, { value: 'MISC', label: 'Miscellaneous' }, { value: 'CTC', label: 'CTC' }, { value: 'PTR', label: 'PTR' }, { value: 'MARKET', label: 'MARKET' }]} placeholder="Select category" />
           </div>
           <input
             type="file"
@@ -2094,25 +2083,16 @@ const handleCancelScan = () => {
                       <>
                         <div>
                           <label className="block text-sm font-semibold text-gray-700 mb-1">Purpose of Renewal</label>
-                          <select
+                          <CustomSelect
                             value={getMarketPurposeSelectValue(ocrDraft.market_purpose_of_renewal)}
-                            onChange={(event) => {
-                              const nextValue = event.target.value;
-                              setOcrDraft((current) => normalizeReceiptDraftReviewState({
-                                ...current,
-                                market_purpose_of_renewal: nextValue === 'Other' ? '' : nextValue,
-                              }));
-                            }}
-                            aria-invalid={missingRequiredFields.includes('market_purpose_of_renewal') ? 'true' : 'false'}
-                            className={`w-full px-4 py-2 border rounded-lg bg-white ${
-                              missingRequiredFields.includes('market_purpose_of_renewal') ? 'border-red-500 bg-red-50' : 'border-gray-300'
-                            }`}
-                          >
-                            {MARKET_PURPOSE_OPTIONS.map((option) => (
-                              <option key={option} value={option}>{option}</option>
-                            ))}
-                            <option value="Other">Other (please specify)</option>
-                          </select>
+                            onChange={(nextValue) => setOcrDraft((current) => normalizeReceiptDraftReviewState({
+                              ...current,
+                              market_purpose_of_renewal: nextValue === 'Other' ? '' : nextValue,
+                            }))}
+                            options={[...MARKET_PURPOSE_OPTIONS.map((option) => ({ value: option, label: option })), { value: 'Other', label: 'Other (please specify)' }]}
+                            placeholder="Select purpose"
+                            hasError={missingRequiredFields.includes('market_purpose_of_renewal')}
+                          />
                           {getMarketPurposeSelectValue(ocrDraft.market_purpose_of_renewal) === 'Other' ? (
                             <input
                               name="market_purpose_of_renewal"

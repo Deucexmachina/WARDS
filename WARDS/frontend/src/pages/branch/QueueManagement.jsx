@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, useRef } from 'react';
 import api, { receiptAPI } from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
+import { CustomSelect } from '../../components/FormControls';
 import { isAnnouncementActive } from '../../utils/queueAnnouncement';
 
 const PAGE_SIZE = 5;
@@ -1205,25 +1206,8 @@ const CompletedTransactionsSection = ({
               placeholder="Search taxpayer or customer"
               className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700 outline-none placeholder:text-slate-400 focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
             />
-            <select
-              value={filters.queueType}
-              onChange={(event) => handleFilterChange('queueType', event.target.value)}
-              className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700 outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
-            >
-              <option value="all">All queue types</option>
-              <option value="immediate">Immediate</option>
-              <option value="appointment">Appointment</option>
-            </select>
-            <select
-              value={filters.window}
-              onChange={(event) => handleFilterChange('window', event.target.value)}
-              className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700 outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
-            >
-              <option value="all">All windows</option>
-              {windowOptions.map((option) => (
-                <option key={option.key} value={option.key}>{option.label}</option>
-              ))}
-            </select>
+            <CustomSelect value={filters.queueType} onChange={(value) => handleFilterChange('queueType', value)} options={[{ value: 'all', label: 'All queue types' }, { value: 'immediate', label: 'Immediate' }, { value: 'appointment', label: 'Appointment' }]} placeholder="All queue types" />
+            <CustomSelect value={filters.window} onChange={(value) => handleFilterChange('window', value)} options={[{ value: 'all', label: 'All windows' }, ...windowOptions.map((option) => ({ value: option.key, label: option.label }))]} placeholder="All windows" />
             <input
               type="text"
               value={filters.servedBy}
@@ -1238,15 +1222,7 @@ const CompletedTransactionsSection = ({
               max={maxCompletionDate}
               className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700 outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
             />
-            <select
-              value={filters.status}
-              onChange={(event) => handleFilterChange('status', event.target.value)}
-              className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700 outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
-            >
-              <option value="all">All statuses</option>
-              <option value="completed">Completed</option>
-              <option value="skipped">Skipped</option>
-            </select>
+            <CustomSelect value={filters.status} onChange={(value) => handleFilterChange('status', value)} options={[{ value: 'all', label: 'All statuses' }, { value: 'completed', label: 'Completed' }, { value: 'skipped', label: 'Skipped' }]} placeholder="All statuses" />
           </div>
         </div>
       </div>
@@ -2553,37 +2529,13 @@ const QueueManagement = () => {
         </div>
 
         <div className="mt-5 grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-4">
-          <select value={queueTypeFilter} onChange={(event) => setQueueTypeFilter(event.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none">
-            <option value="all">All queue types</option>
-            <option value="immediate">Immediate</option>
-            <option value="appointment">Appointment</option>
-          </select>
-          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none">
-            <option value="all">All statuses</option>
-            <option value="appointment">Appointment</option>
-            <option value="waiting">Waiting</option>
-            <option value="called">Called</option>
-            <option value="serving">Serving</option>
-            <option value="completed">Completed</option>
-            <option value="skipped">Skipped</option>
-          </select>
+          <CustomSelect value={queueTypeFilter} onChange={(value) => setQueueTypeFilter(value)} options={[{ value: 'all', label: 'All queue types' }, { value: 'immediate', label: 'Immediate' }, { value: 'appointment', label: 'Appointment' }]} placeholder="All queue types" />
+          <CustomSelect value={statusFilter} onChange={(value) => setStatusFilter(value)} options={[{ value: 'all', label: 'All statuses' }, { value: 'appointment', label: 'Appointment' }, { value: 'waiting', label: 'Waiting' }, { value: 'called', label: 'Called' }, { value: 'serving', label: 'Serving' }, { value: 'completed', label: 'Completed' }, { value: 'skipped', label: 'Skipped' }]} placeholder="All statuses" />
           <input type="date" value={dateFilter} onChange={(event) => setDateFilter(event.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none" />
           <input type="time" value={timeSlotFilter} onChange={(event) => setTimeSlotFilter(event.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none" />
-          <select value={serviceTypeFilter} onChange={(event) => setServiceTypeFilter(event.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none">
-            <option value="all">All services</option>
-            {serviceTypes.map((serviceType) => (
-              <option key={serviceType} value={serviceType}>{serviceType}</option>
-            ))}
-          </select>
+          <CustomSelect value={serviceTypeFilter} onChange={(value) => setServiceTypeFilter(value)} options={[{ value: 'all', label: 'All services' }, ...serviceTypes.map((serviceType) => ({ value: serviceType, label: serviceType }))]} placeholder="All services" />
           {isMonitorOnlyRole ? (
-            <select value={windowFilter} onChange={(event) => setWindowFilter(event.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none">
-              <option value="all">All branch windows</option>
-              {windowOptions.map((account) => (
-                <option key={account.key} value={account.key}>
-                  {account.label}{account.username ? ` - ${account.username}` : ''}
-                </option>
-              ))}
-            </select>
+            <CustomSelect value={windowFilter} onChange={(value) => setWindowFilter(value)} options={[{ value: 'all', label: 'All branch windows' }, ...windowOptions.map((account) => ({ value: account.key, label: `${account.label}${account.username ? ` - ${account.username}` : ''}` }))]} placeholder="All branch windows" />
           ) : null}
           <input
             type="text"
@@ -3088,25 +3040,16 @@ const QueueManagement = () => {
                         <>
                           <label className="block">
                             <span className="mb-2 block text-sm font-semibold text-slate-700">Purpose of Renewal</span>
-                            <select
+                            <CustomSelect
                               value={getMarketPurposeSelectValue(receiptDraft.market_purpose_of_renewal)}
-                              onChange={(event) => {
-                                const nextValue = event.target.value;
-                                setReceiptDraft((current) => normalizeReceiptDraftReviewState({
-                                  ...current,
-                                  market_purpose_of_renewal: nextValue === 'Other' ? '' : nextValue,
-                                }));
-                              }}
-                              aria-invalid={receiptDraftMissingFields.includes('market_purpose_of_renewal') ? 'true' : 'false'}
-                              className={`w-full rounded-xl border bg-white px-4 py-3 text-sm outline-none ${
-                                receiptDraftMissingFields.includes('market_purpose_of_renewal') ? 'border-red-500 bg-red-50' : 'border-slate-300'
-                              }`}
-                            >
-                              {MARKET_PURPOSE_OPTIONS.map((option) => (
-                                <option key={option} value={option}>{option}</option>
-                              ))}
-                              <option value="Other">Other (please specify)</option>
-                            </select>
+                              onChange={(nextValue) => setReceiptDraft((current) => normalizeReceiptDraftReviewState({
+                                ...current,
+                                market_purpose_of_renewal: nextValue === 'Other' ? '' : nextValue,
+                              }))}
+                              options={[...MARKET_PURPOSE_OPTIONS.map((option) => ({ value: option, label: option })), { value: 'Other', label: 'Other (please specify)' }]}
+                              placeholder="Select purpose"
+                              hasError={receiptDraftMissingFields.includes('market_purpose_of_renewal')}
+                            />
                             {getMarketPurposeSelectValue(receiptDraft.market_purpose_of_renewal) === 'Other' ? (
                               <input
                                 name="market_purpose_of_renewal"

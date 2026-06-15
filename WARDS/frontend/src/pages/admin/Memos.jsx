@@ -3,6 +3,7 @@ import api, { memoAPI } from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
+import { CustomSelect } from '../../components/FormControls';
 import SystemMessageModal from '../../components/SystemMessageModal';
 import ActionConfirmationModal from '../../components/ActionConfirmationModal';
 import { UNREAD_CARD_HIGHLIGHT_CLASS, UNREAD_STATUS_BADGE_CLASS } from '../../utils/notificationUI';
@@ -152,6 +153,10 @@ const Memos = () => {
     if (name === 'recipient_type' && validationErrors.recipients) {
       setValidationErrors((previous) => ({ ...previous, recipients: '' }));
     }
+  };
+
+  const handleSelectChange = (fieldName) => (value) => {
+    handleInputChange({ target: { name: fieldName, value } });
   };
 
   const ALLOWED_MEMO_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.pdf', '.doc', '.docx', '.xls', '.xlsx'];
@@ -619,18 +624,7 @@ const Memos = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div>
                   <label className="block text-gray-700 font-semibold mb-2">Memo Priority</label>
-                  <select
-                    name="priority"
-                    value={formData.priority}
-                    onChange={handleInputChange}
-                    className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent ${
-                      validationErrors.priority ? 'border-red-500 bg-red-50' : 'border-gray-300'
-                    }`}
-                  >
-                    <option value="low">Low</option>
-                    <option value="normal">Normal</option>
-                    <option value="high">High</option>
-                  </select>
+                  <CustomSelect value={formData.priority} onChange={handleSelectChange('priority')} options={[{ value: 'low', label: 'Low' }, { value: 'normal', label: 'Normal' }, { value: 'high', label: 'High' }]} placeholder="Select priority" hasError={!!validationErrors.priority} />
                   {validationErrors.priority && (
                     <p className="mt-2 text-sm font-semibold text-red-600">{validationErrors.priority}</p>
                   )}
@@ -638,15 +632,7 @@ const Memos = () => {
 
                 <div>
                   <label className="block text-gray-700 font-semibold mb-2">Recipients</label>
-                  <select
-                    name="recipient_type"
-                    value={formData.recipient_type}
-                    onChange={handleInputChange}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
-                  >
-                    <option value="all">All Branches</option>
-                    <option value="specific_branches">Specific Branches</option>
-                  </select>
+                  <CustomSelect value={formData.recipient_type} onChange={handleSelectChange('recipient_type')} options={[{ value: 'all', label: 'All Branches' }, { value: 'specific_branches', label: 'Specific Branches' }]} placeholder="Select recipients" />
                 </div>
               </div>
 

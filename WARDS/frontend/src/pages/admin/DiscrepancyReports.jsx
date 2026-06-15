@@ -11,6 +11,7 @@ import {
 } from '../../components/discrepancies/DiscrepancyUI';
 import { discrepancyAPI } from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
+import { CustomSelect } from '../../components/FormControls';
 
 const CLOSED_STATUSES = new Set(['Solved', 'Rejected']);
 
@@ -410,19 +411,7 @@ const DiscrepancyReports = () => {
                     </div>
                     <div className="mt-4">
                       <label className="mb-2 block text-sm font-semibold text-slate-700">Status / Resolution</label>
-                      <select
-                        value={verificationStatus}
-                        onChange={(event) => setVerificationStatus(event.target.value)}
-                        disabled={isClosedReport}
-                        className="w-full rounded-2xl border border-slate-300 px-4 py-3 font-semibold focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
-                      >
-                        <option value="Pending Review">Pending Review</option>
-                        <option value="Under Review">Under Review</option>
-                        <option value="Verified">Verified</option>
-                        <option value="Responded">Responded</option>
-                        <option value="Solved">Solved</option>
-                        <option value="Rejected">Rejected</option>
-                      </select>
+                      <CustomSelect value={verificationStatus} onChange={(value) => setVerificationStatus(value)} disabled={isClosedReport} options={[{ value: 'Pending Review', label: 'Pending Review' }, { value: 'Under Review', label: 'Under Review' }, { value: 'Verified', label: 'Verified' }, { value: 'Responded', label: 'Responded' }, { value: 'Solved', label: 'Solved' }, { value: 'Rejected', label: 'Rejected' }]} placeholder="Select status" />
                     </div>
 
                     {!showReplyComposer && (

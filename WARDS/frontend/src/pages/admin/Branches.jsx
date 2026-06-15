@@ -4,6 +4,7 @@ import { getEmailValidationMessage, validateStrongPassword } from '../../utils/v
 import WardsPageHero from '../../components/WardsPageHero';
 import PasswordField from '../../components/PasswordField';
 import { safeNavigate } from '../../utils/urlValidator';
+import { CustomSelect } from '../../components/FormControls';
 
 const slugifyBranchName = (name) => {
   const slug = name
@@ -346,6 +347,10 @@ const Branches = () => {
     if (modalError) {
       setModalError('');
     }
+  };
+
+  const handleSelectChange = (fieldName) => (value) => {
+    handleInputChange({ target: { name: fieldName, value } });
   };
 
   const handlePresetChange = (e) => {
@@ -946,18 +951,7 @@ const Branches = () => {
               {!editingBranch && (
                 <div className="md:col-span-2">
                   <label className="block text-gray-700 font-semibold mb-2">Predefined Branch Office</label>
-                  <select
-                    value={selectedPreset}
-                    onChange={handlePresetChange}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
-                  >
-                    <option value="custom">Other / Custom Branch</option>
-                    {BRANCH_PRESETS.map((preset) => (
-                      <option key={preset.id} value={preset.id}>
-                        {preset.name} - {preset.location}
-                      </option>
-                    ))}
-                  </select>
+                  <CustomSelect value={selectedPreset} onChange={(value) => handlePresetChange({ target: { value } })} options={[{ value: 'custom', label: 'Other / Custom Branch' }, ...BRANCH_PRESETS.map((preset) => ({ value: preset.id, label: `${preset.name} - ${preset.location}` }))]} placeholder="Select preset" />
                   <p className="mt-2 text-sm text-gray-500">
                     Choose an official branch office to auto-fill the branch name, location, and contact details.
                   </p>
@@ -1050,15 +1044,7 @@ const Branches = () => {
               </div>
               <div>
                 <label className="block text-gray-700 font-semibold mb-2">Status</label>
-                <select 
-                  name="status"
-                  value={formData.status}
-                  onChange={handleInputChange}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
-                >
-                  <option value="Active">Active</option>
-                  <option value="Inactive">Inactive</option>
-                </select>
+                <CustomSelect value={formData.status} onChange={handleSelectChange('status')} options={[{ value: 'Active', label: 'Active' }, { value: 'Inactive', label: 'Inactive' }]} placeholder="Select status" />
               </div>
               {(
                 <>
@@ -1147,22 +1133,7 @@ const Branches = () => {
                           <div className="grid w-full gap-4 lg:w-[32rem] lg:grid-cols-2">
                             <div>
                               <label className="mb-2 block text-sm font-semibold text-slate-700">Assigned Window</label>
-                              <select
-                                value={selectedAssignedWindowNumber}
-                                onChange={(event) => handleWindowAccountChange(option.key, 'assigned_window_number', Number(event.target.value))}
-                                className={`w-full rounded-lg border px-4 py-3 text-sm font-semibold text-slate-800 focus:border-transparent focus:ring-2 focus:ring-accent ${
-                                  hasWindowConflict ? 'border-red-500 bg-red-50' : 'border-slate-300'
-                                }`}
-                              >
-                                {getActiveWindowOptions().map((windowOption) => (
-                                  <option
-                                    key={windowOption.number}
-                                    value={windowOption.number}
-                                  >
-                                    Window {windowOption.number}
-                                  </option>
-                                ))}
-                              </select>
+                              <CustomSelect value={String(selectedAssignedWindowNumber)} onChange={(value) => handleWindowAccountChange(option.key, 'assigned_window_number', Number(value))} options={getActiveWindowOptions().map((windowOption) => ({ value: String(windowOption.number), label: `Window ${windowOption.number}` }))} placeholder="Select window" hasError={hasWindowConflict} />
                               {hasWindowConflict ? (
                                 <p className="mt-2 text-sm font-semibold text-red-600">
                                   Window {selectedAssignedWindowNumber} is already assigned to another assignment.
@@ -1171,22 +1142,7 @@ const Branches = () => {
                             </div>
                             <div>
                               <label className="mb-2 block text-sm font-semibold text-slate-700">Assigned Service</label>
-                              <select
-                                value={selectedServiceWindow}
-                                onChange={(event) => handleWindowAccountChange(option.key, 'service_window', event.target.value)}
-                                className={`w-full rounded-lg border px-4 py-3 text-sm font-semibold text-slate-800 focus:border-transparent focus:ring-2 focus:ring-accent ${
-                                  hasServiceConflict ? 'border-red-500 bg-red-50' : 'border-slate-300'
-                                }`}
-                              >
-                                {serviceChoices.map((choice) => (
-                                  <option
-                                    key={choice.key}
-                                    value={choice.key}
-                                  >
-                                    {choice.label}
-                                  </option>
-                                ))}
-                              </select>
+                              <CustomSelect value={selectedServiceWindow} onChange={(value) => handleWindowAccountChange(option.key, 'service_window', value)} options={serviceChoices.map((choice) => ({ value: choice.key, label: choice.label }))} placeholder="Select service" hasError={hasServiceConflict} />
                               {hasServiceConflict ? (
                                 <p className="mt-2 text-sm font-semibold text-red-600">
                                   {selectedServiceLabel} is already assigned to another assignment.

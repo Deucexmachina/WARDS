@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import api, { announcementAPI } from '../../services/api';
 import WardsPageHero from '../../components/WardsPageHero';
+import { CustomSelect } from '../../components/FormControls';
 import {
   AnnouncementAttachmentsField,
   AnnouncementAttachmentsList,
@@ -77,6 +78,10 @@ const Announcements = () => {
     if (validationErrors[name]) {
       setValidationErrors((previous) => ({ ...previous, [name]: '' }));
     }
+  };
+
+  const handleSelectChange = (fieldName) => (value) => {
+    handleInputChange({ target: { name: fieldName, value } });
   };
 
   const resetEditor = () => {
@@ -443,31 +448,11 @@ const Announcements = () => {
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 mb-1.5">Icon Type</label>
-                    <select
-                      name="icon_type"
-                      value={formData.icon_type}
-                      onChange={handleInputChange}
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
-                    >
-                      <option value="megaphone">Megaphone</option>
-                      <option value="check">Check Mark</option>
-                      <option value="clock">Clock</option>
-                      <option value="info">Info</option>
-                    </select>
+                    <CustomSelect value={formData.icon_type} onChange={handleSelectChange('icon_type')} options={[{ value: 'megaphone', label: 'Megaphone' }, { value: 'check', label: 'Check Mark' }, { value: 'clock', label: 'Clock' }, { value: 'info', label: 'Info' }]} placeholder="Select icon" />
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 mb-1.5">Icon Color</label>
-                    <select
-                      name="icon_color"
-                      value={formData.icon_color}
-                      onChange={handleInputChange}
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
-                    >
-                      <option value="blue">Blue</option>
-                      <option value="green">Green</option>
-                      <option value="yellow">Yellow</option>
-                      <option value="red">Red</option>
-                    </select>
+                    <CustomSelect value={formData.icon_color} onChange={handleSelectChange('icon_color')} options={[{ value: 'blue', label: 'Blue' }, { value: 'green', label: 'Green' }, { value: 'amber', label: 'Amber' }, { value: 'red', label: 'Red' }, { value: 'purple', label: 'Purple' }]} placeholder="Select color" />
                   </div>
                 </div>
                 <div className="rounded-lg border border-slate-200 bg-slate-50/60 px-3.5 py-2.5">

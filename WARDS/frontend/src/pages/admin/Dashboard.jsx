@@ -4,6 +4,7 @@ import { discrepancyAPI } from '../../services/api';
 import { formatUtc8DateTime, formatUtc8Time } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
+import { CustomSelect } from '../../components/FormControls';
 import {
   DiscrepancyInfoCard,
   DiscrepancySection,
@@ -388,34 +389,14 @@ const Dashboard = () => {
                 <label className="mb-1 block text-sm font-medium text-gray-700">
                   Branch Filter
                 </label>
-                <select
-                  value={selectedBranch || ''}
-                  onChange={(e) => setSelectedBranch(e.target.value || null)}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-accent"
-                >
-                  <option value="">All Branches</option>
-                  {stats?.branches?.map((branch) => (
-                    <option key={branch.branch_id} value={branch.branch_id}>
-                      {branch.branch_name}
-                    </option>
-                  ))}
-                </select>
+                <CustomSelect value={selectedBranch || ''} onChange={(value) => setSelectedBranch(value || null)} options={[{ value: '', label: 'All Branches' }, ...(stats?.branches || []).map((branch) => ({ value: String(branch.branch_id), label: branch.branch_name }))]} placeholder="All Branches" />
               </div>
 
               <div>
                 <label className="mb-1 block text-sm font-medium text-gray-700">
                   Service Type
                 </label>
-                <select
-                  value={selectedServiceType || ''}
-                  onChange={(e) => setSelectedServiceType(e.target.value || null)}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-accent"
-                >
-                  <option value="">All Services</option>
-                  <option value="Real Property Tax">Real Property Tax</option>
-                  <option value="Business Tax">Business Tax</option>
-                  <option value="Miscellaneous Tax">Miscellaneous Tax</option>
-                </select>
+                <CustomSelect value={selectedServiceType || ''} onChange={(value) => setSelectedServiceType(value || null)} options={[{ value: '', label: 'All Services' }, { value: 'Real Property Tax', label: 'Real Property Tax' }, { value: 'Business Tax', label: 'Business Tax' }, { value: 'Miscellaneous Tax', label: 'Miscellaneous Tax' }]} placeholder="All Services" />
               </div>
 
               <div>
@@ -1039,19 +1020,7 @@ const Dashboard = () => {
                       </div>
                       <div className="mt-4">
                         <label className="mb-2 block text-sm font-semibold text-slate-700">Status / Resolution</label>
-                        <select
-                          value={verificationStatus}
-                          onChange={(event) => setVerificationStatus(event.target.value)}
-                          disabled={isClosedReport}
-                          className="w-full rounded-2xl border border-slate-300 px-4 py-3 font-semibold focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
-                        >
-                          <option value="Pending Review">Pending Review</option>
-                          <option value="Under Review">Under Review</option>
-                          <option value="Verified">Verified</option>
-                          <option value="Responded">Responded</option>
-                          <option value="Solved">Solved</option>
-                          <option value="Rejected">Rejected</option>
-                        </select>
+                        <CustomSelect value={verificationStatus} onChange={(value) => setVerificationStatus(value)} disabled={isClosedReport} options={[{ value: 'Pending Review', label: 'Pending Review' }, { value: 'Under Review', label: 'Under Review' }, { value: 'Verified', label: 'Verified' }, { value: 'Responded', label: 'Responded' }, { value: 'Solved', label: 'Solved' }, { value: 'Rejected', label: 'Rejected' }]} placeholder="Select status" />
                       </div>
 
                       {!showDiscrepancyReplyComposer && (

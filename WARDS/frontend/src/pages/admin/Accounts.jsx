@@ -14,6 +14,7 @@ import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 import PasswordField from '../../components/PasswordField';
 import SystemMessageModal from '../../components/SystemMessageModal';
+import { CustomSelect } from '../../components/FormControls';
 
 const DEFAULT_PAGE_SIZE = 100;
 const ACCOUNTS_PER_PAGE = 5;
@@ -283,6 +284,10 @@ const Accounts = () => {
       setFullNameError(validateCitizenFullName(normalized));
     }
     setError('');
+  };
+
+  const handleSelectChange = (fieldName) => (value) => {
+    handleInputChange({ target: { name: fieldName, value } });
   };
 
   const handleContactBlur = async () => {
@@ -1115,31 +1120,12 @@ const Accounts = () => {
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
                         <label className="mb-2 block text-sm font-semibold text-slate-700">Role</label>
-                        <select
-                          name="role"
-                          value={formData.role}
-                          onChange={handleInputChange}
-                          className={EDITABLE_INPUT_CLASS}
-                          required
-                        >
-                          <option value="main_admin">Main Office Admin</option>
-                          <option value="branch_admin">Branch Admin</option>
-                          <option value="branch_staff">Branch Staff</option>
-                          <option value="public">Citizen</option>
-                        </select>
+                        <CustomSelect value={formData.role} onChange={handleSelectChange('role')} options={[{ value: 'main_admin', label: 'Main Office Admin' }, { value: 'branch_admin', label: 'Branch Admin' }, { value: 'branch_staff', label: 'Branch Staff' }, { value: 'public', label: 'Citizen' }]} placeholder="Select role" />
                       </div>
 
                       <div>
                         <label className="mb-2 block text-sm font-semibold text-slate-700">Status</label>
-                        <select
-                          name="status"
-                          value={formData.status}
-                          onChange={handleInputChange}
-                          className={EDITABLE_INPUT_CLASS}
-                        >
-                          <option value="Active">Active</option>
-                          <option value="Inactive">Inactive</option>
-                        </select>
+                        <CustomSelect value={formData.status} onChange={handleSelectChange('status')} options={[{ value: 'Active', label: 'Active' }, { value: 'Inactive', label: 'Inactive' }]} placeholder="Select status" />
                       </div>
                     </div>
 
@@ -1147,50 +1133,18 @@ const Accounts = () => {
                       <div className="mt-4 space-y-4">
                         <div>
                           <label className="mb-2 block text-sm font-semibold text-slate-700">Branch Assignment</label>
-                          <select
-                            name="branch_id"
-                            value={formData.branch_id || ''}
-                            onChange={(event) => setFormData((current) => ({ ...current, branch_id: event.target.value ? parseInt(event.target.value, 10) : null }))}
-                            className={EDITABLE_INPUT_CLASS}
-                            required
-                          >
-                            <option value="">Select Branch</option>
-                            {branches.map((branch) => (
-                              <option key={branch.id} value={branch.id}>{branch.name}</option>
-                            ))}
-                          </select>
+                          <CustomSelect value={String(formData.branch_id || '')} onChange={(value) => setFormData((current) => ({ ...current, branch_id: value ? parseInt(value, 10) : null }))} options={[{ value: '', label: 'Select Branch' }, ...branches.map((branch) => ({ value: String(branch.id), label: branch.name }))]} placeholder="Select Branch" />
                         </div>
 
                         {formData.role === 'branch_staff' && (
                           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                             <div>
                               <label className="mb-2 block text-sm font-semibold text-slate-700">Assigned Queue / Service Role</label>
-                              <select
-                                name="service_window"
-                                value={formData.service_window}
-                                onChange={handleInputChange}
-                                className={EDITABLE_INPUT_CLASS}
-                                required
-                              >
-                                <option value="">Select Queue / Service Role</option>
-                                {SERVICE_WINDOW_OPTIONS.map((option) => (
-                                  <option key={option.value} value={option.value}>{option.label}</option>
-                                ))}
-                              </select>
+                              <CustomSelect value={formData.service_window} onChange={handleSelectChange('service_window')} options={[{ value: '', label: 'Select Queue / Service Role' }, ...SERVICE_WINDOW_OPTIONS.map((option) => ({ value: option.value, label: option.label }))]} placeholder="Select Queue / Service Role" />
                             </div>
                             <div>
                               <label className="mb-2 block text-sm font-semibold text-slate-700">Voice Announcement Window</label>
-                              <select
-                                name="assigned_window_number"
-                                value={formData.assigned_window_number || 1}
-                                onChange={(event) => setFormData((current) => ({ ...current, assigned_window_number: Number.parseInt(event.target.value, 10) }))}
-                                className={EDITABLE_INPUT_CLASS}
-                                required
-                              >
-                                {PHYSICAL_WINDOW_OPTIONS.map((windowNumber) => (
-                                  <option key={windowNumber} value={windowNumber}>Window {windowNumber}</option>
-                                ))}
-                              </select>
+                              <CustomSelect value={String(formData.assigned_window_number || 1)} onChange={(value) => setFormData((current) => ({ ...current, assigned_window_number: Number.parseInt(value, 10) }))} options={PHYSICAL_WINDOW_OPTIONS.map((windowNumber) => ({ value: String(windowNumber), label: `Window ${windowNumber}` }))} placeholder="Select window" />
                             </div>
                           </div>
                         )}

@@ -5,6 +5,7 @@ import { formatUtc8Date, formatUtc8DateTime } from '../../utils/dateTime';
 import GeneratedReportContent from '../../components/reports/GeneratedReportContent';
 import WardsPageHero from '../../components/WardsPageHero';
 import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
+import { CustomSelect } from '../../components/FormControls';
 import {
   applyAdminReportViewedState,
   BRANCH_REPORT_VIEWED_EVENT,
@@ -224,6 +225,10 @@ const Reports = () => {
   const handleFilterChange = (event) => {
     const { name, value } = event.target;
     setFilters((current) => ({ ...current, [name]: value }));
+  };
+
+  const handleSelectChange = (fieldName) => (value) => {
+    handleFilterChange({ target: { name: fieldName, value } });
   };
 
   const handleApplyFilters = () => {
@@ -448,37 +453,17 @@ const Reports = () => {
 
           <div>
             <label className="mb-2 block text-sm font-semibold text-slate-700">Branch Office</label>
-            <select name="branch" value={filters.branch} onChange={handleFilterChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm">
-              <option value="">All Branches</option>
-              {branches.map((branch) => (
-                <option key={branch.id} value={branch.name}>{branch.name}</option>
-              ))}
-            </select>
+            <CustomSelect value={filters.branch} onChange={handleSelectChange('branch')} options={[{ value: '', label: 'All Branches' }, ...branches.map((branch) => ({ value: branch.name, label: branch.name }))]} placeholder="All Branches" />
           </div>
 
           <div>
             <label className="mb-2 block text-sm font-semibold text-slate-700">Service Type</label>
-            <select name="service_type" value={filters.service_type} onChange={handleFilterChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm">
-              <option value="">All Services</option>
-              {SERVICE_TYPE_OPTIONS.map((option) => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-            </select>
+            <CustomSelect value={filters.service_type} onChange={handleSelectChange('service_type')} options={[{ value: '', label: 'All Services' }, ...SERVICE_TYPE_OPTIONS.map((option) => ({ value: option, label: option }))]} placeholder="All Services" />
           </div>
 
           <div>
             <label className="mb-2 block text-sm font-semibold text-slate-700">Transaction Category</label>
-            <select
-              name="transaction_category"
-              value={filters.transaction_category}
-              onChange={handleFilterChange}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
-            >
-              <option value="">All Categories</option>
-              {TRANSACTION_CATEGORY_OPTIONS.map((option) => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-            </select>
+            <CustomSelect value={filters.transaction_category} onChange={handleSelectChange('transaction_category')} options={[{ value: '', label: 'All Categories' }, ...TRANSACTION_CATEGORY_OPTIONS.map((option) => ({ value: option, label: option }))]} placeholder="All Categories" />
           </div>
 
           <div>
