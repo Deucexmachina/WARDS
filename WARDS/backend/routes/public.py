@@ -17,8 +17,10 @@ from slowapi.util import get_remote_address
 from database.models import (
     Branch, BranchStaff, CitizenUser, Queue, QueueHistory, Service, BranchService, FAQ, TaxpayerGuide,
     BranchOperatingHours, Announcement, QueueActivity, ReceiptRequest,
-    Payment, get_db
+    Payment, ActivityLog, get_db
 )
+from middleware.admin_auth import require_main_admin
+from middleware.branch_auth import get_current_branch_staff
 from utils.field_crypto import apply_queue_security, find_citizen_by_email, find_payment_by_ref_number, find_queue_by_queue_number, get_decrypted_or_raw, hash_aware_any, hash_aware_match, hash_optional_value, queue_value, service_value, taxpayer_guide_value
 from utils.field_crypto import receipt_request_value
 from utils.branch_appointment_settings import (
@@ -45,6 +47,17 @@ ACTIVE_PUBLIC_QUEUE_STATUSES = ("Pending", "Waiting", "Called", "Serving")
 ACTIVE_QUEUE_MESSAGE = "You already have an active queue request. Please complete or cancel your current queue before registering for another one."
 optional_user_security = HTTPBearer(auto_error=False)
 MANILA_TIMEZONE = timezone(timedelta(hours=8))
+
+def log_activity(db: Session, action: str, user: str, details: str, log_type: str = "security") -> None:
+    log = ActivityLog(
+        action=action,
+        user=user,
+        details=details,
+        type=log_type
+    )
+    db.add(log)
+    db.commit()
+
 
 # Rate limiting configuration
 limiter = Limiter(key_func=get_remote_address)
@@ -730,20 +743,36 @@ async def get_branch_queues(request: Request, branch_id: int, db: Session = Depe
     ]
 
 @router.put("/queue/{queue_id}/status")
-async def update_queue_status(queue_id: int, status_update: dict, db: Session = Depends(get_db)):
-    """Update queue status (for Branch Admin)"""
+async def update_queue_status(
+    queue_id: int,
+    status_update: dict,
+    db: Session = Depends(get_db),
+    current_staff: BranchStaff = Depends(get_current_branch_staff),
+):
+    """Update queue status (for Branch Staff)"""
     queue = db.query(Queue).filter(Queue.id == queue_id).first()
     if not queue:
         raise HTTPException(status_code=404, detail="Queue not found")
+    if current_staff.branch_id != queue.branch_id:
+        raise HTTPException(status_code=403, detail="Access denied to this queue")
     ensure_queue_operations_manageable(db, queue.branch_id)
-    
-    queue.status = status_update.get("status", queue_value(queue, "status"))
-    if should_release_appointment_reservation(queue_value(queue, "status")):
+
+    old_status = queue_value(queue, "status")
+    new_status = status_update.get("status", old_status)
+    queue.status = new_status
+    if should_release_appointment_reservation(new_status):
         queue.appointment_reservation_key = None
     apply_queue_security(queue)
     db.commit()
     db.refresh(queue)
-    
+
+    log_activity(
+        db,
+        action="Queue Status Updated",
+        user=current_staff.username or current_staff.email,
+        details=f"Queue #{queue_id} status changed from {old_status} to {new_status} at branch {queue.branch_id}",
+        log_type="admin_action",
+    )
     return {"message": "Queue status updated", "queue_number": queue_value(queue, "queue_number"), "status": queue_value(queue, "status")}
 
 @router.post("/queue/register")
@@ -1329,13 +1358,19 @@ async def check_payment_status(ref_number: str, db: Session = Depends(get_db)):
 
 @router.post("/payment/{ref_number}/verify")
 @limiter.limit("10/minute")
-async def verify_payment(request: Request, ref_number: str, db: Session = Depends(get_db)):
-    """Simulate payment verification (for testing)"""
+async def verify_payment(
+    request: Request,
+    ref_number: str,
+    db: Session = Depends(get_db),
+    current_admin=Depends(require_main_admin()),
+):
+    """Verify a payment (admin only)"""
     payment = find_payment_by_ref_number(db, Payment, ref_number)
-    
+
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
-    
+
+    old_status = payment.status
     if payment.source_module == "receipt_request":
         payment.status = "Pending Transaction"
     else:
@@ -1344,7 +1379,15 @@ async def verify_payment(request: Request, ref_number: str, db: Session = Depend
     from utils.field_crypto import apply_payment_security
     apply_payment_security(payment)
     db.commit()
-    
+
+    log_activity(
+        db,
+        action="Payment Verified",
+        user=current_admin.username or current_admin.email,
+        details=f"Payment {ref_number} status changed from {old_status} to {payment.status}",
+        log_type="admin_action",
+    )
+
     return {
         "ref_number": get_decrypted_or_raw(payment, "ref_number"),
         "status": payment.status,
