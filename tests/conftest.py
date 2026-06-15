@@ -1,9 +1,3 @@
-import os
-
-os.environ.setdefault("DATA_ENCRYPTION_SECRET", "test-data-encryption-secret-do-not-use-in-production")
-os.environ.setdefault("DATA_HASH_SECRET", "test-data-hash-secret-do-not-use-in-production")
-os.environ.setdefault("LOG_INTEGRITY_SECRET", "test-log-integrity-secret-do-not-use-in-production")
-
 import sys
 from pathlib import Path
 

@@ -43,11 +43,6 @@ QUARANTINE_ROOT = MASTER_ROOT / "QUARANTINE"
 DEFAULT_BACKUP_ROOT = SECURITY_ROOT / "local_backups"
 MODEL_STATE_PATH = SECURITY_ROOT / "ml" / "isolation_forest_state.json"
 MODEL_METADATA_PATH = SECURITY_ROOT / "ml" / "isolation_forest_metadata.json"
-
-AUTO_RECOVERY_ENABLED = os.getenv("AUTO_RECOVERY_ENABLED", "true").lower() == "true"
-AUTO_RECOVERY_DELAY_SECONDS = int(os.getenv("AUTO_RECOVERY_DELAY_SECONDS", "0"))
-AUTO_RECOVERY_MIN_SEVERITY = os.getenv("AUTO_RECOVERY_MIN_SEVERITY", "medium")
-AUTO_RECOVERY_SEVERITY_ORDER = {"low": 1, "medium": 2, "high": 3, "critical": 4}
 WAZUH_CONFIG_PATH = Path(os.getenv("WAZUH_CONFIG_PATH", str(SECURITY_ROOT / "wazuh" / "ossec.conf"))).expanduser()
 DATABASE_MONITOR_ROOT = SECURITY_ROOT / "database_monitor"
 DATABASE_SNAPSHOT_PATH = DATABASE_MONITOR_ROOT / "wards_db_snapshot.json"
@@ -3073,36 +3068,6 @@ def reconcile_trusted_file_removals(db: Session, actor: str = "trusted_baseline"
     return {"verified_deleted": verified_deleted, "verified_renamed": verified_renamed}
 
 
-def schedule_delayed_recovery(db: Session, file_entry: SecurityMonitoredFile, detection_id: int, quarantine_path: str | None, delay_seconds: int) -> None:
-    execute_at = now_utc() + timedelta(seconds=delay_seconds)
-    payload = {
-        "detection_id": detection_id,
-        "file_id": file_entry.id,
-        "quarantine_path": quarantine_path,
-        "execute_at": execute_at.isoformat(),
-    }
-    set_setting(db, f"pending_recovery_{detection_id}", json_dumps(payload), "auto_recovery")
-    db.commit()
-
-
-def process_pending_recoveries(db: Session) -> list[SecurityRecoveryEvent]:
-    recoveries = []
-    for setting in db.query(SecuritySetting).filter(SecuritySetting.key.like("pending_recovery_%")).all():
-        try:
-            payload = json_loads(setting.value, {})
-            execute_at = datetime.fromisoformat(payload["execute_at"])
-            if now_utc() >= execute_at:
-                file_entry = db.query(SecurityMonitoredFile).filter(SecurityMonitoredFile.id == payload["file_id"]).first()
-                if file_entry:
-                    recovery = restore_from_backup(db, file_entry, payload["detection_id"], "automatic", None, payload.get("quarantine_path"))
-                    recoveries.append(recovery)
-                db.delete(setting)
-                db.commit()
-        except Exception:
-            logger.exception("Failed to process pending recovery for %s", setting.key)
-    return recoveries
-
-
 def should_create_incident(change_type: str, prediction: AIPrediction, flags: list[str], classification: dict) -> bool:
     concrete_tamper_flags = {
         "script_injection",
@@ -3334,18 +3299,11 @@ def record_detection(db: Session, file_entry: SecurityMonitoredFile, change_type
         quarantine_path = quarantine_file(portable_monitored_path(file_entry), detection.id)
         incident = create_incident(db, detection, classification, flags, changed, quarantine_path)
         recovery = None
-        if change_type in {"content_modified", "file_deleted"} and AUTO_RECOVERY_ENABLED:
-            severity_score = AUTO_RECOVERY_SEVERITY_ORDER.get(classification["severity_level"], 0)
-            min_score = AUTO_RECOVERY_SEVERITY_ORDER.get(AUTO_RECOVERY_MIN_SEVERITY, 2)
-            if severity_score >= min_score:
-                if AUTO_RECOVERY_DELAY_SECONDS > 0:
-                    schedule_delayed_recovery(db, file_entry, detection.id, quarantine_path, AUTO_RECOVERY_DELAY_SECONDS)
-                    incident.response_action = "delayed_auto_recovery_scheduled"
-                else:
-                    recovery = restore_from_backup(db, file_entry, detection.id, "automatic", None, quarantine_path)
-                    incident.response_action = "auto_recovered_pending_review" if recovery and recovery.status == "success" else "escalated"
-                db.add(incident)
-                db.commit()
+        if change_type in {"content_modified", "file_deleted"}:
+            recovery = restore_from_backup(db, file_entry, detection.id, "automatic", None, quarantine_path)
+            incident.response_action = "auto_recovered_pending_review" if recovery.status == "success" else "escalated"
+            db.add(incident)
+            db.commit()
         create_incident_system_alert(db, incident, detection, recovery)
     elif not is_legitimate:
         create_system_alert(
@@ -3373,7 +3331,6 @@ def build_trigger_summary(change_type: str, flags: list[str], changed: dict, is_
 
 
 def scan_all_files(db: Session, context: dict | None = None) -> list[SecurityDetectionEvent]:
-    process_pending_recoveries(db)
     register_initial_files(db, refresh_existing=False)
     migrate_portable_monitored_files(db)
     database_entry = normalize_database_monitor_entry(db, reset_baseline=False, ensure_snapshot=True)

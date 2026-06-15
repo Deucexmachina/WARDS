@@ -5,53 +5,22 @@ import os
 import re
 from typing import Optional
 
-from cryptography.exceptions import InvalidTag
 from cryptography.fernet import Fernet, InvalidToken
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from sqlalchemy import or_
 
 
-CIPHER_PREFIX_FERNET = "f1:"
-CIPHER_PREFIX_AES256_GCM = "a1:"
-
-
-def _get_env_secret(name: str) -> str:
+def _get_env_secret(name: str, fallback: str) -> str:
     value = (os.getenv(name) or "").strip()
-    if not value:
-        raise RuntimeError(
-            f"Security configuration error: environment variable {name} is not set. "
-            f"Set it to a strong random secret before starting the application."
-        )
-    return value
+    return value or fallback
 
 
 def _build_fernet() -> Fernet:
-    secret = _get_env_secret("DATA_ENCRYPTION_SECRET")
+    secret = _get_env_secret("DATA_ENCRYPTION_SECRET", "change-this-data-encryption-secret")
     key = base64.urlsafe_b64encode(hashlib.sha256(secret.encode("utf-8")).digest())
     return Fernet(key)
 
 
-def _build_aesgcm() -> AESGCM:
-    secret = _get_env_secret("DATA_ENCRYPTION_SECRET")
-    key = hashlib.sha256(secret.encode("utf-8")).digest()
-    return AESGCM(key)
-
-
 _FERNET = _build_fernet()
-_AESGCM = _build_aesgcm()
-
-
-def _detect_cipher(ciphertext: str) -> str:
-    if ciphertext.startswith(CIPHER_PREFIX_AES256_GCM):
-        return "aes256gcm"
-    if ciphertext.startswith(CIPHER_PREFIX_FERNET):
-        return "fernet"
-    # Legacy Fernet tokens start with "gAAAA"
-    if ciphertext.startswith("gAAAA"):
-        return "fernet"
-    return "unknown"
-
-
 REDACTED_VALUE_PATTERN = re.compile(r"^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*_[0-9a-fA-F]{6,64}$")
 REDACTED_EMAIL_PATTERN = re.compile(r"^[a-z0-9_.+-]+_[0-9a-fA-F]{6,64}@redacted\.local$")
 REDACTED_PREFIX_ONLY_PATTERN = re.compile(
@@ -59,18 +28,13 @@ REDACTED_PREFIX_ONLY_PATTERN = re.compile(
 )
 
 
-def encrypt_optional_value(value: Optional[str], mode: Optional[str] = None) -> Optional[str]:
+def encrypt_optional_value(value: Optional[str]) -> Optional[str]:
     if value is None:
         return None
     text = str(value).strip()
     if not text:
         return None
-    effective_mode = (mode or os.getenv("DATA_ENCRYPTION_MODE", "fernet")).lower()
-    if effective_mode == "aes256gcm":
-        nonce = os.urandom(12)
-        ciphertext = _AESGCM.encrypt(nonce, text.encode("utf-8"), None)
-        return f"{CIPHER_PREFIX_AES256_GCM}{nonce.hex()}:{ciphertext.hex()}"
-    return f"{CIPHER_PREFIX_FERNET}{_FERNET.encrypt(text.encode('utf-8')).decode('utf-8')}"
+    return _FERNET.encrypt(text.encode("utf-8")).decode("utf-8")
 
 
 def decrypt_optional_value(value: Optional[str]) -> Optional[str]:
@@ -80,19 +44,9 @@ def decrypt_optional_value(value: Optional[str]) -> Optional[str]:
     if not text:
         return None
     try:
-        cipher = _detect_cipher(text)
-        if cipher == "aes256gcm":
-            payload = text[len(CIPHER_PREFIX_AES256_GCM):]
-            nonce_hex, ciphertext_hex = payload.split(":", 1)
-            nonce = bytes.fromhex(nonce_hex)
-            ciphertext = bytes.fromhex(ciphertext_hex)
-            return _AESGCM.decrypt(nonce, ciphertext, None).decode("utf-8")
-        if cipher == "fernet":
-            fernet_token = text[len(CIPHER_PREFIX_FERNET):] if text.startswith(CIPHER_PREFIX_FERNET) else text
-            return _FERNET.decrypt(fernet_token.encode("utf-8")).decode("utf-8")
-    except (InvalidToken, InvalidTag, ValueError, TypeError):
+        return _FERNET.decrypt(text.encode("utf-8")).decode("utf-8")
+    except (InvalidToken, ValueError, TypeError):
         return None
-    return None
 
 
 def hash_optional_value(value: Optional[str]) -> Optional[str]:
@@ -101,7 +55,7 @@ def hash_optional_value(value: Optional[str]) -> Optional[str]:
     text = str(value).strip()
     if not text:
         return None
-    secret = _get_env_secret("DATA_HASH_SECRET")
+    secret = _get_env_secret("DATA_HASH_SECRET", "change-this-data-hash-secret")
     return hmac.new(secret.encode("utf-8"), text.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
