@@ -16,6 +16,7 @@ const sensitivityOptions = [
   { value: 1, label: 'Normal', hint: 'Recommended' },
   { value: 1.5, label: 'High', hint: 'More strict' },
 ];
+const FILE_PAGE_SIZE = 10;
 
 const ruleHelp = {
   hour_of_day: 'Learns the normal time range for admin changes.',
@@ -334,6 +335,7 @@ const BackupRecovery = () => {
   const [backupFilters, setBackupFilters] = useState({ keyword: '', date_from: '', date_to: '', type: '', status: '', sort: 'newest' });
   const [fileKeyword, setFileKeyword] = useState('');
   const [fileSort, setFileSort] = useState({ column: 'folder', direction: 'asc' });
+  const [filePage, setFilePage] = useState(1);
   const [aiRules, setAiRules] = useState({});
   const [aiRuleTemplates, setAiRuleTemplates] = useState([]);
   const [showAiRules, setShowAiRules] = useState(false);
@@ -647,6 +649,10 @@ const BackupRecovery = () => {
       refreshIncidents(1);
     }
   }, [incidentFilters]);
+
+  useEffect(() => {
+    setFilePage(1);
+  }, [fileKeyword, fileSort]);
 
   const markSeen = (type, ids) => {
     const uniqueIds = Array.from(new Set((ids || []).filter((id) => id !== undefined && id !== null).map(Number)));
@@ -1137,7 +1143,7 @@ const BackupRecovery = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {visibleFiles.map((file) => (
+                    {visibleFiles.slice((filePage - 1) * FILE_PAGE_SIZE, filePage * FILE_PAGE_SIZE).map((file) => (
                       <tr key={file.id}>
                         <td className="max-w-md py-3 font-semibold text-slate-800">{file.relative_path}</td>
                         <td>{file.folder_root}</td>
@@ -1159,6 +1165,10 @@ const BackupRecovery = () => {
                   </tbody>
                 </table>
               </div>
+              <PaginationFooter
+                state={{ page: filePage, total_pages: Math.max(1, Math.ceil(visibleFiles.length / FILE_PAGE_SIZE)), total: visibleFiles.length }}
+                onPage={setFilePage}
+              />
             </Section>
           )}
 
