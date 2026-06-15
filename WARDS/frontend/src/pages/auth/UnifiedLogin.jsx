@@ -681,7 +681,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
 
   return (
     <div className={`min-h-screen bg-gradient-to-br ${copy.accent} flex items-center justify-center p-6`}>
-      <div className="w-full max-w-4xl bg-white rounded-3xl shadow-2xl overflow-hidden flex min-h-[560px]">
+      <div className="w-full max-w-5xl bg-white rounded-3xl shadow-2xl overflow-hidden flex h-[640px]">
 
         {/* Left — Login Form */}
         <div className="flex flex-col justify-center w-full md:w-[60%] px-6 py-8 md:px-10 md:py-12">
