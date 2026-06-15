@@ -11,7 +11,7 @@ import time
 import pyotp
 import qrcode
 import requests
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -723,7 +723,7 @@ def generate_mfa_payload(portal: str, username: str, secret: str) -> dict:
 
 @router.post("/login", response_model=UnifiedToken)
 @limiter.limit("5/minute")
-async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: Session = Depends(get_db)):
+async def unified_login(request: Request, response: Response, credentials: UnifiedLoginRequest, db: Session = Depends(get_db)):
     client_ip = request.client.host
 
     portal, account = find_account_for_portal(db, credentials.identifier, credentials.portal)
@@ -893,6 +893,14 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
     if portal in {"public", "admin", "branch"}:
         mfa_setup_required = get_mfa_secret(db, portal, get_mfa_username(portal, account)) is None
 
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=os.getenv("SECURE_COOKIES", "false").lower() == "true",
+        samesite="Strict",
+        max_age=int(timedelta(minutes=PORTAL_CONFIG[portal]["expires_minutes"]).total_seconds()),
+    )
     return {
         "access_token": access_token,
         "token_type": "bearer",
@@ -905,13 +913,18 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
 
 
 @router.post("/logout")
-async def unified_logout(request: Request, db: Session = Depends(get_db)):
+async def unified_logout(request: Request, response: Response, db: Session = Depends(get_db)):
+    token = None
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         token = auth_header.split(" ", 1)[1]
+    if not token:
+        token = request.cookies.get("access_token")
+    if token:
         for config in PORTAL_CONFIG.values():
             revoke_token(db, token, config["secret_key"], ALGORITHM, config.get("token_type"))
         db.commit()
+    response.delete_cookie(key="access_token", httponly=True, secure=os.getenv("SECURE_COOKIES", "false").lower() == "true", samesite="Strict")
     return {"message": "Logged out successfully"}
 
 

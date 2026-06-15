@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 from fastapi import FastAPI, Depends, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from datetime import datetime, timedelta
 from typing import Optional
@@ -228,6 +228,33 @@ async def custom_rate_limit_exceeded_handler(request: Request, exc: RateLimitExc
     )
 
 
+class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
+    """Redirect HTTP requests to HTTPS in production environments."""
+
+    async def dispatch(self, request: Request, call_next):
+        is_production = os.getenv("APP_ENV", os.getenv("ENV", "development")).lower() in {"prod", "production"}
+        if not is_production:
+            return await call_next(request)
+
+        # Allow health checks and local loopback without redirect
+        client_host = request.client.host if request.client else ""
+        if client_host in ("127.0.0.1", "::1", "localhost"):
+            return await call_next(request)
+
+        # Check if already secure
+        is_secure = request.url.scheme == "https"
+        forwarded_proto = request.headers.get("x-forwarded-proto", "")
+        if forwarded_proto:
+            is_secure = forwarded_proto == "https"
+
+        if is_secure:
+            return await call_next(request)
+
+        # Redirect to HTTPS
+        https_url = str(request.url.replace(scheme="https"))
+        return RedirectResponse(https_url, status_code=status.HTTP_308_PERMANENT_REDIRECT)
+
+
 def build_allowed_origins() -> list[str]:
     origins: list[str] = []
 
@@ -264,10 +291,13 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=build_allowed_origins(),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With", "Accept", "Origin", "X-Requires-Captcha", "X-Requires-MFA-Setup", "X-Auth-Portal", "X-Requires-Email-Verification"],
     expose_headers=["X-Requires-Captcha", "X-Requires-MFA-Setup", "X-Auth-Portal", "X-Requires-Email-Verification"],
 )
+
+# HTTPS Redirect Middleware (only active in production)
+app.add_middleware(HTTPSRedirectMiddleware)
 
 # Security Headers Middleware
 # Adds security headers to all responses (CSP, X-Frame-Options, etc.)
