@@ -70,6 +70,7 @@ export const persistSession = ({ portal, access_token, user, mfa_setup_required 
     : user;
 
   if (portal === 'admin') {
+    localStorage.setItem('adminToken', access_token);
     localStorage.setItem('adminUser', JSON.stringify(enrichedUser));
     localStorage.setItem('adminAuthenticatedAt', new Date().toISOString());
     localStorage.removeItem('securityAuthenticated');
@@ -88,6 +89,7 @@ export const persistSession = ({ portal, access_token, user, mfa_setup_required 
   }
 
   if (portal === 'branch') {
+    localStorage.setItem('branchToken', access_token);
     localStorage.setItem('branchUser', JSON.stringify(enrichedUser));
     localStorage.setItem('branchAuthenticatedAt', new Date().toISOString());
     localStorage.removeItem('branchSettingsAuthenticated');
@@ -101,6 +103,7 @@ export const persistSession = ({ portal, access_token, user, mfa_setup_required 
     return;
   }
 
+  localStorage.setItem('userToken', access_token);
   setStoredPublicUser(enrichedUser);
   localStorage.setItem('userAuthenticatedAt', new Date().toISOString());
   localStorage.removeItem('adminToken');

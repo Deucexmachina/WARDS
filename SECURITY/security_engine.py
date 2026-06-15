@@ -44,7 +44,7 @@ DEFAULT_BACKUP_ROOT = SECURITY_ROOT / "local_backups"
 MODEL_STATE_PATH = SECURITY_ROOT / "ml" / "isolation_forest_state.json"
 MODEL_METADATA_PATH = SECURITY_ROOT / "ml" / "isolation_forest_metadata.json"
 
-AUTO_RECOVERY_ENABLED = os.getenv("AUTO_RECOVERY_ENABLED", "false").lower() == "true"
+AUTO_RECOVERY_ENABLED = os.getenv("AUTO_RECOVERY_ENABLED", "true").lower() == "true"
 AUTO_RECOVERY_DELAY_SECONDS = int(os.getenv("AUTO_RECOVERY_DELAY_SECONDS", "0"))
 AUTO_RECOVERY_MIN_SEVERITY = os.getenv("AUTO_RECOVERY_MIN_SEVERITY", "medium")
 AUTO_RECOVERY_SEVERITY_ORDER = {"low": 1, "medium": 2, "high": 3, "critical": 4}

@@ -153,8 +153,6 @@ def test_record_detection_creates_incident_and_quarantine(monkeypatch):
         "SECURITY.security_engine.create_incident_system_alert",
         lambda *_args, **_kwargs: calls.__setitem__("alert", calls["alert"] + 1),
     )
-    monkeypatch.setattr("SECURITY.security_engine.AUTO_RECOVERY_ENABLED", True)
-    monkeypatch.setattr("SECURITY.security_engine.AUTO_RECOVERY_DELAY_SECONDS", 0)
 
     detection = record_detection(
         db,
