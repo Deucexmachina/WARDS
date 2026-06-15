@@ -813,7 +813,7 @@ const Branches = () => {
   return (
     <div className="mx-auto w-full max-w-[1600px] space-y-6">
       <WardsPageHero
-        eyebrow="Main Admin Dashboard"
+        eyebrow={adminUser?.internal_role === 'superadmin' || adminUser?.role === 'superadmin' ? 'Superadmin Dashboard' : 'Main Admin Dashboard'}
         title="Manage Branches"
         subtitle="Oversee branch records, assign administrators, and maintain branch operational details from one place."
         actions={(

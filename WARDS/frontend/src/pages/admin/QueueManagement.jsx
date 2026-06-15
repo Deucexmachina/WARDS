@@ -10,6 +10,7 @@ const getRelevantQueueTimestamp = (queue) =>
   queue?.completed_at || queue?.served_at || queue?.appointment_time || queue?.created_at;
 
 const QueueManagement = () => {
+  const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}');
   const [queues, setQueues] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
@@ -97,7 +98,7 @@ const QueueManagement = () => {
   return (
     <div className="space-y-6">
       <WardsPageHero
-        eyebrow="Main Admin Dashboard"
+        eyebrow={adminUser?.internal_role === 'superadmin' || adminUser?.role === 'superadmin' ? 'Superadmin Dashboard' : 'Main Admin Dashboard'}
         title="Queue Management"
         subtitle="Monitor live branch queues, review current statuses, and refresh queue activity from the admin side."
         actions={(

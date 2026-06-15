@@ -176,6 +176,7 @@ const getAssessmentValidationErrors = (form) => {
 };
 
 const TaxAssessment = () => {
+  const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}');
   const [branches, setBranches] = useState([]);
   const [submissions, setSubmissions] = useState([]);
   const [assessments, setAssessments] = useState([]);
@@ -673,7 +674,7 @@ const TaxAssessment = () => {
   return (
     <div className="space-y-8">
       <WardsPageHero
-        eyebrow="Main Admin Dashboard"
+        eyebrow={adminUser?.internal_role === 'superadmin' || adminUser?.role === 'superadmin' ? 'Superadmin Dashboard' : 'Main Admin Dashboard'}
         title="Tax Assessment"
         subtitle="Review taxpayer identifier submissions, verify or reject them with remarks, and create RPT and Business Tax assessments that feed the public online payment module."
       />

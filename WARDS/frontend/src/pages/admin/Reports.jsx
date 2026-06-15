@@ -407,7 +407,7 @@ const Reports = () => {
   return (
     <div className="space-y-6">
       <WardsPageHero
-        eyebrow="Main Admin Dashboard"
+        eyebrow={adminUser?.internal_role === 'superadmin' || adminUser?.role === 'superadmin' ? 'Superadmin Dashboard' : 'Main Admin Dashboard'}
         title="Branch Reports"
         subtitle="Receive branch-submitted reports, review operational performance, filter historical records, and export clean documents for monitoring and analysis."
       />

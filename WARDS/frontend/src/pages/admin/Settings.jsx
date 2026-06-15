@@ -285,7 +285,7 @@ const Settings = () => {
   return (
     <div className="space-y-6">
       <WardsPageHero
-        eyebrow="Main Admin Dashboard"
+        eyebrow={adminUser?.internal_role === 'superadmin' || adminUser?.role === 'superadmin' ? 'Superadmin Dashboard' : 'Main Admin Dashboard'}
         title="System Settings"
         subtitle="Manage the central configuration hub for queueing, service availability, authentication defaults, receipt requests, and operational notices."
       />

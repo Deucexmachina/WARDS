@@ -25,6 +25,7 @@ const priorityStyles = {
 const formatDateTime = (value) => formatUtc8DateTime(value);
 
 const Memos = () => {
+  const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}');
   const [memos, setMemos] = useState([]);
   const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -390,7 +391,7 @@ const Memos = () => {
   return (
     <div>
       <WardsPageHero
-        eyebrow="Main Admin Dashboard"
+        eyebrow={adminUser?.internal_role === 'superadmin' || adminUser?.role === 'superadmin' ? 'Superadmin Dashboard' : 'Main Admin Dashboard'}
         title="Internal Memos"
         subtitle="Create and distribute internal policies, operational instructions, and internal announcements to all branches or selected branch offices."
         actions={(

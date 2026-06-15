@@ -4,6 +4,7 @@ import WardsPageHero from '../../components/WardsPageHero';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 
 const Alerts = () => {
+  const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}');
   const [alerts, setAlerts] = useState([]);
   const [pageState, setPageState] = useState({ page: 1, page_size: 10, total: 0, total_pages: 1 });
   const [jumpPage, setJumpPage] = useState('');
@@ -91,7 +92,7 @@ const Alerts = () => {
   return (
     <div className="space-y-8">
       <WardsPageHero
-        eyebrow={isBranchAlertView ? 'Branch Dashboard' : 'Main Admin Dashboard'}
+        eyebrow={isBranchAlertView ? 'Branch Dashboard' : (adminUser?.internal_role === 'superadmin' || adminUser?.role === 'superadmin' ? 'Superadmin Dashboard' : 'Main Admin Dashboard')}
         title="System Alerts"
         subtitle={isBranchAlertView ? 'Monitor branch operational alerts and system anomalies that need staff attention.' : 'Monitor security notices, anomaly flags, and platform warnings that need administrative attention.'}
       />

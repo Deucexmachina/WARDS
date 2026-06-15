@@ -265,6 +265,7 @@ const RemittanceActionModal = ({
 };
 
 const PaymentManagement = () => {
+  const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}');
   const [payments, setPayments] = useState([]);
   const [branches, setBranches] = useState([]);
   const [remittanceData, setRemittanceData] = useState(null);
@@ -821,7 +822,7 @@ const PaymentManagement = () => {
   return (
     <div className="space-y-6 rounded-[28px] bg-gradient-to-b from-slate-100 via-white to-slate-100 p-3 md:p-4">
       <WardsPageHero
-        eyebrow="Main Admin Dashboard"
+        eyebrow={adminUser?.internal_role === 'superadmin' || adminUser?.role === 'superadmin' ? 'Superadmin Dashboard' : 'Main Admin Dashboard'}
         title={collectionReportTitle}
         subtitle="Monitor verified tax payments, branch collections, and remittances credited to the Main collection account."
         actions={(

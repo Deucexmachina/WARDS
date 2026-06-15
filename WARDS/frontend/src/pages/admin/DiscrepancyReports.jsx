@@ -56,6 +56,7 @@ const buildPendingActionMessage = (report) => {
 };
 
 const DiscrepancyReports = () => {
+  const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}');
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -195,7 +196,7 @@ const DiscrepancyReports = () => {
   return (
     <div>
       <WardsPageHero
-        eyebrow="Main Admin Dashboard"
+        eyebrow={adminUser?.internal_role === 'superadmin' || adminUser?.role === 'superadmin' ? 'Superadmin Dashboard' : 'Main Admin Dashboard'}
         title="Discrepancy Reports"
         subtitle="Review and verify discrepancy reports submitted by branch personnel. Every report remains archived for traceability, accountability, and audit reference."
         className="mb-8"

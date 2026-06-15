@@ -101,7 +101,11 @@ const Accounts = () => {
   const [pendingMfaReset, setPendingMfaReset] = useState(null);
   const [accountPages, setAccountPages] = useState({});
 
-  const managerEyebrow = isBranchPortal ? 'Branch Admin Dashboard' : 'Main Admin Dashboard';
+  const managerEyebrow = isBranchPortal
+    ? 'Branch Admin Dashboard'
+    : currentManager?.internal_role === 'superadmin' || currentManager?.role === 'superadmin'
+      ? 'Superadmin Dashboard'
+      : 'Main Admin Dashboard';
   const managerSubtitle = isBranchPortal
     ? 'Review and manage branch staff, branch admins, and citizen accounts connected to your assigned branch.'
     : 'Create, review, and maintain main admin, branch, and citizen accounts.';
@@ -723,7 +727,7 @@ const Accounts = () => {
                             Act
                           </button>
                         )}
-                        {isBranchPortal && account.role === 'branch_staff' && (
+                        {((!isBranchPortal && account.role !== 'public') || (isBranchPortal && (account.role === 'branch_staff' || account.role === 'branch_admin'))) && (
                           <button
                             onClick={() => setPendingMfaReset(account)}
                             className="rounded-md bg-purple-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-purple-700"

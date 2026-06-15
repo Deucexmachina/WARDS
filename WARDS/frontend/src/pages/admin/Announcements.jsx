@@ -17,6 +17,7 @@ const defaultForm = {
 };
 
 const Announcements = () => {
+  const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}');
   const [announcements, setAnnouncements] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [selectedAnnouncement, setSelectedAnnouncement] = useState(null);
@@ -289,7 +290,7 @@ const Announcements = () => {
   return (
     <div>
       <WardsPageHero
-        eyebrow="Main Admin Dashboard"
+        eyebrow={adminUser?.internal_role === 'superadmin' || adminUser?.role === 'superadmin' ? 'Superadmin Dashboard' : 'Main Admin Dashboard'}
         title="Announcements"
         subtitle="Create, schedule, and manage official announcements that appear across the WARDS platform."
         actions={(

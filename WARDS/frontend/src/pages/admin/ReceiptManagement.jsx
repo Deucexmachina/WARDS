@@ -7,6 +7,7 @@ import SystemMessageModal from '../../components/SystemMessageModal';
 const API_BASE_URL = 'http://localhost:8000/api';
 
 const ReceiptManagement = () => {
+  const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}');
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
@@ -78,7 +79,7 @@ const ReceiptManagement = () => {
   return (
     <div className="space-y-6">
       <WardsPageHero
-        eyebrow="Main Admin Dashboard"
+        eyebrow={adminUser?.internal_role === 'superadmin' || adminUser?.role === 'superadmin' ? 'Superadmin Dashboard' : 'Main Admin Dashboard'}
         title="Receipt Management"
         subtitle="Upload, review, and process receipt records through the OCR-assisted receipt management workspace."
       />

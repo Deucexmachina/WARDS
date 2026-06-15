@@ -22,6 +22,7 @@ const formatTimestamp = (value) =>
   });
 
 const ActivityLogs = () => {
+  const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}');
   const [logs, setLogs] = useState([]);
   const [pageState, setPageState] = useState({ page: 1, page_size: 10, total: 0, total_pages: 1 });
   const [jumpPage, setJumpPage] = useState('');
@@ -81,7 +82,7 @@ const ActivityLogs = () => {
   return (
     <div className="space-y-6">
       <WardsPageHero
-        eyebrow="Main Admin Dashboard"
+        eyebrow={adminUser?.internal_role === 'superadmin' || adminUser?.role === 'superadmin' ? 'Superadmin Dashboard' : 'Main Admin Dashboard'}
         title="Activity Logs"
         subtitle="Review administrative, security, branch, and transaction activity across the system."
       />

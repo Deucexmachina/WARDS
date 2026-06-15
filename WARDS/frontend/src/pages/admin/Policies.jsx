@@ -44,6 +44,7 @@ const getPreviewParagraphs = (content) => {
 };
 
 const Policies = () => {
+  const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}');
   const [policies, setPolicies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -238,7 +239,7 @@ const Policies = () => {
   return (
     <div className="space-y-6">
       <WardsPageHero
-        eyebrow="Main Admin Dashboard"
+        eyebrow={adminUser?.internal_role === 'superadmin' || adminUser?.role === 'superadmin' ? 'Superadmin Dashboard' : 'Main Admin Dashboard'}
         title="Policies & SOPs"
         subtitle="Review, update, and maintain official policy records and system-generated configuration notices."
       />
