@@ -640,16 +640,16 @@ const RequestReceipt = () => {
         : text.selectTaxType;
 
   return (
-    <section className="min-h-screen bg-slate-50 py-16">
+    <section className="min-h-screen bg-slate-50 py-8 sm:py-12 lg:py-16">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-xl shadow-slate-200/60">
-          <div className="bg-primary px-8 py-10 text-white">
+        <div className="overflow-hidden rounded-2xl sm:rounded-[2rem] border border-slate-200 bg-white shadow-xl shadow-slate-200/60">
+          <div className="bg-primary px-5 py-6 sm:px-8 sm:py-10 text-white">
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-100">{text.onlineServices}</p>
-            <h2 className="mt-3 text-3xl font-bold">{text.title}</h2>
+            <h2 className="mt-3 text-2xl sm:text-3xl font-bold">{text.title}</h2>
             <p className="mt-3 max-w-3xl text-sm leading-7 text-blue-50">{text.heroDescription}</p>
           </div>
 
-          <div className="px-6 py-8 md:px-8">
+          <div className="px-4 py-6 sm:px-6 sm:py-8 md:px-8">
             {error ? (
               <div className="mb-6 flex gap-3 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-red-700" role="alert" aria-live="polite">
                 <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-red-100 text-red-600">
@@ -668,8 +668,8 @@ const RequestReceipt = () => {
             {shouldShowReceiptStatusPanel ? (
               <div className="mx-auto max-w-6xl space-y-6">
                 {!requestStatus.feePaid && !requestConfirmed ? (
-                  <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <h3 className="text-xl font-bold text-slate-900">{text.requestStatus}</h3>
+                  <div className="rounded-2xl sm:rounded-3xl border border-slate-200 bg-white p-4 sm:p-6 shadow-sm">
+                    <h3 className="text-lg sm:text-xl font-bold text-slate-900">{text.requestStatus}</h3>
                     <div className="mt-5 space-y-3">
                       {[
                         [text.requestId, requestStatus.requestId],
@@ -680,9 +680,9 @@ const RequestReceipt = () => {
                         [text.paymentStatus, localizeStatusValue(requestStatus.paymentStatus || 'Pending')],
                         [text.releaseStatus, localizeStatusValue(requestStatus.releaseStatus || 'Not Ready for Release')],
                       ].map(([label, value]) => (
-                        <div key={label} className="flex items-start justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                        <div key={label} className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 sm:gap-4 rounded-xl sm:rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 sm:px-4 sm:py-3">
                           <span className="text-sm font-semibold text-slate-600">{label}</span>
-                          <span className="text-right text-sm font-semibold text-slate-900">{value || text.notApplicable}</span>
+                          <span className="sm:text-right text-sm font-semibold text-slate-900">{value || text.notApplicable}</span>
                         </div>
                       ))}
                     </div>
@@ -697,47 +697,33 @@ const RequestReceipt = () => {
                 ) : null}
 
                 {!requestStatus.feePaid && requestConfirmed ? (
-                  <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <h3 className="text-xl font-bold text-slate-900">{text.paymentDetails}</h3>
-                    <div className="mt-5 rounded-[28px] border border-emerald-200 bg-emerald-50 p-5">
-                      <div className="flex items-center justify-between gap-4">
-                        <div>
-                          <p className="text-sm font-semibold text-emerald-900">{text.requestFee}</p>
-                          <p className="mt-1 text-sm text-emerald-800">{text.requestFeeDescription}</p>
-                        </div>
-                        <p className="text-2xl font-bold text-emerald-700">P200.00</p>
-                      </div>
-                      <div className="mt-5">
-                        <PaymentGatewayExperience
-                          amount={200}
-                          bankCode={selectedBank}
-                          customer={{
-                            name: paymentCustomer.name || requestStatus.taxpayerName || formData.taxpayerName,
-                            email: paymentCustomer.email || requestStatus.email || formData.email,
-                            mobile: paymentCustomer.mobile,
-                          }}
-                          disabled={Boolean(systemStatus && (!systemStatus.paymentGatewayEnabled || systemStatus.maintenanceMode))}
-                          method={paymentMethod}
-                          onBankChange={setSelectedBank}
-                          onCustomerChange={setPaymentCustomer}
-                          onMethodChange={(nextMethod) => {
-                            setPaymentMethod(nextMethod);
-                            setSelectedBank('');
-                          }}
-                          onContinue={(details) => handlePayFee(null, details)}
-                          processing={paying}
-                          referenceNumber={requestStatus.requestId}
-                          title={text.requestFeeCheckout}
-                          language={language}
-                        />
-                      </div>
-                    </div>
-                  </div>
+                  <PaymentGatewayExperience
+                    amount={200}
+                    bankCode={selectedBank}
+                    customer={{
+                      name: paymentCustomer.name || requestStatus.taxpayerName || formData.taxpayerName,
+                      email: paymentCustomer.email || requestStatus.email || formData.email,
+                      mobile: paymentCustomer.mobile,
+                    }}
+                    disabled={Boolean(systemStatus && (!systemStatus.paymentGatewayEnabled || systemStatus.maintenanceMode))}
+                    method={paymentMethod}
+                    onBankChange={setSelectedBank}
+                    onCustomerChange={setPaymentCustomer}
+                    onMethodChange={(nextMethod) => {
+                      setPaymentMethod(nextMethod);
+                      setSelectedBank('');
+                    }}
+                    onContinue={(details) => handlePayFee(null, details)}
+                    processing={paying}
+                    referenceNumber={requestStatus.requestId}
+                    title={text.requestFeeCheckout}
+                    language={language}
+                  />
                 ) : null}
 
                 {requestStatus.feePaid ? (
-                  <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <h3 className="text-xl font-bold text-slate-900">{text.paymentDetails}</h3>
+                  <div className="rounded-2xl sm:rounded-3xl border border-slate-200 bg-white p-4 sm:p-6 shadow-sm">
+                    <h3 className="text-lg sm:text-xl font-bold text-slate-900">{text.paymentDetails}</h3>
                     <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm font-semibold text-emerald-800">
                       {requestStatus.paymentStatus === 'Pending Transaction'
                         ? text.paymentRecordedPendingVerification
@@ -756,9 +742,9 @@ const RequestReceipt = () => {
                 ) : null}
               </div>
             ) : (
-              <div className="grid gap-8 xl:grid-cols-[1.25fr,0.75fr]">
+              <div className="grid gap-8 lg:grid-cols-[1.25fr,0.75fr]">
                 <div className="space-y-6">
-                  <div className="rounded-3xl border border-slate-200 bg-slate-50 p-6">
+                  <div className="rounded-2xl sm:rounded-3xl border border-slate-200 bg-slate-50 p-4 sm:p-6">
                     <h3 className="text-lg font-bold text-slate-900">{text.requestDetails}</h3>
                     <p className="mt-1 text-sm text-slate-500">{text.requestDetailsDescription}</p>
 
@@ -881,7 +867,7 @@ const RequestReceipt = () => {
                 </div>
 
                 <div className="space-y-6">
-                  <div className="rounded-3xl border border-blue-100 bg-blue-50 p-6">
+                  <div className="rounded-2xl sm:rounded-3xl border border-blue-100 bg-blue-50 p-4 sm:p-6">
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-700">{text.howItWorks}</p>
                     <div className="mt-4 space-y-4 text-sm leading-6 text-slate-700">
                       <p>{text.step1}</p>

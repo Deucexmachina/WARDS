@@ -62,23 +62,6 @@ const DetailRow = ({ label, value }) => (
   </div>
 );
 
-const StepPill = ({ active, label, number }) => (
-  <span
-    className={`inline-flex items-center gap-2 rounded-full px-3 py-2 text-[10px] font-black uppercase tracking-[0.14em] ${
-      active ? 'bg-[#0f2f5f] text-white' : 'bg-slate-100 text-slate-400'
-    }`}
-  >
-    <span
-      className={`grid h-5 w-5 place-items-center rounded-full text-[10px] ${
-        active ? 'bg-white/20 text-white' : 'bg-white text-slate-400'
-      }`}
-    >
-      {number}
-    </span>
-    {label}
-  </span>
-);
-
 const PaymentGatewayExperience = ({
   amount,
   bankCode = '',
@@ -305,17 +288,11 @@ const PaymentGatewayExperience = ({
         </aside>
 
         <section className="bg-white p-6 sm:p-8">
-          <div className="mb-6 flex flex-wrap gap-2">
-            <StepPill active number="1" label={copy.stepMethod} />
-            <StepPill active={step === 'details' || step === 'review'} number="2" label={copy.stepDetails} />
-            <StepPill active={step === 'review'} number="3" label={copy.stepConfirm} />
-          </div>
-
           {step === 'details' ? (
             <>
               <div>
                 <p className="text-sm font-black uppercase tracking-[0.16em] text-slate-400">{copy.paymentMethod}</p>
-                <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                <div className="mt-3 grid grid-cols-3 gap-2">
                   {PAYMENT_METHOD_OPTIONS.map((option) => {
                     const selected = option.id === selectedMethod.id;
                     return (
@@ -324,32 +301,26 @@ const PaymentGatewayExperience = ({
                         type="button"
                         disabled={disabled || processing}
                         onClick={() => selectMethod(option)}
-                        className={`group rounded-3xl border p-4 text-left transition ${
+                        className={`group flex flex-col items-center rounded-2xl border p-2 sm:p-3 text-center transition ${
                           selected
                             ? `${option.border} bg-white shadow-[0_14px_30px_rgba(15,23,42,0.12)]`
                             : 'border-slate-200 bg-slate-50 hover:border-slate-400 hover:bg-white'
                         } disabled:cursor-not-allowed disabled:opacity-60`}
                       >
-                        <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center justify-center">
                           {option.logo ? (
                             <img
                               src={option.logo}
                               alt={`${option.label} logo`}
-                              className="h-10 w-10 rounded-2xl object-cover shadow-sm"
+                              className="h-8 w-8 rounded-xl object-cover shadow-sm"
                             />
                           ) : (
-                            <span className={`grid h-10 w-10 place-items-center rounded-2xl text-xs font-black text-white ${option.accent}`}>
+                            <span className={`grid h-8 w-8 place-items-center rounded-xl text-[10px] font-black text-white ${option.accent}`}>
                               {option.short}
                             </span>
                           )}
-                          <span
-                            className={`h-3 w-3 rounded-full border ${
-                              selected ? `${option.accent} border-transparent` : 'border-slate-300 bg-white'
-                            }`}
-                          />
                         </div>
-                        <p className="mt-4 text-sm font-black text-slate-950">{option.label?.[language] || option.label}</p>
-                        <p className="mt-1 text-xs leading-5 text-slate-500">{option.description?.[language] || option.description}</p>
+                        <p className="mt-2 text-[10px] font-black leading-3 text-slate-950 sm:text-xs">{option.label?.[language] || option.label}</p>
                       </button>
                     );
                   })}
