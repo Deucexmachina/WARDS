@@ -7,6 +7,7 @@ import { paymentAPI, taxpayerAccountAPI } from '../../services/api';
 import { getStoredPublicUser } from '../../utils/publicSession';
 import { getEmailValidationMessage } from '../../utils/validation';
 import { appendLanguageParam, usePublicLanguage } from '../../utils/publicLanguage';
+import { openCheckoutPopupShell } from '../../utils/checkoutPopup';
 import { safeReplace, safeNavigate } from '../../utils/urlValidator';
 
 const API_BASE_URL = 'http://localhost:8000/api';
@@ -823,7 +824,12 @@ const PayTaxesRPT = () => {
     setError('');
 
     try {
-      checkoutWindow = window.open('', 'wardsPaymongoCheckout');
+      checkoutWindow = openCheckoutPopupShell({
+        name: 'wardsPaymongoCheckout',
+        title: 'Opening PayMongo Checkout',
+        heading: 'Opening secure payment window...',
+        description: 'Please wait while we redirect you to PayMongo. Keep this tab open to complete your payment.',
+      });
       if (checkoutWindow) {
         // Build loading page with safe DOM APIs — no blob URL, no document.write
         const doc = checkoutWindow.document;

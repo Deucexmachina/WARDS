@@ -8,6 +8,7 @@ import PaymentGatewayExperience from '../../components/PaymentGatewayExperience'
 import { getStoredPublicUser, PUBLIC_USER_STORAGE_EVENT } from '../../utils/publicSession';
 import { getEmailValidationMessage } from '../../utils/validation';
 import { appendLanguageParam, usePublicLanguage } from '../../utils/publicLanguage';
+import { openCheckoutPopupShell } from '../../utils/checkoutPopup';
 import { safeReplace, safeNavigate } from '../../utils/urlValidator';
 
 const DEFAULT_DISABLED_MESSAGE = 'This service is currently unavailable because it has been disabled by system administration.';
@@ -533,7 +534,12 @@ const RequestReceipt = () => {
     let checkoutWindow = null;
 
     try {
-      checkoutWindow = window.open('', 'wardsReceiptCheckout');
+      checkoutWindow = openCheckoutPopupShell({
+        name: 'wardsReceiptCheckout',
+        title: text.requestFeeCheckout,
+        heading: text.openingPaymentWindow,
+        description: text.openingPaymentWindowDescription,
+      });
 
       if (checkoutWindow) {
         // Build loading page with safe DOM APIs — no blob URL, no document.write
