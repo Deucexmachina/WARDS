@@ -84,16 +84,8 @@ Use these as reference credentials from the repo and current workspace.
 
 These appear in the repo seed files, but may depend on the current database contents:
 
-- Main admin seed:
-  - Username: `admin`
-  - Password: `admin123`
-- Branch admin seed:
-  - Username: `galas_admin`
-  - Password: `galas123`
-- Alternate branch/admin seed values found in auth seed scripts:
-  - Email: `branchadmin@treasury.gov`
-  - Password: `branchadmin123`
-  - Branch staff seed password: `branch123`
+- Seed passwords are set via environment variables (e.g., `SEED_ADMIN_PASSWORD`, `SEED_BRANCH_ADMIN_PASSWORD`).
+- If not provided, strong random passwords are generated automatically on first run.
 
 ## Important Notes
 

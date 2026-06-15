@@ -1427,11 +1427,24 @@ def bootstrap_superadmin():
         if existing:
             return
 
+        superadmin_password = os.getenv("SUPERADMIN_PASSWORD")
+        if not superadmin_password:
+            import secrets
+            superadmin_password = secrets.token_urlsafe(24)
+            print("\n" + "=" * 70)
+            print("SECURITY WARNING: SUPERADMIN_PASSWORD env var not set.")
+            print("A one-time secure password has been generated.")
+            print("You MUST record this password now; it will not be shown again.")
+            print("=" * 70)
+            print(f"  Username: superadmin")
+            print(f"  Password: {superadmin_password}")
+            print("=" * 70 + "\n")
+
         pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
         db.add(Admin(
             username="superadmin",
             email=os.getenv("SUPERADMIN_EMAIL", "treasurersuper@gmail.com"),
-            hashed_password=pwd_context.hash(os.getenv("SUPERADMIN_PASSWORD", "superadmin123")),
+            hashed_password=pwd_context.hash(superadmin_password),
             role="superadmin",
             status="Active",
             is_verified=True,

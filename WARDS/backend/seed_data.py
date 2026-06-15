@@ -1,3 +1,6 @@
+import os
+import secrets
+import string
 from database.models import SessionLocal, User, Branch, Alert, Announcement, QueueActivity
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
@@ -5,9 +8,33 @@ import random
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+
+def _generate_secure_password(length: int = 24) -> str:
+    """Generate a strong random password meeting complexity requirements."""
+    alphabet = string.ascii_letters + string.digits + "!@#$%^&*-_+="
+    while True:
+        password = "".join(secrets.choice(alphabet) for _ in range(length))
+        if (
+            any(c.islower() for c in password)
+            and any(c.isupper() for c in password)
+            and any(c.isdigit() or not c.isalnum() for c in password)
+        ):
+            return password
+
+
+def _get_seed_password(env_var: str, default_label: str) -> str:
+    """Fetch password from env var or generate a secure one."""
+    password = os.getenv(env_var)
+    if not password:
+        password = _generate_secure_password()
+        print(f"  [{default_label}] No {env_var} set; generated secure password.")
+    return password
+
+
 def seed_database():
     db = SessionLocal()
-    
+    credentials = {}
+
     try:
         # Create branches first
         if db.query(Branch).count() == 0:
@@ -19,66 +46,76 @@ def seed_database():
             db.add_all(branches)
             db.commit()
             print("Created default branches")
-        
+
         # Get branch IDs
         main_office = db.query(Branch).filter(Branch.name == "Main Office").first()
         galas_branch = db.query(Branch).filter(Branch.name == "Galas Branch").first()
         district_branch = db.query(Branch).filter(Branch.name == "District 3 Office").first()
-        
+
         if db.query(User).count() == 0:
             # Main Office Administrator (full system access)
+            admin_password = _get_seed_password("SEED_MAIN_ADMIN_PASSWORD", "admin")
             admin_user = User(
                 username="admin",
                 email="admin@treasury.gov",
-                hashed_password=pwd_context.hash("admin123"),
+                hashed_password=pwd_context.hash(admin_password),
                 role="main_admin",
                 branch_id=None,  # Main admin has access to all branches
                 status="Active"
             )
-            
+            credentials["admin"] = admin_password
+
             # Galas Branch Administrator
+            galas_password = _get_seed_password("SEED_GALAS_ADMIN_PASSWORD", "galas_admin")
             galas_admin = User(
                 username="galas_admin",
                 email="galas.admin@treasury.gov",
-                hashed_password=pwd_context.hash("galas123"),
+                hashed_password=pwd_context.hash(galas_password),
                 role="branch_admin",
                 branch_id=galas_branch.id if galas_branch else None,
                 status="Active"
             )
-            
+            credentials["galas_admin"] = galas_password
+
             # District 3 Branch Administrator
+            district_password = _get_seed_password("SEED_DISTRICT_ADMIN_PASSWORD", "district_admin")
             district_admin = User(
                 username="district_admin",
                 email="district.admin@treasury.gov",
-                hashed_password=pwd_context.hash("district123"),
+                hashed_password=pwd_context.hash(district_password),
                 role="branch_admin",
                 branch_id=district_branch.id if district_branch else None,
                 status="Active"
             )
-            
+            credentials["district_admin"] = district_password
+
             # Galas Branch Staff
+            galas_staff_password = _get_seed_password("SEED_GALAS_STAFF_PASSWORD", "galas_staff")
             galas_staff = User(
                 username="galas_staff",
                 email="galas.staff@treasury.gov",
-                hashed_password=pwd_context.hash("staff123"),
+                hashed_password=pwd_context.hash(galas_staff_password),
                 role="branch_staff",
                 branch_id=galas_branch.id if galas_branch else None,
                 status="Active"
             )
-            
+            credentials["galas_staff"] = galas_staff_password
+
             # District 3 Branch Staff
+            district_staff_password = _get_seed_password("SEED_DISTRICT_STAFF_PASSWORD", "district_staff")
             district_staff = User(
                 username="district_staff",
                 email="district.staff@treasury.gov",
-                hashed_password=pwd_context.hash("staff123"),
+                hashed_password=pwd_context.hash(district_staff_password),
                 role="branch_staff",
                 branch_id=district_branch.id if district_branch else None,
                 status="Active"
             )
-            
+            credentials["district_staff"] = district_staff_password
+
             db.add_all([admin_user, galas_admin, district_admin, galas_staff, district_staff])
             print("Created default user accounts with RBAC roles")
-        
+
         if db.query(Alert).count() == 0:
             alerts = [
                 Alert(
@@ -91,7 +128,7 @@ def seed_database():
             ]
             db.add_all(alerts)
             print("Created initial system alert")
-        
+
         if db.query(Announcement).count() == 0:
             announcements = [
                 Announcement(
@@ -121,12 +158,12 @@ def seed_database():
             ]
             db.add_all(announcements)
             print("Created sample announcements")
-        
+
         # Create queue activity data
         if db.query(QueueActivity).count() == 0:
             branches = db.query(Branch).all()
             now = datetime.utcnow()
-            
+
             queue_activities = []
             for branch in branches:
                 # Create activity for last 24 hours
@@ -139,34 +176,20 @@ def seed_database():
                         clients_completed=random.randint(10, 50),
                         timestamp=timestamp
                     ))
-            
+
             db.add_all(queue_activities)
             print("Created queue activity data")
-        
+
         db.commit()
         print("\nDatabase seeded successfully!")
-        print("\nDefault Login Credentials:")
-        print("\n  Main Office Administrator:")
-        print("    Username: admin")
-        print("    Password: admin123")
-        print("    Role: main_admin (Full system access)")
-        print("\n  Galas Branch Administrator:")
-        print("    Username: galas_admin")
-        print("    Password: galas123")
-        print("    Role: branch_admin (Galas Branch only)")
-        print("\n  District 3 Branch Administrator:")
-        print("    Username: district_admin")
-        print("    Password: district123")
-        print("    Role: branch_admin (District 3 only)")
-        print("\n  Galas Branch Staff:")
-        print("    Username: galas_staff")
-        print("    Password: staff123")
-        print("    Role: branch_staff (Galas Branch operations)")
-        print("\n  District 3 Branch Staff:")
-        print("    Username: district_staff")
-        print("    Password: staff123")
-        print("    Role: branch_staff (District 3 operations)")
-        
+        if credentials:
+            print("\nDefault Login Credentials (SAVE THESE SECURELY):")
+            print("-" * 50)
+            for user, pw in credentials.items():
+                print(f"  Username: {user}")
+                print(f"  Password: {pw}")
+            print("-" * 50)
+
     except Exception as e:
         print(f"Error seeding database: {e}")
         db.rollback()

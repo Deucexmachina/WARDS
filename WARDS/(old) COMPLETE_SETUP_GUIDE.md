@@ -313,8 +313,8 @@ npm run dev
 
 | Role | Username | Password |
 |------|----------|----------|
-| Branch Admin | `galas_admin` | `galas123` |
-| Branch Staff | - | `branch123` |
+| Branch Admin | `galas_admin` | Set via `SEED_GALAS_ADMIN_PASSWORD` |
+| Branch Staff | - | Set via `SEED_BRANCH_STAFF_PASSWORD` |
 
 ---
 

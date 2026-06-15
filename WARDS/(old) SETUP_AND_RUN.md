@@ -66,7 +66,7 @@ CORS_ORIGINS=http://localhost:3000,http://localhost:3001
 API_PORT=8000
 
 ADMIN_USERNAME=admin
-ADMIN_PASSWORD=admin123
+ADMIN_PASSWORD=
 ADMIN_EMAIL=admin@example.com
 ```
 

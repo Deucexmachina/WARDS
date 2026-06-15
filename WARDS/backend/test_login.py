@@ -1,3 +1,4 @@
+import os
 import requests
 import json
 
@@ -5,7 +6,7 @@ import json
 url = "http://localhost:8000/api/auth/login"
 data = {
     "username": "admin",
-    "password": "admin123"
+    "password": os.getenv("TEST_ADMIN_PASSWORD", "")
 }
 
 print("Testing login endpoint...")
