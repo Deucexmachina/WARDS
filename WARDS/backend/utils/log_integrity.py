@@ -5,6 +5,8 @@ import hmac
 import json
 import os
 import sys
+import threading
+import urllib.request
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -45,7 +47,13 @@ DEFAULT_VALUES = {
 
 
 def integrity_secret() -> str:
-    return (os.getenv("LOG_INTEGRITY_SECRET") or os.getenv("DATA_HASH_SECRET") or "change-this-log-integrity-secret").strip()
+    value = (os.getenv("LOG_INTEGRITY_SECRET") or os.getenv("DATA_HASH_SECRET") or "").strip()
+    if not value:
+        raise RuntimeError(
+            "Security configuration error: LOG_INTEGRITY_SECRET or DATA_HASH_SECRET "
+            "must be set to a strong random secret before starting the application."
+        )
+    return value
 
 
 def _json_default(value: Any):
@@ -97,10 +105,12 @@ def sign_before_insert(mapper, connection, target) -> None:
     if not getattr(target, "previous_integrity_hash", None):
         target.previous_integrity_hash = previous_hash_for(connection, target)
     target.integrity_hash = calculate_integrity_hash(target)
+    forward_log(target)
 
 
 def sign_before_update(mapper, connection, target) -> None:
     target.integrity_hash = calculate_integrity_hash(target)
+    forward_log(target)
 
 
 def verify_record_integrity(record) -> bool | None:
@@ -108,6 +118,40 @@ def verify_record_integrity(record) -> bool | None:
     if not stored:
         return None
     return hmac.compare_digest(stored, calculate_integrity_hash(record))
+
+
+EXTERNAL_LOG_WEBHOOK = os.getenv("EXTERNAL_LOG_WEBHOOK")
+EXTERNAL_LOG_TIMEOUT = int(os.getenv("EXTERNAL_LOG_TIMEOUT", "5"))
+
+
+def _send_log_webhook(record_dict: dict) -> None:
+    if not EXTERNAL_LOG_WEBHOOK:
+        return
+    try:
+        payload = json.dumps(record_dict, sort_keys=True, separators=(",", ":"), default=_json_default).encode("utf-8")
+        req = urllib.request.Request(
+            EXTERNAL_LOG_WEBHOOK,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=EXTERNAL_LOG_TIMEOUT) as resp:
+            resp.read()
+    except Exception:
+        pass
+
+
+def forward_log(record) -> None:
+    if not EXTERNAL_LOG_WEBHOOK:
+        return
+    try:
+        record_dict = integrity_payload(record)
+        record_dict["integrity_hash"] = getattr(record, "integrity_hash", None)
+        record_dict["previous_integrity_hash"] = getattr(record, "previous_integrity_hash", None)
+        record_dict["forwarded_at"] = datetime.utcnow().isoformat()
+        threading.Thread(target=_send_log_webhook, args=(record_dict,), daemon=True).start()
+    except Exception:
+        pass
 
 
 def register_log_integrity_listeners() -> None:
