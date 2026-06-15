@@ -269,7 +269,7 @@ const FolderPicker = ({ picker, onClose, onSelect, onOpen }) => {
           </div>
         </div>
 
-        <div className="grid gap-4 overflow-hidden p-5 md:grid-cols-[12rem_1fr]">
+        <div className="grid grid-cols-1 gap-4 overflow-hidden p-5 md:grid-cols-[12rem_1fr]">
           <div className="space-y-2">
             <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Quick roots</p>
             {[...(picker.quickRoots || []), ...(picker.drives || [])].map((item) => (
@@ -1065,7 +1065,7 @@ const BackupRecovery = () => {
 
           {activeTab === 'Dashboard' && (
             <>
-              <div className="grid gap-4 md:grid-cols-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
                 {cards.map(([label, value]) => (
                   <div key={label} className={`rounded-2xl p-5 shadow-sm ${cardClass(label, value)}`}>
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/80">{label}</p>
@@ -1083,7 +1083,7 @@ const BackupRecovery = () => {
                 </p>
               </div>
 
-              <div className="grid gap-6 xl:grid-cols-3">
+              <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
                 <Section title="Severity Score Distribution">
                   <MiniChart data={dashboard?.severity_distribution} />
                   <p className="mt-4 text-sm leading-6 text-slate-600">{dashboard?.traffic_summaries?.severity}</p>
@@ -1099,7 +1099,7 @@ const BackupRecovery = () => {
               </div>
 
               <Section title="System Health">
-                <div className="grid gap-3 md:grid-cols-5">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
                   {Object.entries(dashboard?.health || {}).filter(([key]) => key !== 'backup_location').map(([key, value]) => (
                     <div key={key} className="min-w-0 rounded-xl border border-green-100 bg-green-50/80 p-4">
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-green-700">{key.replaceAll('_', ' ')}</p>
@@ -1123,8 +1123,8 @@ const BackupRecovery = () => {
                 />
               )}
             >
-              <div className="overflow-hidden">
-                <table className="w-full text-left text-sm">
+              <div className="overflow-x-auto md:overflow-hidden">
+                <table className="w-full text-left text-sm min-w-[600px]">
                   <thead className="border-b text-xs uppercase tracking-[0.16em] text-slate-500">
                     <tr>
                       <th className="py-3">File</th>
@@ -1216,7 +1216,7 @@ const BackupRecovery = () => {
                         </div>
                       </button>
                       {openRows[key] && (
-                        <div className="mt-4 grid gap-4 border-t border-slate-100 pt-4 md:grid-cols-2">
+                        <div className="mt-4 grid grid-cols-1 gap-4 border-t border-slate-100 pt-4 md:grid-cols-2">
                           <div>
                             <p className="text-sm font-bold text-slate-800">Accuracy basis</p>
                             <p className="mt-1 text-sm leading-6 text-slate-600">{item.accuracy_basis}</p>
@@ -1269,7 +1269,7 @@ const BackupRecovery = () => {
             <Section
               title="Security Incidents"
               actions={
-                <div className="grid gap-3 md:grid-cols-6">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-6">
                   <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Search incidents" value={incidentFilters.keyword} onChange={(e) => setIncidentFilters({ ...incidentFilters, keyword: e.target.value })} />
                   <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" type="date" value={incidentFilters.date_from} onChange={(e) => setIncidentFilters({ ...incidentFilters, date_from: e.target.value })} />
                   <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" type="date" value={incidentFilters.date_to} onChange={(e) => setIncidentFilters({ ...incidentFilters, date_to: e.target.value })} />
@@ -1313,7 +1313,7 @@ const BackupRecovery = () => {
                       </button>
                       {openRows[key] && (
                         <div className="mt-4 space-y-4 border-t border-slate-100 pt-4">
-                          <div className="grid gap-3 md:grid-cols-3">
+                          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                             <div className="rounded-xl bg-slate-50 p-4"><p className="text-xs font-bold uppercase text-slate-500">NIST</p><p className="mt-1 text-sm font-semibold">{item.nist_category}</p></div>
                             <div className="rounded-xl bg-slate-50 p-4"><p className="text-xs font-bold uppercase text-slate-500">ENISA</p><p className="mt-1 text-sm font-semibold">{item.enisa_threat_type}</p></div>
                             <div className="rounded-xl bg-slate-50 p-4"><p className="text-xs font-bold uppercase text-slate-500">Action</p><p className="mt-1 text-sm font-semibold">{item.response_action}</p></div>
@@ -1338,9 +1338,9 @@ const BackupRecovery = () => {
           )}
 
           {activeTab === 'Manual Controls' && (
-            <div className="grid gap-6 xl:grid-cols-2">
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
               <Section title="Integrity and Recovery">
-                <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   <button disabled={busy} className="rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Manual system scan?', 'WARDS will scan every monitored file and create logs for any changes it finds.', () => api.post('/security/scan'), (result) => result?.data?.summary || 'Full system integrity scan complete.', 'Start scan')}>Manual System Scan</button>
                   <button
                     disabled={busy}
@@ -1398,7 +1398,7 @@ const BackupRecovery = () => {
                     <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Last selected folder</p>
                     <p className="mt-1 break-all text-sm font-semibold text-slate-800">{controls.monitoredFolder || 'No extra monitored folder selected yet.'}</p>
                   </div>
-                  <div className="grid gap-3 md:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                     <button disabled={busy} className={`rounded-xl bg-primary px-4 py-3 font-semibold text-white${disabledButtonClass}`} onClick={() => openFolderPicker('add-monitor', 'Add monitored folder', controls.monitoredFolder)}>Add monitored folder</button>
                     <button disabled={busy} className={`rounded-xl bg-red-50 px-4 py-3 font-semibold text-red-700${disabledButtonClass}`} onClick={() => openFolderPicker('remove-monitor', 'Remove monitored folder', controls.monitoredFolder)}>Remove monitored folder</button>
                   </div>
@@ -1593,7 +1593,7 @@ const BackupRecovery = () => {
                   
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                     <p className="mb-3 text-sm font-bold text-slate-900">Temporary User Restriction</p>
-                    <div className="grid gap-3 md:grid-cols-5">
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
                       <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Account ID" value={restrictionInput.account_id} onChange={(e) => setRestrictionInput({ ...restrictionInput, account_id: e.target.value })} />
                       <select className="rounded-xl border border-slate-200 px-3 py-2 text-sm" value={restrictionInput.account_type} onChange={(e) => setRestrictionInput({ ...restrictionInput, account_type: e.target.value })}>
                         <option value="citizen">Citizen</option>
@@ -1608,18 +1608,18 @@ const BackupRecovery = () => {
                     <input className="mt-3 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Reason" value={restrictionInput.reason} onChange={(e) => setRestrictionInput({ ...restrictionInput, reason: e.target.value })} />
                   </div>
 
-                  <div className="max-h-60 overflow-auto rounded-xl border border-slate-200">
+                  <div className="max-h-60 overflow-x-auto rounded-xl border border-slate-200 md:overflow-auto">
                     {userRestrictions.length > 0 ? (
-                      <table className="w-full text-sm">
+                      <table className="w-full text-sm min-w-[400px]">
                         <thead className="bg-slate-50"><tr><th className="px-4 py-3 text-left font-bold text-slate-700">Account</th><th className="px-4 py-3 text-left font-bold text-slate-700">Scope</th><th className="px-4 py-3 text-left font-bold text-slate-700">Remaining</th><th className="px-4 py-3 text-left font-bold text-slate-700">Strikes</th></tr></thead>
                         <tbody>{userRestrictions.map((item) => <tr key={`${item.account_id}-${item.scope}`} className="border-t border-slate-100"><td className="px-4 py-3 font-mono text-slate-900">{item.account_id}</td><td className="px-4 py-3 text-slate-700">{item.scope}</td><td className="px-4 py-3 text-slate-700">{Math.floor(item.remaining_seconds / 60)}m {item.remaining_seconds % 60}s</td><td className="px-4 py-3 text-slate-700">{item.strike_count}</td></tr>)}</tbody>
                       </table>
                     ) : <div className="p-8 text-center text-sm text-slate-500">No account restrictions are active.</div>}
                   </div>
 
-                  <div className="max-h-80 overflow-auto rounded-xl border border-slate-200">
+                  <div className="max-h-80 overflow-x-auto rounded-xl border border-slate-200 md:overflow-auto">
                     {blockedIps.length > 0 ? (
-                      <table className="w-full text-sm">
+                      <table className="w-full text-sm min-w-[400px]">
                         <thead className="bg-slate-50">
                           <tr>
                             <th className="px-4 py-3 text-left font-bold text-slate-700">IP Address</th>
@@ -1698,9 +1698,9 @@ const BackupRecovery = () => {
                         />
                       </div>
 
-                      <div className="max-h-60 overflow-auto rounded-xl border border-slate-200">
+                      <div className="max-h-60 overflow-x-auto rounded-xl border border-slate-200 md:overflow-auto">
                         {permanentBlocks.length > 0 ? (
-                          <table className="w-full text-sm">
+                          <table className="w-full text-sm min-w-[400px]">
                             <thead className="bg-slate-50">
                               <tr>
                                 <th className="px-4 py-3 text-left font-bold text-slate-700">IP Address</th>

@@ -28,8 +28,8 @@ const initialFilters = {
 
 const formatNumber = (value) => Number(value || 0).toLocaleString('en-PH');
 
-const SummaryCard = ({ label, value, helper }) => (
-  <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+const SummaryCard = ({ label, value, helper, className = '' }) => (
+  <div className={`rounded-xl border border-slate-200 bg-white p-5 shadow-sm ${className}`}>
     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{label}</p>
     <p className="mt-3 text-2xl font-bold text-primary">{value}</p>
     {helper ? <p className="mt-2 text-sm text-slate-500">{helper}</p> : null}
@@ -412,11 +412,11 @@ const Reports = () => {
         subtitle="Receive branch-submitted reports, review operational performance, filter historical records, and export clean documents for monitoring and analysis."
       />
 
-      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard label="Stored Reports" value={formatNumber(summary.total)} helper="Historical reports across branches" />
-        <SummaryCard label="Reports On Page" value={formatNumber(summary.currentPageCount)} helper="Maximum 5 reports per page" />
-        <SummaryCard label="Branches Visible" value={formatNumber(summary.visibleBranches)} helper="Current filtered result set" />
-        <SummaryCard label="Latest Submission" value={summary.latestSubmission ? formatUtc8Date(summary.latestSubmission) : 'N/A'} helper="Most recent visible report" />
+      <section className="flex md:grid overflow-x-auto md:overflow-visible snap-x snap-mandatory gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <SummaryCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" label="Stored Reports" value={formatNumber(summary.total)} helper="Historical reports across branches" />
+        <SummaryCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" label="Reports On Page" value={formatNumber(summary.currentPageCount)} helper="Maximum 5 reports per page" />
+        <SummaryCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" label="Branches Visible" value={formatNumber(summary.visibleBranches)} helper="Current filtered result set" />
+        <SummaryCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" label="Latest Submission" value={summary.latestSubmission ? formatUtc8Date(summary.latestSubmission) : 'N/A'} helper="Most recent visible report" />
       </section>
 
       {error ? (
@@ -552,8 +552,8 @@ const Reports = () => {
           <div className="px-6 py-12 text-center text-slate-500">Loading submitted branch reports...</div>
         ) : reportsState.items.length ? (
           <>
-            <div className="overflow-hidden rounded-2xl border border-slate-200">
-              <table className="w-full table-auto text-sm">
+            <div className="overflow-x-auto rounded-2xl border border-slate-200 md:overflow-hidden">
+              <table className="w-full table-auto text-sm min-w-[600px]">
                 <thead className="bg-slate-50">
                   <tr>
                     <th className="px-6 py-3 text-left font-semibold text-slate-600">Branch Office</th>
@@ -665,8 +665,8 @@ const Reports = () => {
               <div className="px-6 py-12 text-center text-slate-500">Loading report history...</div>
             ) : historyState.items.length ? (
               <>
-                <div className="overflow-hidden rounded-2xl border border-slate-200">
-                  <table className="w-full table-auto text-sm">
+                <div className="overflow-x-auto rounded-2xl border border-slate-200 md:overflow-hidden">
+                  <table className="w-full table-auto text-sm min-w-[600px]">
                     <thead className="bg-slate-50">
                       <tr>
                         <th className="px-6 py-3 text-left font-semibold text-slate-600">Branch Office</th>
@@ -790,7 +790,7 @@ const Reports = () => {
               </button>
             </div>
             <div className="flex-1 overflow-y-auto px-6 pb-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <p className="text-sm font-semibold text-slate-600">Branch</p>
                   <p className="text-slate-800">{historyReportToView.branch}</p>

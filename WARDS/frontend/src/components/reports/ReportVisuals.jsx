@@ -317,7 +317,7 @@ export const CompactComparisonCard = ({ title, subtitle, rows = [], formatter = 
                   {formatter(delta, row)}
                 </p>
               </div>
-              <div className="mt-2 grid grid-cols-2 gap-3 text-xs text-slate-500">
+              <div className="mt-2 grid grid-cols-1 gap-3 text-xs text-slate-500 sm:grid-cols-2">
                 <div>
                   <p className="uppercase tracking-[0.14em]">Current</p>
                   <p className="mt-1 text-sm font-semibold text-slate-800">{formatter(row.current, row)}</p>

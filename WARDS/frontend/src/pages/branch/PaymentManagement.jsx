@@ -291,8 +291,8 @@ const DashboardIcon = ({ type }) => {
   );
 };
 
-const KpiCard = ({ icon, label, value, helper }) => (
-  <div className="relative overflow-hidden rounded-[28px] border border-slate-300/90 bg-white p-6 shadow-[0_12px_28px_rgba(15,23,42,0.07)]">
+const KpiCard = ({ icon, label, value, helper, className = '' }) => (
+  <div className={`relative overflow-hidden rounded-[28px] border border-slate-300/90 bg-white p-6 shadow-[0_12px_28px_rgba(15,23,42,0.07)] ${className}`}>
     <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-[#0f2f5f] via-[#19498d] to-[#1e5bb8]" />
     <div className="flex items-start justify-between gap-4">
       <div>
@@ -436,7 +436,7 @@ const TrendChart = ({ title, subtitle, points, color, valueKey }) => {
           return <circle key={`${point.label}-${index}`} cx={x} cy={y} r="4.5" fill={color} />;
         })}
       </svg>
-      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-4">
         {points.slice(-4).map((point) => (
           <div key={point.label} className="rounded-2xl border border-slate-100 bg-slate-50 px-3 py-2">
             <p className="text-xs font-semibold text-slate-500">{point.label}</p>
@@ -989,7 +989,37 @@ const PaymentManagement = () => {
         </div>
       ) : (
         <>
-          <div className="rounded-2xl border border-slate-200 bg-white">
+          {/* Mobile card list */}
+          <div className="md:hidden space-y-3">
+            {visibleItems.map((payment) => (
+              <div key={payment.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-bold text-slate-900">{payment.taxpayer_name || 'N/A'}</p>
+                    <p className="mt-0.5 truncate text-xs text-slate-500">{payment.ref_number || 'N/A'}</p>
+                  </div>
+                  <span className="shrink-0 text-sm font-bold text-emerald-700">{formatCurrency(payment.amount)}</span>
+                </div>
+                <div className="mt-2 flex items-center gap-2">
+                  <StatusBadge status={getPaymentBucket(payment)} />
+                  <span className="text-xs text-slate-400">{formatPaymentDate(payment.created_at, { year: 'numeric', month: 'short', day: 'numeric' })}</span>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button onClick={() => handleViewDetails(payment)} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-bold text-white">View</button>
+                  {allowActions ? (
+                    <>
+                      <button onClick={() => handleVerifyClick(payment)} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white">Verify</button>
+                      <button onClick={() => handleDeclineClick(payment)} className="rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-bold text-white">Decline</button>
+                    </>
+                  ) : null}
+                  <button onClick={() => handleDeleteClick(payment)} className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-bold text-white">Delete</button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop table */}
+          <div className="hidden md:block rounded-2xl border border-slate-200 bg-white">
             <table className="w-full table-auto divide-y divide-slate-200 text-xs">
               <thead className="bg-slate-50 text-left text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
                 <tr>
@@ -1221,13 +1251,13 @@ const PaymentManagement = () => {
         </div>
       ) : null}
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <KpiCard icon="wallet" label="Total Payments" value={stats.total} helper="Unique transactions in the current filtered view" />
-        <KpiCard icon="check" label="Verified Payments" value={stats.confirmed} helper="Counted once after successful branch verification" />
-        <KpiCard icon="clock" label="Pending Payments" value={stats.pending} helper="Still awaiting branch review and verification" />
-        <KpiCard icon="alert" label="Failed / Declined" value={stats.failed} helper="Excluded from collection and revenue totals" />
-        <KpiCard icon="trend" label="Total Collections" value={formatCurrency(stats.totalCollections)} helper="Verified revenue only for the selected records" />
-        <KpiCard icon="clock" label="Today's Payments" value={stats.todaysPayments} helper="Transactions created today in the current branch view" />
+      <section className="flex md:grid overflow-x-auto md:overflow-visible snap-x snap-mandatory gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <KpiCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" icon="wallet" label="Total Payments" value={stats.total} helper="Unique transactions in the current filtered view" />
+        <KpiCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" icon="check" label="Verified Payments" value={stats.confirmed} helper="Counted once after successful branch verification" />
+        <KpiCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" icon="clock" label="Pending Payments" value={stats.pending} helper="Still awaiting branch review and verification" />
+        <KpiCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" icon="alert" label="Failed / Declined" value={stats.failed} helper="Excluded from collection and revenue totals" />
+        <KpiCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" icon="trend" label="Total Collections" value={formatCurrency(stats.totalCollections)} helper="Verified revenue only for the selected records" />
+        <KpiCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" icon="clock" label="Today's Payments" value={stats.todaysPayments} helper="Transactions created today in the current branch view" />
       </section>
 
       <SectionCard
@@ -1239,14 +1269,43 @@ const PaymentManagement = () => {
           </div>
         )}
       >
-        <div className="grid gap-4 md:grid-cols-3">
-          <KpiCard icon="wallet" label="Branch Cash Available" value={formatCurrency(remittanceSummary?.available_amount)} helper="Verified payments ready for remittance" />
-          <KpiCard icon="clock" label="Pending Main Review" value={formatCurrency(remittanceSummary?.pending_remittance_amount)} helper="Submitted remittances not yet accepted" />
-          <KpiCard icon="check" label="Already Remitted" value={formatCurrency(remittanceSummary?.remitted_amount)} helper="Accepted by Main collection account" />
+        <div className="flex md:grid overflow-x-auto md:overflow-visible snap-x snap-mandatory gap-4 md:grid-cols-3">
+          <KpiCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" icon="wallet" label="Branch Cash Available" value={formatCurrency(remittanceSummary?.available_amount)} helper="Verified payments ready for remittance" />
+          <KpiCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" icon="clock" label="Pending Main Review" value={formatCurrency(remittanceSummary?.pending_remittance_amount)} helper="Submitted remittances not yet accepted" />
+          <KpiCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" icon="check" label="Already Remitted" value={formatCurrency(remittanceSummary?.remitted_amount)} helper="Accepted by Main collection account" />
         </div>
 
         <div className="mt-6 grid gap-6 xl:grid-cols-[1.4fr,1fr]">
-          <div className="rounded-2xl border border-slate-200">
+          {/* Mobile remittance cards */}
+          <div className="md:hidden space-y-3">
+            {(() => {
+              const visible = (remittanceSummary?.available_payments || [])
+                .slice((sectionPages.remittance - 1) * TRANSACTIONS_PER_PAGE, sectionPages.remittance * TRANSACTIONS_PER_PAGE);
+              return visible.map((payment) => (
+                <div key={payment.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedRemittancePayments.includes(payment.id)}
+                      onChange={() => toggleRemittancePayment(payment.id)}
+                      className="h-5 w-5 shrink-0 cursor-pointer rounded border-slate-300 accent-emerald-600"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-bold text-slate-900">{payment.taxpayer_name}</p>
+                      <p className="truncate text-xs text-slate-500">{payment.ref_number}</p>
+                    </div>
+                    <span className="shrink-0 text-sm font-bold text-emerald-700">{formatCurrency(payment.amount)}</span>
+                  </div>
+                  <div className="mt-2">
+                    <span className="inline-block truncate rounded-full bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700">{payment.tax_type}</span>
+                  </div>
+                </div>
+              ));
+            })()}
+          </div>
+
+          {/* Desktop remittance table */}
+          <div className="hidden md:block rounded-2xl border border-slate-200 bg-white">
             <table className="w-full table-auto divide-y divide-slate-200 text-xs">
               <thead className="bg-slate-50 text-left text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
                 <tr>
@@ -1344,7 +1403,32 @@ const PaymentManagement = () => {
           </div>
         </div>
 
-        <div className="mt-6 rounded-2xl border border-slate-200">
+        {/* Mobile remittance history cards */}
+        <div className="md:hidden mt-6 space-y-3">
+          {remittances.slice(0, 5).map((remittance) => (
+            <div key={remittance.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-bold text-slate-900">{remittance.remittance_number}</p>
+                  <p className="mt-0.5 truncate text-xs text-slate-500">{remittance.status}</p>
+                </div>
+                <span className="shrink-0 text-sm font-bold text-slate-900">{formatCurrency(remittance.total_amount)}</span>
+              </div>
+              <div className="mt-2 flex items-center gap-3 text-xs text-slate-500">
+                <span>{remittance.payment_count} payment{remittance.payment_count === 1 ? '' : 's'}</span>
+                <span>{formatPaymentDate(remittance.submitted_at, { month: 'short', day: 'numeric' })}</span>
+              </div>
+            </div>
+          ))}
+          {!remittances.length ? (
+            <div className="rounded-xl border border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-500">
+              No remittance batches submitted yet.
+            </div>
+          ) : null}
+        </div>
+
+        {/* Desktop remittance history table */}
+        <div className="hidden md:block mt-6 rounded-2xl border border-slate-200">
           <table className="w-full divide-y divide-slate-200 text-sm">
             <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
               <tr>
@@ -1386,7 +1470,7 @@ const PaymentManagement = () => {
           </div>
         }
       >
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
           <div className="xl:col-span-2">
             <label className="mb-2 block text-sm font-semibold text-slate-700">Search Bar</label>
             <input
@@ -1518,7 +1602,7 @@ const PaymentManagement = () => {
         title="Payment Monitoring Analytics"
         subtitle="A quick visual read of method distribution, verification mix, and recent payment trends."
       >
-        <div className="grid gap-5 xl:grid-cols-2">
+        <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
           <div className="rounded-3xl border border-slate-300 bg-slate-50/90 p-5 shadow-sm">
             <div className="mb-4">
               <h3 className="text-base font-bold text-slate-900">Payments By Method</h3>

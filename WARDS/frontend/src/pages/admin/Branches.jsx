@@ -896,7 +896,7 @@ const Branches = () => {
                 </div>
               )}
             </div>
-            <div className="mt-6 grid grid-cols-2 gap-3">
+            <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
               {branch.verification_status === 'Pending' && (
                 <button
                   onClick={() => handleResendVerification(branch)}

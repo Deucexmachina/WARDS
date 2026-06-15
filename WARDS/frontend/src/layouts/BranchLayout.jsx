@@ -509,10 +509,54 @@ const BranchLayout = () => {
             <span className="sm:hidden">{isSuperadminManagedBranch ? 'Return' : 'Logout'}</span>
           </button>
         </header>
-        <main className="p-4 sm:p-6 lg:p-8">
+        <main className="p-4 pb-20 sm:pb-6 lg:p-8">
           <Outlet />
         </main>
       </div>
+
+      {/* Mobile bottom navigation */}
+      <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-slate-200 bg-white lg:hidden">
+        <div className="flex items-center justify-around px-2 pb-safe">
+          {navItems.slice(0, 5).map((item) => {
+            const isActive = location.pathname === item.path || location.pathname.startsWith(item.path);
+            return (
+              <NavLink
+                key={item.path}
+                to={item.path}
+                end={item.path === basePath}
+                onClick={(e) => handleNavClick(e, item.path)}
+                className={`flex flex-col items-center gap-0.5 py-2 px-1 text-[10px] font-medium transition ${isActive ? 'text-[#0f2f5f]' : 'text-slate-400'}`}
+              >
+                <span className={`flex h-8 w-8 items-center justify-center rounded-xl ${isActive ? 'bg-[#0f2f5f]/10' : ''}`}>
+                  {item.label.includes('Dashboard') && (
+                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
+                  )}
+                  {item.label.includes('Queue') && (
+                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                  )}
+                  {item.label.includes('Receipt') && (
+                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                  )}
+                  {item.label.includes('Payment') && (
+                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>
+                  )}
+                  {item.label.includes('Report') && (
+                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                  )}
+                  {item.label.includes('Account') && (
+                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                  )}
+                  {!item.label.match(/Dashboard|Queue|Receipt|Payment|Report|Account/) && (
+                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                  )}
+                </span>
+                <span className="max-w-[4.5rem] truncate">{item.label.replace(' Management', '').replace('Branch ', '')}</span>
+              </NavLink>
+            );
+          })}
+        </div>
+      </nav>
+
       <StaffMfaSetupModal
         isOpen={showMfaModal}
         user={staff}

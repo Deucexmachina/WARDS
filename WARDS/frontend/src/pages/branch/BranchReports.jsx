@@ -60,8 +60,8 @@ const showSystemSuccessMessage = ({ title, message }) => {
   }));
 };
 
-const SummaryCard = ({ label, value, helper }) => (
-  <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+const SummaryCard = ({ label, value, helper, className = '' }) => (
+  <div className={`rounded-xl border border-slate-200 bg-white p-5 shadow-sm ${className}`}>
     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{label}</p>
     <p className="mt-3 text-2xl font-bold text-primary">{value}</p>
     {helper ? <p className="mt-2 text-sm text-slate-500">{helper}</p> : null}
@@ -356,11 +356,11 @@ const BranchReports = () => {
         subtitle="Generate clean operational reports from recorded branch activity, review the report presentation, and submit them directly to Main Admin for monitoring and long-term analysis."
       />
 
-      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard label="Submitted Reports" value={formatNumber(summary.total)} helper="Branch report history" />
-        <SummaryCard label="Operational Reports" value={formatNumber(summary.operational)} helper="In current page view" />
-        <SummaryCard label="Monthly Reports" value={formatNumber(summary.monthly)} helper="In current page view" />
-        <SummaryCard label="Latest Submission" value={summary.latestDate ? formatUtc8Date(summary.latestDate) : 'N/A'} helper="Most recent report date" />
+      <section className="flex md:grid overflow-x-auto md:overflow-visible snap-x snap-mandatory gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <SummaryCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" label="Submitted Reports" value={formatNumber(summary.total)} helper="Branch report history" />
+        <SummaryCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" label="Operational Reports" value={formatNumber(summary.operational)} helper="In current page view" />
+        <SummaryCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" label="Monthly Reports" value={formatNumber(summary.monthly)} helper="In current page view" />
+        <SummaryCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" label="Latest Submission" value={summary.latestDate ? formatUtc8Date(summary.latestDate) : 'N/A'} helper="Most recent report date" />
       </section>
 
       {error && (
@@ -679,8 +679,8 @@ const BranchReports = () => {
           <div className="px-6 py-12 text-center text-slate-500">Loading branch reports...</div>
         ) : reportsState.items.length ? (
           <>
-            <div className="rounded-2xl border border-slate-200 overflow-hidden">
-              <table className="w-full table-auto text-sm">
+            <div className="overflow-x-auto rounded-2xl border border-slate-200 md:overflow-hidden">
+              <table className="w-full table-auto text-sm min-w-[600px]">
                 <thead className="bg-slate-50">
                   <tr>
                     <th className="px-6 py-3 text-left font-semibold text-slate-600">Title</th>
@@ -781,8 +781,8 @@ const BranchReports = () => {
               <div className="px-6 py-12 text-center text-slate-500">Loading report history...</div>
             ) : historyState.items.length ? (
               <>
-                <div className="rounded-2xl border border-slate-200 overflow-hidden">
-                  <table className="w-full table-auto text-sm">
+                <div className="overflow-x-auto rounded-2xl border border-slate-200 md:overflow-hidden">
+                  <table className="w-full table-auto text-sm min-w-[600px]">
                     <thead className="bg-slate-50">
                       <tr>
                         <th className="px-6 py-3 text-left font-semibold text-slate-600">Title</th>
@@ -884,7 +884,7 @@ const BranchReports = () => {
               </button>
             </div>
             <div className="flex-1 overflow-y-auto px-6 pb-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <p className="text-sm font-semibold text-slate-600">Report Type</p>
                   <p className="text-slate-800">{historyReportToView.report_type}</p>

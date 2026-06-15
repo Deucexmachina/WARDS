@@ -938,8 +938,8 @@ const PaymentManagement = () => {
             </button>
           </div>
         </div>
-        <div className="mt-5 rounded-2xl border border-slate-200 overflow-hidden">
-          <table className="w-full table-auto divide-y divide-slate-200 text-xs">
+        <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200 md:overflow-hidden">
+          <table className="w-full table-auto divide-y divide-slate-200 text-xs min-w-[800px]">
             <thead className="bg-slate-50 text-left text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">
               <tr>
                 <th className="px-2 py-2.5">Branch</th>
@@ -1015,12 +1015,12 @@ const PaymentManagement = () => {
             const endIndex = startIndex + LEDGER_PER_PAGE;
             const pagedRecords = records.slice(startIndex, endIndex);
             return (
-              <div key={branchName} className="overflow-hidden rounded-2xl border border-slate-200">
+              <div key={branchName} className="overflow-x-auto rounded-2xl border border-slate-200 md:overflow-hidden">
                 <div className="border-b border-slate-200 bg-[#0f2f5f] px-5 py-3 text-white">
                   <p className="text-xs font-black uppercase tracking-[0.22em]">{branchName}</p>
                 </div>
                 <div className="overflow-hidden">
-                  <table className="w-full table-auto divide-y divide-slate-200 text-xs">
+                  <table className="w-full table-auto divide-y divide-slate-200 text-xs min-w-[700px]">
                     <thead className="bg-slate-50 text-left text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">
                       <tr>
                         <th className="px-2 py-2.5">Txn ID</th>
@@ -1155,8 +1155,8 @@ const PaymentManagement = () => {
           </button>
         </div>
 
-        <div className="mt-5 rounded-2xl border border-slate-200 overflow-hidden">
-          <table className="w-full table-auto divide-y divide-slate-200 text-xs">
+        <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200 md:overflow-hidden">
+          <table className="w-full table-auto divide-y divide-slate-200 text-xs min-w-[700px]">
             <thead className="bg-slate-50 text-left text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">
               <tr>
                 <th className="px-2 py-2.5">Remit No.</th>

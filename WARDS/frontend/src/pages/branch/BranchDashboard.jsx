@@ -19,8 +19,8 @@ import {
   discrepancyModalShellClass,
 } from '../../components/discrepancies/DiscrepancyUI';
 
-const MetricCard = ({ label, value, color }) => (
-  <div className="bg-white rounded-xl shadow p-6">
+const MetricCard = ({ label, value, color, className = '' }) => (
+  <div className={`bg-white rounded-xl shadow p-6 ${className}`}>
     <p className="text-sm text-gray-500 mb-2">{label}</p>
     <p className={`text-3xl font-bold ${color}`}>{value}</p>
   </div>
@@ -191,11 +191,11 @@ const BranchDashboard = () => {
         className="mb-8"
       />
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-        <MetricCard label="Waiting Clients" value={data?.queue?.waiting || 0} color="text-orange-600" />
-        <MetricCard label="Currently Serving" value={data?.queue?.serving || 0} color="text-blue-600" />
-        <MetricCard label="Completed Queue" value={data?.queue?.completed || 0} color="text-green-600" />
-        <MetricCard label="Completed Today" value={data?.transactions?.today_completed || 0} color="text-purple-600" />
+      <div className="flex md:grid overflow-x-auto md:overflow-visible snap-x snap-mandatory gap-6 mb-8 md:grid-cols-4">
+        <MetricCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" label="Waiting Clients" value={data?.queue?.waiting || 0} color="text-orange-600" />
+        <MetricCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" label="Currently Serving" value={data?.queue?.serving || 0} color="text-blue-600" />
+        <MetricCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" label="Completed Queue" value={data?.queue?.completed || 0} color="text-green-600" />
+        <MetricCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" label="Completed Today" value={data?.transactions?.today_completed || 0} color="text-purple-600" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
@@ -241,8 +241,8 @@ const BranchDashboard = () => {
 
       <div className="bg-white rounded-xl shadow p-6">
         <h2 className="text-xl font-bold text-gray-900 mb-4">Recent Queue Activity</h2>
-        <div className="overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="overflow-x-auto md:overflow-hidden">
+          <table className="w-full text-sm min-w-[500px]">
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-4 py-3 text-left">Queue No.</th>
@@ -303,10 +303,10 @@ const BranchDashboard = () => {
           </div>
         )}
 
-        <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
-          <MetricCard label="Pending Review" value={pendingDiscrepancies} color="text-yellow-600" />
-          <MetricCard label="Verified Reports" value={verifiedDiscrepancies} color="text-green-600" />
-          <MetricCard label="Submitted Offline" value={offlineDiscrepancies} color="text-blue-600" />
+        <div className="mb-6 flex md:grid overflow-x-auto md:overflow-visible snap-x snap-mandatory gap-4 md:grid-cols-3">
+          <MetricCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" label="Pending Review" value={pendingDiscrepancies} color="text-yellow-600" />
+          <MetricCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" label="Verified Reports" value={verifiedDiscrepancies} color="text-green-600" />
+          <MetricCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" label="Submitted Offline" value={offlineDiscrepancies} color="text-blue-600" />
         </div>
 
         {showDiscrepancyForm && (
@@ -486,8 +486,8 @@ const BranchDashboard = () => {
         ) : recentDiscrepancies.length === 0 ? (
           <div className="py-8 text-center text-gray-500">No discrepancy reports submitted for this branch yet.</div>
         ) : (
-          <div className="overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="overflow-x-auto md:overflow-hidden">
+            <table className="w-full text-sm min-w-[500px]">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-4 py-3 text-left">Report ID</th>
@@ -564,7 +564,7 @@ const BranchDashboard = () => {
             </div>
 
             <div className="overflow-y-auto bg-slate-50 p-6 sm:p-8">
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <DiscrepancyInfoCard label="Report ID" value={`DR-${selectedDiscrepancy.id}`} tone="blue" helper="Unique discrepancy tracking reference." />
                 <DiscrepancyInfoCard label="Date Submitted" value={formatDateTime(selectedDiscrepancy.created_at)} tone="amber" helper={`Report date: ${selectedDiscrepancy.report_date || 'Not provided'}`} />
                 <DiscrepancyInfoCard
@@ -587,7 +587,7 @@ const BranchDashboard = () => {
                     title="Report Information"
                     description="Core submission details presented in a cleaner, audit-ready format."
                   >
-                    <div className="grid gap-4 md:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                       <DiscrepancyInfoCard label="Discrepancy Type" value={selectedDiscrepancy.discrepancy_type || 'Not specified'} />
                       <DiscrepancyInfoCard label="Current Status" value={<DiscrepancyStatusBadge status={selectedDiscrepancy.status} />} />
                       <DiscrepancyInfoCard label="Last Updated" value={formatDateTime(selectedDiscrepancy.updated_at || selectedDiscrepancy.created_at)} />
@@ -599,7 +599,7 @@ const BranchDashboard = () => {
                     title="Queue Information"
                     description="Reference details that help the branch reconcile the affected transaction or batch."
                   >
-                    <div className="grid gap-4 md:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                       <DiscrepancyInfoCard
                         label="Queue Number / Reference"
                         value={selectedDiscrepancy.supporting_documents || 'No queue number or reference was supplied.'}

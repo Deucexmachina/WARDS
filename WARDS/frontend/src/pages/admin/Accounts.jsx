@@ -926,7 +926,7 @@ const Accounts = () => {
 
       {showModal && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/60 px-4 py-6">
-          <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-[28px] bg-white shadow-[0_30px_80px_rgba(15,23,42,0.28)]">
+          <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl md:rounded-[28px] bg-white shadow-[0_30px_80px_rgba(15,23,42,0.28)]">
             <div className="flex shrink-0 items-start justify-between border-b border-slate-200 px-6 py-5 md:px-8">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
@@ -963,7 +963,7 @@ const Accounts = () => {
                 <div className="space-y-6">
                   <div>
                     <h4 className="mb-4 text-lg font-semibold text-slate-900">View-Only Account Details</h4>
-                    <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       {renderReadOnlyField(formData.role === 'public' ? 'Full Name' : 'Username', formData.role === 'public' ? formData.full_name : formData.username)}
                       {renderReadOnlyField('Role', getRoleDisplay(formData.role))}
                       {renderReadOnlyField('Branch Assignment', formData.branch_id ? (editingAccount?.branch_name || `Branch ${formData.branch_id}`) : 'All Branches')}
@@ -977,7 +977,7 @@ const Accounts = () => {
 
                   <div>
                     <h4 className="mb-4 text-lg font-semibold text-slate-900">Editable Information</h4>
-                    <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div className={isCitizenAccount ? '' : 'sm:col-span-2'}>
                         <label className="mb-2 block text-sm font-semibold text-slate-700">Email Address</label>
                         <input
@@ -1034,7 +1034,7 @@ const Accounts = () => {
                 <div className="space-y-6">
                   <div>
                     <h4 className="mb-4 text-lg font-semibold text-slate-900">Account Information</h4>
-                    <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       {formData.role === 'public' ? (
                         <div className="sm:col-span-2">
                           <label className="mb-2 block text-sm font-semibold text-slate-700">Full Name</label>
@@ -1108,7 +1108,7 @@ const Accounts = () => {
 
                   <div>
                     <h4 className="mb-4 text-lg font-semibold text-slate-900">Access Control</h4>
-                    <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
                         <label className="mb-2 block text-sm font-semibold text-slate-700">Role</label>
                         <select
@@ -1158,7 +1158,7 @@ const Accounts = () => {
                         </div>
 
                         {formData.role === 'branch_staff' && (
-                          <div className="grid gap-4 sm:grid-cols-2">
+                          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                             <div>
                               <label className="mb-2 block text-sm font-semibold text-slate-700">Assigned Queue / Service Role</label>
                               <select

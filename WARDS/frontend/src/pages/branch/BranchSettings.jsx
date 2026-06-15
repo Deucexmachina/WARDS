@@ -697,7 +697,7 @@ const BranchSettings = () => {
       />
 
       {/* Quick-glance stats */}
-      <div className="grid grid-cols-2 gap-4 xl:grid-cols-5">
+      <div className="flex sm:grid overflow-x-auto sm:overflow-visible snap-x snap-mandatory gap-4 sm:grid-cols-2 xl:grid-cols-5">
         {[
           { label: 'Queue Status', value: systemSettings.queueEnabled ? 'Open' : 'Closed', valueClass: systemSettings.queueEnabled ? 'text-green-600' : 'text-red-500' },
           { label: 'Open Weekdays', value: summary.availableDays, valueClass: 'text-primary' },
@@ -705,7 +705,7 @@ const BranchSettings = () => {
           { label: 'Published Overrides', value: summary.publishedOverrides, valueClass: 'text-primary' },
           { label: 'Last Published', value: summary.lastPublished ? formatUtc8DateTime(summary.lastPublished) : 'Not yet', valueClass: 'text-primary text-base' },
         ].map((card) => (
-          <div key={card.label} className="rounded-xl bg-white p-4 shadow">
+          <div key={card.label} className="w-[85%] sm:w-auto flex-shrink-0 snap-center rounded-xl bg-white p-4 shadow">
             <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">{card.label}</p>
             <p className={`mt-1 text-2xl font-bold leading-tight ${card.valueClass}`}>{card.value}</p>
           </div>
@@ -796,7 +796,7 @@ const BranchSettings = () => {
                   </div>
                 )}
 
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                   {branchQueueWindows.map((window) => (
                     <button
                       key={window.windowNumber}
@@ -869,7 +869,7 @@ const BranchSettings = () => {
             title="Appointment Days"
             subtitle="Enable only the weekdays when this branch should accept appointment queue bookings."
           >
-            <div className="grid grid-cols-2 gap-3 p-5 sm:grid-cols-3 xl:grid-cols-4">
+            <div className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-3 xl:grid-cols-4">
               {schedule.weekly_schedule.map((entry) => (
                 <label
                   key={entry.day}
@@ -1050,7 +1050,7 @@ const BranchSettings = () => {
                     className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm disabled:bg-gray-100 disabled:opacity-70"
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-sm">
+                <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Draft Window</p>
                     <p className="mt-1 font-semibold text-gray-700">{formatTimeWindow(schedule.time_settings)}</p>
@@ -1111,8 +1111,8 @@ const BranchSettings = () => {
         </div>
 
         {historyState.items.length ? (
-          <div className="rounded-xl border border-gray-200 overflow-hidden">
-            <table className="w-full table-auto text-sm">
+          <div className="overflow-x-auto rounded-xl border border-gray-200 md:overflow-hidden">
+            <table className="w-full table-auto text-sm min-w-[600px]">
               <thead className="bg-gray-50">
                 <tr>
                   {['Entry', 'Type', 'When', 'Changed By', 'Actions'].map((h) => (
@@ -1289,7 +1289,7 @@ const BranchSettings = () => {
                 <div className="bg-gray-100 px-5 py-3 border-b border-gray-200">
                   <p className="text-xs font-bold uppercase tracking-wider text-gray-500">Details</p>
                 </div>
-                <div className="grid grid-cols-2 gap-0 divide-y divide-gray-100 sm:grid-cols-4 sm:divide-x sm:divide-y-0">
+                <div className="grid grid-cols-1 gap-0 divide-y divide-gray-100 sm:grid-cols-4 sm:divide-x sm:divide-y-0">
                   {[
                     {
                       label: selectedHistoryEntry.audit_type === 'system_settings' ? 'Branch' : 'Effective Date',

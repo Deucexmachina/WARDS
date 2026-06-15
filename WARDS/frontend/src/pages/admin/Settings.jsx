@@ -378,8 +378,8 @@ const Settings = () => {
                               Read-only snapshot of each branch's queue windows.
                             </p>
                           </div>
-                          <div className="overflow-hidden rounded-xl border border-gray-200">
-                            <table className="w-full table-auto text-sm">
+                          <div className="overflow-x-auto rounded-xl border border-gray-200 md:overflow-hidden">
+                            <table className="w-full table-auto text-sm min-w-[500px]">
                               <thead className="bg-gray-50">
                                 <tr>
                                   {['Branch', 'Queue Counters', 'Window Assignments', 'Verification'].map((h) => (
@@ -615,8 +615,8 @@ const Settings = () => {
         )}
 
         {historyState.items.length ? (
-          <div className="overflow-hidden rounded-xl border border-gray-200">
-            <table className="w-full table-auto text-sm">
+          <div className="overflow-x-auto rounded-xl border border-gray-200 md:overflow-hidden">
+            <table className="w-full table-auto text-sm min-w-[500px]">
               <thead className="bg-gray-50">
                 <tr>
                   {['Setting', 'Category', 'Changed', 'Updated By', 'Actions'].map((h) => (

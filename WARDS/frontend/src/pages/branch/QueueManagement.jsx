@@ -480,7 +480,57 @@ const QueueSection = ({
         </div>
       ) : (
         <>
-          <table className="w-full table-auto text-xs">
+          {/* Mobile queue cards */}
+          <div className="md:hidden space-y-3">
+            {paginated.items.map((queue) => {
+              const derivedStatus = getDerivedStatus(queue, now);
+              const relevantDateTime = getRelevantDateTime(queue);
+              return (
+                <div key={queue.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-bold text-primary">{queue.queue_number}</p>
+                      <p className="text-xs text-slate-500">{queue.taxpayer_name || 'Walk-in'}</p>
+                    </div>
+                    <span className={`shrink-0 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${statusClasses[derivedStatus] || 'bg-slate-100 text-slate-700'}`}>
+                      {getStatusLabel(queue, now)}
+                    </span>
+                  </div>
+                  <div className="mt-2 text-xs text-slate-600">
+                    <p>{queue.service_type}</p>
+                    <p className="mt-0.5 text-slate-400">
+                      {queue.queue_type === 'appointment' && queue.appointment_time
+                        ? formatAppointmentDateTimeLabel(queue.appointment_time)
+                        : (relevantDateTime ? formatUtc8DateTime(relevantDateTime) : 'N/A')}
+                    </p>
+                  </div>
+                  {canManageQueues ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {skippedOnly || derivedStatus === 'skipped' ? (
+                        <button onClick={() => onAction('recall-skipped', queue)} disabled={queueUnavailable} className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-40">Pull Up</button>
+                      ) : (
+                        <>
+                          {(queue.status || '').toLowerCase() === 'called' && (
+                            <button onClick={() => onAction('serve', queue)} disabled={queueUnavailable} className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-40">Serve</button>
+                          )}
+                          {['called', 'serving'].includes((queue.status || '').toLowerCase()) && (
+                            <button onClick={() => onAction('skip', queue)} disabled={queueUnavailable} className="rounded-md bg-yellow-500 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-40">Skip</button>
+                          )}
+                          {(queue.status || '').toLowerCase() === 'serving' && (
+                            <button onClick={() => onAction('complete', queue)} disabled={queueUnavailable} className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-40">Complete</button>
+                          )}
+                        </>
+                      )}
+                      <button onClick={() => onDeleteRequest(queue)} disabled={queueUnavailable} className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-40">Delete</button>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Desktop queue table */}
+          <table className="hidden md:table w-full table-auto text-xs">
             <thead className="bg-white">
               <tr className="border-b border-slate-100 text-left text-slate-500">
                 <th className="px-3 py-2.5 text-[10px] font-semibold">Queue No.</th>
@@ -800,7 +850,7 @@ const WindowMonitoringSection = ({
                       </div>
 
                       <div className="p-5">
-                        <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+                        <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-4">
                           <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                             <p className="text-slate-500">Active</p>
                             <p className="mt-1 text-lg font-bold text-slate-900">{activeQueue?.queue_number || 'None'}</p>
@@ -997,7 +1047,34 @@ const QueueHistorySection = ({
       </div>
     ) : (
       <div className="rounded-2xl border border-slate-200 overflow-hidden">
-        <table className="w-full table-auto text-xs">
+        {/* Mobile completed cards */}
+        <div className="md:hidden space-y-3">
+          {items.map((queue) => (
+            <div key={queue.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-bold text-primary">{queue.queue_number}</p>
+                  <p className="text-xs text-slate-500">{queue.taxpayer_name || 'Walk-in'}</p>
+                </div>
+                <span className="shrink-0 inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">
+                  {queue.status_label || 'Completed'}
+                </span>
+              </div>
+              <div className="mt-2 text-xs text-slate-600">
+                <p>{queue.service_type || 'N/A'}</p>
+                <p className="mt-0.5 text-slate-400">{queue.completed_at ? formatUtc8DateTime(queue.completed_at) : 'N/A'}</p>
+              </div>
+              <div className="mt-3 flex items-center gap-2">
+                <button onClick={() => onDeleteHistory(queue)} disabled={deletingHistoryId === queue.id} className="rounded-md bg-rose-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-40">
+                  {deletingHistoryId === queue.id ? '...' : 'Delete'}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Desktop completed table */}
+        <table className="hidden md:table w-full table-auto text-xs">
           <thead className="bg-white">
             <tr className="border-b border-slate-100 text-left text-slate-500">
               <th className="px-3 py-2.5 text-[10px] font-semibold">Queue No.</th>
@@ -1183,7 +1260,35 @@ const CompletedTransactionsSection = ({
         </div>
       ) : (
         <>
-          <div className="rounded-2xl border border-slate-200 overflow-hidden">
+          {/* Mobile completed history cards */}
+          <div className="md:hidden space-y-3">
+            {pageItems.map((queue) => (
+              <div key={queue.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-bold text-primary">{queue.queue_number}</p>
+                    <p className="text-xs text-slate-500">{queue.taxpayer_name || 'Walk-in'}</p>
+                  </div>
+                  <span className={`shrink-0 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${completedStatusClasses[queue.status] || 'bg-slate-100 text-slate-700'}`}>
+                    {queue.status_label || 'Completed'}
+                  </span>
+                </div>
+                <div className="mt-2 text-xs text-slate-600">
+                  <p>{queue.service_type || 'N/A'}</p>
+                  <p className="mt-0.5 text-slate-400">{queue.completed_at ? formatUtc8DateTime(queue.completed_at) : 'N/A'}</p>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button onClick={() => onOpenView(queue)} className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white">View</button>
+                  <button onClick={() => onDeleteHistory(queue)} disabled={!canDeleteHistory || deletingHistoryId === queue.id} className="rounded-md bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">
+                    {deletingHistoryId === queue.id ? '...' : 'Delete'}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop completed history table */}
+          <div className="hidden md:block rounded-2xl border border-slate-200 overflow-hidden">
             <table className="w-full text-xs">
               <thead className="bg-white">
                 <tr className="border-b border-slate-100 text-left text-slate-500">

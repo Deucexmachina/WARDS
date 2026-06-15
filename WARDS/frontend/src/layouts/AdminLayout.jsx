@@ -125,6 +125,7 @@ const AdminLayout = () => {
       <main className="lg:ml-72 mt-16 p-4 sm:p-6 lg:p-8">
         <Outlet />
       </main>
+
       <StaffMfaSetupModal
         isOpen={showMfaModal}
         user={adminUser}

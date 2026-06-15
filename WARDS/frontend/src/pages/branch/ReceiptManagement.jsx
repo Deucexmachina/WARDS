@@ -1516,8 +1516,8 @@ const ReceiptManagement = () => {
         const visibleRows = paginateRows(rows, sectionPages[pageKey]);
         return (
           <>
-      <div className="overflow-hidden rounded-2xl border border-slate-200">
-        <table className="w-full table-fixed text-sm text-slate-700">
+      <div className="overflow-x-auto md:overflow-hidden rounded-2xl border border-slate-200">
+        <table className="w-full table-fixed text-sm text-slate-700 min-w-[640px]">
           <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
             <tr>
               {showReferenceColumn ? (
@@ -1634,8 +1634,8 @@ const renderMarketVerifiedRecordSection = (rows) => (
         const visibleRows = paginateRows(rows, sectionPages[pageKey]);
         return (
           <>
-            <div className="overflow-hidden rounded-2xl border border-slate-200">
-              <table className="w-full table-fixed text-sm text-slate-700">
+            <div className="overflow-x-auto md:overflow-hidden rounded-2xl border border-slate-200">
+              <table className="w-full table-fixed text-sm text-slate-700 min-w-[640px]">
                   <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
                     <tr>
                       <th className="whitespace-nowrap px-4 py-3.5 text-left w-[10%]">Certificate No.</th>
@@ -1786,8 +1786,8 @@ const renderMarketVerifiedRecordSection = (rows) => (
         const visibleRows = paginateRows(rows, sectionPages[pageKey]);
         return (
           <>
-      <div className="overflow-hidden rounded-2xl border border-slate-200">
-        <table className="w-full table-fixed text-sm text-slate-700">
+      <div className="overflow-x-auto md:overflow-hidden rounded-2xl border border-slate-200">
+        <table className="w-full table-fixed text-sm text-slate-700 min-w-[640px]">
           <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
             <tr>
               <th className="whitespace-nowrap px-4 py-3.5 text-left w-[10%]">Request ID</th>
@@ -1907,7 +1907,7 @@ const handleCancelScan = () => {
         </div>
       )}
 
-      <div className="grid lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-xl shadow p-6">
           <h2 className="text-xl font-bold text-gray-900 mb-4">Upload Receipt Image</h2>
           <div className="mb-4">
@@ -1959,7 +1959,7 @@ const handleCancelScan = () => {
               <div className="bg-gray-50 rounded-lg p-4 text-sm text-gray-700">
                 Category: {ocrDraft.category || selectedCategory}
               </div>
-              <div className="grid md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="bg-gray-50 rounded-lg p-4 text-sm text-gray-700">
                   <span className="font-semibold">Detected Category:</span> {effectiveDetectedCategory || 'Unknown'}
                 </div>
@@ -2022,7 +2022,7 @@ const handleCancelScan = () => {
                   </button>
                 </div>
               )}
-              <div className="grid md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {isCtcReceiptCategory ? (
                   <div className="md:col-span-2">
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Date</label>
@@ -2230,7 +2230,7 @@ const handleCancelScan = () => {
                     </div>
                   </div>
 
-                  <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-3">
                     {[
                       ['Taxpayer', request.taxpayerName || 'N/A'],
                       ['Tax Type', getBranchTaxDisplayName(request.taxType)],
@@ -2431,7 +2431,7 @@ const handleCancelScan = () => {
               </button>
             </div>
 
-            <div className="grid gap-6 px-6 py-6 md:grid-cols-2">
+            <div className="grid grid-cols-1 gap-6 px-6 py-6 md:grid-cols-2">
               {[
                 ['Taxpayer', selectedCompletedRequest.taxpayerName],
                 ['Tax Type', getBranchTaxDisplayName(selectedCompletedRequest.taxType)],

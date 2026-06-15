@@ -46,7 +46,7 @@ function ModalShell({ eyebrow, title, onClose, closeDisabled, children }) {
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
-        <div className="sticky top-0 bg-white border-b border-gray-200 px-8 py-5 flex items-center justify-between rounded-t-xl">
+        <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 md:px-8 md:py-5 flex items-center justify-between rounded-t-xl">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">{eyebrow}</p>
             <h3 className="text-xl font-bold text-gray-900 mt-0.5">{title}</h3>
@@ -59,7 +59,7 @@ function ModalShell({ eyebrow, title, onClose, closeDisabled, children }) {
             </button>
           )}
         </div>
-        <div className="px-8 py-6">{children}</div>
+        <div className="px-6 py-5 md:px-8 md:py-6">{children}</div>
       </div>
     </div>
   );
@@ -225,12 +225,12 @@ function EditProfileModal({ open, profile, onClose, onSuccess }) {
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
         <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl">
           {/* Header */}
-          <div className="border-b border-gray-200 px-8 py-5 rounded-t-xl">
+          <div className="border-b border-gray-200 px-6 py-4 md:px-8 md:py-5 rounded-t-xl">
             <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">Account Settings</p>
             <h3 className="text-xl font-bold text-gray-900 mt-0.5">Confirm Profile Changes</h3>
           </div>
 
-          <div className="px-8 py-6 space-y-6">
+          <div className="px-6 py-5 md:px-8 md:py-6 space-y-6">
             <p className="text-sm text-gray-600">
               Please review the following changes before proceeding:
             </p>
@@ -616,11 +616,11 @@ function ResetMFAModal({ open, onClose, onSuccess }) {
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
         <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-          <div className="sticky top-0 bg-white border-b border-gray-200 px-8 py-5 rounded-t-xl">
+          <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 md:px-8 md:py-5 rounded-t-xl">
             <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">MFA Setup</p>
             <h3 className="text-xl font-bold text-gray-900 mt-0.5">Configure Authenticator</h3>
           </div>
-          <div className="px-8 py-6 space-y-5">
+          <div className="px-6 py-5 md:px-8 md:py-6 space-y-5">
             <ol className="space-y-1 text-sm text-gray-600 list-decimal list-inside">
               <li>Open your authenticator application.</li>
               <li>Scan the QR Code below.</li>
@@ -917,13 +917,14 @@ const WindowStaffAccount = () => {
       {isBranchAdmin && (
         <div className="mt-8">
           <h3 className="text-lg font-bold text-gray-900 mb-4">Branch Staff Management</h3>
-          <div className="bg-white rounded-xl shadow-md overflow-hidden">
+          <div className="bg-white rounded-xl shadow-md overflow-x-auto">
             {loadingStaff ? (
               <div className="p-8 text-center text-gray-500">Loading staff list...</div>
             ) : branchStaff.length === 0 ? (
               <div className="p-8 text-center text-gray-500">No staff members found in this branch.</div>
             ) : (
-              <table className="w-full text-sm">
+              <div className="overflow-x-auto rounded-2xl border border-gray-200 md:overflow-hidden">
+              <table className="w-full text-sm min-w-[600px]">
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="text-left px-6 py-3 font-semibold text-gray-600">Name</th>
@@ -954,6 +955,7 @@ const WindowStaffAccount = () => {
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
         </div>

@@ -500,8 +500,8 @@ const Dashboard = () => {
         )}
       </div>
 
-      <div className="mb-8 grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-xl bg-gradient-to-br from-orange-500 to-orange-600 p-6 text-white shadow-lg">
+      <div className="mb-8 flex md:grid overflow-x-auto md:overflow-visible snap-x snap-mandatory gap-6 md:grid-cols-2 lg:grid-cols-4">
+        <div className="w-[85%] md:w-auto flex-shrink-0 snap-center rounded-xl bg-gradient-to-br from-orange-500 to-orange-600 p-6 text-white shadow-lg">
           <div className="flex items-center justify-between">
             <div>
               <p className="mb-1 text-sm text-orange-100">Clients Waiting</p>
@@ -520,7 +520,7 @@ const Dashboard = () => {
           </div>
         </div>
 
-        <div className="rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 p-6 text-white shadow-lg">
+        <div className="w-[85%] md:w-auto flex-shrink-0 snap-center rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 p-6 text-white shadow-lg">
           <div className="flex items-center justify-between">
             <div>
               <p className="mb-1 text-sm text-blue-100">Being Served</p>
@@ -539,7 +539,7 @@ const Dashboard = () => {
           </div>
         </div>
 
-        <div className="rounded-xl bg-gradient-to-br from-green-500 to-green-600 p-6 text-white shadow-lg">
+        <div className="w-[85%] md:w-auto flex-shrink-0 snap-center rounded-xl bg-gradient-to-br from-green-500 to-green-600 p-6 text-white shadow-lg">
           <div className="flex items-center justify-between">
             <div>
               <p className="mb-1 text-sm text-green-100">Completed Today</p>
@@ -558,7 +558,7 @@ const Dashboard = () => {
           </div>
         </div>
 
-        <div className="rounded-xl bg-gradient-to-br from-purple-500 to-purple-600 p-6 text-white shadow-lg">
+        <div className="w-[85%] md:w-auto flex-shrink-0 snap-center rounded-xl bg-gradient-to-br from-purple-500 to-purple-600 p-6 text-white shadow-lg">
           <div className="flex items-center justify-between">
             <div>
               <p className="mb-1 text-sm text-purple-100">Active Branches</p>
@@ -619,8 +619,8 @@ const Dashboard = () => {
 
       <div className="mb-6 rounded-xl bg-white p-6 shadow-lg">
         <h3 className="mb-4 text-xl font-bold text-primary">Branch Queue Activity</h3>
-        <div className="overflow-hidden">
-          <table className="w-full table-auto">
+        <div className="overflow-x-auto md:overflow-hidden">
+          <table className="w-full table-auto min-w-[600px]">
             <thead>
               <tr className="bg-gray-50">
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
@@ -690,26 +690,26 @@ const Dashboard = () => {
             {recentPayments.length} recent records
           </span>
         </div>
-        <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-4">
-          <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4">
+        <div className="mb-6 flex md:grid overflow-x-auto md:overflow-visible snap-x snap-mandatory gap-4 md:grid-cols-4">
+          <div className="w-[85%] md:w-auto flex-shrink-0 snap-center rounded-2xl border border-blue-100 bg-blue-50 p-4">
             <p className="mb-1 text-sm font-medium text-slate-600">Total Payments Today</p>
             <p className="text-3xl font-black text-blue-600">
               {formatCurrency(stats?.payments?.total_amount)}
             </p>
           </div>
-          <div className="rounded-2xl border border-amber-100 bg-amber-50 p-4">
+          <div className="w-[85%] md:w-auto flex-shrink-0 snap-center rounded-2xl border border-amber-100 bg-amber-50 p-4">
             <p className="mb-1 text-sm font-medium text-slate-600">Pending Verification</p>
             <p className="text-3xl font-black text-amber-600">
               {stats?.payments?.pending_count || 0}
             </p>
           </div>
-          <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
+          <div className="w-[85%] md:w-auto flex-shrink-0 snap-center rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
             <p className="mb-1 text-sm font-medium text-slate-600">Confirmed</p>
             <p className="text-3xl font-black text-emerald-600">
               {stats?.payments?.confirmed_count || 0}
             </p>
           </div>
-          <div className="rounded-2xl border border-rose-100 bg-rose-50 p-4">
+          <div className="w-[85%] md:w-auto flex-shrink-0 snap-center rounded-2xl border border-rose-100 bg-rose-50 p-4">
             <p className="mb-1 text-sm font-medium text-slate-600">Failed</p>
             <p className="text-3xl font-black text-rose-600">
               {stats?.payments?.failed_count || 0}
@@ -726,15 +726,15 @@ const Dashboard = () => {
                     <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Branch Collection</p>
                     <h4 className="mt-1 text-lg font-black text-[#0f2f5f]">{branchGroup.branchName}</h4>
                   </div>
-                  <div className="grid grid-cols-2 gap-2 text-xs font-bold text-slate-600 sm:grid-cols-4">
+                  <div className="grid grid-cols-1 gap-2 text-xs font-bold text-slate-600 sm:grid-cols-4">
                     <span className="rounded-full bg-white px-3 py-2 ring-1 ring-slate-200">{branchGroup.payments.length} records</span>
                     <span className="rounded-full bg-white px-3 py-2 ring-1 ring-slate-200">{formatCurrency(branchGroup.totalAmount)}</span>
                     <span className="rounded-full bg-emerald-50 px-3 py-2 text-emerald-700 ring-1 ring-emerald-100">{branchGroup.verifiedCount} verified</span>
                     <span className="rounded-full bg-amber-50 px-3 py-2 text-amber-700 ring-1 ring-amber-100">{branchGroup.pendingCount} pending</span>
                   </div>
                 </div>
-                <div className="overflow-hidden">
-                  <table className="w-full table-auto">
+                <div className="overflow-x-auto md:overflow-hidden">
+                  <table className="w-full table-auto min-w-[600px]">
                     <thead>
                       <tr className="bg-white">
                         <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Transaction ID</th>
@@ -842,16 +842,16 @@ const Dashboard = () => {
           </div>
         )}
 
-        <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
-          <div className="rounded-lg bg-yellow-50 p-4">
+        <div className="mb-6 flex md:grid overflow-x-auto md:overflow-visible snap-x snap-mandatory gap-4 md:grid-cols-3">
+          <div className="w-[85%] md:w-auto flex-shrink-0 snap-center rounded-lg bg-yellow-50 p-4">
             <p className="text-sm text-gray-600">Pending Review</p>
             <p className="mt-2 text-2xl font-bold text-yellow-700">{pendingDiscrepancies}</p>
           </div>
-          <div className="rounded-lg bg-green-50 p-4">
+          <div className="w-[85%] md:w-auto flex-shrink-0 snap-center rounded-lg bg-green-50 p-4">
             <p className="text-sm text-gray-600">Verified Reports</p>
             <p className="mt-2 text-2xl font-bold text-green-700">{verifiedDiscrepancies}</p>
           </div>
-          <div className="rounded-lg bg-blue-50 p-4">
+          <div className="w-[85%] md:w-auto flex-shrink-0 snap-center rounded-lg bg-blue-50 p-4">
             <p className="text-sm text-gray-600">Submitted While Offline</p>
             <p className="mt-2 text-2xl font-bold text-blue-700">{offlineDiscrepancies}</p>
           </div>
@@ -860,8 +860,8 @@ const Dashboard = () => {
         {recentDiscrepancies.length === 0 ? (
           <p className="py-8 text-center text-gray-500">No discrepancy reports submitted yet.</p>
         ) : (
-          <div className="overflow-hidden">
-            <table className="w-full table-auto text-sm">
+          <div className="overflow-x-auto md:overflow-hidden">
+            <table className="w-full table-auto text-sm min-w-[600px]">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-4 py-3 text-left">Report ID</th>
@@ -941,7 +941,7 @@ const Dashboard = () => {
               </div>
 
               <div className="overflow-y-auto bg-slate-50 p-6 sm:p-8">
-                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
                   <DiscrepancyInfoCard label="Branch" value={selectedDiscrepancy.branch_name} tone="blue" helper="Origin of the discrepancy report." />
                   <DiscrepancyInfoCard
                     label="Submitted By"
@@ -969,7 +969,7 @@ const Dashboard = () => {
                       title="Original Report Details"
                       description="What was reported, who submitted it, and the primary discrepancy context."
                     >
-                      <div className="grid gap-4 md:grid-cols-2">
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                         <DiscrepancyInfoCard label="Discrepancy Type" value={selectedDiscrepancy.discrepancy_type || 'Not specified'} />
                         <DiscrepancyInfoCard label="Current Status" value={<DiscrepancyStatusBadge status={selectedDiscrepancy.status} />} />
                         <DiscrepancyInfoCard label="Submitted Offline" value={selectedDiscrepancy.submitted_offline ? 'Yes' : 'No'} />
@@ -993,7 +993,7 @@ const Dashboard = () => {
                         </button>
                       ) : null}
                     >
-                      <div className="grid gap-4 md:grid-cols-2">
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                         <DiscrepancyInfoCard
                           label="Queue Number / Reference"
                           value={selectedDiscrepancy.supporting_documents || 'No queue or reference details supplied.'}

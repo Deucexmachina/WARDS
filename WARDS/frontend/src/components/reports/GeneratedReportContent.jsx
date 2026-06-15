@@ -73,8 +73,8 @@ const HeaderField = ({ label, value }) => (
   </div>
 );
 
-const KpiCard = ({ label, value, helper }) => (
-  <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+const KpiCard = ({ label, value, helper, className = '' }) => (
+  <div className={`rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ${className}`}>
     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{label}</p>
     <p className="mt-3 text-2xl font-bold text-slate-900">{value}</p>
     {helper ? <p className="mt-2 text-sm text-slate-500">{helper}</p> : null}
@@ -207,7 +207,7 @@ const TrendLineChart = ({ points }) => {
           );
         })}
       </svg>
-      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-4">
         {points.slice(-4).map((point) => (
           <div key={point.date} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
             <p className="text-xs font-semibold text-slate-500">{formatUtc8Date(point.date, 'en-PH', { month: 'short', day: 'numeric' })}</p>
@@ -352,7 +352,7 @@ const DetailSectionCard = ({ section }) => (
           <h4 className="mt-3 text-lg font-bold leading-snug text-slate-900">{section.title}</h4>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">{section.subtitle}</p>
         </div>
-        <div className={`grid gap-2 ${isQueueServiceSection(section.key) ? 'grid-cols-3' : 'grid-cols-2 sm:grid-cols-4'}`}>
+        <div className={`grid gap-2 ${isQueueServiceSection(section.key) ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2 md:grid-cols-4'}`}>
           <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-center shadow-sm">
             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Records</p>
             <p className="mt-1 text-base font-bold text-slate-900">{formatNumber(section.summary.totalRecords)}</p>
@@ -587,9 +587,9 @@ export default function GeneratedReportContent({ report, metrics, contextLabel =
         </div>
       </section>
 
-      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section className="flex md:grid overflow-x-auto md:overflow-visible snap-x snap-mandatory gap-4 md:grid-cols-2 xl:grid-cols-4">
         {buildTopKpis(report, metrics).map((card) => (
-          <KpiCard key={card.label} label={card.label} value={card.value} helper={card.helper} />
+          <KpiCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" key={card.label} label={card.label} value={card.value} helper={card.helper} />
         ))}
       </section>
 
@@ -659,15 +659,15 @@ export default function GeneratedReportContent({ report, metrics, contextLabel =
       </div>
 
       <ReportSection title="Operational Statistics" subtitle="Queue activity snapshots and branch workload trends captured during the reporting period.">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <KpiCard label="Activity Snapshots" value={formatNumber(operationalStats.total_snapshots)} helper="Recorded queue activity checkpoints" />
-          <KpiCard label="Avg Waiting" value={formatNumber(operationalStats.average_waiting)} helper="Average waiting clients per snapshot" />
-          <KpiCard label="Avg Serving" value={formatNumber(operationalStats.average_serving)} helper="Average active serving load per snapshot" />
-          <KpiCard label="Avg Completed" value={formatNumber(operationalStats.average_completed)} helper="Average completed clients per snapshot" />
-          <KpiCard label="Peak Waiting" value={formatNumber(operationalStats.peak_waiting)} helper="Highest waiting count recorded" />
-          <KpiCard label="Peak Serving" value={formatNumber(operationalStats.peak_serving)} helper="Highest active serving count recorded" />
-          <KpiCard label="Peak Completed" value={formatNumber(operationalStats.peak_completed)} helper="Highest completed count recorded" />
-          <KpiCard label="Latest Snapshot" value={operationalStats.latest_snapshot_at ? formatUtc8DateTime(operationalStats.latest_snapshot_at) : 'N/A'} helper="Most recent queue activity sample" />
+        <div className="flex md:grid overflow-x-auto md:overflow-visible snap-x snap-mandatory gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <KpiCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" label="Activity Snapshots" value={formatNumber(operationalStats.total_snapshots)} helper="Recorded queue activity checkpoints" />
+          <KpiCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" label="Avg Waiting" value={formatNumber(operationalStats.average_waiting)} helper="Average waiting clients per snapshot" />
+          <KpiCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" label="Avg Serving" value={formatNumber(operationalStats.average_serving)} helper="Average active serving load per snapshot" />
+          <KpiCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" label="Avg Completed" value={formatNumber(operationalStats.average_completed)} helper="Average completed clients per snapshot" />
+          <KpiCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" label="Peak Waiting" value={formatNumber(operationalStats.peak_waiting)} helper="Highest waiting count recorded" />
+          <KpiCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" label="Peak Serving" value={formatNumber(operationalStats.peak_serving)} helper="Highest active serving count recorded" />
+          <KpiCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" label="Peak Completed" value={formatNumber(operationalStats.peak_completed)} helper="Highest completed count recorded" />
+          <KpiCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" label="Latest Snapshot" value={operationalStats.latest_snapshot_at ? formatUtc8DateTime(operationalStats.latest_snapshot_at) : 'N/A'} helper="Most recent queue activity sample" />
         </div>
       </ReportSection>
 

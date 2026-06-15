@@ -152,8 +152,8 @@ const BranchActivityLogs = () => {
           <div className="m-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
         ) : logs.length ? (
           <>
-            <div className="rounded-xl border border-slate-200 overflow-hidden">
-              <table className="w-full table-auto text-sm">
+            <div className="overflow-x-auto rounded-xl border border-slate-200 md:overflow-hidden">
+              <table className="w-full table-auto text-sm min-w-[700px]">
                 <thead className="bg-slate-50">
                   <tr>
                     {['Log Title', 'Activity Type', 'Branch', 'Email/User', 'Role', 'IP', 'Action', 'Date'].map((heading) => (

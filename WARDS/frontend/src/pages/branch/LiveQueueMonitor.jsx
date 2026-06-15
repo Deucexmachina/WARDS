@@ -204,7 +204,7 @@ const LiveQueueMonitor = () => {
   if (error) {
     return (
       <div className="flex h-screen items-center justify-center bg-gradient-to-br from-red-50 to-slate-100">
-        <div className="rounded-3xl bg-white p-12 shadow-2xl">
+        <div className="rounded-3xl bg-white p-6 md:p-12 shadow-2xl">
           <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-red-100">
             <svg className="h-10 w-10 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
@@ -314,7 +314,7 @@ const LiveQueueMonitor = () => {
             
             if (windowCount === 0) {
               return (
-                <div className="rounded-2xl bg-white p-12 text-center shadow-xl">
+                <div className="rounded-2xl bg-white p-6 md:p-12 text-center shadow-xl">
                   <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-gray-100">
                     <svg className="h-10 w-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path>

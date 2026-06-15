@@ -111,7 +111,7 @@ const BranchLoginV2 = () => {
       <div className="w-full max-w-4xl bg-white rounded-3xl shadow-2xl overflow-hidden flex min-h-[560px]">
 
         {/* Left — Login Form */}
-        <div className="flex flex-col justify-center w-full md:w-1/2 px-10 py-12">
+        <div className="flex flex-col justify-center w-full md:w-1/2 px-6 py-8 md:px-10 md:py-12">
           {/* Header */}
           <div className="mb-8">
             <span className="inline-block bg-purple-100 text-purple-700 text-xs font-semibold tracking-widest uppercase px-3 py-1 rounded-full mb-3">
