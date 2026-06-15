@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import api from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
+import { CustomDatePicker } from '../../components/FormControls';
 import WardsPageHero from '../../components/WardsPageHero';
 
 const typeColors = {
@@ -112,22 +113,18 @@ const BranchActivityLogs = () => {
           </div>
           <div>
             <label className="block text-gray-700 font-semibold mb-2">Date From</label>
-            <input
-              type="date"
+            <CustomDatePicker
               name="dateFrom"
               value={filters.dateFrom}
               onChange={handleFilterChange}
-              className="w-full rounded-lg border border-gray-300 px-4 py-3 focus:ring-2 focus:ring-accent focus:border-transparent"
             />
           </div>
           <div>
             <label className="block text-gray-700 font-semibold mb-2">Date To</label>
-            <input
-              type="date"
+            <CustomDatePicker
               name="dateTo"
               value={filters.dateTo}
               onChange={handleFilterChange}
-              className="w-full rounded-lg border border-gray-300 px-4 py-3 focus:ring-2 focus:ring-accent focus:border-transparent"
             />
           </div>
           <div className="flex items-end">

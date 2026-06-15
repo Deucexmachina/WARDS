@@ -3,7 +3,7 @@ import { branchSettingsAPI } from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 import ActionConfirmationModal from '../../components/ActionConfirmationModal';
-import { CustomSelect } from '../../components/FormControls';
+import { CustomSelect, CustomDatePicker } from '../../components/FormControls';
 import { useUnsavedChanges } from '../../contexts/UnsavedChangesContext';
 
 const PAGE_SIZE = 5;
@@ -947,7 +947,7 @@ const BranchSettings = () => {
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[170px_220px_1fr]">
                     <div>
                       <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">Date</label>
-                      <input type="date" min={todayDate} value={override.date} disabled={!isBranchAdmin} onChange={(event) => updateOverride(index, 'date', event.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:bg-gray-100 disabled:opacity-70" />
+                      <CustomDatePicker min={todayDate} value={override.date} disabled={!isBranchAdmin} onChange={(event) => updateOverride(index, 'date', event.target.value)} />
                     </div>
                     <div>
                       <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">Status</label>
@@ -1040,13 +1040,11 @@ const BranchSettings = () => {
               <div className="rounded-lg bg-gray-50 p-4 space-y-3">
                 <div>
                   <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">Draft Effective Date</label>
-                  <input
-                    type="date"
+                  <CustomDatePicker
                     min={todayDate}
                     value={schedule.effective_date}
                     disabled={!isBranchAdmin}
                     onChange={(event) => setSchedule((current) => ({ ...current, effective_date: event.target.value }))}
-                    className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm disabled:bg-gray-100 disabled:opacity-70"
                   />
                 </div>
                 <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../../services/api';
 import WardsPageHero from '../../components/WardsPageHero';
-import { CustomSelect } from '../../components/FormControls';
+import { CustomSelect, CustomDatePicker } from '../../components/FormControls';
 
 const PAYMENT_TIME_ZONE = 'Asia/Manila';
 const TRANSACTIONS_PER_PAGE = 5;
@@ -1496,22 +1496,18 @@ const PaymentManagement = () => {
           </div>
           <div>
             <label className="mb-2 block text-sm font-semibold text-slate-700">Date From</label>
-            <input
-              type="date"
+            <CustomDatePicker
               max={draftFilters.dateTo || undefined}
               value={draftFilters.dateFrom}
               onChange={(event) => updateDraftFilter('dateFrom', event.target.value)}
-              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm shadow-sm focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-slate-200"
             />
           </div>
           <div>
             <label className="mb-2 block text-sm font-semibold text-slate-700">Date To</label>
-            <input
-              type="date"
+            <CustomDatePicker
               min={draftFilters.dateFrom || undefined}
               value={draftFilters.dateTo}
               onChange={(event) => updateDraftFilter('dateTo', event.target.value)}
-              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm shadow-sm focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-slate-200"
             />
           </div>
           <div>

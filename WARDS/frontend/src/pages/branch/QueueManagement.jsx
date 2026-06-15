@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState, useRef } from 'react';
 import api, { receiptAPI } from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
-import { CustomSelect } from '../../components/FormControls';
+import { CustomSelect, CustomDatePicker } from '../../components/FormControls';
 import { isAnnouncementActive } from '../../utils/queueAnnouncement';
 
 const PAGE_SIZE = 5;
@@ -1215,12 +1215,10 @@ const CompletedTransactionsSection = ({
               placeholder="Filter by served by"
               className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700 outline-none placeholder:text-slate-400 focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
             />
-            <input
-              type="date"
+            <CustomDatePicker
               value={filters.completionDate}
               onChange={(event) => handleFilterChange('completionDate', event.target.value)}
               max={maxCompletionDate}
-              className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700 outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
             />
             <CustomSelect value={filters.status} onChange={(value) => handleFilterChange('status', value)} options={[{ value: 'all', label: 'All statuses' }, { value: 'completed', label: 'Completed' }, { value: 'skipped', label: 'Skipped' }]} placeholder="All statuses" />
           </div>
@@ -2531,7 +2529,7 @@ const QueueManagement = () => {
         <div className="mt-5 grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-4">
           <CustomSelect value={queueTypeFilter} onChange={(value) => setQueueTypeFilter(value)} options={[{ value: 'all', label: 'All queue types' }, { value: 'immediate', label: 'Immediate' }, { value: 'appointment', label: 'Appointment' }]} placeholder="All queue types" />
           <CustomSelect value={statusFilter} onChange={(value) => setStatusFilter(value)} options={[{ value: 'all', label: 'All statuses' }, { value: 'appointment', label: 'Appointment' }, { value: 'waiting', label: 'Waiting' }, { value: 'called', label: 'Called' }, { value: 'serving', label: 'Serving' }, { value: 'completed', label: 'Completed' }, { value: 'skipped', label: 'Skipped' }]} placeholder="All statuses" />
-          <input type="date" value={dateFilter} onChange={(event) => setDateFilter(event.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none" />
+          <CustomDatePicker value={dateFilter} onChange={(event) => setDateFilter(event.target.value)} />
           <input type="time" value={timeSlotFilter} onChange={(event) => setTimeSlotFilter(event.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none" />
           <CustomSelect value={serviceTypeFilter} onChange={(value) => setServiceTypeFilter(value)} options={[{ value: 'all', label: 'All services' }, ...serviceTypes.map((serviceType) => ({ value: serviceType, label: serviceType }))]} placeholder="All services" />
           {isMonitorOnlyRole ? (
@@ -2974,14 +2972,12 @@ const QueueManagement = () => {
                   {completionReceiptCategory === 'CTC' ? (
                     <label className="block md:col-span-2">
                       <span className="mb-2 block text-sm font-semibold text-slate-700">Date</span>
-                      <input
+                      <CustomDatePicker
                         name="transaction_date"
-                        type="date"
                         min={getTodayDateInputValue()}
                         max={getTodayDateInputValue()}
                         value={formatDateInputValue(receiptDraft.transaction_date || getTodayDateInputValue())}
-                        readOnly
-                        className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none"
+                        disabled
                       />
                     </label>
                   ) : (
@@ -3068,16 +3064,12 @@ const QueueManagement = () => {
                           </label>
                           <label className="block">
                             <span className="mb-2 block text-sm font-semibold text-slate-700">Valid Until</span>
-                            <input
+                            <CustomDatePicker
                               name="market_valid_until"
-                              type="date"
                               min={getTodayDateInputValue()}
                               value={formatDateInputValue(receiptDraft.market_valid_until)}
                               onChange={handleMarketDateChange}
-                              aria-invalid={receiptDraftMissingFields.includes('market_valid_until') ? 'true' : 'false'}
-                              className={`w-full rounded-xl border px-4 py-3 text-sm outline-none ${
-                                receiptDraftMissingFields.includes('market_valid_until') ? 'border-red-500 bg-red-50' : 'border-slate-300'
-                              }`}
+                              hasError={receiptDraftMissingFields.includes('market_valid_until')}
                             />
                             {receiptDraftMissingFields.includes('market_valid_until') ? (
                               <p className="mt-1 text-xs font-semibold text-red-600">{getReceiptFieldLabel('market_valid_until', receiptDraftCategory)} could not be extracted. Please enter a value.</p>

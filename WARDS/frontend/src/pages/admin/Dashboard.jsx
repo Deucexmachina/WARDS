@@ -4,7 +4,7 @@ import { discrepancyAPI } from '../../services/api';
 import { formatUtc8DateTime, formatUtc8Time } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
-import { CustomSelect } from '../../components/FormControls';
+import { CustomSelect, CustomDatePicker } from '../../components/FormControls';
 import {
   DiscrepancyInfoCard,
   DiscrepancySection,
@@ -403,11 +403,9 @@ const Dashboard = () => {
                 <label className="mb-1 block text-sm font-medium text-gray-700">
                   Date From
                 </label>
-                <input
-                  type="date"
+                <CustomDatePicker
                   value={dateFrom}
                   onChange={(e) => setDateFrom(e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-accent"
                 />
               </div>
 
@@ -415,11 +413,9 @@ const Dashboard = () => {
                 <label className="mb-1 block text-sm font-medium text-gray-700">
                   Date To
                 </label>
-                <input
-                  type="date"
+                <CustomDatePicker
                   value={dateTo}
                   onChange={(e) => setDateTo(e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-accent"
                 />
               </div>
 

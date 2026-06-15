@@ -5,7 +5,7 @@ import { formatUtc8Date, formatUtc8DateTime } from '../../utils/dateTime';
 import GeneratedReportContent from '../../components/reports/GeneratedReportContent';
 import WardsPageHero from '../../components/WardsPageHero';
 import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
-import { CustomSelect } from '../../components/FormControls';
+import { CustomSelect, CustomDatePicker } from '../../components/FormControls';
 import {
   applyAdminReportViewedState,
   BRANCH_REPORT_VIEWED_EVENT,
@@ -468,12 +468,12 @@ const Reports = () => {
 
           <div>
             <label className="mb-2 block text-sm font-semibold text-slate-700">Date From</label>
-            <input type="date" name="date_from" max={filters.date_to || undefined} value={filters.date_from} onChange={handleFilterChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm" />
+            <CustomDatePicker name="date_from" max={filters.date_to || undefined} value={filters.date_from} onChange={handleFilterChange} />
           </div>
 
           <div>
             <label className="mb-2 block text-sm font-semibold text-slate-700">Date To</label>
-            <input type="date" name="date_to" min={filters.date_from || undefined} value={filters.date_to} onChange={handleFilterChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm" />
+            <CustomDatePicker name="date_to" min={filters.date_from || undefined} value={filters.date_to} onChange={handleFilterChange} />
           </div>
         </div>
 

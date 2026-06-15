@@ -4,7 +4,7 @@ import { receiptAPI } from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
-import { CustomSelect } from '../../components/FormControls';
+import { CustomSelect, CustomDatePicker } from '../../components/FormControls';
 import ProcessingModal from '../../components/ProcessingModal';
 import { useUnsavedChanges } from '../../contexts/UnsavedChangesContext';
 
@@ -2015,14 +2015,12 @@ const handleCancelScan = () => {
                 {isCtcReceiptCategory ? (
                   <div className="md:col-span-2">
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Date</label>
-                    <input
+                    <CustomDatePicker
                       name="transaction_date"
-                      type="date"
                       min={getTodayDateInputValue()}
                       max={getTodayDateInputValue()}
                       value={formatDateInputValue(ocrDraft.transaction_date || getTodayDateInputValue())}
-                      readOnly
-                      className="w-full px-4 py-2 border rounded-lg bg-gray-50 text-gray-800"
+                      disabled
                     />
                   </div>
                 ) : (
@@ -2111,16 +2109,12 @@ const handleCancelScan = () => {
                         </div>
                         <div>
                           <label className="block text-sm font-semibold text-gray-700 mb-1">Valid Until</label>
-                          <input
+                          <CustomDatePicker
                             name="market_valid_until"
-                            type="date"
                             min={getTodayDateInputValue()}
                             value={formatDateInputValue(ocrDraft.market_valid_until)}
                             onChange={handleMarketDateChange}
-                            aria-invalid={missingRequiredFields.includes('market_valid_until') ? 'true' : 'false'}
-                            className={`w-full px-4 py-2 border rounded-lg ${
-                              missingRequiredFields.includes('market_valid_until') ? 'border-red-500 bg-red-50' : 'border-gray-300'
-                            }`}
+                            hasError={missingRequiredFields.includes('market_valid_until')}
                           />
                           {missingRequiredFields.includes('market_valid_until') ? (
                             <p className="mt-1 text-xs font-semibold text-red-600">{getReceiptFieldLabel('market_valid_until', effectiveSelectedCategory)} could not be extracted. Please enter a value.</p>

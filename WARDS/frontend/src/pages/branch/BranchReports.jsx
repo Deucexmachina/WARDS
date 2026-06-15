@@ -5,7 +5,7 @@ import { formatUtc8Date, formatUtc8DateTime } from '../../utils/dateTime';
 import GeneratedReportContent from '../../components/reports/GeneratedReportContent';
 import WardsPageHero from '../../components/WardsPageHero';
 import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
-import { CustomSelect } from '../../components/FormControls';
+import { CustomSelect, CustomDatePicker } from '../../components/FormControls';
 import {
   applyBranchReportViewedState,
   BRANCH_REPORT_VIEWED_EVENT,
@@ -421,23 +421,19 @@ const BranchReports = () => {
 
             <div>
               <label className="mb-2 block text-sm font-semibold text-slate-700">Date From</label>
-              <input
-                type="date"
+              <CustomDatePicker
                 max={filters.dateTo || undefined}
                 value={filters.dateFrom}
                 onChange={(event) => setFilters((current) => ({ ...current, dateFrom: event.target.value }))}
-                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
               />
             </div>
 
             <div>
               <label className="mb-2 block text-sm font-semibold text-slate-700">Date To</label>
-              <input
-                type="date"
+              <CustomDatePicker
                 min={filters.dateFrom || undefined}
                 value={filters.dateTo}
                 onChange={(event) => setFilters((current) => ({ ...current, dateTo: event.target.value }))}
-                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
               />
             </div>
           </div>
