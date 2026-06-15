@@ -2973,7 +2973,11 @@ async def get_all_payments(branch: str = None, db: Session = Depends(get_db)):
 
 
 @router.put("/{payment_id}/verify")
-async def verify_payment_by_id(payment_id: int, db: Session = Depends(get_db)):
+async def verify_payment_by_id(
+    payment_id: int,
+    db: Session = Depends(get_db),
+    current_admin=Depends(require_main_admin()),
+):
     payment = db.query(Payment).filter(Payment.id == payment_id).first()
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
@@ -3009,8 +3013,8 @@ async def verify_payment_by_id(payment_id: int, db: Session = Depends(get_db)):
 
     db.add(ActivityLog(
         action="Payment Verified",
-        user="branch_admin",
-        details=f"Payment {payment.ref_number} verified by branch admin",
+        user=current_admin.username,
+        details=f"Payment {payment.ref_number} verified by admin",
         type="transaction",
     ))
     db.commit()
@@ -3019,7 +3023,11 @@ async def verify_payment_by_id(payment_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/{payment_id}/decline")
-async def decline_payment(payment_id: int, db: Session = Depends(get_db)):
+async def decline_payment(
+    payment_id: int,
+    db: Session = Depends(get_db),
+    current_admin=Depends(require_main_admin()),
+):
     payment = db.query(Payment).filter(Payment.id == payment_id).first()
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
@@ -3039,8 +3047,8 @@ async def decline_payment(payment_id: int, db: Session = Depends(get_db)):
             apply_business_tax_application_security_fields(application)
     db.add(ActivityLog(
         action="Payment Declined",
-        user="branch_admin",
-        details=f"Payment {payment.ref_number} declined by branch admin",
+        user=current_admin.username,
+        details=f"Payment {payment.ref_number} declined by admin",
         type="transaction",
     ))
     db.commit()
@@ -3053,6 +3061,7 @@ async def request_payment_clarification(
     payment_id: int,
     remarks: str = Form(""),
     db: Session = Depends(get_db),
+    current_admin=Depends(require_main_admin()),
 ):
     payment = db.query(Payment).filter(Payment.id == payment_id).first()
     if not payment:
@@ -3074,7 +3083,7 @@ async def request_payment_clarification(
     apply_payment_security(payment)
     db.add(ActivityLog(
         action="Payment Clarification Requested",
-        user="branch_admin",
+        user=current_admin.username,
         details=f"Clarification requested for {payment.ref_number}",
         type="transaction",
     ))
@@ -3557,7 +3566,11 @@ async def check_paymongo_status(ref_number: str, db: Session = Depends(get_db)):
 
 
 @router.delete("/{payment_id}")
-async def delete_payment(payment_id: int, db: Session = Depends(get_db)):
+async def delete_payment(
+    payment_id: int,
+    db: Session = Depends(get_db),
+    current_admin=Depends(require_main_admin()),
+):
     payment = db.query(Payment).filter(Payment.id == payment_id).first()
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
@@ -3568,8 +3581,8 @@ async def delete_payment(payment_id: int, db: Session = Depends(get_db)):
     db.delete(payment)
     db.add(ActivityLog(
         action="Payment Deleted",
-        user="branch_personnel",
-        details=f"Payment {ref_number} for {taxpayer_name} was deleted",
+        user=current_admin.username,
+        details=f"Payment {ref_number} for {taxpayer_name} was deleted by admin",
         type="transaction",
     ))
     db.commit()

@@ -383,7 +383,10 @@ const PaymentManagement = () => {
 
   const handleVerifyPayment = async (paymentId) => {
     try {
-      await axios.put(`${API_BASE_URL}/payments/${paymentId}/verify`);
+      const token = localStorage.getItem('adminToken');
+      await axios.put(`${API_BASE_URL}/payments/${paymentId}/verify`, {}, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       window.dispatchEvent(new CustomEvent('receipt-payment-updated', { detail: { action: 'verified', paymentId } }));
       window.dispatchEvent(new CustomEvent('branch-payment-updated', { detail: { action: 'verified', paymentId } }));
       setMessageModal({
