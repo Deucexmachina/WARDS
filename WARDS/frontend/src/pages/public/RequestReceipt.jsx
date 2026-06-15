@@ -541,30 +541,6 @@ const RequestReceipt = () => {
         description: text.openingPaymentWindowDescription,
       });
 
-      if (checkoutWindow) {
-        // Build loading page with safe DOM APIs — no blob URL, no document.write
-        const doc = checkoutWindow.document;
-        doc.title = text.requestFeeCheckout;
-
-        const style = doc.createElement('style');
-        style.textContent = 'body{font-family:Arial,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f8fafc;color:#1f2937;}';
-        doc.head.appendChild(style);
-
-        const container = doc.createElement('div');
-        container.style.cssText = 'text-align:center;max-width:420px;padding:24px;';
-
-        const heading = doc.createElement('h2');
-        heading.style.marginBottom = '12px';
-        heading.textContent = text.openingPaymentWindow;
-
-        const paragraph = doc.createElement('p');
-        paragraph.style.lineHeight = '1.5';
-        paragraph.textContent = text.openingPaymentWindowDescription;
-
-        container.appendChild(heading);
-        container.appendChild(paragraph);
-        doc.body.appendChild(container);
-      }
 
       const paymentContext = requestStatus || {};
       const checkoutCustomer = checkoutDetails.customer || paymentCustomer;
