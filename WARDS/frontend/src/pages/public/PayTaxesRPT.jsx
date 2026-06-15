@@ -297,6 +297,71 @@ const buildCartItemFromProperty = (property, branch, paymentOption) => {
   };
 };
 
+const BranchDropdown = ({ value, onChange, disabled, options, placeholder, error }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('touchstart', handleOutsideClick);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('touchstart', handleOutsideClick);
+    };
+  }, []);
+
+  const selectedLabel = options.find((o) => String(o.value) === String(value))?.label || '';
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen((o) => !o)}
+        className={`w-full flex items-center justify-between rounded-2xl border px-4 py-3 text-sm text-left transition outline-none
+          ${disabled ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' : 'bg-white border-slate-300 text-slate-800 hover:border-[#0f5b83] focus:border-[#0f5b83] focus:ring-2 focus:ring-[#0f5b83]/30'}
+          ${open && !disabled ? 'border-[#0f5b83] ring-2 ring-[#0f5b83]/30' : ''}
+          ${error && !disabled ? 'border-red-500 focus:border-red-500 focus:ring-red-500/30' : ''}`}
+      >
+        <span className={selectedLabel ? 'text-slate-800' : 'text-slate-400'}>
+          {selectedLabel || placeholder}
+        </span>
+        <svg
+          className={`w-4 h-4 text-slate-400 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
+          fill="none" stroke="currentColor" viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {open && !disabled && (
+        <div className="absolute left-0 right-0 z-50 mt-1 bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden">
+          <div className="max-h-56 overflow-y-auto">
+            {options.length === 0 ? (
+              <div className="px-4 py-3 text-sm text-slate-400">{placeholder}</div>
+            ) : (
+              options.map((option) => (
+                <button
+                  key={String(option.value)}
+                  type="button"
+                  onClick={() => { onChange(option.value); setOpen(false); }}
+                  className={`w-full text-left px-4 py-2.5 text-sm hover:bg-[#0f5b83]/10 hover:text-[#0f5b83] transition
+                    ${String(option.value) === String(value) ? 'bg-[#0f5b83]/10 text-[#0f5b83] font-semibold' : 'text-slate-700'}`}
+                >
+                  {option.label}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const PayTaxesRPT = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -991,10 +1056,10 @@ const PayTaxesRPT = () => {
                         <label className="mb-2 block text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
                           {text.selectedBranch}
                         </label>
-                        <select
+                        <BranchDropdown
                           value={selectedBranchId}
-                          onChange={(event) => {
-                            setSelectedBranchId(event.target.value);
+                          onChange={(value) => {
+                            setSelectedBranchId(value);
                             setSearchedProperty(emptyPropertySearch);
                             setPendingProperty(null);
                             setSelectedPropertyIds([]);
@@ -1005,17 +1070,13 @@ const PayTaxesRPT = () => {
                             resetGeneratedPayment();
                           }}
                           disabled={isSystemDisabled || isBlockedByPendingPayment}
-                          className={`w-full rounded-2xl border px-4 py-3 text-sm text-slate-900 outline-none transition ${
-                            validationErrors.branch || isBranchSearchError ? 'border-red-500 focus:border-red-500' : 'border-slate-300 focus:border-[#0f5b83]'
-                          }`}
-                        >
-                          <option value="">{text.selectBranch}</option>
-                          {branches.map((branch) => (
-                            <option key={branch.id} value={branch.id}>
-                              {branch.name} - {branch.location}
-                            </option>
-                          ))}
-                        </select>
+                          options={[
+                            { value: '', label: text.selectBranch },
+                            ...branches.map((branch) => ({ value: String(branch.id), label: `${branch.name} - ${branch.location}` })),
+                          ]}
+                          placeholder={text.selectBranch}
+                          error={validationErrors.branch || isBranchSearchError}
+                        />
                       </div>
                     </div>
 

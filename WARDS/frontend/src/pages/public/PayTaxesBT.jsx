@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import PaymentGatewayExperience from '../../components/PaymentGatewayExperience';
 import { paymentAPI, taxpayerAccountAPI } from '../../services/api';
@@ -66,6 +66,69 @@ const getLocalizedBTMessage = (message, language) => {
   }
 
   return message;
+};
+
+const Dropdown = ({ value, onChange, options, placeholder }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('touchstart', handleOutsideClick);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('touchstart', handleOutsideClick);
+    };
+  }, []);
+
+  const selectedLabel = options.find((o) => String(o.value) === String(value))?.label || '';
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`w-full flex items-center justify-between rounded-2xl border px-4 py-3 text-sm text-left transition outline-none
+          bg-white border-slate-300 text-slate-800 hover:border-[#123f8f] focus:border-[#123f8f] focus:ring-2 focus:ring-[#123f8f]/30
+          ${open ? 'border-[#123f8f] ring-2 ring-[#123f8f]/30' : ''}`}
+      >
+        <span className={selectedLabel ? 'text-slate-800' : 'text-slate-400'}>
+          {selectedLabel || placeholder}
+        </span>
+        <svg
+          className={`w-4 h-4 text-slate-400 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
+          fill="none" stroke="currentColor" viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="absolute left-0 right-0 z-50 mt-1 bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden">
+          <div className="max-h-56 overflow-y-auto">
+            {options.length === 0 ? (
+              <div className="px-4 py-3 text-sm text-slate-400">{placeholder}</div>
+            ) : (
+              options.map((option) => (
+                <button
+                  key={String(option.value)}
+                  type="button"
+                  onClick={() => { onChange(option.value); setOpen(false); }}
+                  className={`w-full text-left px-4 py-2.5 text-sm hover:bg-[#123f8f]/10 hover:text-[#123f8f] transition
+                    ${String(option.value) === String(value) ? 'bg-[#123f8f]/10 text-[#123f8f] font-semibold' : 'text-slate-700'}`}
+                >
+                  {option.label}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 };
 
 const PayTaxesBT = () => {
@@ -594,27 +657,21 @@ const PayTaxesBT = () => {
                 <div className="grid gap-4 lg:grid-cols-[260px,240px,minmax(0,1fr),160px]">
                   <div>
                     <label className="mb-2 block text-sm font-semibold text-slate-700">{text.searchStatus}</label>
-                    <select
+                    <Dropdown
                       value={statusFilter}
-                      onChange={(event) => setStatusFilter(event.target.value)}
-                      className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm focus:border-[#123f8f] focus:outline-none"
-                    >
-                      {localizedStatusOptions.map((option) => (
-                        <option key={option.value} value={option.value}>{option.label}</option>
-                      ))}
-                    </select>
+                      onChange={(value) => setStatusFilter(value)}
+                      options={localizedStatusOptions}
+                      placeholder={text.searchStatus}
+                    />
                   </div>
                   <div>
                     <label className="mb-2 block text-sm font-semibold text-slate-700">{text.searchField}</label>
-                    <select
+                    <Dropdown
                       value={searchField}
-                      onChange={(event) => setSearchField(event.target.value)}
-                      className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm focus:border-[#123f8f] focus:outline-none"
-                    >
-                      {localizedSearchOptions.map((option) => (
-                        <option key={option.value} value={option.value}>{option.label}</option>
-                      ))}
-                    </select>
+                      onChange={(value) => setSearchField(value)}
+                      options={localizedSearchOptions}
+                      placeholder={text.searchField}
+                    />
                   </div>
                   <div>
                     <label className="mb-2 block text-sm font-semibold text-slate-700">{text.searchLabel}</label>
@@ -637,8 +694,9 @@ const PayTaxesBT = () => {
                   </div>
                 </div>
 
-                <div className="mt-4  rounded-[28px] border border-slate-200">
-                  <table className="w-full table-auto text-sm">
+                <div className="mt-4 rounded-[28px] border border-slate-200">
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full table-auto text-sm">
                     <thead className="bg-[#203e63] text-white">
                       <tr>
                         <th className="px-5 py-4 text-left font-semibold uppercase tracking-[0.12em]">{text.tableTracking}</th>
@@ -682,6 +740,7 @@ const PayTaxesBT = () => {
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 </div>
               </>
             ) : null}
