@@ -560,6 +560,12 @@ const UserRegister = () => {
                 >
                   Already have an account? <span className="font-semibold text-emerald-600 hover:text-emerald-700">Log in</span>
                 </Link>
+                <Link
+                  to="/"
+                  className="text-center text-sm font-medium text-slate-500 transition hover:text-slate-700"
+                >
+                  &larr; Back to Home
+                </Link>
                 <button
                   type="submit"
                   disabled={loading || !canSubmit}
