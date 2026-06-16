@@ -8,8 +8,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
-from passlib.context import CryptContext
-
 from database.models import (
     ActivityLog,
     Admin,
@@ -25,7 +23,6 @@ from database.models import (
     CollectionAccount,
     DiscrepancyReport,
     Invite,
-    MFASecret,
     Payment,
     Queue,
     QueueActivity,
@@ -42,12 +39,13 @@ from database.models import (
     Report,
     get_db,
 )
-from utils.field_crypto import apply_invite_security, find_active_invite_by_email_role, find_mfa_secret_record, get_decrypted_or_raw
-from middleware.admin_auth import get_current_admin_user, require_main_admin
+from utils.field_crypto import apply_invite_security, find_active_invite_by_email_role, get_decrypted_or_raw
+from auth import get_current_admin_user, require_main_admin
 from services.email_service import send_branch_access_email, send_new_window_accounts_email, smtp_is_configured
 from utils.field_crypto import build_redacted_text, get_decrypted_or_raw, set_encrypted_hash_companions
-from routes.branch_auth_v2 import create_access_token as create_branch_access_token
-from routes.branch_auth_v2 import get_branch_dashboard_url, get_session_timeout_minutes
+from auth import create_access_token
+from auth import hash_password, verify_password, verify_account_password, delete_mfa_secret
+from auth import get_branch_dashboard_url, get_session_timeout_minutes, slugify_branch_name
 from utils.security_validation import (
     ensure_branch_name_is_unique,
     ensure_email_is_unique,
@@ -70,11 +68,6 @@ from utils.branch_window_config import (
 from utils.rbac import require_permission
 
 router = APIRouter()
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-def slugify_branch_name(name: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
-    return slug or "branch"
 
 
 def build_branch_dashboard_url(name: str) -> str:
@@ -240,12 +233,6 @@ def normalize_assigned_window_number(value: Optional[int], fallback_service_wind
     return window_number
 
 
-def clear_branch_mfa_secret(db: Session, username: str):
-    mfa = find_mfa_secret_record(db, MFASecret, "branch", username)
-    if mfa:
-        db.delete(mfa)
-
-
 class BranchWindowAccountCreate(BaseModel):
     id: Optional[int] = None
     service_window: str
@@ -275,11 +262,6 @@ class BranchUpdate(BaseModel):
 
 class BranchDeleteRequest(BaseModel):
     current_admin_password: str
-
-
-def verify_branch_admin_password(current_user: Admin, provided_password: str):
-    if not provided_password or not pwd_context.verify(provided_password, current_user.hashed_password):
-        raise HTTPException(status_code=401, detail="Incorrect password. Please try again.")
 
 
 def normalize_window_accounts_payload(
@@ -362,7 +344,7 @@ async def create_superadmin_branch_session(
         .all()
     )
 
-    access_token = create_branch_access_token(
+    access_token = create_access_token(
         data={
             "sub": staff.username,
             "role": "branch",
@@ -469,7 +451,7 @@ async def create_branch(
         validate_strong_password(branch.admin_password)
 
         # Create branch admin account
-        hashed_password = pwd_context.hash(branch.admin_password)
+        hashed_password = hash_password(branch.admin_password)
         admin_user = BranchStaff(
             username=admin_username,
             email=admin_email,
@@ -481,7 +463,7 @@ async def create_branch(
             status="Pending Verification"
         )
         db.add(admin_user)
-        clear_branch_mfa_secret(db, admin_username)
+        delete_mfa_secret(db, "branch", admin_username)
 
         admin_invite = Invite(
             email=admin_email,
@@ -516,7 +498,7 @@ async def create_branch(
             username=generated_username,
             email=generated_email,
             full_name=staff_full_name,
-            hashed_password=pwd_context.hash(generated_password),
+            hashed_password=hash_password(generated_password),
             role="branch_staff",
             branch_id=new_branch.id,
             account_scope="queue_window",
@@ -527,7 +509,7 @@ async def create_branch(
             status="Active",
         )
         db.add(staff_user)
-        clear_branch_mfa_secret(db, generated_username)
+        delete_mfa_secret(db, "branch", generated_username)
         db.flush()
 
         window_account_deliveries.append(build_window_account_delivery_payload(
@@ -606,7 +588,7 @@ async def update_branch(
     if not db_branch:
         raise HTTPException(status_code=404, detail="Branch not found")
 
-    verify_branch_admin_password(current_user, branch.current_admin_password)
+    verify_account_password(branch.current_admin_password, current_user.hashed_password, detail="Incorrect password. Please try again.")
 
     normalized_name = normalize_branch_name(branch.name)
     ensure_branch_name_is_unique(db, normalized_name, exclude_branch_id=db_branch.id)
@@ -666,8 +648,8 @@ async def update_branch(
                 or previous_window_label != get_window_display_label(staff_account)
             ):
                 refreshed_password = generate_window_password(window_account["service_window"])
-                staff_account.hashed_password = pwd_context.hash(refreshed_password)
-                clear_branch_mfa_secret(db, staff_account.username)
+                staff_account.hashed_password = hash_password(refreshed_password)
+                delete_mfa_secret(db, "branch", staff_account.username)
                 window_account_deliveries.append(build_window_account_delivery_payload(
                     username=staff_account.username,
                     email=staff_account.email,
@@ -698,7 +680,7 @@ async def update_branch(
             username=generated_username,
             email=generated_email,
             full_name=generate_window_full_name(normalized_name, window_account["window_label"]),
-            hashed_password=pwd_context.hash(generated_password),
+            hashed_password=hash_password(generated_password),
             role="branch_staff",
             branch_id=db_branch.id,
             account_scope="queue_window",
@@ -709,7 +691,7 @@ async def update_branch(
             status="Active",
         )
         db.add(staff_user)
-        clear_branch_mfa_secret(db, generated_username)
+        delete_mfa_secret(db, "branch", generated_username)
         new_account_payload = build_window_account_delivery_payload(
             username=generated_username,
             email=generated_email,
@@ -843,7 +825,7 @@ async def delete_branch(
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
 
-    verify_branch_admin_password(current_user, payload.current_admin_password)
+    verify_account_password(payload.current_admin_password, current_user.hashed_password, detail="Incorrect password. Please try again.")
 
     # Delete records from child tables first to satisfy MySQL foreign keys.
     branch_users = db.query(BranchStaff).filter(BranchStaff.branch_id == branch_id).all()

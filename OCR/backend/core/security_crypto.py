@@ -7,7 +7,13 @@ from cryptography.fernet import Fernet, InvalidToken
 
 
 def _get_encryption_secret() -> str:
-    return os.getenv("DATA_ENCRYPTION_SECRET", "change-this-data-encryption-secret")
+    value = os.getenv("DATA_ENCRYPTION_SECRET")
+    if not value:
+        raise RuntimeError(
+            "Missing required environment variable: DATA_ENCRYPTION_SECRET. "
+            "Please ensure it is set in your .env file."
+        )
+    return value
 
 
 def _get_fernet() -> Fernet:

@@ -47,7 +47,7 @@ const SystemSettingsProtectedRoute = ({ children }) => {
 
       try {
         const [verifyResponse, accessResponse] = await Promise.all([
-          axios.get('http://localhost:8000/api/admin/auth/verify', {
+          axios.get('http://localhost:8000/api/auth/unified/verify', {
             headers: { Authorization: `Bearer ${token}` },
           }),
           axios.get('http://localhost:8000/api/settings/access', {

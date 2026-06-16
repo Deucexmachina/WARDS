@@ -33,7 +33,7 @@ const AdminLayout = () => {
       const token = localStorage.getItem('adminToken');
       
       // Call backend logout endpoint
-      await api.post('/admin/auth/logout', {}, {
+      await api.post('/auth/unified/logout', {}, {
         headers: {
           'Authorization': `Bearer ${token}`
         }

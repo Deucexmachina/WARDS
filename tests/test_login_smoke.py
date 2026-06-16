@@ -3,7 +3,7 @@ import requests
 import json
 
 # Test login endpoint
-url = "http://localhost:8000/api/auth/login"
+url = "http://localhost:8000/api/auth/unified/login"
 data = {
     "username": "admin",
     "password": os.getenv("TEST_ADMIN_PASSWORD", "")

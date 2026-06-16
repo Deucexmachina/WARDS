@@ -8,7 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from database.models import ActivityLog, Announcement, AnnouncementAttachment, AnnouncementView, User, get_db
-from middleware.admin_auth import get_current_admin_user
+from auth import get_current_admin_user
 from utils.announcement_attachments import (
     enforce_attachment_limit,
     remove_announcement_directory,

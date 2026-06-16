@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from database.models import Service, User, get_db
-from middleware.admin_auth import get_current_admin_user
+from auth import get_current_admin_user
 from utils.field_crypto import service_value
 from utils.rbac import require_permission
 from utils.system_settings import (

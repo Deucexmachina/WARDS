@@ -223,7 +223,7 @@ const UserRegister = () => {
     }
     setContactCheckingUniqueness(true);
     try {
-      const response = await axios.post(`${API_URL}/api/user/auth/check-contact`, {
+      const response = await axios.post(`${API_URL}/api/auth/unified/check-contact`, {
         contact_number: `+63${digits}`,
       });
       if (!response.data.available) {
@@ -295,7 +295,7 @@ const UserRegister = () => {
     }
 
     try {
-      const response = await axios.post(`${API_URL}/api/user/auth/register`, {
+      const response = await axios.post(`${API_URL}/api/auth/unified/register`, {
         email: formData.email.trim(),
         full_name: normalizeCitizenFullName(formData.full_name),
         contact_number: `+63${normalizePhilippineContactDigits(formData.contact_number)}`,

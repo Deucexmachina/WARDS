@@ -31,7 +31,7 @@ const BranchProtectedRoute = ({ children }) => {
     }
 
     try {
-      const response = await axios.get('http://localhost:8000/api/branch/auth/verify', {
+      const response = await axios.get('http://localhost:8000/api/auth/unified/verify', {
         headers: {
           'Authorization': `Bearer ${token}`
         },

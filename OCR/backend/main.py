@@ -16,8 +16,7 @@ from routes import (
     announcements,
     services,
     queue,
-    auth_simple,
-    admin_simple,
+    admin_auth,
     receipts,
     taxpayer_auth,
     rpt_payments,
@@ -117,7 +116,7 @@ app.mount(
 # 🚏 API ROUTES
 # =========================
 app.include_router(
-    auth_simple.router,
+    admin_auth.auth_router,
     prefix="/api/auth",
     tags=["authentication"]
 )
@@ -129,7 +128,7 @@ app.include_router(
 )
 
 app.include_router(
-    admin_simple.router,
+    admin_auth.admin_router,
     prefix="/api/admin",
     tags=["admin"]
 )

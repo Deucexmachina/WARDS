@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
@@ -7,10 +8,22 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from database.config import get_db
 
-# Security configuration
-SECRET_KEY = "your-secret-key-change-this-in-production"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 480  # 8 hours
+
+
+def _require_env(name: str) -> str:
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(
+            f"Missing required environment variable: {name}. "
+            "Please ensure it is set in your .env file."
+        )
+    return value
+
+
+# Security configuration — must be set in environment; no volatile fallbacks.
+SECRET_KEY = _require_env("OCR_JWT_SECRET_KEY")
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login")

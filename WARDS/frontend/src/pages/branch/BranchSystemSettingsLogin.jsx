@@ -94,7 +94,7 @@ const BranchSystemSettingsLogin = () => {
 
         if (isSuperadminManagedBranch) {
           requests.push(
-            axios.get(`${API_URL}/api/admin/auth/verify`, {
+            axios.get(`${API_URL}/api/auth/unified/verify`, {
               headers: { Authorization: `Bearer ${localStorage.getItem('adminToken')}` },
             }),
           );

@@ -2,12 +2,11 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from passlib.context import CryptContext
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from database.models import ActivityLog, Admin, Branch, BranchStaff, CitizenUser, PrivacyConsent, Queue, QueueHistory, TaxAssessmentRecord, TaxpayerIdentifierSubmission, get_db
-from middleware.admin_auth import get_current_admin_user
+from auth import get_current_admin_user, hash_password, verify_password, verify_account_password
 from utils.field_crypto import apply_citizen_user_security, get_decrypted_or_raw, serialize_citizen_user
 from utils.security_validation import (
     ensure_contact_number_is_unique,
@@ -22,7 +21,6 @@ from utils.security_validation import (
 from utils.rbac import require_permission
 
 router = APIRouter()
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 class UserCreate(BaseModel):
@@ -268,14 +266,6 @@ def protected_admin_label(current_user: Admin | BranchStaff) -> str:
     return "main admin"
 
 
-def verify_protected_account_password(current_user: Admin | BranchStaff, password: str):
-    if not password or not pwd_context.verify(password, current_user.hashed_password):
-        raise HTTPException(
-            status_code=401,
-            detail=f"Incorrect {protected_admin_label(current_user)} password",
-        )
-
-
 def find_account(db: Session, user_id: int, role: Optional[str] = None):
     if role:
         if is_admin_role(role):
@@ -383,7 +373,7 @@ async def create_user(
         account = Admin(
             username=username,
             email=email,
-            hashed_password=pwd_context.hash(user.password),
+            hashed_password=hash_password(user.password),
             role=user.role,
             status=user.status,
             is_verified=True,
@@ -404,7 +394,7 @@ async def create_user(
             username=username,
             email=email,
             full_name=normalize_citizen_full_name(user.full_name or username),
-            hashed_password=pwd_context.hash(user.password),
+            hashed_password=hash_password(user.password),
             branch_id=user.branch_id,
             role=user.role,
             account_scope=account_scope,
@@ -421,7 +411,7 @@ async def create_user(
             email=email,
             full_name=normalize_citizen_full_name(user.full_name or email.split("@", 1)[0]),
             contact_number="",
-            hashed_password=pwd_context.hash(user.password),
+            hashed_password=hash_password(user.password),
             role="public",
             status=user.status,
             is_verified=True,
@@ -454,7 +444,7 @@ async def update_user(
 ):
     require_accounts_access(current_user)
 
-    verify_protected_account_password(current_user, user.current_admin_password)
+    verify_account_password(user.current_admin_password, current_user.hashed_password, detail=f"Incorrect {protected_admin_label(current_user)} password")
 
     account = find_account(db, user_id, user.role)
     if not account:
@@ -477,7 +467,7 @@ async def update_user(
 
     if user.password:
         validate_strong_password(user.password)
-        account.hashed_password = pwd_context.hash(user.password)
+        account.hashed_password = hash_password(user.password)
 
     if isinstance(account, Admin):
         if not is_admin_role(user.role):
@@ -522,7 +512,7 @@ async def deactivate_user(
 
     if payload is None:
         raise HTTPException(status_code=401, detail=f"Incorrect {protected_admin_label(current_user)} password")
-    verify_protected_account_password(current_user, payload.current_admin_password)
+    verify_account_password(payload.current_admin_password, current_user.hashed_password, detail=f"Incorrect {protected_admin_label(current_user)} password")
 
     account = find_account(db, user_id, role)
     if not account:
@@ -553,7 +543,7 @@ async def activate_user(
 
     if payload is None:
         raise HTTPException(status_code=401, detail=f"Incorrect {protected_admin_label(current_user)} password")
-    verify_protected_account_password(current_user, payload.current_admin_password)
+    verify_account_password(payload.current_admin_password, current_user.hashed_password, detail=f"Incorrect {protected_admin_label(current_user)} password")
 
     account = find_account(db, user_id, role)
     if not account:
@@ -584,7 +574,7 @@ async def delete_user(
 
     if payload is None:
         raise HTTPException(status_code=401, detail=f"Incorrect {protected_admin_label(current_user)} password")
-    verify_protected_account_password(current_user, payload.current_admin_password)
+    verify_account_password(payload.current_admin_password, current_user.hashed_password, detail=f"Incorrect {protected_admin_label(current_user)} password")
 
     account = find_account(db, user_id, role)
     if not account:

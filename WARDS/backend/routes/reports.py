@@ -16,8 +16,8 @@ from database.models import (
     ReceiptRequest, QueueActivity, QueueHistory, ReceiptRequestHistory,
     Service, DiscrepancyReport, BranchSystemSetting, ReportHistory
 )
-from middleware.admin_auth import get_current_admin_user
-from middleware.branch_auth import get_current_branch_staff, require_any_branch_staff
+from auth import get_current_admin_user
+from auth import get_current_branch_staff, require_any_branch_staff
 from utils.rbac import require_permission
 from utils.field_crypto import (
     get_decrypted_or_raw,

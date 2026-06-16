@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from database.models import User, get_db
-from middleware.admin_auth import get_current_admin_user
+from auth import get_current_admin_user
 from utils.rbac import get_sidebar_modules, get_accessible_branches
 
 router = APIRouter()

@@ -11,8 +11,6 @@ import time
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, Request
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
 from fastapi.responses import FileResponse, StreamingResponse
 from utils.file_delivery import deliver_file_response
 from utils.file_validation import validate_upload_file
@@ -26,7 +24,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from database.models import ActivityLog, Branch, CitizenUser, Payment, Queue, ReceiptRecord, ReceiptRequest, ReceiptRequestHistory, get_db
-from middleware.branch_auth import get_current_branch_staff
+from auth import get_current_branch_staff
 from services.ocr_runtime import run_ocr_in_executor
 from services.ocr_service import OCRProcessingError, ocr_service
 from services.email_service import send_receipt_release_email
@@ -36,6 +34,7 @@ from utils.branch_system_settings import get_branch_setting_value
 from utils.field_crypto import apply_payment_security, apply_receipt_record_security, apply_receipt_request_history_security, apply_receipt_request_security, find_citizen_by_email, find_payment_by_ref_number, get_decrypted_or_raw, hash_aware_any, hash_aware_match, hash_optional_value, queue_value, receipt_record_value, receipt_request_history_value, receipt_request_value, set_encrypted_hash_companions
 from utils.security_validation import normalize_email
 from utils.system_settings import SYSTEM_DISABLED_MESSAGE, get_setting_value
+from auth import get_optional_current_user
 
 router = APIRouter()
 
@@ -59,11 +58,7 @@ def resolve_frontend_base_url(request: Request) -> str:
     return "http://localhost:3000"
 
 
-USER_SECRET_KEY = os.getenv("USER_SECRET_KEY", "your-user-secret-key-change-in-production")
-UNIFIED_SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "your-unified-auth-secret-change-in-production")
-ALGORITHM = "HS256"
 ACTIVE_QUEUE_STATUSES = ("Pending", "Waiting", "Called", "Serving")
-optional_user_security = HTTPBearer(auto_error=False)
 MOBILE_RECEIPT_UPLOAD_SESSIONS: dict[str, dict] = {}
 MOBILE_RECEIPT_UPLOAD_TTL_SECONDS = 15 * 60
 MANILA_TIMEZONE = timezone(timedelta(hours=8))
@@ -2117,42 +2112,6 @@ def ensure_receipt_requests_enabled(db: Session, branch_id: int | None = None):
         raise HTTPException(status_code=403, detail=SYSTEM_DISABLED_MESSAGE)
 
 
-def resolve_authenticated_citizen(
-    credentials: HTTPAuthorizationCredentials | None,
-    db: Session,
-) -> CitizenUser | None:
-    if credentials is None:
-        return None
-
-    token = credentials.credentials
-    user = None
-
-    try:
-        payload = jwt.decode(token, UNIFIED_SECRET_KEY, algorithms=[ALGORITHM])
-        email = payload.get("email") or payload.get("sub")
-        role = payload.get("role")
-        token_type = payload.get("type")
-        if email and token_type == "role_auth" and role == "public":
-            user = find_citizen_by_email(db, CitizenUser, email)
-    except JWTError:
-        user = None
-
-    if user is None:
-        try:
-            payload = jwt.decode(token, USER_SECRET_KEY, algorithms=[ALGORITHM])
-            email = payload.get("sub")
-            token_type = payload.get("type")
-            if email and token_type == "user":
-                user = find_citizen_by_email(db, CitizenUser, email)
-        except JWTError as exc:
-            raise HTTPException(status_code=401, detail="Could not validate credentials") from exc
-
-    if user and user.status != "Active":
-        raise HTTPException(status_code=403, detail="Account is not active")
-
-    return user
-
-
 def resolve_linked_active_queue(
     db: Session,
     *,
@@ -3052,14 +3011,13 @@ async def create_receipt_request(
     request: Request,
     receipt_req: PublicReceiptRequestCreate,
     db: Session = Depends(get_db),
-    credentials: HTTPAuthorizationCredentials | None = Depends(optional_user_security),
+    current_citizen: CitizenUser | None = Depends(get_optional_current_user),
 ):
     taxpayer_name = validate_taxpayer_name(receipt_req.taxpayerName)
     transaction_date = validate_transaction_date((receipt_req.txnDate or "").strip())
     normalized_email = normalize_email(receipt_req.email, check_deliverability=True)
     normalized_ref_number = normalize_reference_number(receipt_req.refNumber)
     request_reason, request_reason_other = validate_receipt_request_reason(receipt_req.requestReason, receipt_req.requestReasonOther)
-    current_citizen = resolve_authenticated_citizen(credentials, db)
     limit_account = current_citizen or find_citizen_by_email(db, CitizenUser, normalized_email)
     tax_type = normalize_receipt_category(receipt_req.taxType)
     branch_id = receipt_req.branchId

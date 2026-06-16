@@ -1,9 +1,9 @@
 import hashlib
 from datetime import datetime
 
-from jose import jwt
 from sqlalchemy.orm import Session
 
+from auth.jwt_utils import decode_token
 from database.models import RevokedToken
 
 
@@ -28,7 +28,7 @@ def revoke_token(db: Session, token: str, secret_key: str, algorithm: str, token
     subject = None
     expires_at = None
     try:
-        payload = jwt.decode(token, secret_key, algorithms=[algorithm], options={"verify_exp": False})
+        payload = decode_token(token, secret_key, options={"verify_exp": False})
         subject = payload.get("sub")
         exp = payload.get("exp")
         if exp:

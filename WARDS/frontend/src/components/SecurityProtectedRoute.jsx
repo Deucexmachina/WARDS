@@ -42,7 +42,7 @@ const SecurityProtectedRoute = ({ children }) => {
       }
 
       try {
-        const response = await axios.get('http://localhost:8000/api/admin/auth/verify', {
+        const response = await axios.get('http://localhost:8000/api/auth/unified/verify', {
           headers: { Authorization: `Bearer ${token}` },
         });
         const serverStartedAt = Date.parse(response.data.server_started_at || '');

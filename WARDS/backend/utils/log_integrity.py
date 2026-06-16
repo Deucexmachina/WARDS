@@ -45,7 +45,13 @@ DEFAULT_VALUES = {
 
 
 def integrity_secret() -> str:
-    return (os.getenv("LOG_INTEGRITY_SECRET") or os.getenv("DATA_HASH_SECRET") or "change-this-log-integrity-secret").strip()
+    value = os.getenv("LOG_INTEGRITY_SECRET") or os.getenv("DATA_HASH_SECRET")
+    if not value:
+        raise RuntimeError(
+            "Missing required environment variable: LOG_INTEGRITY_SECRET or DATA_HASH_SECRET. "
+            "Please ensure at least one is set in your .env file."
+        )
+    return value.strip()
 
 
 def _json_default(value: Any):

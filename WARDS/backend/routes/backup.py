@@ -4,7 +4,7 @@ from datetime import datetime
 import random
 
 from database.models import Backup, get_db, ActivityLog
-from middleware.admin_auth import get_current_admin_user, require_main_admin
+from auth import get_current_admin_user, require_main_admin
 
 router = APIRouter()
 

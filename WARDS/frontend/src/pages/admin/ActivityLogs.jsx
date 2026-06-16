@@ -9,6 +9,7 @@ const typeColors = {
   admin: 'bg-purple-100 text-purple-800',
   security: 'bg-red-100 text-red-800',
   transaction: 'bg-green-100 text-green-800',
+  auth: 'bg-blue-100 text-blue-800',
   user_auth: 'bg-blue-100 text-blue-800',
   branch_auth: 'bg-orange-100 text-orange-800',
   admin_auth: 'bg-indigo-100 text-indigo-800',

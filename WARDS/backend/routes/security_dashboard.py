@@ -13,7 +13,7 @@ if str(MASTER_ROOT) not in sys.path:
     sys.path.insert(0, str(MASTER_ROOT))
 
 from database.models import get_db, ActivityLog, PermanentIpBlock, SecurityLogView
-from routes.admin_auth_v2 import get_current_admin_from_token
+from auth import get_current_admin_from_token
 from middleware.dos_protection import get_blocked_ips, unblock_ip, block_ip, account_rate_limit_state, record_rate_limit_detection
 from services.ip_reputation import get_permanent_blocks, add_permanent_block, remove_permanent_block, check_ip_reputation
 from SECURITY.security_engine import (
@@ -184,8 +184,8 @@ class BulkIncidentRequest(BaseModel):
     confirm_missing_files: bool = False
 
 
-def current_admin(request: Request, db: Session = Depends(get_db)):
-    return get_current_admin_from_token(request, db)
+async def current_admin(request: Request, db: Session = Depends(get_db)):
+    return await get_current_admin_from_token(request, db)
 
 
 @router.post("/initialize")

@@ -19,7 +19,7 @@ from typing import Dict, Optional
 import os
 import ipaddress
 import json
-from jose import jwt
+from auth import ADMIN_SECRET_KEY, BRANCH_SECRET_KEY, USER_SECRET_KEY, decode_token
 
 MAX_REQUEST_SIZE = int(os.getenv("MAX_REQUEST_SIZE_BYTES", 10 * 1024 * 1024))  # 10MB
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT_SECONDS", 30))
@@ -168,15 +168,15 @@ def account_from_request(request: Request, client_ip: str) -> tuple[str, str, st
     auth_header = request.headers.get("Authorization") or ""
     token = auth_header.split(" ", 1)[1] if auth_header.startswith("Bearer ") else ""
     secrets = (
-        ("user", os.getenv("USER_SECRET_KEY", "your-user-secret-key-change-in-production")),
-        ("admin", os.getenv("ADMIN_SECRET_KEY", "your-admin-secret-key-change-in-production-immediately")),
-        ("branch", os.getenv("BRANCH_SECRET_KEY", "your-branch-secret-key-change-in-production")),
+        ("user", USER_SECRET_KEY),
+        ("admin", ADMIN_SECRET_KEY),
+        ("branch", BRANCH_SECRET_KEY),
     )
     for fallback_type, secret in secrets:
         if not token:
             break
         try:
-            payload = jwt.decode(token, secret, algorithms=["HS256"])
+            payload = decode_token(token, secret)
             account_type = str(payload.get("type") or fallback_type)
             account_id = str(payload.get("user_id") or payload.get("sub") or "")
             role = str(payload.get("role") or account_type)

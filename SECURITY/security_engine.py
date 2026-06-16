@@ -1018,7 +1018,13 @@ def file_type(path: Path) -> str:
 
 
 def hmac_secret() -> str:
-    return (os.getenv("BACKUP_INTEGRITY_SECRET") or os.getenv("DATA_HASH_SECRET") or "change-this-backup-integrity-secret").strip()
+    value = os.getenv("BACKUP_INTEGRITY_SECRET") or os.getenv("DATA_HASH_SECRET")
+    if not value:
+        raise RuntimeError(
+            "Missing required environment variable: BACKUP_INTEGRITY_SECRET or DATA_HASH_SECRET. "
+            "Please ensure at least one is set in your .env file."
+        )
+    return value.strip()
 
 
 def serialize_db_value(value):

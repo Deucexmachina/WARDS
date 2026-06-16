@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from database.models import PrivacyConsent, User, get_db
-from middleware.admin_auth import get_current_admin_user
+from auth import get_current_admin_user
 from utils.field_crypto import get_decrypted_or_raw
 from utils.privacy_agreement import get_public_privacy_agreement
 from utils.rbac import require_permission

@@ -2,11 +2,10 @@
 Verification script to check if admin and branch staff users exist in database
 """
 import os
-from passlib.context import CryptContext
+
+from auth.password_utils import verify_password
 from database.models import Admin, BranchStaff, Branch, SessionLocal
 from tabulate import tabulate
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Map env var names to expected usernames for optional password verification
 _ADMIN_PASSWORD_ENVS = {
@@ -23,7 +22,7 @@ def _verify_password(username: str, hashed: str) -> str:
     password = os.getenv(env_var)
     if not password:
         return "N/A (env missing)"
-    return "✓" if pwd_context.verify(password, hashed) else "✗"
+    return "✓" if verify_password(password, hashed) else "✗"
 
 
 def verify_auth_users():

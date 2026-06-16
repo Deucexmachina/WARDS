@@ -1,96 +1,90 @@
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
-import base64
-import binascii
-import hashlib
-import io
 import os
+import random
 import secrets
+import string
 import time
 
 import pyotp
-import qrcode
 import requests
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import JSONResponse
+import base64
+import io
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
-from database.models import ActivityLog, Admin, BranchStaff, CitizenUser, EmailOTP, MFASecret, get_db
+from database.models import ActivityLog, Admin, BranchStaff, CitizenUser, EmailOTP, Invite, MFASecret, get_db
 from services.email_service import (
+    send_account_change_notification_email,
+    send_citizen_verification_email,
     send_login_notification_email,
-    send_mfa_recovery_email,
     send_password_reset_email,
 )
-from utils.field_crypto import apply_citizen_user_security, apply_email_otp_security, apply_mfa_secret_security, find_citizen_by_email, find_mfa_secret_record, get_decrypted_or_raw, hash_optional_value, serialize_citizen_user
-from utils.token_revocation import revoke_token
+from utils.field_crypto import (
+    apply_citizen_user_security,
+    find_citizen_by_contact_number,
+    find_citizen_by_email,
+    find_invite_by_token,
+    find_mfa_secret_record,
+    get_decrypted_or_raw,
+    serialize_citizen_user,
+)
+from utils.security_validation import normalize_email
+from utils.system_settings import get_setting_value
+from auth import (
+    ALGORITHM,
+    PASSWORD_RESET_SECRET_KEY,
+    PORTAL_CONFIG,
+    create_access_token,
+    decode_token,
+    get_portal_config,
+    get_branch_assigned_window_number,
+    get_branch_dashboard_url,
+    get_branch_window_label,
+    get_session_timeout_minutes,
+    slugify_branch_name,
+    pwd_context,
+    validate_password_strength,
+    check_mfa_recovery_confirm_rate_limit,
+    check_mfa_recovery_rate_limit,
+    find_active_mfa_recovery_otp,
+    generate_mfa_payload,
+    get_mfa_secret,
+    get_mfa_secret_raw,
+    hash_mfa_recovery_code,
+    issue_mfa_recovery_otp,
+    save_mfa_secret,
+    decode_active_account_from_bearer_token,
+    get_current_admin_user,
+    get_current_branch_staff,
+    get_current_user,
+    require_window_staff,
+    revoke_token,
+    verify_account_password,
+    delete_mfa_secret,
+)
 
 router = APIRouter()
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Rate limiting configuration
 limiter = Limiter(key_func=get_remote_address)
 
-USER_SECRET_KEY = os.getenv("USER_SECRET_KEY", "your-user-secret-key-change-in-production")
-ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "your-admin-secret-key-change-in-production-immediately")
-BRANCH_SECRET_KEY = os.getenv("BRANCH_SECRET_KEY", "your-branch-secret-key-change-in-production")
-PASSWORD_RESET_SECRET_KEY = os.getenv("PASSWORD_RESET_SECRET_KEY", "your-password-reset-secret-key-change-in-production")
-ALGORITHM = "HS256"
-RECAPTCHA_SECRET_KEY = os.getenv("RECAPTCHA_SECRET_KEY", "6LdOdsAsAAAAAHPw5OFtL757OAFc7SRJB618yE-D")
+RECAPTCHA_SECRET_KEY = os.getenv("RECAPTCHA_SECRET_KEY")
 PASSWORD_RESET_EXPIRES_MINUTES = 30
 
-PORTAL_CONFIG = {
-    "unknown": {
-        "secret_key": USER_SECRET_KEY,
-        "token_type": "user",
-        "expires_minutes": 1440,
-        "captcha_threshold": 3,
-        "lockout_duration": 120,
-        "issuer_name": "WARDS Portal",
-    },
-    "public": {
-        "secret_key": USER_SECRET_KEY,
-        "token_type": "user",
-        "expires_minutes": 1440,
-        "captcha_threshold": 3,
-        "lockout_duration": 120,
-        "issuer_name": "WARDS Public Portal",
-    },
-    "admin": {
-        "secret_key": ADMIN_SECRET_KEY,
-        "token_type": "admin",
-        "expires_minutes": 30,
-        "captcha_threshold": 3,
-        "lockout_duration": 120,
-        "issuer_name": "WARDS Admin Portal",
-    },
-    "branch": {
-        "secret_key": BRANCH_SECRET_KEY,
-        "token_type": "branch",
-        "expires_minutes": 480,
-        "captcha_threshold": 3,
-        "lockout_duration": 120,
-        "issuer_name": "WARDS Branch Portal",
-    },
-}
+SERVER_STARTED_AT = datetime.utcnow().isoformat()
 
 MAX_LOGIN_ATTEMPTS = 5
 RATE_LIMIT_WINDOW = 60
 MAX_REQUESTS_PER_WINDOW = 30
 MFA_VALID_WINDOW_STEPS = 2
-
-MFA_RECOVERY_ROLE = "mfa_recovery"
-MFA_RECOVERY_OTP_EXPIRES_MINUTES = 10
-MFA_RECOVERY_RESEND_COOLDOWN_SECONDS = 120
-
-mfa_recovery_rate_limits: dict[str, list[float]] = {}
-mfa_recovery_confirm_rate_limits: dict[str, list[float]] = {}
 
 login_attempts = {}
 locked_accounts = {}
@@ -152,55 +146,6 @@ class UnifiedPasswordResetConfirm(BaseModel):
 
 def normalize_identifier(identifier: str) -> str:
     return identifier.strip().lower()
-
-
-def slugify_branch_name(name: str) -> str:
-    value = "".join(char.lower() if char.isalnum() else "-" for char in name.strip())
-    slug = "-".join(part for part in value.split("-") if part)
-    return slug or "branch"
-
-
-def get_branch_dashboard_url(account: object) -> str:
-    branch = getattr(account, "branch", None)
-    if branch and getattr(branch, "dashboard_url", None):
-        return branch.dashboard_url
-
-    base_url = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000").rstrip("/")
-    branch_name = getattr(branch, "name", "") if branch else ""
-    if branch_name:
-        return f"{base_url}/branch-dashboard/{slugify_branch_name(branch_name)}"
-
-    branch_id = getattr(account, "branch_id", None)
-    return f"{base_url}/branch-dashboard/branch-{branch_id or 'portal'}"
-
-
-def get_branch_window_label(account: object) -> Optional[str]:
-    service_window = getattr(account, "service_window", None)
-    if not service_window:
-        return None
-    return getattr(account, "service_window_label", None) or {
-        "RPT": "RPT Window",
-        "BUSINESS": "BT Window",
-        "MISC": "MISC Window",
-        "QW4": "Queue Window 4",
-        "QW5": "Queue Window 5",
-    }.get(service_window, service_window)
-
-
-def get_branch_assigned_window_number(account: object) -> Optional[int]:
-    service_window = getattr(account, "service_window", None)
-    if not service_window:
-        return None
-    assigned_window_number = getattr(account, "assigned_window_number", None)
-    if assigned_window_number:
-        return assigned_window_number
-    return {
-        "RPT": 1,
-        "BUSINESS": 2,
-        "MISC": 3,
-        "QW4": 4,
-        "QW5": 5,
-    }.get(service_window)
 
 
 def tracking_key(portal: str, identifier: str) -> str:
@@ -280,53 +225,6 @@ def verify_recaptcha(token: str, client_ip: str) -> bool:
         return response.json().get("success", False)
     except Exception as exc:
         return False
-
-
-def create_access_token(portal: str, data: dict) -> str:
-    expires_delta = timedelta(minutes=PORTAL_CONFIG[portal]["expires_minutes"])
-    to_encode = data.copy()
-    to_encode["exp"] = datetime.utcnow() + expires_delta
-    return jwt.encode(to_encode, PORTAL_CONFIG[portal]["secret_key"], algorithm=ALGORITHM)
-
-
-def decode_active_account_from_bearer_token(
-    token: str,
-    db: Session,
-    allowed_portals: tuple[str, ...] = ("public", "admin", "branch"),
-):
-    if not token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token")
-    for portal, config in PORTAL_CONFIG.items():
-        if portal not in allowed_portals:
-            continue
-        try:
-            payload = jwt.decode(token, config["secret_key"], algorithms=[ALGORITHM])
-        except JWTError:
-            continue
-
-        token_type = payload.get("type")
-        if token_type != config["token_type"]:
-            continue
-
-        if portal == "public":
-            account = find_citizen_by_email(db, CitizenUser, payload.get("sub"))
-        elif portal == "admin":
-            identifier = payload.get("email") or payload.get("sub")
-            account = db.query(Admin).filter(
-                (Admin.email == identifier) | (Admin.username == payload.get("sub"))
-            ).first()
-        else:
-            identifier = payload.get("email") or payload.get("sub")
-            account = db.query(BranchStaff).filter(
-                (BranchStaff.email == identifier) | (BranchStaff.username == payload.get("sub"))
-            ).first()
-
-        if not account or getattr(account, "status", "Active") != "Active":
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
-
-        return portal, account, payload
-
-    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
 
 def log_activity(db: Session, action: str, user: str, details: str, log_type: str = "auth"):
@@ -417,147 +315,6 @@ def get_portal_login_label(portal: Optional[str]) -> str:
     return labels.get((portal or "").strip().lower(), "WARDS Login")
 
 
-def get_mfa_secret(db: Session, portal: str, username: str) -> Optional[str]:
-    record = find_mfa_secret_record(db, MFASecret, portal, username, enabled_only=True)
-    if not record:
-        return None
-
-    secret = get_decrypted_or_raw(record, "secret")
-    if not secret:
-        return None
-
-    normalized_secret = str(secret).strip().replace(" ", "")
-    if not normalized_secret:
-        return None
-
-    try:
-        base64.b32decode(normalized_secret, casefold=True)
-    except (binascii.Error, ValueError):
-        return None
-
-    return normalized_secret
-
-
-def save_mfa_secret(db: Session, portal: str, username: str, secret: str, enabled: bool = True):
-    record = find_mfa_secret_record(db, MFASecret, portal, username, enabled_only=False)
-    if record:
-        record.portal = portal
-        record.username = username
-        record.secret = secret
-        record.enabled = enabled
-        apply_mfa_secret_security(record)
-    else:
-        record = MFASecret(portal=portal, username=username, secret=secret, enabled=enabled)
-        apply_mfa_secret_security(record)
-        db.add(record)
-    db.commit()
-
-
-def get_mfa_secret_raw(db: Session, portal: str, username: str) -> Optional[MFASecret]:
-    return find_mfa_secret_record(db, MFASecret, portal, username, enabled_only=False)
-
-
-def hash_mfa_recovery_code(code: str) -> str:
-    return hashlib.sha256(code.encode("utf-8")).hexdigest()
-
-
-def generate_mfa_recovery_code() -> str:
-    return f"{secrets.randbelow(1_000_000):06d}"
-
-
-def find_active_mfa_recovery_otp(db: Session, email: str) -> Optional[EmailOTP]:
-    now = datetime.utcnow()
-    email_hash = hash_optional_value(email)
-    role_hash = hash_optional_value(MFA_RECOVERY_ROLE)
-    return (
-        db.query(EmailOTP)
-        .filter(
-            EmailOTP.email_hash == email_hash,
-            EmailOTP.role_hash == role_hash,
-            EmailOTP.consumed_at.is_(None),
-            EmailOTP.expires_at > now,
-        )
-        .order_by(EmailOTP.created_at.desc(), EmailOTP.id.desc())
-        .first()
-    )
-
-
-def issue_mfa_recovery_otp(
-    db: Session,
-    email: str,
-    *,
-    allow_recent_existing: bool = False,
-) -> tuple[EmailOTP, int]:
-    now = datetime.utcnow()
-    active_otp = find_active_mfa_recovery_otp(db, email)
-
-    if active_otp and active_otp.last_sent_at:
-        elapsed = int((now - active_otp.last_sent_at).total_seconds())
-        remaining = max(MFA_RECOVERY_RESEND_COOLDOWN_SECONDS - elapsed, 0)
-        if remaining > 0:
-            if allow_recent_existing:
-                return active_otp, remaining
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"Please wait {remaining} seconds before requesting another verification code.",
-            )
-
-    if active_otp:
-        active_otp.consumed_at = now
-
-    verification_code = generate_mfa_recovery_code()
-    otp_record = EmailOTP(
-        email=email,
-        role=MFA_RECOVERY_ROLE,
-        code_hash=hash_mfa_recovery_code(verification_code),
-        expires_at=now + timedelta(minutes=MFA_RECOVERY_OTP_EXPIRES_MINUTES),
-        attempts=0,
-        resend_count=(active_otp.resend_count + 1) if active_otp else 0,
-        last_sent_at=now,
-    )
-    db.add(otp_record)
-    db.flush()
-    apply_email_otp_security(otp_record)
-
-    email_result = send_mfa_recovery_email(
-        recipient_email=email,
-        verification_code=verification_code,
-        expires_minutes=MFA_RECOVERY_OTP_EXPIRES_MINUTES,
-    )
-    if not email_result["sent"]:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=email_result["message"],
-        )
-
-    return otp_record, MFA_RECOVERY_RESEND_COOLDOWN_SECONDS
-
-
-def check_mfa_recovery_rate_limit(email: str) -> bool:
-    current_time = time.time()
-    email_lower = email.lower()
-    window = mfa_recovery_rate_limits.get(email_lower, [])
-    window = [t for t in window if current_time - t < 3600]
-    if len(window) >= 3:
-        return False
-    window.append(current_time)
-    mfa_recovery_rate_limits[email_lower] = window
-    return True
-
-
-def check_mfa_recovery_confirm_rate_limit(email: str) -> bool:
-    current_time = time.time()
-    email_lower = email.lower()
-    window = mfa_recovery_confirm_rate_limits.get(email_lower, [])
-    window = [t for t in window if current_time - t < 60]
-    if len(window) >= 5:
-        return False
-    window.append(current_time)
-    mfa_recovery_confirm_rate_limits[email_lower] = window
-    return True
-
-
 def build_user_response(portal: str, account: object) -> dict:
     if portal == "public":
         profile = serialize_citizen_user(account)
@@ -646,28 +403,6 @@ def build_password_reset_token(portal: str, account: object) -> str:
     return jwt.encode(payload, PASSWORD_RESET_SECRET_KEY, algorithm=ALGORITHM)
 
 
-def validate_reset_password(password: str):
-    password_bytes = password.encode("utf-8")
-    message = (
-        "Password must be more than 12 characters long and include at least one uppercase letter, "
-        "one lowercase letter, and at least one number or special character."
-    )
-
-    if len(password) <= 12:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
-    if len(password_bytes) > 72:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Password is too long for secure processing. Please use 72 bytes or fewer.",
-        )
-    if not any(char.isupper() for char in password):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
-    if not any(char.islower() for char in password):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
-    if not any(char.isdigit() or not char.isalnum() for char in password):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
-
-
 def get_account_email(portal: str, account: object) -> str:
     if portal == "public":
         return serialize_citizen_user(account)["email"]
@@ -699,26 +434,6 @@ def get_account_type_label(portal: str, account: object) -> str:
     if getattr(account, "role", "") == "branch_staff":
         return "branch_staff"
     return "branch"
-
-
-def generate_mfa_payload(portal: str, username: str, secret: str) -> dict:
-    issuer_name = PORTAL_CONFIG[portal]["issuer_name"]
-    totp_uri = pyotp.TOTP(secret).provisioning_uri(name=username, issuer_name=issuer_name)
-
-    qr = qrcode.QRCode(version=1, box_size=10, border=5)
-    qr.add_data(totp_uri)
-    qr.make(fit=True)
-
-    image = qr.make_image(fill_color="black", back_color="white")
-    buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
-
-    return {
-        "message": "MFA setup successful",
-        "portal": portal,
-        "qr_code": f"data:image/png;base64,{base64.b64encode(buffer.getvalue()).decode()}",
-        "manual_entry_key": secret,
-    }
 
 
 @router.post("/login", response_model=UnifiedToken)
@@ -835,7 +550,20 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
         mfa_username = get_mfa_username(portal, account)
         mfa_secret = get_mfa_secret(db, portal, mfa_username)
         if not mfa_secret:
-            # MFA not configured; allow login and require setup later via mfa_setup_required flag
+            if portal in {"admin", "branch"}:
+                log_activity(
+                    db,
+                    "Login Without MFA Setup",
+                    credentials.identifier,
+                    f"Portal: {portal}, IP: {client_ip}",
+                    "security",
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="MFA not configured. Please setup MFA first.",
+                    headers={"X-Requires-MFA-Setup": "true", "X-Auth-Portal": portal},
+                )
+            # For public: MFA not configured; allow login and require setup later via mfa_setup_required flag
             pass
         else:
             if not credentials.totp_code:
@@ -890,7 +618,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
     log_unified_security_context(db, portal=portal, actor=get_mfa_username(portal, account), client_ip=client_ip, account=account)
 
     mfa_setup_required = False
-    if portal in {"public", "admin", "branch"}:
+    if portal == "public":
         mfa_setup_required = get_mfa_secret(db, portal, get_mfa_username(portal, account)) is None
 
     return {
@@ -911,7 +639,10 @@ async def unified_logout(request: Request, db: Session = Depends(get_db)):
         token = auth_header.split(" ", 1)[1]
         for config in PORTAL_CONFIG.values():
             revoke_token(db, token, config["secret_key"], ALGORITHM, config.get("token_type"))
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
     return {"message": "Logged out successfully"}
 
 
@@ -1073,7 +804,7 @@ async def unified_reset_password(
     db: Session = Depends(get_db),
 ):
     try:
-        payload = jwt.decode(reset_data.token, PASSWORD_RESET_SECRET_KEY, algorithms=[ALGORITHM])
+        payload = decode_token(reset_data.token, PASSWORD_RESET_SECRET_KEY)
     except JWTError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset link.") from exc
 
@@ -1091,7 +822,7 @@ async def unified_reset_password(
     if not account or account.id != user_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset link.")
 
-    validate_reset_password(reset_data.new_password)
+    validate_password_strength(reset_data.new_password)
 
     account.hashed_password = pwd_context.hash(reset_data.new_password)
     db.commit()
@@ -1278,3 +1009,815 @@ async def unified_mfa_recovery_verify_otp(
     )
 
     return generate_mfa_payload(portal, mfa_username, secret)
+
+
+@router.get("/verify")
+async def unified_verify(request: Request, db: Session = Depends(get_db)):
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid authorization header",
+        )
+
+    token = auth_header.split(" ", 1)[1]
+    portal, account, _payload = decode_active_account_from_bearer_token(token, db)
+
+    return {
+        "valid": True,
+        "portal": portal,
+        "server_started_at": SERVER_STARTED_AT,
+        "user": build_user_response(portal, account),
+    }
+
+
+@router.post("/setup-mfa-authenticated")
+async def unified_setup_mfa_authenticated(request: Request, db: Session = Depends(get_db)):
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid authorization header",
+        )
+
+    token = auth_header.split(" ", 1)[1]
+    portal, account, _payload = decode_active_account_from_bearer_token(token, db)
+
+    if portal not in {"public", "admin", "branch"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="MFA setup is only available for citizen, staff, and admin accounts.",
+        )
+
+    client_ip = request.client.host
+    mfa_username = get_mfa_username(portal, account)
+    secret = pyotp.random_base32()
+    is_public = portal == "public"
+    save_mfa_secret(db, portal, mfa_username, secret, enabled=not is_public)
+    log_activity(
+        db,
+        "Authenticated MFA Setup Initiated",
+        get_account_identifier(portal, account),
+        f"Portal: {portal}, IP: {client_ip}",
+        "security",
+    )
+    return generate_mfa_payload(portal, mfa_username, secret)
+
+
+@router.get("/me")
+async def unified_me(request: Request, db: Session = Depends(get_db)):
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid authorization header",
+        )
+
+    token = auth_header.split(" ", 1)[1]
+    portal, account, _payload = decode_active_account_from_bearer_token(token, db)
+    return build_user_response(portal, account)
+
+
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    full_name: str
+    contact_number: str
+    address: str = ""
+    password: str
+    dpa_consent: bool = False
+    dpa_version: Optional[str] = None
+    recaptcha_token: Optional[str] = None
+
+
+class CheckContactRequest(BaseModel):
+    contact_number: str
+
+
+class VerificationRequest(BaseModel):
+    email: EmailStr
+
+
+class VerificationConfirmRequest(BaseModel):
+    email: EmailStr
+    code: str
+
+
+class InviteRegisterRequest(BaseModel):
+    email: EmailStr
+    password: str
+    invite_token: str
+
+
+def _generate_verification_code() -> str:
+    return "".join(random.choices(string.digits, k=6))
+
+
+def _get_citizen_email(citizen: CitizenUser) -> str:
+    return serialize_citizen_user(citizen)["email"]
+
+
+@router.post("/register")
+@limiter.limit("3/minute")
+async def unified_register(
+    request: Request,
+    payload: RegisterRequest,
+    db: Session = Depends(get_db),
+):
+    if not payload.dpa_consent or not payload.dpa_version:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You must accept the Data Privacy Agreement to register.",
+        )
+
+    if payload.recaptcha_token and RECAPTCHA_SECRET_KEY:
+        try:
+            recaptcha_resp = requests.post(
+                "https://www.google.com/recaptcha/api/siteverify",
+                data={"secret": RECAPTCHA_SECRET_KEY, "response": payload.recaptcha_token},
+                timeout=10,
+            )
+            recaptcha_data = recaptcha_resp.json()
+            if not recaptcha_data.get("success"):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="reCAPTCHA verification failed.",
+                )
+        except Exception:
+            pass
+
+    email = normalize_identifier(payload.email)
+
+    existing = find_citizen_by_email(db, CitizenUser, email)
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with this email already exists.",
+        )
+
+    validate_password_strength(payload.password)
+
+    citizen = CitizenUser(
+        email=email,
+        full_name=payload.full_name.strip(),
+        contact_number=payload.contact_number.strip(),
+        address=payload.address.strip() if payload.address else "",
+        hashed_password=pwd_context.hash(payload.password),
+        role="public",
+        is_verified=False,
+        status="Active",
+    )
+    apply_citizen_user_security(citizen)
+    db.add(citizen)
+    db.flush()
+
+    code = _generate_verification_code()
+    email_otp = EmailOTP(
+        email=email,
+        role="public",
+        code_hash=pwd_context.hash(code),
+        expires_at=datetime.utcnow() + timedelta(minutes=10),
+        resend_count=1,
+        last_sent_at=datetime.utcnow(),
+    )
+    db.add(email_otp)
+    db.commit()
+
+    email_result = send_citizen_verification_email(email, code, expires_minutes=10)
+    message = (
+        email_result.get("message")
+        or "We sent a 6-digit verification code to your email. Enter it to activate your account."
+    )
+
+    log_activity(
+        db,
+        "Citizen Registration",
+        email,
+        f"New citizen user registered. Email verification pending.",
+        "auth",
+    )
+
+    return {
+        "requires_email_verification": True,
+        "message": message,
+        "resend_available_in_seconds": 120,
+    }
+
+
+@router.post("/check-contact")
+async def unified_check_contact(
+    payload: CheckContactRequest,
+    db: Session = Depends(get_db),
+):
+    normalized = payload.contact_number.strip()
+    existing = find_citizen_by_contact_number(db, CitizenUser, normalized)
+    return {"available": existing is None}
+
+
+@router.post("/verification/request")
+@limiter.limit("3/minute")
+async def unified_verification_request(
+    request: Request,
+    payload: VerificationRequest,
+    db: Session = Depends(get_db),
+):
+    email = normalize_identifier(payload.email)
+    citizen = find_citizen_by_email(db, CitizenUser, email)
+    if not citizen:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No account found with this email address.",
+        )
+
+    recent_otp = (
+        db.query(EmailOTP)
+        .filter(
+            EmailOTP.email == email,
+            EmailOTP.role == "public",
+            EmailOTP.consumed_at.is_(None),
+        )
+        .order_by(EmailOTP.created_at.desc())
+        .first()
+    )
+
+    if recent_otp and recent_otp.last_sent_at:
+        elapsed = (datetime.utcnow() - recent_otp.last_sent_at).total_seconds()
+        if elapsed < 60:
+            remaining = int(60 - elapsed)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Please wait {remaining} seconds before requesting a new code.",
+            )
+
+    code = _generate_verification_code()
+
+    if recent_otp:
+        recent_otp.code_hash = pwd_context.hash(code)
+        recent_otp.expires_at = datetime.utcnow() + timedelta(minutes=10)
+        recent_otp.resend_count = (recent_otp.resend_count or 0) + 1
+        recent_otp.last_sent_at = datetime.utcnow()
+        recent_otp.attempts = 0
+    else:
+        email_otp = EmailOTP(
+            email=email,
+            role="public",
+            code_hash=pwd_context.hash(code),
+            expires_at=datetime.utcnow() + timedelta(minutes=10),
+            resend_count=1,
+            last_sent_at=datetime.utcnow(),
+        )
+        db.add(email_otp)
+
+    db.commit()
+
+    email_result = send_citizen_verification_email(email, code, expires_minutes=10)
+    message = (
+        email_result.get("message")
+        or "A new verification code was sent to your email."
+    )
+
+    return {
+        "message": message,
+        "resend_available_in_seconds": 120,
+    }
+
+
+@router.post("/verification/confirm")
+async def unified_verification_confirm(
+    payload: VerificationConfirmRequest,
+    db: Session = Depends(get_db),
+):
+    email = normalize_identifier(payload.email)
+    citizen = find_citizen_by_email(db, CitizenUser, email)
+    if not citizen:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No account found with this email address.",
+        )
+
+    otp_record = (
+        db.query(EmailOTP)
+        .filter(
+            EmailOTP.email == email,
+            EmailOTP.role == "public",
+            EmailOTP.consumed_at.is_(None),
+        )
+        .order_by(EmailOTP.created_at.desc())
+        .first()
+    )
+
+    if not otp_record or otp_record.expires_at < datetime.utcnow():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The verification code has expired. Please request a new one.",
+        )
+
+    if not pwd_context.verify(payload.code, otp_record.code_hash):
+        otp_record.attempts = (otp_record.attempts or 0) + 1
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid verification code. Please try again.",
+        )
+
+    otp_record.consumed_at = datetime.utcnow()
+    citizen.is_verified = True
+    db.commit()
+
+    return {"message": "Email verified. You can now log in."}
+
+
+@router.post("/register/invite")
+@limiter.limit("5/minute")
+async def unified_invite_register(
+    request: Request,
+    payload: InviteRegisterRequest,
+    db: Session = Depends(get_db),
+):
+    email = normalize_identifier(payload.email)
+
+    invite = find_invite_by_token(db, Invite, payload.invite_token)
+    if not invite or invite.used or invite.expires_at < datetime.utcnow():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired invite token.",
+        )
+
+    if normalize_identifier(invite.email) != email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invite email does not match.",
+        )
+
+    validate_password_strength(payload.password)
+
+    portal = invite.role
+    account = None
+
+    if portal in ("admin", "main_admin", "superadmin"):
+        existing = db.query(Admin).filter(Admin.email == email).first()
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="An admin account with this email already exists.",
+            )
+        account = Admin(
+            email=email,
+            username=email.split("@")[0],
+            hashed_password=pwd_context.hash(payload.password),
+            role=portal if portal in ("main_admin", "superadmin") else "main_admin",
+            status="Active",
+        )
+        db.add(account)
+    elif portal == "branch":
+        existing = db.query(BranchStaff).filter(BranchStaff.email == email).first()
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A branch account with this email already exists.",
+            )
+        account = BranchStaff(
+            email=email,
+            username=email.split("@")[0],
+            hashed_password=pwd_context.hash(payload.password),
+            role="branch_admin",
+            status="Active",
+        )
+        db.add(account)
+    else:
+        existing = find_citizen_by_email(db, CitizenUser, email)
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="An account with this email already exists.",
+            )
+        account = CitizenUser(
+            email=email,
+            full_name=email.split("@")[0],
+            contact_number="",
+            address="",
+            hashed_password=pwd_context.hash(payload.password),
+            role="public",
+            is_verified=True,
+            status="Active",
+        )
+        apply_citizen_user_security(account)
+        db.add(account)
+
+    invite.used = True
+    db.commit()
+    db.refresh(account)
+
+    token_portal = (
+        "public" if portal not in ("admin", "main_admin", "superadmin", "branch")
+        else ("admin" if portal in ("admin", "main_admin", "superadmin") else "branch")
+    )
+    token_payload = build_token_payload(token_portal, account)
+    access_token = create_access_token(token_portal, token_payload)
+
+    log_activity(
+        db,
+        "Invite Registration",
+        email,
+        f"Registered via invite. Portal: {portal}",
+        "auth",
+    )
+
+    user_response = build_user_response(
+        "public" if portal not in ("admin", "main_admin", "superadmin", "branch") else ("admin" if portal in ("admin", "main_admin", "superadmin") else "branch"),
+        account,
+    )
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": user_response,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Branch Authentication Endpoints (mounted at /api/branch/auth)
+# ---------------------------------------------------------------------------
+
+@router.post("/branch/setup-mfa-authenticated")
+async def branch_setup_mfa_authenticated(
+    request: Request,
+    current_staff: BranchStaff = Depends(get_current_branch_staff),
+    db: Session = Depends(get_db),
+):
+    """Authenticated branch staff MFA setup."""
+    client_ip = request.client.host if request.client else "unknown"
+    mfa_username = current_staff.username
+    secret = pyotp.random_base32()
+    save_mfa_secret(db, "branch", mfa_username, secret, enabled=True)
+
+    db.add(ActivityLog(
+        action="Branch MFA Setup Initiated",
+        user=mfa_username,
+        details=f"IP: {client_ip}",
+        type="security",
+    ))
+    db.commit()
+
+    totp = pyotp.TOTP(secret)
+    provisioning_uri = totp.provisioning_uri(
+        name=mfa_username,
+        issuer_name="WARDS Branch Portal",
+    )
+    return {
+        "secret": secret,
+        "qr_code_uri": provisioning_uri,
+        "message": "MFA setup initiated. Scan the QR code with your authenticator app.",
+    }
+
+
+@router.get("/branch/admin/staff")
+async def list_branch_staff(
+    current_staff: BranchStaff = Depends(get_current_branch_staff),
+    db: Session = Depends(get_db),
+):
+    """List staff accounts within the same branch (branch admin only)."""
+    if current_staff.role not in {"branch_admin", "main_admin", "admin", "superadmin"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Branch admin access required",
+        )
+
+    staff_list = (
+        db.query(BranchStaff)
+        .filter(BranchStaff.branch_id == current_staff.branch_id)
+        .all()
+    )
+
+    return [
+        {
+            "id": s.id,
+            "username": s.username,
+            "email": s.email,
+            "full_name": s.full_name,
+            "role": s.role,
+            "status": s.status,
+            "mfa_enabled": bool(
+                find_mfa_secret_record(db, "branch", s.username)
+            ),
+        }
+        for s in staff_list
+    ]
+
+
+class ResetStaffMfaRequest(BaseModel):
+    staff_id: int
+
+
+@router.post("/branch/admin/reset-staff-mfa")
+async def reset_staff_mfa(
+    payload: ResetStaffMfaRequest,
+    current_staff: BranchStaff = Depends(get_current_branch_staff),
+    db: Session = Depends(get_db),
+):
+    """Reset MFA for a staff member in the same branch."""
+    if current_staff.role not in {"branch_admin", "main_admin", "admin", "superadmin"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Branch admin access required",
+        )
+
+    target = db.query(BranchStaff).filter(
+        BranchStaff.id == payload.staff_id,
+        BranchStaff.branch_id == current_staff.branch_id,
+    ).first()
+
+    if not target:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff member not found")
+
+    mfa_record = find_mfa_secret_record(db, "branch", target.username)
+    if mfa_record:
+        db.delete(mfa_record)
+
+    db.add(ActivityLog(
+        action="Branch Staff MFA Reset",
+        user=current_staff.username,
+        details=f"Reset MFA for {target.username} (ID: {target.id})",
+        type="security",
+    ))
+    db.commit()
+
+    return {"message": f"MFA reset for {target.username}"}
+
+
+@router.get("/branch/verify-email")
+async def verify_branch_email(
+    token: str = Query(..., description="Invite verification token"),
+    db: Session = Depends(get_db),
+):
+    """Verify a branch admin email via invite token."""
+    invite = (
+        db.query(Invite)
+        .filter(Invite.token == token, Invite.used == False)
+        .first()
+    )
+
+    if not invite:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification token.",
+        )
+
+    if invite.expires_at and invite.expires_at < datetime.utcnow():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification token has expired.",
+        )
+
+    invite.used = True
+
+    invite_email = get_decrypted_or_raw(invite, "email") or invite.email
+    normalized_invite_email = normalize_email(invite_email, check_deliverability=False)
+    staff = (
+        db.query(BranchStaff)
+        .filter(BranchStaff.email == normalized_invite_email)
+        .first()
+    )
+    if staff:
+        staff.is_verified = True
+        if staff.status == "Pending Verification":
+            staff.status = "Active"
+
+    db.add(ActivityLog(
+        action="Branch Email Verified",
+        user=invite_email,
+        details=f"Token: {token[:8]}...",
+        type="branch_auth",
+    ))
+    db.commit()
+
+    return {
+        "message": "Email verified successfully. You may now log in.",
+        "verified": True,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Window Staff Self-Service Auth Endpoints
+# ---------------------------------------------------------------------------
+
+class WindowStaffChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+    confirm_new_password: str
+
+
+class WindowStaffResetMFARequest(BaseModel):
+    current_password: str
+
+
+class WindowStaffVerifyMFARequest(BaseModel):
+    totp_code: str
+
+
+@router.put("/branch/staff/password")
+async def branch_staff_change_password(
+    request: Request,
+    payload: WindowStaffChangePasswordRequest,
+    current_staff: BranchStaff = Depends(get_current_branch_staff),
+    db: Session = Depends(get_db),
+):
+    """Change the authenticated window staff's own password."""
+    require_window_staff(current_staff)
+    verify_account_password(payload.current_password, current_staff.hashed_password)
+
+    if payload.new_password != payload.confirm_new_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The new passwords do not match.",
+        )
+
+    validate_password_strength(payload.new_password)
+
+    current_staff.hashed_password = hash_password(payload.new_password)
+    db.commit()
+
+    client_ip = request.client.host if request.client else "unknown"
+    log_activity(db, "Window Staff Password Changed", current_staff.username, f"IP: {client_ip}")
+
+    email_result = send_account_change_notification_email(
+        recipient_email=current_staff.email,
+        display_name=current_staff.full_name or current_staff.username,
+        account_type="branch_staff",
+        change_summary="Your WARDS account password was successfully changed.",
+        changed_fields=["Password"],
+        subject="WARDS Security Notification: Password Changed",
+    )
+    if email_result.get("sent"):
+        log_activity(db, "Window Staff Password Changed", current_staff.username, "Security notification email sent after password change.")
+
+    return {"message": "Password changed successfully.", "email_sent": email_result.get("sent", False)}
+
+
+@router.post("/branch/staff/reset-mfa")
+async def branch_staff_reset_mfa(
+    request: Request,
+    payload: WindowStaffResetMFARequest,
+    current_staff: BranchStaff = Depends(get_current_branch_staff),
+    db: Session = Depends(get_db),
+):
+    """Reset the authenticated window staff's MFA and return a new QR code for in-app setup."""
+    require_window_staff(current_staff)
+    verify_account_password(payload.current_password, current_staff.hashed_password)
+
+    totp_secret = pyotp.random_base32()
+    save_mfa_secret(db, "branch", current_staff.username, totp_secret)
+
+    payload_data = generate_mfa_payload("branch", current_staff.username, totp_secret, issuer_name="WARDS Branch Portal")
+
+    client_ip = request.client.host if request.client else "unknown"
+    log_activity(db, "Window Staff MFA Reset", current_staff.username, f"IP: {client_ip}")
+
+    return {
+        "message": "MFA reset. Please scan the QR code to complete setup.",
+        "qr_code": payload_data["qr_code"],
+        "manual_entry_key": totp_secret,
+    }
+
+
+@router.post("/branch/staff/verify-mfa")
+async def branch_staff_verify_mfa(
+    request: Request,
+    payload: WindowStaffVerifyMFARequest,
+    current_staff: BranchStaff = Depends(get_current_branch_staff),
+    db: Session = Depends(get_db),
+):
+    """Verify the TOTP code after in-app MFA setup to confirm the new configuration."""
+    require_window_staff(current_staff)
+
+    totp_secret = get_mfa_secret(db, "branch", current_staff.username)
+    if not totp_secret:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No pending MFA setup found. Please reset MFA first.",
+        )
+
+    totp = pyotp.TOTP(totp_secret)
+    if not totp.verify(payload.totp_code, valid_window=1):
+        client_ip = request.client.host if request.client else "unknown"
+        log_activity(db, "Window Staff MFA Verify Failed", current_staff.username, f"IP: {client_ip}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid verification code.",
+        )
+
+    client_ip = request.client.host if request.client else "unknown"
+    log_activity(db, "Window Staff MFA Configured", current_staff.username, f"IP: {client_ip}")
+
+    email_result = send_account_change_notification_email(
+        recipient_email=current_staff.email,
+        display_name=current_staff.full_name or current_staff.username,
+        account_type="branch_staff",
+        change_summary="Your WARDS account Multi-Factor Authentication (MFA) settings were successfully updated.",
+        changed_fields=["Multi-Factor Authentication"],
+        subject="WARDS Security Notification: MFA Settings Updated",
+    )
+    if email_result.get("sent"):
+        log_activity(db, "Window Staff MFA Configured", current_staff.username, "Security notification email sent after MFA reset.")
+
+    return {"message": "MFA configured successfully.", "email_sent": email_result.get("sent", False)}
+
+
+# ---------------------------------------------------------------------------
+# Public User Self-Service Auth Endpoints
+# ---------------------------------------------------------------------------
+
+class PublicUserChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+    confirm_new_password: str
+
+
+@router.put("/user/password")
+async def public_user_change_password(
+    payload: PublicUserChangePasswordRequest,
+    db: Session = Depends(get_db),
+    current_user: CitizenUser = Depends(get_current_user),
+):
+    """Change the authenticated public user's password."""
+    verify_account_password(payload.current_password, current_user.hashed_password, detail="Incorrect account password.")
+    if payload.new_password != payload.confirm_new_password:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New password and confirmation do not match.")
+    if verify_password(payload.new_password, current_user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New password must be different from your current password.")
+    validate_password_strength(payload.new_password)
+
+    current_user.hashed_password = hash_password(payload.new_password)
+    db.add(ActivityLog(
+        action="Public Taxpayer Password Changed",
+        user=get_decrypted_or_raw(current_user, "email") or current_user.email or "",
+        details=f"Password changed for citizen user {current_user.id}",
+        type="user",
+    ))
+    db.commit()
+
+    send_account_change_notification_email(
+        recipient_email=get_decrypted_or_raw(current_user, "email") or current_user.email or "",
+        display_name=get_decrypted_or_raw(current_user, "full_name") or current_user.full_name or "Taxpayer",
+        account_type="public",
+        change_summary="Your WARDS account password was changed.",
+        changed_fields=["Password"],
+    )
+
+    return {"message": "Password changed successfully."}
+
+
+# ---------------------------------------------------------------------------
+# Admin Invite Creation Endpoint
+# ---------------------------------------------------------------------------
+
+class AdminInviteCreateRequest(BaseModel):
+    email: EmailStr
+    role: str
+
+
+@router.post("/admin/invite")
+async def admin_create_invite(
+    request: Request,
+    invite_data: AdminInviteCreateRequest,
+    current_admin=Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    """Create an invite token for branch or admin registration."""
+    if current_admin.role not in {"main_admin", "admin", "superadmin"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+
+    if invite_data.role not in {"branch", "admin"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invite role must be either branch or admin",
+        )
+
+    token = secrets.token_urlsafe(32)
+    invite = Invite(
+        email=invite_data.email.lower(),
+        role=invite_data.role,
+        token=token,
+        expires_at=datetime.utcnow() + timedelta(hours=24),
+        used=False,
+    )
+    db.add(invite)
+    db.flush()
+    from utils.field_crypto import apply_invite_security
+    apply_invite_security(invite)
+    db.add(ActivityLog(
+        action="Invite Created",
+        user=current_admin.username,
+        details=f"Invite for {get_decrypted_or_raw(invite, 'email') or invite_data.email.lower()} as {get_decrypted_or_raw(invite, 'role') or invite_data.role} from IP: {request.client.host}",
+        type="admin_invite",
+    ))
+    db.commit()
+    db.refresh(invite)
+
+    return {
+        "id": invite.id,
+        "email": get_decrypted_or_raw(invite, "email") or invite.email,
+        "role": get_decrypted_or_raw(invite, "role") or invite.role,
+        "token": get_decrypted_or_raw(invite, "token") or token,
+        "expires_at": invite.expires_at.isoformat(),
+        "message": "Invite created successfully",
+    }

@@ -1,1 +1,1 @@
-from . import announcements, services, queue, auth_simple, admin_simple
+from . import announcements, services, queue, admin_auth

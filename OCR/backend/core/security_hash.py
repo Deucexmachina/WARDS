@@ -5,7 +5,13 @@ from typing import Optional
 
 
 def _get_hash_secret() -> str:
-    return os.getenv("DATA_HASH_SECRET", "change-this-data-hash-secret")
+    value = os.getenv("DATA_HASH_SECRET")
+    if not value:
+        raise RuntimeError(
+            "Missing required environment variable: DATA_HASH_SECRET. "
+            "Please ensure it is set in your .env file."
+        )
+    return value
 
 
 def hash_sensitive_value(value: str) -> str:

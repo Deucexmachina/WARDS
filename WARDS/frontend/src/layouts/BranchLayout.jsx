@@ -383,7 +383,7 @@ const BranchLayout = () => {
     }
 
     try {
-      await api.post('/branch/auth/logout');
+      await api.post('/auth/unified/logout');
     } catch (error) {
       console.error('Branch logout failed:', error);
     } finally {

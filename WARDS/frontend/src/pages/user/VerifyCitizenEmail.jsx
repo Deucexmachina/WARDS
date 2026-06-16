@@ -90,7 +90,7 @@ function VerifyCitizenEmail() {
       setError('');
 
       try {
-        const response = await axios.post(`${API_URL}/api/user/auth/verification/request`, {
+        const response = await axios.post(`${API_URL}/api/auth/unified/verification/request`, {
           email,
         });
 
@@ -145,7 +145,7 @@ function VerifyCitizenEmail() {
     setError('');
 
     try {
-      const response = await axios.post(`${API_URL}/api/user/auth/verification/confirm`, {
+      const response = await axios.post(`${API_URL}/api/auth/unified/verification/confirm`, {
         email,
         code,
       });
@@ -167,7 +167,7 @@ function VerifyCitizenEmail() {
     setError('');
 
     try {
-      const response = await axios.post(`${API_URL}/api/user/auth/verification/request`, {
+      const response = await axios.post(`${API_URL}/api/auth/unified/verification/request`, {
         email,
       });
 

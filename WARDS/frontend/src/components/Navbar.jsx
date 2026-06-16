@@ -10,9 +10,7 @@ import { appendLanguageParam, usePublicLanguage } from '../utils/publicLanguage'
 const hasPublicSession = () =>
   Boolean(
     localStorage.getItem('userToken') ||
-    localStorage.getItem('publicToken') ||
-    localStorage.getItem('user') ||
-    localStorage.getItem('publicUser')
+    localStorage.getItem('user')
   );
 
 const Navbar = () => {
@@ -51,7 +49,6 @@ const Navbar = () => {
     localStorage.removeItem('loginPortal');
     sessionStorage.removeItem('loginPortal');
     clearSession('public');
-    localStorage.removeItem('publicToken');
     clearStoredPublicUser();
     sessionStorage.removeItem('redirectAfterLogin');
     sessionStorage.removeItem('loginMessage');

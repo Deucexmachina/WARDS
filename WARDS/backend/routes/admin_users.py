@@ -2,12 +2,11 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from database.models import ActivityLog, Admin, BranchStaff, CitizenUser, get_db
-from middleware.admin_auth import get_current_admin_user
+from auth import get_current_admin_user, hash_password
 from utils.field_crypto import apply_citizen_user_security, serialize_citizen_user
 from utils.security_validation import (
     ensure_email_is_unique,
@@ -19,7 +18,6 @@ from utils.security_validation import (
 )
 
 router = APIRouter()
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 class AdminUserCreate(BaseModel):
@@ -117,7 +115,7 @@ async def create_user(
     ensure_email_is_unique(db, email)
     validate_strong_password(user_data.password)
 
-    hashed_password = pwd_context.hash(user_data.password)
+    hashed_password = hash_password(user_data.password)
     if role == "admin":
         requested_username = normalize_username(user_data.username) if user_data.username else None
         username = unique_username(db, Admin, email, requested_username)
@@ -193,7 +191,7 @@ async def update_user(
     user.status = user_data.status
     if user_data.password:
         validate_strong_password(user_data.password)
-        user.hashed_password = pwd_context.hash(user_data.password)
+        user.hashed_password = hash_password(user_data.password)
     if role in {"admin", "branch"} and user_data.username:
         username = normalize_username(user_data.username)
         ensure_username_is_unique(db, username, exclude_admin_id=exclude_admin_id, exclude_branch_staff_id=exclude_branch_staff_id)

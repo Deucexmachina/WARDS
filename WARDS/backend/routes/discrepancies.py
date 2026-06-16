@@ -11,8 +11,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.session import object_session
 
 from database.models import ActivityLog, Admin, Branch, BranchStaff, DiscrepancyReport, get_db
-from middleware.admin_auth import require_main_admin
-from middleware.branch_auth import get_current_branch_staff, require_branch_admin
+from auth import require_main_admin
+from auth import get_current_branch_staff, require_branch_admin
 from utils.file_delivery import deliver_file_response
 from utils.file_validation import validate_upload_file
 from utils.field_crypto import apply_discrepancy_report_security, get_decrypted_or_raw

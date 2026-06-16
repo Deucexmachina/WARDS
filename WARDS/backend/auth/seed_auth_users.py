@@ -4,11 +4,10 @@ Seed script to create default Admin and BranchStaff users for authentication tes
 import os
 import secrets
 import string
-from passlib.context import CryptContext
-from database.models import Admin, BranchStaff, Branch, SessionLocal, Base, engine
 from datetime import datetime
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+from auth.password_utils import hash_password
+from database.models import Admin, BranchStaff, Branch, SessionLocal, Base, engine
 
 
 def _generate_secure_password(length: int = 24) -> str:
@@ -52,7 +51,7 @@ def seed_auth_users():
             admin = Admin(
                 username="admin",
                 email="treasurermain@gmail.com",
-                hashed_password=pwd_context.hash(admin_password),
+                hashed_password=hash_password(admin_password),
                 role="main_admin",
                 status="Active",
                 created_at=datetime.utcnow()
@@ -90,7 +89,7 @@ def seed_auth_users():
                 username="branch1",
                 email="branch1@treasury.gov",
                 full_name="Branch Staff One",
-                hashed_password=pwd_context.hash(staff_password),
+                hashed_password=hash_password(staff_password),
                 branch_id=branch.id,
                 role="branch_staff",
                 status="Active",
@@ -111,7 +110,7 @@ def seed_auth_users():
                 username="branchadmin",
                 email="branchadmin@treasury.gov",
                 full_name="Branch Administrator",
-                hashed_password=pwd_context.hash(branch_admin_password),
+                hashed_password=hash_password(branch_admin_password),
                 branch_id=branch.id,
                 role="branch_admin",
                 status="Active",

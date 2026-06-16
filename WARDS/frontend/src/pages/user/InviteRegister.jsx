@@ -69,7 +69,7 @@ const InviteRegister = () => {
     setError('');
 
     try {
-      const response = await axios.post(`${API_URL}/api/user/auth/register/invite`, {
+      const response = await axios.post(`${API_URL}/api/auth/unified/register/invite`, {
         email: formData.email,
         password: formData.password,
         invite_token: formData.invite_token,

@@ -1,7 +1,4 @@
-import os
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_
 from sqlalchemy.exc import IntegrityError
@@ -36,14 +33,11 @@ from utils.branch_system_settings import get_branch_setting_value
 from utils.system_settings import SYSTEM_DISABLED_MESSAGE, BRANCH_QUEUE_DISABLED_MESSAGE, get_setting_value
 from utils.field_crypto import decrypt_optional_value
 from utils.announcement_attachments import serialize_attachments
+from auth import get_optional_current_user
 
 router = APIRouter()
-USER_SECRET_KEY = os.getenv("USER_SECRET_KEY", "your-user-secret-key-change-in-production")
-UNIFIED_SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "your-unified-auth-secret-change-in-production")
-ALGORITHM = "HS256"
 ACTIVE_PUBLIC_QUEUE_STATUSES = ("Pending", "Waiting", "Called", "Serving")
 ACTIVE_QUEUE_MESSAGE = "You already have an active queue request. Please complete or cancel your current queue before registering for another one."
-optional_user_security = HTTPBearer(auto_error=False)
 MANILA_TIMEZONE = timezone(timedelta(hours=8))
 
 # Rate limiting configuration
@@ -217,44 +211,6 @@ def resolve_public_branch_by_name(db: Session, branch_name: str | None) -> Branc
         if (get_decrypted_or_raw(branch, "name") or branch.name) == normalized:
             return branch
     return None
-
-
-def resolve_authenticated_citizen(
-    credentials: Optional[HTTPAuthorizationCredentials],
-    db: Session,
-) -> Optional[CitizenUser]:
-    if credentials is None:
-        return None
-
-    token = credentials.credentials
-    user = None
-
-    try:
-        payload = jwt.decode(token, UNIFIED_SECRET_KEY, algorithms=[ALGORITHM])
-        email = payload.get("email") or payload.get("sub")
-        role = payload.get("role")
-        token_type = payload.get("type")
-
-        if email and token_type == "role_auth" and role == "public":
-            user = find_citizen_by_email(db, CitizenUser, email)
-    except JWTError:
-        user = None
-
-    if user is None:
-        try:
-            payload = jwt.decode(token, USER_SECRET_KEY, algorithms=[ALGORITHM])
-            email = payload.get("sub")
-            token_type = payload.get("type")
-
-            if email and token_type == "user":
-                user = find_citizen_by_email(db, CitizenUser, email)
-        except JWTError as exc:
-            raise HTTPException(status_code=401, detail="Could not validate credentials") from exc
-
-    if user and user.status != "Active":
-        raise HTTPException(status_code=403, detail="Account is not active")
-
-    return user
 
 
 def find_existing_active_queue(
@@ -752,7 +708,7 @@ async def register_queue(
     request: Request,
     registration: QueueRegistration,
     db: Session = Depends(get_db),
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_user_security),
+    current_citizen: CitizenUser | None = Depends(get_optional_current_user),
 ):
     """Register for queue (immediate or appointment)"""
     ensure_queue_registration_allowed(db, registration.branch_id)
@@ -773,7 +729,6 @@ async def register_queue(
             detail="Queue registration failed: Immediate queueing is unavailable because this service requires an appointment schedule. Please choose Appointment queueing.",
         )
 
-    current_citizen = resolve_authenticated_citizen(credentials, db)
     resolved_taxpayer_name = (
         (get_decrypted_or_raw(current_citizen, "full_name") or current_citizen.full_name)
         if current_citizen
@@ -951,10 +906,9 @@ async def register_queue(
 async def get_my_active_ticket(
     request: Request,
     db: Session = Depends(get_db),
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_user_security),
+    current_citizen: CitizenUser = Depends(get_optional_current_user),
 ):
     """Get the authenticated citizen's active queue ticket"""
-    current_citizen = resolve_authenticated_citizen(credentials, db)
     if not current_citizen:
         raise HTTPException(status_code=401, detail="Authentication required to view your ticket")
     
@@ -1070,10 +1024,9 @@ async def get_my_active_ticket(
 async def get_my_queue_history(
     request: Request,
     db: Session = Depends(get_db),
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_user_security),
+    current_citizen: CitizenUser = Depends(get_optional_current_user),
 ):
     """Get the authenticated citizen's queue records across active and archived sources."""
-    current_citizen = resolve_authenticated_citizen(credentials, db)
     if not current_citizen:
         raise HTTPException(status_code=401, detail="Authentication required to view your history")
 

@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database.models import ActivityLog, Policy, PolicyView, User, get_db
-from middleware.admin_auth import get_current_admin_user
+from auth import get_current_admin_user
 from utils.rbac import require_permission
 
 router = APIRouter()

@@ -8,7 +8,7 @@ from database.models import (
     get_db, Branch, Queue, QueueActivity, Payment, User, 
     Alert, AlertView, ActivityLog, Announcement
 )
-from middleware.admin_auth import get_current_admin_user
+from auth import get_current_admin_user
 from utils.rbac import require_permission
 from utils.field_crypto import get_decrypted_or_raw, hash_aware_match, queue_value, hash_optional_value
 

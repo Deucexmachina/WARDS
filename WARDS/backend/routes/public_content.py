@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database.models import ActivityLog, FAQ, PublicPageContent, TaxpayerGuide, get_db
-from middleware.admin_auth import get_current_admin_user
+from auth import get_current_admin_user
 from utils.field_crypto import apply_faq_security, apply_taxpayer_guide_security, get_decrypted_or_raw, hash_optional_value, taxpayer_guide_value
 from utils.rbac import require_permission
 

@@ -2,11 +2,9 @@ import os
 import secrets
 import string
 from database.models import SessionLocal, User, Branch, Alert, Announcement, QueueActivity
-from passlib.context import CryptContext
+from auth import hash_password
 from datetime import datetime, timedelta
 import random
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def _generate_secure_password(length: int = 24) -> str:
@@ -58,7 +56,7 @@ def seed_database():
             admin_user = User(
                 username="admin",
                 email="admin@treasury.gov",
-                hashed_password=pwd_context.hash(admin_password),
+                hashed_password=hash_password(admin_password),
                 role="main_admin",
                 branch_id=None,  # Main admin has access to all branches
                 status="Active"
@@ -70,7 +68,7 @@ def seed_database():
             galas_admin = User(
                 username="galas_admin",
                 email="galas.admin@treasury.gov",
-                hashed_password=pwd_context.hash(galas_password),
+                hashed_password=hash_password(galas_password),
                 role="branch_admin",
                 branch_id=galas_branch.id if galas_branch else None,
                 status="Active"
@@ -82,7 +80,7 @@ def seed_database():
             district_admin = User(
                 username="district_admin",
                 email="district.admin@treasury.gov",
-                hashed_password=pwd_context.hash(district_password),
+                hashed_password=hash_password(district_password),
                 role="branch_admin",
                 branch_id=district_branch.id if district_branch else None,
                 status="Active"
@@ -94,7 +92,7 @@ def seed_database():
             galas_staff = User(
                 username="galas_staff",
                 email="galas.staff@treasury.gov",
-                hashed_password=pwd_context.hash(galas_staff_password),
+                hashed_password=hash_password(galas_staff_password),
                 role="branch_staff",
                 branch_id=galas_branch.id if galas_branch else None,
                 status="Active"
@@ -106,7 +104,7 @@ def seed_database():
             district_staff = User(
                 username="district_staff",
                 email="district.staff@treasury.gov",
-                hashed_password=pwd_context.hash(district_staff_password),
+                hashed_password=hash_password(district_staff_password),
                 role="branch_staff",
                 branch_id=district_branch.id if district_branch else None,
                 status="Active"

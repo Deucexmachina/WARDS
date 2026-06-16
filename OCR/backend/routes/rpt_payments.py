@@ -137,7 +137,7 @@ def get_staff_user(authorization: Optional[str] = Header(None)) -> dict:
         raise HTTPException(status_code=401, detail="Authentication is required.")
 
     token = authorization.replace("Bearer ", "")
-    from auth.simple_auth import verify_session
+    from routes.admin_auth import verify_session
 
     user = verify_session(token)
     if not user:

@@ -296,7 +296,7 @@ const Accounts = () => {
     if (!digits || validatePhilippineContactDigits(digits)) return;
     setContactCheckingUniqueness(true);
     try {
-      const response = await axios.post('http://localhost:8000/api/user/auth/check-contact', {
+      const response = await axios.post('http://localhost:8000/api/auth/unified/check-contact', {
         contact_number: `+63${digits}`,
         exclude_citizen_id: editingAccount?.id ?? null,
       });

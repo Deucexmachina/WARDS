@@ -4,6 +4,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 
+from auth import get_current_admin_user
 from services.ocr_runtime import run_ocr_in_executor
 from services.ocr_service import OCRProcessingError, ocr_service
 from utils.file_validation import validate_upload_file
@@ -18,6 +19,7 @@ async def process_receipt_ocr(
     request: Request,
     file: UploadFile = File(...),
     category: str = Form("RPT"),
+    current_user=Depends(get_current_admin_user),
 ):
     image_data = await file.read()
     validate_upload_file(

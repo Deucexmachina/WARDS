@@ -1,7 +1,6 @@
-from . import auth, branches, reports, announcements, memos, alerts, logs, backup, users, payments, receipts, settings, policies, branch_settings, privacy
+from . import branches, reports, announcements, memos, alerts, logs, backup, users, payments, receipts, settings, policies, branch_settings, privacy, unified_auth
 
 __all__ = [
-    'auth',
     'branches',
     'reports',
     'announcements',
@@ -16,4 +15,5 @@ __all__ = [
     'policies',
     'branch_settings',
     'privacy',
+    'unified_auth',
 ]

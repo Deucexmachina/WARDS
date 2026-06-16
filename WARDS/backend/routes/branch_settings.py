@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database.models import Branch, BranchStaff, Service, get_db
-from middleware.branch_auth import require_branch_admin
+from auth import require_branch_admin
 from utils.branch_appointment_settings import (
     delete_branch_schedule_history_entry,
     get_branch_schedule_history,

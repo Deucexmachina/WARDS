@@ -5,7 +5,6 @@ from fastapi import FastAPI, Depends, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from datetime import datetime, timedelta
 from typing import Optional
 import uvicorn
@@ -14,7 +13,6 @@ import threading
 import time
 
 from dotenv import load_dotenv
-from passlib.context import CryptContext
 from sqlalchemy import text, inspect, or_, event
 from sqlalchemy.orm import Session as OrmSession
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -22,7 +20,7 @@ from slowapi.errors import RateLimitExceeded
 
 load_dotenv(Path(__file__).resolve().with_name(".env"), override=True)
 
-from routes import auth, branches, reports, announcements, memos, alerts, logs, backup, users, payments, receipts, settings, policies, privacy, rbac_routes, dashboard, public, public_auth, admin_auth_v2, user_auth_v2, branch_auth_v2, invites, admin_users, branch_portal, branch_settings, unified_auth, discrepancies, tax_assessment, security_dashboard, public_content, window_staff_account
+from routes import branches, reports, announcements, memos, alerts, logs, backup, users, payments, receipts, settings, policies, privacy, rbac_routes, dashboard, public, admin_users, branch_portal, branch_settings, unified_auth, discrepancies, tax_assessment, security_dashboard, public_content, window_staff_account
 from services import ocr_routes
 from database.models import Base, engine, SessionLocal, Admin, Announcement, AnnouncementAttachment, Branch, BusinessRegistry, BusinessTaxApplication, CollectionAccount, DiscrepancyReport, EmailOTP, EmailVerificationToken, FAQ, Invite, Memo, MemoView, MFASecret, Payment, Queue, QueueActivity, ReceiptRecord, ReceiptRequest, ReceiptRequestHistory, Remittance, RemittanceItem, RPTPropertyRecord, Service, ServiceWindowConfig, TaxpayerGuide
 from utils.field_crypto import apply_citizen_user_security, apply_collection_account_security, apply_discrepancy_report_security, apply_email_otp_security, apply_email_verification_token_security, apply_faq_security, apply_invite_security, apply_memo_security, apply_memo_view_security, apply_mfa_secret_security, apply_payment_security, apply_queue_activity_security, apply_queue_security, apply_receipt_record_security, apply_receipt_request_history_security, apply_receipt_request_security, apply_remittance_item_security, apply_remittance_security, apply_rpt_property_record_security, apply_service_security, apply_service_window_config_security, apply_system_setting_security, apply_tax_assessment_record_security, apply_taxpayer_guide_security, apply_taxpayer_identifier_submission_security, build_redacted_text, get_decrypted_or_raw, hash_optional_value, set_encrypted_hash_companions
@@ -1406,12 +1404,12 @@ def bootstrap_admin():
         if admin_exists:
             return
 
-        pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+        from auth import hash_password
         username = admin_email.split("@", 1)[0]
         db.add(Admin(
             username=username,
             email=admin_email.lower(),
-            hashed_password=pwd_context.hash(admin_password),
+            hashed_password=hash_password(admin_password),
             role="main_admin",
             status="Active",
             is_verified=True,
@@ -1440,11 +1438,11 @@ def bootstrap_superadmin():
             print(f"  Password: {superadmin_password}")
             print("=" * 70 + "\n")
 
-        pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+        from auth import hash_password
         db.add(Admin(
             username="superadmin",
             email=os.getenv("SUPERADMIN_EMAIL", "treasurersuper@gmail.com"),
-            hashed_password=pwd_context.hash(superadmin_password),
+            hashed_password=hash_password(superadmin_password),
             role="superadmin",
             status="Active",
             is_verified=True,
@@ -1953,17 +1951,15 @@ def stop_database_runtime_monitoring():
         print(f"[SECURITY MONITOR] database audit trigger shutdown skipped: {exc}")
 
 
-app.include_router(user_auth_v2.router, prefix="/api/user/auth", tags=["User Authentication V2"])
-app.include_router(branch_auth_v2.router, prefix="/api/branch/auth", tags=["Branch Authentication V2"])
 app.include_router(branch_portal.router, prefix="/api/branch", tags=["Branch Portal"])
 app.include_router(branch_settings.router, prefix="/api/branch/settings", tags=["Branch Settings"])
 app.include_router(window_staff_account.router, prefix="/api/branch/account", tags=["Window Staff Account"])
 app.include_router(reports.branch_router, prefix="/api/branch/reports", tags=["Branch Reports"])
-app.include_router(admin_auth_v2.router, prefix="/api/admin/auth", tags=["Admin Authentication V2"])
-app.include_router(invites.router, prefix="/api/admin", tags=["Admin Invites"])
 app.include_router(admin_users.router, prefix="/api/admin", tags=["Admin Users"])
+# Unified auth is intentionally mounted at two prefixes:
+# /api/auth/unified  – primary endpoint for all portals (admin, branch, public)
+# /api/public/auth   – backward-compatible alias for public portal login flows
 app.include_router(unified_auth.router, prefix="/api/auth/unified", tags=["Unified Authentication"])
-app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(branches.router, prefix="/api/branches", tags=["Branches"])
 app.include_router(reports.router, prefix="/api/reports", tags=["Reports"])
 app.include_router(announcements.router, prefix="/api/announcements", tags=["Announcements"])
@@ -1985,7 +1981,7 @@ app.include_router(ocr_routes.router, prefix="/api/ocr", tags=["OCR"])
 app.include_router(rbac_routes.router, prefix="/api/rbac", tags=["RBAC"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])
 app.include_router(public.router, prefix="/api/public", tags=["Public Portal"])
-app.include_router(public_auth.router, prefix="/api/public/auth", tags=["Public Authentication"])
+app.include_router(unified_auth.router, prefix="/api/public/auth", tags=["Public Authentication"])
 app.include_router(public_content.router, prefix="/api/public-content", tags=["Public Content Management"])
 
 @app.get("/")

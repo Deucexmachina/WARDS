@@ -2,7 +2,7 @@ import axios from 'axios';
 import { useEffect, useMemo, useState } from 'react';
 import { CustomSelect } from '../../components/FormControls';
 import { useSearchParams } from 'react-router-dom';
-import { taxpayerAccountAPI, queueAPI, userAuthAPI } from '../../services/api';
+import { taxpayerAccountAPI, queueAPI, unifiedAuthAPI } from '../../services/api';
 import { getStoredPublicUser, setStoredPublicUser } from '../../utils/publicSession';
 import { usePublicLanguage } from '../../utils/publicLanguage';
 import {
@@ -206,8 +206,8 @@ const AccountManagement = () => {
     try {
       setMfaLoading(true);
       setMfaError('');
-      const response = await userAuthAPI.setupMfa({
-        email: profile.email,
+      const response = await unifiedAuthAPI.setupMfa({
+        identifier: profile.email,
         password: mfaPassword,
       });
       setMfaSetupData(response.data);
@@ -235,8 +235,8 @@ const AccountManagement = () => {
       setMfaLoading(true);
       setMfaError('');
       setMfaTotpError('');
-      await userAuthAPI.verifyMfaSetup({
-        email: profile.email,
+      await unifiedAuthAPI.verifyMfaSetup({
+        identifier: profile.email,
         password: mfaPassword,
         totp_code: mfaTotpCode,
       });
@@ -313,7 +313,7 @@ const AccountManagement = () => {
     const storedUser = getStoredPublicUser();
     setContactCheckingUniqueness(true);
     try {
-      const response = await axios.post('http://localhost:8000/api/user/auth/check-contact', {
+      const response = await axios.post('http://localhost:8000/api/auth/unified/check-contact', {
         contact_number: `+63${digits}`,
         exclude_citizen_id: storedUser?.id ?? null,
       });

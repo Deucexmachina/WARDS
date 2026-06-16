@@ -8,7 +8,7 @@ from typing import Optional
 
 from database.models import ActivityLog, Branch, BranchStaff, User, get_db
 from utils.field_crypto import get_decrypted_or_raw
-from middleware.admin_auth import get_current_admin_user
+from auth import get_current_admin_user
 from utils.log_integrity import verify_record_integrity
 from utils.rbac import require_permission
 

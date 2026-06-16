@@ -9,13 +9,18 @@ from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import or_
 
 
-def _get_env_secret(name: str, fallback: str) -> str:
-    value = (os.getenv(name) or "").strip()
-    return value or fallback
+def _require_env(name: str) -> str:
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(
+            f"Missing required environment variable: {name}. "
+            "Please ensure it is set in your .env file."
+        )
+    return value
 
 
 def _build_fernet() -> Fernet:
-    secret = _get_env_secret("DATA_ENCRYPTION_SECRET", "change-this-data-encryption-secret")
+    secret = _require_env("DATA_ENCRYPTION_SECRET")
     key = base64.urlsafe_b64encode(hashlib.sha256(secret.encode("utf-8")).digest())
     return Fernet(key)
 
@@ -55,7 +60,7 @@ def hash_optional_value(value: Optional[str]) -> Optional[str]:
     text = str(value).strip()
     if not text:
         return None
-    secret = _get_env_secret("DATA_HASH_SECRET", "change-this-data-hash-secret")
+    secret = _require_env("DATA_HASH_SECRET")
     return hmac.new(secret.encode("utf-8"), text.encode("utf-8"), hashlib.sha256).hexdigest()
 
 

@@ -28,8 +28,7 @@ from database.models import (
     TaxAssessmentRecord,
     get_db,
 )
-from middleware.admin_auth import require_main_admin
-from middleware.user_auth import get_current_user
+from auth import require_main_admin, get_current_user
 from services.email_service import send_payment_receipt_email
 from services.paymongo import paymongo_service
 from utils.branch_system_settings import get_branch_setting_value

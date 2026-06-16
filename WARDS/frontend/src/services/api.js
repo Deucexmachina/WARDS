@@ -45,13 +45,7 @@ api.interceptors.request.use((config) => {
   let token = null;
   const url = config.url || '';
   
-  if (
-    url.includes('/user/auth') ||
-    url.includes('/user/') ||
-    url.includes('/tax-assessment/user/')
-  ) {
-    token = localStorage.getItem('userToken');
-  } else if (url.includes('/public-content')) {
+  if (url.includes('/public-content')) {
     token = localStorage.getItem('adminToken') || localStorage.getItem('branchToken');
   } else if (url.includes('/alerts')) {
     token = localStorage.getItem('adminToken') || localStorage.getItem('branchToken');
@@ -142,12 +136,6 @@ api.interceptors.response.use(
   }
 );
 
-export const authAPI = {
-  login: (credentials) => api.post('/auth/login', credentials),
-  logout: () => api.post('/auth/logout'),
-  getCurrentUser: () => api.get('/auth/me'),
-};
-
 export const branchAPI = {
   getAll: () => api.get('/branches'),
   getById: (id) => api.get(`/branches/${id}`),
@@ -185,7 +173,7 @@ export const paymentAPI = {
 export const taxpayerAccountAPI = {
   getAccount: () => api.get('/tax-assessment/user/account'),
   updateProfile: (data) => api.put('/tax-assessment/user/account/profile', data),
-  changePassword: (data) => api.put('/tax-assessment/user/account/password', data),
+  changePassword: (data) => api.put('/auth/unified/user/password', data),
   submitIdentifier: (formData) => api.post('/tax-assessment/user/account/submissions', formData, {
     headers: { 'Content-Type': 'multipart/form-data' }
   }),
@@ -195,12 +183,10 @@ export const taxpayerAccountAPI = {
   }),
 };
 
-export const userAuthAPI = {
-  setupMfa: (data) => api.post('/user/auth/setup-mfa', data),
-  verifyMfaSetup: (data) => api.post('/user/auth/verify-mfa-setup', data),
-};
-
 export const unifiedAuthAPI = {
+  login: (credentials) => api.post('/auth/unified/login', credentials),
+  logout: () => api.post('/auth/unified/logout'),
+  getCurrentUser: () => api.get('/auth/unified/me'),
   setupMfa: (data) => api.post('/auth/unified/setup-mfa', data),
   verifyMfaSetup: (data) => api.post('/auth/unified/verify-mfa-setup', data),
   sendMfaRecoveryOtp: (data) => api.post('/auth/unified/mfa-recovery/send-otp', data),
@@ -287,9 +273,9 @@ export const branchReportAPI = {
 export const windowStaffAccountAPI = {
   getProfile: () => api.get('/branch/account/profile'),
   updateProfile: (data) => api.put('/branch/account/profile', data),
-  changePassword: (data) => api.put('/branch/account/password', data),
-  resetMfa: (data) => api.post('/branch/account/reset-mfa', data),
-  verifyMfa: (data) => api.post('/branch/account/verify-mfa', data),
+  changePassword: (data) => api.put('/auth/unified/branch/staff/password', data),
+  resetMfa: (data) => api.post('/auth/unified/branch/staff/reset-mfa', data),
+  verifyMfa: (data) => api.post('/auth/unified/branch/staff/verify-mfa', data),
 };
 
 export const branchSettingsAPI = {
@@ -448,7 +434,7 @@ export const settingsAPI = {
   update: (data) => api.put('/settings', data),
   getHistory: (params) => api.get('/settings/history', { params }),
   deleteHistoryEntry: (id) => api.delete(`/settings/history/${id}`),
-  setupAdminMfa: () => api.post('/admin/auth/setup-mfa-authenticated'),
+  setupAdminMfa: () => api.post('/auth/unified/setup-mfa-authenticated'),
 };
 
 export const accountAPI = {

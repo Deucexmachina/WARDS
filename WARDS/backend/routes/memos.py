@@ -12,7 +12,7 @@ from utils.file_delivery import deliver_file_response
 from utils.file_validation import validate_upload_file
 
 from database.models import Memo, MemoView, get_db, ActivityLog, User, Branch
-from middleware.admin_auth import get_current_admin_user, require_main_admin
+from auth import get_current_admin_user, require_main_admin
 from utils.field_crypto import apply_memo_security, apply_memo_view_security, get_decrypted_or_raw, get_memo_viewed_ids, find_memo_view
 from utils.rbac import require_permission
 

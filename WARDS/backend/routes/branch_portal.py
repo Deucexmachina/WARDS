@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError, OperationalError
 
 from database.models import ActivityLog, Announcement, AnnouncementAttachment, AnnouncementView, Branch, BranchStaff, BusinessTaxApplication, CollectionAccount, Memo, MemoView, Payment, Policy, PolicyView, Queue, QueueHistory, ReceiptRequest, ReceiptRequestHistory, Remittance, RemittanceItem, Service, get_db
-from middleware.branch_auth import get_current_branch_staff, require_any_branch_staff
+from auth import get_current_branch_staff, require_any_branch_staff
 from utils.file_delivery import deliver_file_response
 from utils.file_validation import validate_upload_file
 from utils.announcement_attachments import (
