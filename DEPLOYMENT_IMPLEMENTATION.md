@@ -8,7 +8,7 @@ This guide deploys WARDS on a DigitalOcean Ubuntu droplet using Docker Compose, 
 2. Recommended minimum size: 2 vCPU, 4 GB RAM, 80 GB disk.
 3. Add your SSH key during droplet creation.
 4. In the DigitalOcean firewall, allow:
-   - SSH: `22` from your team IPs only.
+   - SSH: `22` from your team IPs only. You can find your IP by visiting https://api.ipify.org + /32
    - Frontend: `3000` from all IPv4/IPv6 while you do not have a domain.
    - Backend API: `8000` from all IPv4/IPv6 while you do not have a domain.
    - MySQL and Redis: do not expose publicly.
@@ -28,7 +28,7 @@ SSH into the droplet:
 ```bash
 ssh root@DROPLET_PUBLIC_IP
 ```
-
+152.42.249.84
 Install Docker, Compose, Git, and MySQL client tools:
 
 ```bash
