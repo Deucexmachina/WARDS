@@ -73,6 +73,15 @@ jobs:
       - name: Run backend tests
         env:
           PYTHONPATH: ${{ github.workspace }}/WARDS/backend:${{ github.workspace }}
+          ADMIN_SECRET_KEY: ci-test-admin-secret
+          USER_SECRET_KEY: ci-test-user-secret
+          BRANCH_SECRET_KEY: ci-test-branch-secret
+          PASSWORD_RESET_SECRET_KEY: ci-test-reset-secret
+          DATA_ENCRYPTION_SECRET: ci-test-data-encryption-secret
+          DATA_HASH_SECRET: ci-test-data-hash-secret
+          LOG_INTEGRITY_SECRET: ci-test-log-integrity-secret
+          BACKUP_INTEGRITY_SECRET: ci-test-backup-integrity-secret
+          RECAPTCHA_SECRET_KEY: ci-test-recaptcha-secret
         run: pytest -q tests
 
   frontend:
