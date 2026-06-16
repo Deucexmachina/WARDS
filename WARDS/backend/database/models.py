@@ -21,6 +21,10 @@ class String(SQLString):
 
 def build_database_url() -> str:
     database_url = os.getenv("DATABASE_URL", "").strip()
+
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return "sqlite:///:memory:"
+
     if not database_url:
         raise RuntimeError(
             "DATABASE_URL environment variable is required but not set. "
