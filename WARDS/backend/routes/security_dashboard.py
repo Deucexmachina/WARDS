@@ -12,7 +12,10 @@ from slowapi.util import get_remote_address
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-MASTER_ROOT = Path(__file__).resolve().parents[3]
+try:
+    MASTER_ROOT = Path(__file__).resolve().parents[3]
+except IndexError:
+    MASTER_ROOT = Path("/app")
 if str(MASTER_ROOT) not in sys.path:
     sys.path.insert(0, str(MASTER_ROOT))
 
