@@ -1,4 +1,5 @@
 import os
+import sys
 import uuid
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -19,10 +20,18 @@ class String(SQLString):
         super().__init__(length=length, **kwargs)
 
 
+def _is_pytest() -> bool:
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return True
+    if "pytest" in sys.modules:
+        return True
+    return any("pytest" in arg for arg in sys.argv)
+
+
 def build_database_url() -> str:
     database_url = os.getenv("DATABASE_URL", "").strip()
 
-    if os.getenv("PYTEST_CURRENT_TEST"):
+    if _is_pytest():
         return "sqlite:///:memory:"
 
     if not database_url:
