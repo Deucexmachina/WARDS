@@ -83,7 +83,7 @@ def test_unified_login_invalid_password():
             json={"identifier": account.email, "password": "WrongPass1!"},
         )
         assert response.status_code == 401
-        assert response.json()["detail"] == "Invalid credentials. Please check your email and password."
+        assert response.json()["detail"] == "Invalid credentials or account status."
     finally:
         unified_auth.find_account_for_portal = original_find
         unified_auth.log_activity = original_log

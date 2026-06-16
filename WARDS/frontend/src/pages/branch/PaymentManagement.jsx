@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import api from '../../services/api';
+import api, { API_BASE_URL } from '../../services/api';
 import WardsPageHero from '../../components/WardsPageHero';
 import { CustomSelect, CustomDatePicker } from '../../components/FormControls';
 
@@ -42,7 +42,7 @@ const formatCurrency = (value) =>
 const buildApiAssetUrl = (path) => {
   if (!path) return '';
   if (/^https?:\/\//i.test(path)) return path;
-  const baseUrl = api.defaults.baseURL || 'http://localhost:8000/api';
+  const baseUrl = api.defaults.baseURL || API_BASE_URL;
   const apiOrigin = baseUrl.replace(/\/api\/?$/, '');
   return `${apiOrigin}${path.startsWith('/') ? path : `/${path}`}`;
 };

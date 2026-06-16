@@ -1,7 +1,7 @@
 import os
 import secrets
 import string
-from database.models import SessionLocal, User, Branch, Alert, Announcement, QueueActivity
+from database.models import SessionLocal, Admin, Branch, Alert, Announcement, QueueActivity
 from auth import hash_password
 from datetime import datetime, timedelta
 import random
@@ -50,10 +50,10 @@ def seed_database():
         galas_branch = db.query(Branch).filter(Branch.name == "Galas Branch").first()
         district_branch = db.query(Branch).filter(Branch.name == "District 3 Office").first()
 
-        if db.query(User).count() == 0:
+        if db.query(Admin).count() == 0:
             # Main Office Administrator (full system access)
             admin_password = _get_seed_password("SEED_MAIN_ADMIN_PASSWORD", "admin")
-            admin_user = User(
+            admin_user = Admin(
                 username="admin",
                 email="admin@treasury.gov",
                 hashed_password=hash_password(admin_password),
@@ -65,7 +65,7 @@ def seed_database():
 
             # Galas Branch Administrator
             galas_password = _get_seed_password("SEED_GALAS_ADMIN_PASSWORD", "galas_admin")
-            galas_admin = User(
+            galas_admin = Admin(
                 username="galas_admin",
                 email="galas.admin@treasury.gov",
                 hashed_password=hash_password(galas_password),
@@ -77,7 +77,7 @@ def seed_database():
 
             # District 3 Branch Administrator
             district_password = _get_seed_password("SEED_DISTRICT_ADMIN_PASSWORD", "district_admin")
-            district_admin = User(
+            district_admin = Admin(
                 username="district_admin",
                 email="district.admin@treasury.gov",
                 hashed_password=hash_password(district_password),
@@ -89,7 +89,7 @@ def seed_database():
 
             # Galas Branch Staff
             galas_staff_password = _get_seed_password("SEED_GALAS_STAFF_PASSWORD", "galas_staff")
-            galas_staff = User(
+            galas_staff = Admin(
                 username="galas_staff",
                 email="galas.staff@treasury.gov",
                 hashed_password=hash_password(galas_staff_password),
@@ -101,7 +101,7 @@ def seed_database():
 
             # District 3 Branch Staff
             district_staff_password = _get_seed_password("SEED_DISTRICT_STAFF_PASSWORD", "district_staff")
-            district_staff = User(
+            district_staff = Admin(
                 username="district_staff",
                 email="district.staff@treasury.gov",
                 hashed_password=hash_password(district_staff_password),

@@ -4,7 +4,7 @@ import WardsPageHero from '../../components/WardsPageHero';
 import SystemMessageModal from '../../components/SystemMessageModal';
 import CollectionReportView from '../../components/admin/CollectionReportView';
 
-const API_BASE_URL = 'http://localhost:8000/api';
+import { API_BASE_URL } from '../../services/api';
 const PAYMENT_TIME_ZONE = 'Asia/Manila';
 const LEDGER_PER_PAGE = 5;
 

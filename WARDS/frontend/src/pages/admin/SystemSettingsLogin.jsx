@@ -8,7 +8,7 @@ import {
 } from '../../utils/settingsSecurity';
 import { AUTH_GRADIENTS } from '../../utils/authTheme';
 
-const API_URL = 'http://localhost:8000';
+import { API_HOST } from '../../services/api';
 
 const SystemSettingsLogin = () => {
   const [identifier, setIdentifier] = useState('');
@@ -74,7 +74,7 @@ const SystemSettingsLogin = () => {
       }
 
       try {
-        await axios.get(`${API_URL}/api/settings/access`, {
+        await axios.get(`${API_HOST}/api/settings/access`, {
           headers: { Authorization: `Bearer ${token}` },
         });
       } catch (accessError) {
@@ -128,7 +128,7 @@ const SystemSettingsLogin = () => {
         return;
       }
 
-      const response = await axios.post(`${API_URL}/api/auth/unified/login`, {
+      const response = await axios.post(`${API_HOST}/api/auth/unified/login`, {
         identifier,
         password,
         portal: 'admin',

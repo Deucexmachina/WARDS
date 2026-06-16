@@ -2,6 +2,7 @@ from datetime import datetime, date, timedelta, timezone
 import json
 from io import BytesIO
 import asyncio
+import functools
 import hashlib
 import mimetypes
 import os
@@ -29,6 +30,7 @@ from services.ocr_runtime import run_ocr_in_executor
 from services.ocr_service import OCRProcessingError, ocr_service
 from services.email_service import send_receipt_release_email
 from utils.branch_appointment_settings import validate_branch_appointment_datetime
+from utils.distributed_ledger import append_ledger_entry
 from utils.branch_window_config import SERVICE_WINDOW_ALIASES
 from utils.branch_system_settings import get_branch_setting_value
 from utils.field_crypto import apply_payment_security, apply_receipt_record_security, apply_receipt_request_history_security, apply_receipt_request_security, find_citizen_by_email, find_payment_by_ref_number, get_decrypted_or_raw, hash_aware_any, hash_aware_match, hash_optional_value, queue_value, receipt_record_value, receipt_request_history_value, receipt_request_value, set_encrypted_hash_companions
@@ -1157,6 +1159,11 @@ def compute_image_ahash(image_bytes: bytes) -> str:
     return f"{int(bits, 2):016x}"
 
 
+async def async_compute_image_ahash(image_bytes: bytes) -> str:
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, functools.partial(compute_image_ahash, image_bytes))
+
+
 def sanitize_receipt_filename_component(value: str | None) -> str:
     normalized = re.sub(r"[\\\\/:*?\"<>|]+", " ", (value or "").strip())
     normalized = re.sub(r"\s+", " ", normalized).strip()
@@ -1235,6 +1242,11 @@ def ensure_valid_image_upload(image_bytes: bytes):
             image.verify()
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Uploaded file is not a valid image") from exc
+
+
+async def async_ensure_valid_image_upload(image_bytes: bytes):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, functools.partial(ensure_valid_image_upload, image_bytes))
 
 
 def validate_receipt_document_analysis(
@@ -1940,7 +1952,7 @@ def build_receipt_ocr_result(
     return result
 
 
-def _build_queue_ocr_fallback_result(
+async def _build_queue_ocr_fallback_result(
     *,
     image_data: bytes,
     file: UploadFile,
@@ -1956,7 +1968,7 @@ def _build_queue_ocr_fallback_result(
     """
     normalized_category = normalize_receipt_category(category)
     image_sha256 = compute_image_sha256(image_data)
-    image_ahash = compute_image_ahash(image_data)
+    image_ahash = await async_compute_image_ahash(image_data)
     original_filename = os.path.basename(file.filename or os.path.basename(file_path))
     filename_validation = build_receipt_filename_validation(
         filename=original_filename,
@@ -2010,18 +2022,18 @@ async def build_receipt_ocr_result_async(**kwargs) -> dict:
         return await run_ocr_in_executor(build_receipt_ocr_result, **kwargs)
     except asyncio.TimeoutError as exc:
         if is_queue_upload:
-            return _build_queue_ocr_fallback_result(**kwargs)
+            return await _build_queue_ocr_fallback_result(**kwargs)
         raise HTTPException(
             status_code=504,
             detail="Receipt OCR timed out. Please try again with a clearer or smaller image.",
         ) from exc
     except OCRProcessingError as exc:
         if is_queue_upload:
-            return _build_queue_ocr_fallback_result(**kwargs)
+            return await _build_queue_ocr_fallback_result(**kwargs)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except HTTPException as exc:
         if is_queue_upload and exc.status_code in {500, 504}:
-            return _build_queue_ocr_fallback_result(**kwargs)
+            return await _build_queue_ocr_fallback_result(**kwargs)
         raise
 
 
@@ -2159,7 +2171,7 @@ async def upload_receipt_for_ocr(
         image_data,
         allowed_extensions=ALLOWED_OCR_EXTENSIONS,
     )
-    ensure_valid_image_upload(image_data)
+    await async_ensure_valid_image_upload(image_data)
 
     original_name = os.path.basename(file.filename or "receipt.jpg")
     safe_name = f"{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{original_name}"
@@ -2200,7 +2212,7 @@ async def upload_receipt_for_ocr(
         except Exception:
             sha256 = ""
         try:
-            ahash = compute_image_ahash(image_data)
+            ahash = await async_compute_image_ahash(image_data)
         except Exception:
             ahash = ""
         return {
@@ -2331,7 +2343,8 @@ async def get_mobile_receipt_upload_qr(
     session = get_mobile_receipt_upload_session(token)
     frontend_base_url = resolve_frontend_base_url(request)
     upload_url = f"{frontend_base_url}/mobile-receipt-upload/{token}"
-    image = qrcode.make(upload_url)
+    loop = asyncio.get_event_loop()
+    image = await loop.run_in_executor(None, functools.partial(qrcode.make, upload_url))
     buffer = BytesIO()
     image.save(buffer, format="PNG")
     buffer.seek(0)
@@ -2371,7 +2384,7 @@ async def upload_mobile_receipt_for_ocr(
         image_data,
         allowed_extensions=ALLOWED_OCR_EXTENSIONS,
     )
-    ensure_valid_image_upload(image_data)
+    await async_ensure_valid_image_upload(image_data)
 
     original_name = os.path.basename(file.filename or "mobile-receipt.jpg")
     safe_name = f"mobile_{token[:10]}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{original_name}"
@@ -2883,7 +2896,7 @@ async def upload_release_copy(
         allowed_extensions=ALLOWED_RELEASE_EXTENSIONS,
         max_size_bytes=MAX_RELEASE_FILE_SIZE,
     )
-    ensure_valid_image_upload(file_bytes)
+    await async_ensure_valid_image_upload(file_bytes)
 
     os.makedirs(RELEASE_UPLOAD_DIR, exist_ok=True)
     safe_name = f"{request_id}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}{extension}"
@@ -3206,6 +3219,20 @@ async def pay_request_fee(
         type="public_receipts",
     ))
     db.commit()
+
+    append_ledger_entry(
+        entry_type="payment_initiated",
+        record_id=payment.id,
+        actor=receipt_request_value(receipt_request, "email") or "anonymous",
+        action="Receipt Request Fee Initiated",
+        data={
+            "ref_number": payment_ref,
+            "txn_id": txn_id,
+            "amount": float(payment.amount or 0),
+            "request_id": resolved_request_id,
+            "branch_id": receipt_request.branch_id,
+        },
+    )
 
     return {
         "requestId": resolved_request_id,

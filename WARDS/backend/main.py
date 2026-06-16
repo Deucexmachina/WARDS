@@ -11,6 +11,8 @@ import uvicorn
 import os
 import threading
 import time
+import hmac
+import hashlib
 
 from dotenv import load_dotenv
 from sqlalchemy import text, inspect, or_, event
@@ -177,14 +179,52 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
+SENSITIVE_PATH_PREFIXES = (
+    "/api/payments/",
+    "/api/remittances/",
+    "/api/users/",
+    "/api/security/",
+    "/api/admin/",
+    "/api/branch/",
+)
+
+
+class RequestIntegrityMiddleware(BaseHTTPMiddleware):
+    """Verify HMAC-SHA256 request signatures for sensitive state-changing endpoints."""
+
+    def __init__(self, app, secret: str | None = None):
+        super().__init__(app)
+        self.secret = secret
+
+    def _is_sensitive(self, path: str, method: str) -> bool:
+        if method in {"GET", "HEAD", "OPTIONS"}:
+            return False
+        return any(path.startswith(prefix) for prefix in SENSITIVE_PATH_PREFIXES)
+
+    async def dispatch(self, request: Request, call_next):
+        if self.secret and self._is_sensitive(request.url.path, request.method):
+            expected = request.headers.get("x-request-signature")
+            if not expected:
+                return JSONResponse(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    content={"detail": "Missing request integrity signature."},
+                )
+            body = await request.body()
+            computed = hmac.new(self.secret.encode(), body, hashlib.sha256).hexdigest()
+            if not hmac.compare_digest(expected, computed):
+                return JSONResponse(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    content={"detail": "Invalid request integrity signature."},
+                )
+        return await call_next(request)
+
+
 app = FastAPI(title="WARDS API", version="1.0.0")
 
 
 @app.exception_handler(Exception)
 async def production_exception_handler(request: Request, exc: Exception):
-    if os.getenv("APP_ENV", os.getenv("ENV", "development")).lower() in {"prod", "production"}:
-        return JSONResponse(status_code=500, content={"detail": "An internal server error occurred."})
-    raise exc
+    return JSONResponse(status_code=500, content={"detail": "An internal server error occurred."})
 
 def hybrid_rate_limit_key(request: Request) -> str:
     """Return account-based key for authenticated users, IP for anonymous."""
@@ -262,14 +302,17 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=build_allowed_origins(),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["X-Requires-Captcha", "X-Requires-MFA-Setup", "X-Auth-Portal", "X-Requires-Email-Verification"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With", "Accept", "Origin"],
+    expose_headers=["Content-Disposition", "x-requires-mfa-setup", "x-requires-captcha", "x-requires-email-verification", "x-auth-portal"],
 )
 
 # Security Headers Middleware
 # Adds security headers to all responses (CSP, X-Frame-Options, etc.)
 app.add_middleware(SecurityHeadersMiddleware)
+
+# Request Integrity Middleware (optional; only enforced when REQUEST_INTEGRITY_SECRET is set)
+app.add_middleware(RequestIntegrityMiddleware, secret=os.getenv("REQUEST_INTEGRITY_SECRET"))
 
 # DoS Protection Middleware (order matters - size first, then timeout, then connection/abuse)
 app.add_middleware(RequestSizeMiddleware)
@@ -548,85 +591,28 @@ def ensure_auth_extensions():
             if column_name not in payment_columns:
                 conn.execute(text(f"ALTER TABLE payments ADD COLUMN {column_name} {column_type}"))
 
-        if engine.dialect.name == "sqlite":
-            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_payments_ref_number_unique ON payments (ref_number)"))
-            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_payments_txn_id_unique ON payments (txn_id)"))
-            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_payments_checkout_session_unique ON payments (paymongo_checkout_session_id) WHERE paymongo_checkout_session_id IS NOT NULL"))
-            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_payments_payment_intent_unique ON payments (paymongo_payment_intent_id) WHERE paymongo_payment_intent_id IS NOT NULL"))
-            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_payments_source_unique ON payments (paymongo_source_id) WHERE paymongo_source_id IS NOT NULL"))
-            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_payments_payment_id_unique ON payments (paymongo_payment_id) WHERE paymongo_payment_id IS NOT NULL"))
-        
-        if engine.dialect.name == "sqlite":
-            columns = {row[1] for row in conn.execute(text("PRAGMA table_info(citizen_users)")).fetchall()}
-            if "role" not in columns:
-                conn.execute(text("ALTER TABLE citizen_users ADD COLUMN role VARCHAR DEFAULT 'public'"))
-            if "tin" not in columns:
-                conn.execute(text("ALTER TABLE citizen_users ADD COLUMN tin VARCHAR"))
-            if "taxpayer_type" not in columns:
-                conn.execute(text("ALTER TABLE citizen_users ADD COLUMN taxpayer_type VARCHAR DEFAULT 'Individual'"))
-            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_citizen_users_tin ON citizen_users (tin)"))
-            for table_name in ("admins", "branch_staff"):
-                table_columns = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table_name})")).fetchall()}
-                if "is_verified" not in table_columns:
-                    conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN is_verified BOOLEAN DEFAULT 0"))
-            branch_staff_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(branch_staff)")).fetchall()}
-            if "account_scope" not in branch_staff_columns:
-                conn.execute(text("ALTER TABLE branch_staff ADD COLUMN account_scope VARCHAR DEFAULT 'full_branch'"))
-            if "service_window" not in branch_staff_columns:
-                conn.execute(text("ALTER TABLE branch_staff ADD COLUMN service_window VARCHAR"))
-            if "service_window_label" not in branch_staff_columns:
-                conn.execute(text("ALTER TABLE branch_staff ADD COLUMN service_window_label VARCHAR"))
-            if "assigned_window_number" not in branch_staff_columns:
-                conn.execute(text("ALTER TABLE branch_staff ADD COLUMN assigned_window_number INTEGER"))
-        else:
-            citizen_columns = {column["name"] for column in inspector.get_columns("citizen_users")}
-            if "tin" not in citizen_columns:
-                conn.execute(text("ALTER TABLE citizen_users ADD COLUMN tin VARCHAR(255)"))
-            if "taxpayer_type" not in citizen_columns:
-                conn.execute(text("ALTER TABLE citizen_users ADD COLUMN taxpayer_type VARCHAR(255) DEFAULT 'Individual'"))
-            for column_name, column_type in (
-                ("email_hash", "VARCHAR(255)"),
-                ("email_enc", "TEXT"),
-                ("full_name_hash", "VARCHAR(255)"),
-                ("full_name_enc", "TEXT"),
-                ("tin_hash", "VARCHAR(255)"),
-                ("tin_enc", "TEXT"),
-                ("contact_number_hash", "VARCHAR(255)"),
-                ("contact_number_enc", "TEXT"),
-                ("address_hash", "VARCHAR(255)"),
-                ("address_enc", "TEXT"),
-            ):
-                if column_name not in citizen_columns:
-                    conn.execute(text(f"ALTER TABLE citizen_users ADD COLUMN {column_name} {column_type}"))
-            citizen_indexes = {index["name"] for index in inspect(conn).get_indexes("citizen_users")}
-            if "ix_citizen_users_tin" not in citizen_indexes:
-                conn.execute(text("CREATE UNIQUE INDEX ix_citizen_users_tin ON citizen_users (tin)"))
-        if engine.dialect.name == "sqlite":
-            citizen_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(citizen_users)")).fetchall()}
-            for column_name, column_type in (
-                ("email_hash", "VARCHAR"),
-                ("email_enc", "TEXT"),
-                ("full_name_hash", "VARCHAR"),
-                ("full_name_enc", "TEXT"),
-                ("tin_hash", "VARCHAR"),
-                ("tin_enc", "TEXT"),
-                ("contact_number_hash", "VARCHAR"),
-                ("contact_number_enc", "TEXT"),
-                ("address_hash", "VARCHAR"),
-                ("address_enc", "TEXT"),
-            ):
-                if column_name not in citizen_columns:
-                    conn.execute(text(f"ALTER TABLE citizen_users ADD COLUMN {column_name} {column_type}"))
-            branch_staff_columns = {column["name"] for column in inspector.get_columns("branch_staff")}
-            if "account_scope" not in branch_staff_columns:
-                conn.execute(text("ALTER TABLE branch_staff ADD COLUMN account_scope VARCHAR(255) DEFAULT 'full_branch'"))
-            if "service_window" not in branch_staff_columns:
-                conn.execute(text("ALTER TABLE branch_staff ADD COLUMN service_window VARCHAR(255)"))
-            if "service_window_label" not in branch_staff_columns:
-                conn.execute(text("ALTER TABLE branch_staff ADD COLUMN service_window_label VARCHAR(255)"))
-            if "assigned_window_number" not in branch_staff_columns:
-                conn.execute(text("ALTER TABLE branch_staff ADD COLUMN assigned_window_number INTEGER"))
-
+        citizen_columns = {column["name"] for column in inspector.get_columns("citizen_users")}
+        if "tin" not in citizen_columns:
+            conn.execute(text("ALTER TABLE citizen_users ADD COLUMN tin VARCHAR(255)"))
+        if "taxpayer_type" not in citizen_columns:
+            conn.execute(text("ALTER TABLE citizen_users ADD COLUMN taxpayer_type VARCHAR(255) DEFAULT 'Individual'"))
+        for column_name, column_type in (
+            ("email_hash", "VARCHAR(255)"),
+            ("email_enc", "TEXT"),
+            ("full_name_hash", "VARCHAR(255)"),
+            ("full_name_enc", "TEXT"),
+            ("tin_hash", "VARCHAR(255)"),
+            ("tin_enc", "TEXT"),
+            ("contact_number_hash", "VARCHAR(255)"),
+            ("contact_number_enc", "TEXT"),
+            ("address_hash", "VARCHAR(255)"),
+            ("address_enc", "TEXT"),
+        ):
+            if column_name not in citizen_columns:
+                conn.execute(text(f"ALTER TABLE citizen_users ADD COLUMN {column_name} {column_type}"))
+        citizen_indexes = {index["name"] for index in inspect(conn).get_indexes("citizen_users")}
+        if "ix_citizen_users_tin" not in citizen_indexes:
+            conn.execute(text("CREATE UNIQUE INDEX ix_citizen_users_tin ON citizen_users (tin)"))
         email_otp_columns = {column["name"] for column in inspector.get_columns("email_otps")}
         for column_name, column_type in (
             ("email_hash", "VARCHAR(255)"),
@@ -928,14 +914,10 @@ def ensure_auth_extensions():
 
         queue_columns = {column["name"] for column in inspector.get_columns("queues")}
         if "citizen_user_id" not in queue_columns:
-            if engine.dialect.name == "sqlite":
-                conn.execute(text("ALTER TABLE queues ADD COLUMN citizen_user_id INTEGER"))
-                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_queues_citizen_user_id ON queues (citizen_user_id)"))
-            else:
-                conn.execute(text("ALTER TABLE queues ADD COLUMN citizen_user_id INTEGER NULL"))
-                queue_indexes = {index["name"] for index in inspect(conn).get_indexes("queues")}
-                if "ix_queues_citizen_user_id" not in queue_indexes:
-                    conn.execute(text("CREATE INDEX ix_queues_citizen_user_id ON queues (citizen_user_id)"))
+            conn.execute(text("ALTER TABLE queues ADD COLUMN citizen_user_id INTEGER NULL"))
+            queue_indexes = {index["name"] for index in inspect(conn).get_indexes("queues")}
+            if "ix_queues_citizen_user_id" not in queue_indexes:
+                conn.execute(text("CREATE INDEX ix_queues_citizen_user_id ON queues (citizen_user_id)"))
             queue_columns.add("citizen_user_id")
         for column_name, column_type in (
             ("queue_number_hash", "VARCHAR(255)"),
@@ -957,45 +939,30 @@ def ensure_auth_extensions():
             if column_name not in queue_columns:
                 conn.execute(text(f"ALTER TABLE queues ADD COLUMN {column_name} {column_type}"))
 
-        if engine.dialect.name == "sqlite":
-            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_queues_appointment_reservation_key_unique ON queues (appointment_reservation_key)"))
-        else:
-            queue_indexes = {index["name"] for index in inspect(conn).get_indexes("queues")}
-            if "ix_queues_appointment_reservation_key_unique" not in queue_indexes:
-                conn.execute(text("CREATE UNIQUE INDEX ix_queues_appointment_reservation_key_unique ON queues (appointment_reservation_key)"))
+        queue_indexes = {index["name"] for index in inspect(conn).get_indexes("queues")}
+        if "ix_queues_appointment_reservation_key_unique" not in queue_indexes:
+            conn.execute(text("CREATE UNIQUE INDEX ix_queues_appointment_reservation_key_unique ON queues (appointment_reservation_key)"))
 
         queue_history_columns = {column["name"] for column in inspector.get_columns("queue_history")}
         if "citizen_user_id" not in queue_history_columns:
-            if engine.dialect.name == "sqlite":
-                conn.execute(text("ALTER TABLE queue_history ADD COLUMN citizen_user_id INTEGER"))
-                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_queue_history_citizen_user_id ON queue_history (citizen_user_id)"))
-            else:
-                conn.execute(text("ALTER TABLE queue_history ADD COLUMN citizen_user_id INTEGER NULL"))
-                queue_history_indexes = {index["name"] for index in inspect(conn).get_indexes("queue_history")}
-                if "ix_queue_history_citizen_user_id" not in queue_history_indexes:
-                    conn.execute(text("CREATE INDEX ix_queue_history_citizen_user_id ON queue_history (citizen_user_id)"))
+            conn.execute(text("ALTER TABLE queue_history ADD COLUMN citizen_user_id INTEGER NULL"))
+            queue_history_indexes = {index["name"] for index in inspect(conn).get_indexes("queue_history")}
+            if "ix_queue_history_citizen_user_id" not in queue_history_indexes:
+                conn.execute(text("CREATE INDEX ix_queue_history_citizen_user_id ON queue_history (citizen_user_id)"))
 
         receipt_request_columns = {column["name"] for column in inspector.get_columns("receipt_requests")}
         if "citizen_user_id" not in receipt_request_columns:
-            if engine.dialect.name == "sqlite":
-                conn.execute(text("ALTER TABLE receipt_requests ADD COLUMN citizen_user_id INTEGER"))
-                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_receipt_requests_citizen_user_id ON receipt_requests (citizen_user_id)"))
-            else:
-                conn.execute(text("ALTER TABLE receipt_requests ADD COLUMN citizen_user_id INTEGER NULL"))
-                receipt_request_indexes = {index["name"] for index in inspect(conn).get_indexes("receipt_requests")}
-                if "ix_receipt_requests_citizen_user_id" not in receipt_request_indexes:
-                    conn.execute(text("CREATE INDEX ix_receipt_requests_citizen_user_id ON receipt_requests (citizen_user_id)"))
+            conn.execute(text("ALTER TABLE receipt_requests ADD COLUMN citizen_user_id INTEGER NULL"))
+            receipt_request_indexes = {index["name"] for index in inspect(conn).get_indexes("receipt_requests")}
+            if "ix_receipt_requests_citizen_user_id" not in receipt_request_indexes:
+                conn.execute(text("CREATE INDEX ix_receipt_requests_citizen_user_id ON receipt_requests (citizen_user_id)"))
 
         receipt_request_history_columns = {column["name"] for column in inspector.get_columns("receipt_request_history")}
         if "citizen_user_id" not in receipt_request_history_columns:
-            if engine.dialect.name == "sqlite":
-                conn.execute(text("ALTER TABLE receipt_request_history ADD COLUMN citizen_user_id INTEGER"))
-                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_receipt_request_history_citizen_user_id ON receipt_request_history (citizen_user_id)"))
-            else:
-                conn.execute(text("ALTER TABLE receipt_request_history ADD COLUMN citizen_user_id INTEGER NULL"))
-                receipt_request_history_indexes = {index["name"] for index in inspect(conn).get_indexes("receipt_request_history")}
-                if "ix_receipt_request_history_citizen_user_id" not in receipt_request_history_indexes:
-                    conn.execute(text("CREATE INDEX ix_receipt_request_history_citizen_user_id ON receipt_request_history (citizen_user_id)"))
+            conn.execute(text("ALTER TABLE receipt_request_history ADD COLUMN citizen_user_id INTEGER NULL"))
+            receipt_request_history_indexes = {index["name"] for index in inspect(conn).get_indexes("receipt_request_history")}
+            if "ix_receipt_request_history_citizen_user_id" not in receipt_request_history_indexes:
+                conn.execute(text("CREATE INDEX ix_receipt_request_history_citizen_user_id ON receipt_request_history (citizen_user_id)"))
 
         business_registry_columns = {column["name"] for column in inspector.get_columns("business_registry")}
         for column_name, column_type in (
@@ -1127,203 +1094,9 @@ def ensure_auth_extensions():
                      AND rc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
                     WHERE rc.CONSTRAINT_SCHEMA = DATABASE()
                       AND rc.TABLE_NAME = 'email_verification_tokens'
-                      AND kcu.COLUMN_NAME = 'citizen_user_id'
-                    LIMIT 1
-                """)).scalar()
-                delete_rule = conn.execute(text("""
-                    SELECT DELETE_RULE
-                    FROM information_schema.REFERENTIAL_CONSTRAINTS rc
-                    JOIN information_schema.KEY_COLUMN_USAGE kcu
-                      ON rc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA
-                     AND rc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
-                    WHERE rc.CONSTRAINT_SCHEMA = DATABASE()
-                      AND rc.TABLE_NAME = 'email_verification_tokens'
-                      AND kcu.COLUMN_NAME = 'citizen_user_id'
-                    LIMIT 1
-                """)).scalar()
-
-                if verification_fk and delete_rule != "CASCADE":
-                    conn.execute(text(f"ALTER TABLE email_verification_tokens DROP FOREIGN KEY {verification_fk}"))
-                    conn.execute(text("""
-                        ALTER TABLE email_verification_tokens
-                        ADD CONSTRAINT email_verification_tokens_citizen_user_id_fk
-                        FOREIGN KEY (citizen_user_id) REFERENCES citizen_users(id)
-                        ON DELETE CASCADE
-                    """))
-
-        if engine.dialect.name == "sqlite":
-            discrepancy_tables = {
-                row[0] for row in conn.execute(
-                    text("SELECT name FROM sqlite_master WHERE type='table'")
-                ).fetchall()
-            }
-            if "discrepancy_reports" not in discrepancy_tables:
-                conn.execute(text("""
-                    CREATE TABLE discrepancy_reports (
-                        id INTEGER PRIMARY KEY,
-                        branch_id INTEGER NOT NULL,
-                        title VARCHAR NOT NULL DEFAULT 'Untitled Report',
-                        report_date VARCHAR NOT NULL,
-                        discrepancy_type VARCHAR NOT NULL,
-                        system_amount FLOAT,
-                        actual_amount FLOAT,
-                        description TEXT NOT NULL,
-                        supporting_documents TEXT,
-                        attachment_path VARCHAR,
-                        attachment_filename VARCHAR,
-                        submitted_offline BOOLEAN DEFAULT 0,
-                        status VARCHAR DEFAULT 'Pending Review',
-                        verification_notes TEXT,
-                        branch_reply_notes TEXT,
-                        conversation_thread TEXT,
-                        reported_by VARCHAR NOT NULL,
-                        verified_by VARCHAR,
-                        branch_replied_by VARCHAR,
-                        verified_at DATETIME,
-                        branch_replied_at DATETIME,
-                        last_viewed_by_branch DATETIME,
-                        last_viewed_by_admin DATETIME,
-                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY(branch_id) REFERENCES branches(id)
-                    )
-                """))
-
-        if "discrepancy_reports" in set(inspector.get_table_names()):
-            discrepancy_columns = {column["name"] for column in inspector.get_columns("discrepancy_reports")}
-            if "title" not in discrepancy_columns:
-                conn.execute(text("ALTER TABLE discrepancy_reports ADD COLUMN title VARCHAR(255) DEFAULT 'Untitled Report'"))
-                conn.execute(text("UPDATE discrepancy_reports SET title = COALESCE(NULLIF(title, ''), discrepancy_type || ' - Report #' || id)"))
-            if "last_viewed_by_branch" not in discrepancy_columns:
-                conn.execute(text("ALTER TABLE discrepancy_reports ADD COLUMN last_viewed_by_branch DATETIME"))
-            if "last_viewed_by_admin" not in discrepancy_columns:
-                conn.execute(text("ALTER TABLE discrepancy_reports ADD COLUMN last_viewed_by_admin DATETIME"))
-            if "branch_reply_notes" not in discrepancy_columns:
-                conn.execute(text("ALTER TABLE discrepancy_reports ADD COLUMN branch_reply_notes TEXT"))
-            if "conversation_thread" not in discrepancy_columns:
-                conn.execute(text("ALTER TABLE discrepancy_reports ADD COLUMN conversation_thread TEXT"))
-            if "branch_replied_by" not in discrepancy_columns:
-                conn.execute(text("ALTER TABLE discrepancy_reports ADD COLUMN branch_replied_by VARCHAR(255)"))
-            if "branch_replied_at" not in discrepancy_columns:
-                conn.execute(text("ALTER TABLE discrepancy_reports ADD COLUMN branch_replied_at DATETIME"))
-            if "attachment_path" not in discrepancy_columns:
-                conn.execute(text("ALTER TABLE discrepancy_reports ADD COLUMN attachment_path VARCHAR(255)"))
-            if "attachment_filename" not in discrepancy_columns:
-                conn.execute(text("ALTER TABLE discrepancy_reports ADD COLUMN attachment_filename VARCHAR(255)"))
-            for column_name, column_type in (
-                ("title_hash", "VARCHAR(255)"),
-                ("title_enc", "TEXT"),
-                ("report_date_hash", "VARCHAR(255)"),
-                ("report_date_enc", "TEXT"),
-                ("discrepancy_type_hash", "VARCHAR(255)"),
-                ("discrepancy_type_enc", "TEXT"),
-                ("description_hash", "VARCHAR(255)"),
-                ("description_enc", "TEXT"),
-                ("supporting_documents_hash", "VARCHAR(255)"),
-                ("supporting_documents_enc", "TEXT"),
-                ("attachment_path_hash", "VARCHAR(255)"),
-                ("attachment_path_enc", "TEXT"),
-                ("attachment_filename_hash", "VARCHAR(255)"),
-                ("attachment_filename_enc", "TEXT"),
-                ("verification_notes_hash", "VARCHAR(255)"),
-                ("verification_notes_enc", "TEXT"),
-                ("branch_reply_notes_hash", "VARCHAR(255)"),
-                ("branch_reply_notes_enc", "TEXT"),
-                ("conversation_thread_hash", "VARCHAR(255)"),
-                ("conversation_thread_enc", "TEXT"),
-                ("reported_by_hash", "VARCHAR(255)"),
-                ("reported_by_enc", "TEXT"),
-                ("verified_by_hash", "VARCHAR(255)"),
-                ("verified_by_enc", "TEXT"),
-                ("branch_replied_by_hash", "VARCHAR(255)"),
-                ("branch_replied_by_enc", "TEXT"),
-            ):
-                if column_name not in discrepancy_columns:
-                    conn.execute(text(f"ALTER TABLE discrepancy_reports ADD COLUMN {column_name} {column_type}"))
-
-        table_names = set(inspector.get_table_names())
-
-        if "system_settings" not in table_names:
-            conn.execute(text("""
-                CREATE TABLE system_settings (
-                    `key` VARCHAR(255) PRIMARY KEY,
-                    label VARCHAR(255) NOT NULL,
-                    category VARCHAR(255) NOT NULL,
-                    value_json TEXT NULL,
-                    value TEXT NOT NULL,
-                    value_type VARCHAR(255) NOT NULL DEFAULT 'string',
-                    description TEXT NULL,
-                    updated_by VARCHAR(255) NULL,
-                    updated_at DATETIME NULL
-                )
-            """))
-        else:
-            system_setting_columns = {column["name"] for column in inspector.get_columns("system_settings")}
-            if "label" not in system_setting_columns:
-                conn.execute(text("ALTER TABLE system_settings ADD COLUMN label VARCHAR(255)"))
-            if "category" not in system_setting_columns:
-                conn.execute(text("ALTER TABLE system_settings ADD COLUMN category VARCHAR(255)"))
-            if "value_json" not in system_setting_columns:
-                conn.execute(text("ALTER TABLE system_settings ADD COLUMN value_json TEXT"))
-            if "value" not in system_setting_columns:
-                conn.execute(text("ALTER TABLE system_settings ADD COLUMN value TEXT"))
-            if "value_type" not in system_setting_columns:
-                conn.execute(text("ALTER TABLE system_settings ADD COLUMN value_type VARCHAR(255) DEFAULT 'string'"))
-            if "description" not in system_setting_columns:
-                conn.execute(text("ALTER TABLE system_settings ADD COLUMN description TEXT"))
-            if "updated_by" not in system_setting_columns:
-                conn.execute(text("ALTER TABLE system_settings ADD COLUMN updated_by VARCHAR(255)"))
-            if "updated_at" not in system_setting_columns:
-                conn.execute(text("ALTER TABLE system_settings ADD COLUMN updated_at DATETIME"))
-            for column_name, column_type in (
-                ("key_hash", "VARCHAR(255)"),
-                ("key_enc", "TEXT"),
-                ("label_hash", "VARCHAR(255)"),
-                ("label_enc", "TEXT"),
-                ("category_hash", "VARCHAR(255)"),
-                ("category_enc", "TEXT"),
-                ("value_json_hash", "VARCHAR(255)"),
-                ("value_json_enc", "TEXT"),
-                ("value_hash", "VARCHAR(255)"),
-                ("value_enc", "TEXT"),
-                ("value_type_hash", "VARCHAR(255)"),
-                ("value_type_enc", "TEXT"),
-                ("description_hash", "VARCHAR(255)"),
-                ("description_enc", "TEXT"),
-                ("updated_by_hash", "VARCHAR(255)"),
-                ("updated_by_enc", "TEXT"),
-            ):
-                if column_name not in system_setting_columns:
-                    conn.execute(text(f"ALTER TABLE system_settings ADD COLUMN {column_name} {column_type}"))
-
-        if "system_setting_audit" not in table_names:
-            conn.execute(text("""
-                CREATE TABLE system_setting_audit (
-                    id INTEGER PRIMARY KEY AUTO_INCREMENT,
-                    setting_key VARCHAR(255) NOT NULL,
-                    setting_label VARCHAR(255) NOT NULL,
-                    category VARCHAR(255) NOT NULL,
-                    previous_value TEXT NULL,
-                    new_value TEXT NOT NULL,
-                    changed_by VARCHAR(255) NOT NULL,
-                    reason TEXT NULL,
-                    changed_at DATETIME NULL,
-                    FOREIGN KEY (setting_key) REFERENCES system_settings(`key`)
-                )
-            """) if engine.dialect.name != "sqlite" else text("""
-                CREATE TABLE system_setting_audit (
-                    id INTEGER PRIMARY KEY,
-                    setting_key VARCHAR(255) NOT NULL,
-                    setting_label VARCHAR(255) NOT NULL,
-                    category VARCHAR(255) NOT NULL,
-                    previous_value TEXT NULL,
-                    new_value TEXT NOT NULL,
-                    changed_by VARCHAR(255) NOT NULL,
-                    reason TEXT NULL,
-                    changed_at DATETIME NULL,
-                    FOREIGN KEY (setting_key) REFERENCES system_settings(`key`)
-                )
-            """))
+                """)).fetchone()
+                if verification_fk:
+                    conn.execute(text(f"ALTER TABLE email_verification_tokens DROP FOREIGN KEY {verification_fk[0]}"))
 
         if "branch_appointment_schedules" not in table_names:
             conn.execute(text("""
@@ -1335,19 +1108,6 @@ def ensure_auth_extensions():
                     effective_date VARCHAR(255) NOT NULL,
                     updated_by VARCHAR(255) NULL,
                     published_by VARCHAR(255) NULL,
-                    updated_at DATETIME NULL,
-                    published_at DATETIME NULL,
-                    FOREIGN KEY (branch_id) REFERENCES branches(id)
-                )
-            """) if engine.dialect.name != "sqlite" else text("""
-                CREATE TABLE branch_appointment_schedules (
-                    id INTEGER PRIMARY KEY,
-                    branch_id INTEGER NOT NULL,
-                    draft_config TEXT NOT NULL,
-                    published_config TEXT NOT NULL,
-                    effective_date VARCHAR NOT NULL,
-                    updated_by VARCHAR NULL,
-                    published_by VARCHAR NULL,
                     updated_at DATETIME NULL,
                     published_at DATETIME NULL,
                     FOREIGN KEY (branch_id) REFERENCES branches(id)
@@ -1365,20 +1125,6 @@ def ensure_auth_extensions():
                     new_config TEXT NOT NULL,
                     effective_date VARCHAR(255) NOT NULL,
                     changed_by VARCHAR(255) NOT NULL,
-                    reason TEXT NULL,
-                    changed_at DATETIME NULL,
-                    FOREIGN KEY (branch_id) REFERENCES branches(id)
-                )
-            """) if engine.dialect.name != "sqlite" else text("""
-                CREATE TABLE branch_appointment_schedule_audit (
-                    id INTEGER PRIMARY KEY,
-                    branch_id INTEGER NOT NULL,
-                    action VARCHAR NOT NULL,
-                    change_summary TEXT NULL,
-                    previous_config TEXT NULL,
-                    new_config TEXT NOT NULL,
-                    effective_date VARCHAR NOT NULL,
-                    changed_by VARCHAR NOT NULL,
                     reason TEXT NULL,
                     changed_at DATETIME NULL,
                     FOREIGN KEY (branch_id) REFERENCES branches(id)

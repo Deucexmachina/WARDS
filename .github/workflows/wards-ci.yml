@@ -82,6 +82,7 @@ jobs:
           LOG_INTEGRITY_SECRET: ci-test-log-integrity-secret
           BACKUP_INTEGRITY_SECRET: ci-test-backup-integrity-secret
           RECAPTCHA_SECRET_KEY: ci-test-recaptcha-secret
+          PAYMONGO_WEBHOOK_SECRET: ci-test-webhook-secret
         run: pytest -q tests
 
   frontend:

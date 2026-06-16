@@ -19,9 +19,12 @@ from typing import Dict, Optional
 import os
 import ipaddress
 import json
+from pathlib import Path
 from auth import ADMIN_SECRET_KEY, BRANCH_SECRET_KEY, USER_SECRET_KEY, decode_token
+from utils.redis_client import get_redis_client
 
-MAX_REQUEST_SIZE = int(os.getenv("MAX_REQUEST_SIZE_BYTES", 10 * 1024 * 1024))  # 10MB
+MAX_REQUEST_SIZE = int(os.getenv("MAX_REQUEST_SIZE_BYTES", 5 * 1024 * 1024))  # 5MB
+MAX_FILES_PER_REQUEST = int(os.getenv("MAX_FILES_PER_REQUEST", 5))
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT_SECONDS", 30))
 MAX_CONCURRENT_REQUESTS_PER_IP = int(os.getenv("MAX_CONCURRENT_REQUESTS_PER_IP", 50))
 ABUSE_THRESHOLD = int(os.getenv("ABUSE_THRESHOLD_REQUESTS", 300))
@@ -40,7 +43,7 @@ CAPTCHA_AFTER_STRIKES = int(os.getenv("ABUSE_CAPTCHA_AFTER_STRIKES", 2))
 REPUTATION_BLOCK_THRESHOLD = int(os.getenv("REPUTATION_BLOCK_THRESHOLD", 50))
 ENABLE_IP_REPUTATION = os.getenv("ENABLE_IP_REPUTATION", "true").lower() == "true"
 AUTO_BLOCK_MALICIOUS = os.getenv("AUTO_BLOCK_MALICIOUS", "false").lower() == "true"
-EXEMPT_PRIVATE_IPS = os.getenv("ABUSE_EXEMPT_PRIVATE_IPS", "true").lower() == "true"
+EXEMPT_PRIVATE_IPS = os.getenv("ABUSE_EXEMPT_PRIVATE_IPS", "false").lower() == "true"
 EXEMPT_IPS = {
     item.strip()
     for item in os.getenv("ABUSE_EXEMPT_IPS", "127.0.0.1,::1,localhost").split(",")
@@ -49,22 +52,122 @@ EXEMPT_IPS = {
 
 # Track active requests per IP
 active_requests: Dict[str, int] = defaultdict(int)
+
+_DOS_STATE_PATH = Path(os.getenv("DOS_STATE_PATH", "./dos_state.json"))
+_DOS_STATE_SAVE_INTERVAL = float(os.getenv("DOS_STATE_SAVE_INTERVAL", "5"))  # seconds
+_last_dos_state_save = 0.0
+
+
+def _load_dos_state() -> dict:
+    r = get_redis_client()
+    if r:
+        result = {}
+        for field, key in [
+            ("request_history", "wards:dos:request_history"),
+            ("endpoint_request_history", "wards:dos:endpoint_request_history"),
+            ("failed_auth_history", "wards:dos:failed_auth_history"),
+            ("block_strikes", "wards:dos:block_strikes"),
+            ("reputation_strikes", "wards:dos:reputation_strikes"),
+            ("blocked_ips", "wards:dos:blocked_ips"),
+            ("manual_review_incidents", "wards:dos:manual_review_incidents"),
+            ("account_rate_limit_state", "wards:dos:account_rate_limit_state"),
+        ]:
+            data = r.hgetall(key)
+            if data:
+                if field in ("blocked_ips", "manual_review_incidents"):
+                    result[field] = {k: float(v) for k, v in data.items()}
+                elif field == "account_rate_limit_state":
+                    result[field] = {k: json.loads(v) for k, v in data.items()}
+                else:
+                    result[field] = {k: json.loads(v) for k, v in data.items()}
+        # Prune expired blocked_ips
+        current_time = time.time()
+        expired = [ip for ip, unblock_time in result.get("blocked_ips", {}).items() if unblock_time < current_time]
+        for ip in expired:
+            r.hdel("wards:dos:blocked_ips", ip)
+            del result["blocked_ips"][ip]
+        return result
+    # Fallback to file
+    if not _DOS_STATE_PATH.exists():
+        return {}
+    try:
+        with _DOS_STATE_PATH.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        current_time = time.time()
+        for key in list(data.get("blocked_ips", {}).keys()):
+            if data["blocked_ips"][key] < current_time:
+                del data["blocked_ips"][key]
+        return data
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_dos_state() -> None:
+    global _last_dos_state_save
+    current_time = time.time()
+    if current_time - _last_dos_state_save < _DOS_STATE_SAVE_INTERVAL:
+        return
+    _last_dos_state_save = current_time
+
+    r = get_redis_client()
+    if r:
+        try:
+            pipe = r.pipeline()
+            pipe.hset("wards:dos:request_history", mapping={k: json.dumps(v) for k, v in request_history.items()})
+            pipe.hset("wards:dos:endpoint_request_history", mapping={k: json.dumps(v) for k, v in endpoint_request_history.items()})
+            pipe.hset("wards:dos:failed_auth_history", mapping={k: json.dumps(v) for k, v in failed_auth_history.items()})
+            pipe.hset("wards:dos:block_strikes", mapping={k: json.dumps(v) for k, v in block_strikes.items()})
+            pipe.hset("wards:dos:reputation_strikes", mapping={k: json.dumps(v) for k, v in reputation_strikes.items()})
+            pipe.hset("wards:dos:blocked_ips", mapping={k: str(v) for k, v in blocked_ips.items()})
+            pipe.hset("wards:dos:manual_review_incidents", mapping={k: str(v) for k, v in manual_review_incidents.items()})
+            pipe.hset("wards:dos:account_rate_limit_state", mapping={k: json.dumps(v) for k, v in account_rate_limit_state.items()})
+            pipe.execute()
+        except Exception:
+            pass
+        return
+
+    # Fallback to file
+    try:
+        with _DOS_STATE_PATH.open("w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "request_history": dict(request_history),
+                    "endpoint_request_history": dict(endpoint_request_history),
+                    "failed_auth_history": dict(failed_auth_history),
+                    "block_strikes": dict(block_strikes),
+                    "reputation_strikes": dict(reputation_strikes),
+                    "blocked_ips": blocked_ips,
+                    "manual_review_incidents": manual_review_incidents,
+                    "account_rate_limit_state": dict(account_rate_limit_state),
+                },
+                f,
+            )
+    except OSError:
+        pass
+
+
+# Load persisted state if available
+_dos_data = _load_dos_state()
+
 # Track request counts for abuse detection
-request_history: Dict[str, list] = defaultdict(list)
-endpoint_request_history: Dict[str, list] = defaultdict(list)
-failed_auth_history: Dict[str, list] = defaultdict(list)
-block_strikes: Dict[str, list] = defaultdict(list)
-reputation_strikes: Dict[str, list] = defaultdict(list)
+request_history: Dict[str, list] = defaultdict(list, _dos_data.get("request_history", {}))
+endpoint_request_history: Dict[str, list] = defaultdict(list, _dos_data.get("endpoint_request_history", {}))
+failed_auth_history: Dict[str, list] = defaultdict(list, _dos_data.get("failed_auth_history", {}))
+block_strikes: Dict[str, list] = defaultdict(list, _dos_data.get("block_strikes", {}))
+reputation_strikes: Dict[str, list] = defaultdict(list, _dos_data.get("reputation_strikes", {}))
 # Track blocked IPs (temporary, in-memory; reserved for explicit infrastructure protection only)
-blocked_ips: Dict[str, float] = {}  # IP -> unblock time
-manual_review_incidents: Dict[str, float] = {}
-account_rate_limit_state: Dict[str, dict] = defaultdict(lambda: {
-    "violation_count": 0,
-    "strike_count": 0,
-    "last_violation_timestamp": None,
-    "last_strike_timestamp": None,
-    "restricted_until_by_scope": {},
-})
+blocked_ips: Dict[str, float] = _dos_data.get("blocked_ips", {})  # IP -> unblock time
+manual_review_incidents: Dict[str, float] = _dos_data.get("manual_review_incidents", {})
+account_rate_limit_state: Dict[str, dict] = defaultdict(
+    lambda: {
+        "violation_count": 0,
+        "strike_count": 0,
+        "last_violation_timestamp": None,
+        "last_strike_timestamp": None,
+        "restricted_until_by_scope": {},
+    },
+    _dos_data.get("account_rate_limit_state", {}),
+)
 
 # Cache for permanent blocks (in-memory cache to reduce DB calls)
 _permanent_blocks_cache: Dict[str, bool] = {}
@@ -151,6 +254,7 @@ def is_exempt_ip(ip: str) -> bool:
 def register_block_strike(ip: str, current_time: float) -> int:
     block_strikes[ip] = prune_timestamps(block_strikes[ip], current_time, STRIKE_WINDOW)
     block_strikes[ip].append(current_time)
+    _save_dos_state()
     return len(block_strikes[ip])
 
 
@@ -167,21 +271,27 @@ def temporary_block_duration(strikes: int) -> int:
 def account_from_request(request: Request, client_ip: str) -> tuple[str, str, str]:
     auth_header = request.headers.get("Authorization") or ""
     token = auth_header.split(" ", 1)[1] if auth_header.startswith("Bearer ") else ""
-    secrets = (
-        ("user", USER_SECRET_KEY),
-        ("admin", ADMIN_SECRET_KEY),
-        ("branch", BRANCH_SECRET_KEY),
-    )
-    for fallback_type, secret in secrets:
-        if not token:
-            break
+    if not token:
+        return f"anonymous:{client_ip}", "anonymous", "anonymous"
+
+    # Map token type to its canonical secret to prevent cross-portal acceptance
+    type_to_secret = {
+        "user": USER_SECRET_KEY,
+        "admin": ADMIN_SECRET_KEY,
+        "branch": BRANCH_SECRET_KEY,
+    }
+
+    # Try decoding with each secret but only accept tokens whose declared type matches the secret
+    for declared_type, secret in type_to_secret.items():
         try:
             payload = decode_token(token, secret)
-            account_type = str(payload.get("type") or fallback_type)
+            token_type = str(payload.get("type") or "")
+            if token_type != declared_type:
+                continue
             account_id = str(payload.get("user_id") or payload.get("sub") or "")
-            role = str(payload.get("role") or account_type)
+            role = str(payload.get("role") or token_type)
             if account_id:
-                return f"{account_type}:{account_id}", account_type, role
+                return f"{token_type}:{account_id}", token_type, role
         except Exception:
             continue
     return f"anonymous:{client_ip}", "anonymous", "anonymous"
@@ -265,6 +375,7 @@ def account_restriction_response(account_key: str, account_type: str, role: str,
     state = account_rate_limit_state[account_key]
     state["restricted_until_by_scope"][scope] = time.time() + duration
     state["last_strike_timestamp"] = time.time()
+    _save_dos_state()
     record_rate_limit_detection(account_key, account_type, role, scope, strikes, reason, duration)
     return JSONResponse(
         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -288,6 +399,7 @@ def register_account_violation(account_key: str, current_time: float) -> tuple[i
     if state["violation_count"] >= 3:
         state["strike_count"] = int(state.get("strike_count") or 0) + 1
         state["violation_count"] = 0
+    _save_dos_state()
     return int(state["violation_count"]), int(state["strike_count"])
 
 
@@ -297,6 +409,7 @@ def record_ip_manual_review_incident(ip: str, scope: str, strikes: int, reason: 
     if current_time - manual_review_incidents.get(incident_key, 0) < 60 * 60:
         return
     manual_review_incidents[incident_key] = current_time
+    _save_dos_state()
     try:
         from database.models import SessionLocal, authorize_database_session
         from SECURITY.security_models import SecurityDetectionEvent, SecurityIncident
@@ -366,11 +479,13 @@ def record_ip_manual_review_incident(ip: str, scope: str, strikes: int, reason: 
 def register_reputation_strike(ip: str, current_time: float) -> int:
     reputation_strikes[ip] = prune_timestamps(reputation_strikes[ip], current_time, STRIKE_WINDOW)
     reputation_strikes[ip].append(current_time)
+    _save_dos_state()
     return len(reputation_strikes[ip])
 
 
 def block_response(ip: str, duration: int, scope: str, strikes: int, reason: str) -> JSONResponse:
     blocked_ips[ip] = time.time() + duration
+    _save_dos_state()
     manual_review = strikes >= 4
     if manual_review:
         record_ip_manual_review_incident(ip, scope, strikes, reason, duration)
@@ -403,8 +518,8 @@ def rate_limit_for_path(path: str) -> tuple[str, int, int]:
 
 
 class RequestSizeMiddleware(BaseHTTPMiddleware):
-    """Limit request body size to prevent memory exhaustion"""
-    
+    """Limit request body size and file count to prevent memory exhaustion"""
+
     async def dispatch(self, request: Request, call_next):
         content_length = request.headers.get("content-length")
         if content_length:
@@ -413,7 +528,20 @@ class RequestSizeMiddleware(BaseHTTPMiddleware):
                     status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                     content={"detail": f"Request too large. Maximum size: {MAX_REQUEST_SIZE // (1024*1024)}MB"}
                 )
-        
+
+        content_type = request.headers.get("content-type", "")
+        if content_type.startswith("multipart/form-data"):
+            body = await request.body()
+            # Rough count of file parts in multipart body
+            file_count = body.count(b'filename="') + body.count(b"filename='") + body.count(b'filename=')
+            # Each occurrence appears twice in typical multipart (header + end), so divide by 2
+            estimated_files = max(1, file_count // 2)
+            if estimated_files > MAX_FILES_PER_REQUEST:
+                return JSONResponse(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    content={"detail": f"Too many files. Maximum {MAX_FILES_PER_REQUEST} files per request."}
+                )
+
         response = await call_next(request)
         return response
 
@@ -439,7 +567,10 @@ class ConnectionLimitMiddleware(BaseHTTPMiddleware):
         client_ip = request.client.host if request.client else "unknown"
         if is_exempt_ip(client_ip):
             return await call_next(request)
-        
+
+        # Refresh distributed state from Redis before checks
+        _refresh_dos_state()
+
         # Check permanent blocklist using cache (only hit DB every 60 seconds)
         current_time = time.time()
         if current_time - _permanent_blocks_cache_time > PERMANENT_BLOCKS_CACHE_TTL:
@@ -480,6 +611,7 @@ class ConnectionLimitMiddleware(BaseHTTPMiddleware):
             else:
                 # Unblock expired
                 del blocked_ips[client_ip]
+                _save_dos_state()
         
         # Check concurrent request limit
         if active_requests[client_ip] >= MAX_CONCURRENT_REQUESTS_PER_IP:
@@ -509,6 +641,8 @@ class AbuseDetectionMiddleware(BaseHTTPMiddleware):
         current_time = time.time()
         path = request.url.path
         account_key, account_type, role = account_from_request(request, client_ip)
+        _refresh_dos_state()
+        _save_dos_state()
         
         # Check IP reputation if enabled (only for first request from each IP to reduce load)
         if ENABLE_IP_REPUTATION and client_ip not in request_history:
@@ -605,6 +739,8 @@ def get_blocked_ips() -> Dict[str, float]:
     expired = [ip for ip, unblock_time in blocked_ips.items() if unblock_time < current_time]
     for ip in expired:
         del blocked_ips[ip]
+    if expired:
+        _save_dos_state()
     
     # Also get permanent blocks from database
     result = blocked_ips.copy()
@@ -623,6 +759,30 @@ def get_blocked_ips() -> Dict[str, float]:
     return result
 
 
+def _refresh_dos_state() -> None:
+    """Reload mutable state from Redis so other instances' changes are visible."""
+    r = get_redis_client()
+    if not r:
+        return
+    try:
+        global blocked_ips, account_rate_limit_state
+        raw_blocked = r.hgetall("wards:dos:blocked_ips")
+        blocked_ips = {k: float(v) for k, v in raw_blocked.items()}
+        raw_accounts = r.hgetall("wards:dos:account_rate_limit_state")
+        account_rate_limit_state = defaultdict(
+            lambda: {
+                "violation_count": 0,
+                "strike_count": 0,
+                "last_violation_timestamp": None,
+                "last_strike_timestamp": None,
+                "restricted_until_by_scope": {},
+            },
+            {k: json.loads(v) for k, v in raw_accounts.items()},
+        )
+    except Exception:
+        pass
+
+
 def unblock_ip(ip: str) -> bool:
     """Manually unblock an IP (removes from both temporary and permanent blocklist)"""
     global _permanent_blocks_cache_time
@@ -636,6 +796,7 @@ def unblock_ip(ip: str) -> bool:
     for key in list(endpoint_request_history.keys()):
         if key.startswith(f"{ip}:"):
             endpoint_request_history.pop(key, None)
+    _save_dos_state()
     
     # Remove from permanent blocklist
     try:
@@ -659,3 +820,4 @@ def unblock_ip(ip: str) -> bool:
 def block_ip(ip: str, duration: int = 15 * 60) -> None:
     """Manually block an IP (temporary)"""
     blocked_ips[ip] = time.time() + duration
+    _save_dos_state()

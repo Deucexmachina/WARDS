@@ -1,11 +1,13 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 
+import { API_HOST } from '../services/api';
+
 const FILE_HOST = (() => {
   try {
-    const baseURL = (typeof window !== 'undefined' && window.__WARDS_API_HOST__) || 'http://localhost:8000';
+    const baseURL = (typeof window !== 'undefined' && window.__WARDS_API_HOST__) || API_HOST;
     return baseURL.replace(/\/$/, '');
   } catch (_) {
-    return 'http://localhost:8000';
+    return API_HOST;
   }
 })();
 

@@ -1,4 +1,4 @@
-from database.models import SessionLocal, User, Branch, Alert
+from database.models import SessionLocal, Admin, Branch, Alert
 
 def view_database():
     db = SessionLocal()
@@ -10,7 +10,7 @@ def view_database():
     # View Users
     print("\nUSERS:")
     print("-" * 40)
-    users = db.query(User).all()
+    users = db.query(Admin).all()
     for user in users:
         branch_name = user.branch.name if user.branch else "All Branches"
         print(f"ID: {user.id}")

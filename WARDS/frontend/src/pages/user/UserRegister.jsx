@@ -14,7 +14,7 @@ import {
   validateStrongPassword,
 } from '../../utils/validation';
 
-const API_URL = 'http://localhost:8000';
+import { API_HOST } from '../../services/api';
 const RECAPTCHA_SITE_KEY = '6LdOdsAsAAAAAKW-mZvEfaesLvdAwCm_SnZoiirK';
 const EyeIcon = ({ open }) => (
   <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -117,7 +117,7 @@ const UserRegister = () => {
 
     const loadAgreement = async () => {
       try {
-        const response = await axios.get(`${API_URL}/api/privacy/data-privacy-agreement`);
+        const response = await axios.get(`${API_HOST}/api/privacy/data-privacy-agreement`);
         if (isMounted) {
           setAgreement(response.data);
         }
@@ -223,7 +223,7 @@ const UserRegister = () => {
     }
     setContactCheckingUniqueness(true);
     try {
-      const response = await axios.post(`${API_URL}/api/auth/unified/check-contact`, {
+      const response = await axios.post(`${API_HOST}/api/auth/unified/check-contact`, {
         contact_number: `+63${digits}`,
       });
       if (!response.data.available) {
@@ -295,7 +295,7 @@ const UserRegister = () => {
     }
 
     try {
-      const response = await axios.post(`${API_URL}/api/auth/unified/register`, {
+      const response = await axios.post(`${API_HOST}/api/auth/unified/register`, {
         email: formData.email.trim(),
         full_name: normalizeCitizenFullName(formData.full_name),
         contact_number: `+63${normalizePhilippineContactDigits(formData.contact_number)}`,

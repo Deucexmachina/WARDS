@@ -4,7 +4,7 @@ import WardsPageHero from '../../components/WardsPageHero';
 import ProcessingModal from '../../components/ProcessingModal';
 import SystemMessageModal from '../../components/SystemMessageModal';
 
-const API_BASE_URL = 'http://localhost:8000/api';
+import { API_BASE_URL } from '../../services/api';
 
 const ReceiptManagement = () => {
   const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}');

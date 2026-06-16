@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { getEmailValidationMessage } from '../../utils/validation';
 
-const API_URL = 'http://localhost:8000';
+import { API_HOST } from '../../services/api';
 const PASSWORD_RULE_MESSAGE = 'Password must be more than 12 characters long and include at least one uppercase letter, one lowercase letter, and at least one number or special character.';
 
 const getPasswordValidationMessage = (value) => {
@@ -128,7 +128,7 @@ const ForgotPassword = () => {
     }
 
     try {
-      const response = await axios.post(`${API_URL}/api/auth/unified/request-password-reset`, {
+      const response = await axios.post(`${API_HOST}/api/auth/unified/request-password-reset`, {
         email,
         portal: portal === 'default' ? undefined : portal,
       });
@@ -164,7 +164,7 @@ const ForgotPassword = () => {
     }
 
     try {
-      const response = await axios.post(`${API_URL}/api/auth/unified/reset-password`, {
+      const response = await axios.post(`${API_HOST}/api/auth/unified/reset-password`, {
         token,
         new_password: password,
       });

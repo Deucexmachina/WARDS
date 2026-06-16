@@ -3,7 +3,7 @@ import axios from 'axios';
 
 import DataPrivacyAgreementCard from '../../components/DataPrivacyAgreementCard';
 
-const API_URL = 'http://localhost:8000';
+import { API_HOST } from '../../services/api';
 
 const DataPrivacyAgreement = () => {
   const [agreement, setAgreement] = useState(null);
@@ -15,7 +15,7 @@ const DataPrivacyAgreement = () => {
 
     const loadAgreement = async () => {
       try {
-        const response = await axios.get(`${API_URL}/api/privacy/data-privacy-agreement`);
+        const response = await axios.get(`${API_HOST}/api/privacy/data-privacy-agreement`);
         if (isMounted) {
           setAgreement(response.data);
         }

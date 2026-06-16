@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
-const API_URL = 'http://localhost:8000';
+import { API_HOST } from '../../services/api';
 
 const clearSecuritySession = () => {
   localStorage.removeItem('securityAuthenticated');
@@ -47,7 +47,7 @@ const SecurityBackupLogin = () => {
         return;
       }
 
-      const response = await axios.post(`${API_URL}/api/auth/unified/login`, {
+      const response = await axios.post(`${API_HOST}/api/auth/unified/login`, {
         identifier,
         password,
         portal: 'admin',

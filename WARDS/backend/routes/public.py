@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_
 from sqlalchemy.exc import IntegrityError
@@ -16,6 +16,7 @@ from database.models import (
     BranchOperatingHours, Announcement, QueueActivity, ReceiptRequest,
     Payment, get_db
 )
+from auth import get_current_branch_staff
 from utils.field_crypto import apply_queue_security, find_citizen_by_email, find_payment_by_ref_number, find_queue_by_queue_number, get_decrypted_or_raw, hash_aware_any, hash_aware_match, hash_optional_value, queue_value, service_value, taxpayer_guide_value
 from utils.field_crypto import receipt_request_value
 from utils.branch_appointment_settings import (
@@ -34,6 +35,7 @@ from utils.system_settings import SYSTEM_DISABLED_MESSAGE, BRANCH_QUEUE_DISABLED
 from utils.field_crypto import decrypt_optional_value
 from utils.announcement_attachments import serialize_attachments
 from auth import get_optional_current_user
+from utils.distributed_ledger import append_ledger_entry
 
 router = APIRouter()
 ACTIVE_PUBLIC_QUEUE_STATUSES = ("Pending", "Waiting", "Called", "Serving")
@@ -207,7 +209,8 @@ def resolve_public_branch_by_name(db: Session, branch_name: str | None) -> Branc
     direct_match = db.query(Branch).filter(Branch.name == normalized).first()
     if direct_match:
         return direct_match
-    for branch in db.query(Branch).all():
+    active_branches = db.query(Branch).filter(Branch.status == "Active").limit(500).all()
+    for branch in active_branches:
         if (get_decrypted_or_raw(branch, "name") or branch.name) == normalized:
             return branch
     return None
@@ -329,36 +332,31 @@ class OnlinePaymentCreate(BaseModel):
 
 @router.get("/branches")
 @limiter.limit("60/minute")
-async def get_all_public_branches(request: Request, db: Session = Depends(get_db)):
-    """Get all active branches for public view"""
-    branches = db.query(Branch).filter(Branch.status == "Active").all()
-    
+async def get_all_public_branches(
+    request: Request,
+    skip: int = 0,
+    limit: int = Query(100, le=500),
+    db: Session = Depends(get_db),
+    current_user: CitizenUser | None = Depends(get_optional_current_user),
+):
+    """Get all active branches for public view. Authenticated users receive additional operational details."""
+    branches = db.query(Branch).filter(Branch.status == "Active").offset(skip).limit(limit).all()
+
     result = []
     for branch in branches:
         branch_name = get_decrypted_or_raw(branch, "name") or branch.name
         branch_location = get_decrypted_or_raw(branch, "location") or branch.location
-        branch_contact = get_decrypted_or_raw(branch, "contact") or branch.contact
-        # Get current queue status
-        waiting = db.query(Queue).filter(
-            and_(Queue.branch_id == branch.id, hash_aware_match(Queue, "status", "Waiting"))
-        ).count()
-        
-        # Get operating hours
-        hours = db.query(BranchOperatingHours).filter(
-            BranchOperatingHours.branch_id == branch.id
-        ).all()
-        queue_time_slot = get_transaction_duration_minutes(db, branch.id)
-        
-        result.append({
+        entry = {
             "id": branch.id,
             "name": branch_name,
             "location": branch_location,
-            "contact": branch_contact,
-            "counters": branch.counters,
-            "current_waiting": waiting,
-            "estimated_wait_time": waiting * queue_time_slot,
-            "queue_level": "low" if waiting < 5 else "moderate" if waiting < 15 else "high",
-            "operating_hours": [
+        }
+        if current_user:
+            hours = db.query(BranchOperatingHours).filter(
+                BranchOperatingHours.branch_id == branch.id
+            ).all()
+            entry["counters"] = branch.counters
+            entry["operating_hours"] = [
                 {
                     "day": h.day_of_week,
                     "opening": h.opening_time,
@@ -366,51 +364,30 @@ async def get_all_public_branches(request: Request, db: Session = Depends(get_db
                     "is_open": h.is_open
                 } for h in hours
             ]
-        })
-    
+        result.append(entry)
+
     return result
 
 @router.get("/branches/{branch_id}")
-async def get_branch_details(branch_id: int, db: Session = Depends(get_db)):
-    """Get detailed branch information"""
-    queue_time_slot = get_transaction_duration_minutes(db, branch_id)
+async def get_branch_details(
+    branch_id: int,
+    db: Session = Depends(get_db),
+    current_user: CitizenUser | None = Depends(get_optional_current_user),
+):
+    """Get detailed branch information. Authenticated users receive additional operational details."""
     branch = db.query(Branch).filter(Branch.id == branch_id).first()
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
-    
-    # Get branch announcements
-    announcements = db.query(Announcement).filter(
-        Announcement.is_active == True,
-        ((Announcement.branch_id == None) | (Announcement.branch_id == branch_id))
-    ).order_by(Announcement.publish_date.desc()).limit(5).all()
-    
-    enabled_branch_services = get_branch_configured_service_names(db, branch_id)
-    services = [
-        service
-        for service in get_branch_service_options(db, branch_id)
-        if (service.get("code") or infer_service_window(service.get("name"))).strip().upper() in enabled_branch_services
-    ]
-    
-    # Get operating hours
+
+    # Get operating hours (always public)
     hours = db.query(BranchOperatingHours).filter(
         BranchOperatingHours.branch_id == branch_id
     ).all()
-    
-    # Get current queue status
-    waiting = db.query(Queue).filter(
-        and_(Queue.branch_id == branch_id, hash_aware_match(Queue, "status", "Waiting"))
-    ).count()
-    
-    return {
+
+    result = {
         "id": branch.id,
         "name": get_decrypted_or_raw(branch, "name") or branch.name,
         "location": get_decrypted_or_raw(branch, "location") or branch.location,
-        "contact": get_decrypted_or_raw(branch, "contact") or branch.contact,
-        "counters": branch.counters,
-        "status": branch.status,
-        "queue_enabled": bool(get_branch_setting_value(db, "queueEnabled", branch_id)),
-        "announcements": [serialize_public_announcement(a) for a in announcements],
-        "services": services,
         "operating_hours": [
             {
                 "day": h.day_of_week,
@@ -419,20 +396,42 @@ async def get_branch_details(branch_id: int, db: Session = Depends(get_db)):
                 "is_open": h.is_open
             } for h in hours
         ],
-        "queue_status": {
-            "waiting": waiting,
-            "estimated_wait_time": waiting * queue_time_slot,
-            "queue_level": "low" if waiting < 5 else "moderate" if waiting < 15 else "high"
-        }
     }
+
+    if current_user:
+        # Get branch announcements
+        announcements = db.query(Announcement).filter(
+            Announcement.is_active == True,
+            ((Announcement.branch_id == None) | (Announcement.branch_id == branch_id))
+        ).order_by(Announcement.publish_date.desc()).limit(5).all()
+
+        enabled_branch_services = get_branch_configured_service_names(db, branch_id)
+        services = [
+            service
+            for service in get_branch_service_options(db, branch_id)
+            if (service.get("code") or infer_service_window(service.get("name"))).strip().upper() in enabled_branch_services
+        ]
+
+        result["counters"] = branch.counters
+        result["status"] = branch.status
+        result["queue_enabled"] = bool(get_branch_setting_value(db, "queueEnabled", branch_id))
+        result["announcements"] = [serialize_public_announcement(a) for a in announcements]
+        result["services"] = services
+
+    return result
 
 # ============= Public Services Module =============
 
 @router.get("/queue-status")
 @limiter.limit("30/minute")
-async def get_all_queue_status(request: Request, db: Session = Depends(get_db)):
+async def get_all_queue_status(
+    request: Request,
+    skip: int = 0,
+    limit: int = Query(50, le=200),
+    db: Session = Depends(get_db),
+):
     """Get queue status for all branches"""
-    branches = db.query(Branch).filter(Branch.status == "Active").all()
+    branches = db.query(Branch).filter(Branch.status == "Active").offset(skip).limit(limit).all()
     
     result = []
     for branch in branches:
@@ -458,22 +457,31 @@ async def get_all_queue_status(request: Request, db: Session = Depends(get_db)):
     return result
 
 @router.get("/announcements")
-async def get_public_announcements(db: Session = Depends(get_db)):
+async def get_public_announcements(
+    skip: int = 0,
+    limit: int = Query(50, le=200),
+    db: Session = Depends(get_db),
+):
     """Get all active public announcements"""
     announcements = db.query(Announcement).filter(
         Announcement.is_active == True
-    ).order_by(Announcement.publish_date.desc()).all()
+    ).order_by(Announcement.publish_date.desc()).offset(skip).limit(limit).all()
     
     return [serialize_public_announcement(a) for a in announcements]
 
 @router.get("/faqs")
-async def get_faqs(language: str = "en", db: Session = Depends(get_db)):
+async def get_faqs(
+    language: str = "en",
+    skip: int = 0,
+    limit: int = Query(50, le=200),
+    db: Session = Depends(get_db),
+):
     """Get FAQs in specified language"""
     normalized_language = (language or "en").strip().lower()
     language_hash = hash_optional_value(normalized_language)
     faqs = db.query(FAQ).filter(
         and_(FAQ.language_hash == language_hash, FAQ.is_active == True)
-    ).order_by(FAQ.order).all()
+    ).order_by(FAQ.order).offset(skip).limit(limit).all()
     
     return [
         {
@@ -485,13 +493,18 @@ async def get_faqs(language: str = "en", db: Session = Depends(get_db)):
     ]
 
 @router.get("/taxpayer-guide")
-async def get_taxpayer_guide(language: str = "en", db: Session = Depends(get_db)):
+async def get_taxpayer_guide(
+    language: str = "en",
+    skip: int = 0,
+    limit: int = Query(50, le=200),
+    db: Session = Depends(get_db),
+):
     """Get taxpayer guide in specified language"""
     normalized_language = (language or "en").strip().lower()
     language_hash = hash_optional_value(normalized_language)
     guides = db.query(TaxpayerGuide).filter(
         and_(TaxpayerGuide.language_hash == language_hash, TaxpayerGuide.is_active == True)
-    ).order_by(TaxpayerGuide.order).all()
+    ).order_by(TaxpayerGuide.order).offset(skip).limit(limit).all()
     
     return [
         {
@@ -503,11 +516,15 @@ async def get_taxpayer_guide(language: str = "en", db: Session = Depends(get_db)
     ]
 
 @router.get("/services")
-async def get_all_services(db: Session = Depends(get_db)):
+async def get_all_services(
+    skip: int = 0,
+    limit: int = Query(100, le=500),
+    db: Session = Depends(get_db),
+):
     """Get all available services"""
     ensure_public_operations_available(db)
     enabled_service_names = get_enabled_service_names(db)
-    services = db.query(Service).filter(Service.is_active == True).all()
+    services = db.query(Service).filter(Service.is_active == True).offset(skip).limit(limit).all()
     
     return [
         {
@@ -550,7 +567,16 @@ def generate_next_queue_number(db: Session, branch_name: str, queue_type: str = 
     prefix, pattern = build_queue_prefix(branch_name, queue_type)
     next_sequence = 1
     candidate_numbers = []
-    for queue in db.query(Queue).all():
+    # Look up branch to scope the queue query
+    branch = resolve_public_branch_by_name(db, branch_name)
+    branch_id = branch.id if branch else None
+    queue_query = db.query(Queue)
+    if branch_id:
+        queue_query = queue_query.filter(Queue.branch_id == branch_id)
+    # Limit to recent queues to prevent unbounded growth
+    recent_cutoff = datetime.utcnow() - timedelta(days=30)
+    queue_query = queue_query.filter(Queue.created_at >= recent_cutoff)
+    for queue in queue_query.limit(5000).all():
         current_number = queue_value(queue, "queue_number")
         if current_number and current_number.startswith(prefix):
             candidate_numbers.append(current_number)
@@ -663,10 +689,20 @@ async def get_branch_immediate_queue_service_availability(
 
 @router.get("/queue/branch/{branch_id}")
 @limiter.limit("30/minute")
-async def get_branch_queues(request: Request, branch_id: int, db: Session = Depends(get_db)):
-    """Get all queues for a specific branch"""
-    queues = db.query(Queue).filter(Queue.branch_id == branch_id).order_by(Queue.created_at.asc()).all()
-    
+async def get_branch_queues(
+    request: Request,
+    branch_id: int,
+    skip: int = 0,
+    limit: int = Query(100, le=500),
+    db: Session = Depends(get_db),
+    current_staff: BranchStaff = Depends(get_current_branch_staff),
+):
+    """Get all queues for a specific branch (authenticated branch staff only)"""
+    if current_staff.branch_id != branch_id and current_staff.role not in {"main_admin", "superadmin"}:
+        raise HTTPException(status_code=403, detail="Not authorized to view queues for this branch")
+
+    queues = db.query(Queue).filter(Queue.branch_id == branch_id).order_by(Queue.created_at.asc()).offset(skip).limit(limit).all()
+
     return [
         {
             "id": q.id,
@@ -686,11 +722,18 @@ async def get_branch_queues(request: Request, branch_id: int, db: Session = Depe
     ]
 
 @router.put("/queue/{queue_id}/status")
-async def update_queue_status(queue_id: int, status_update: dict, db: Session = Depends(get_db)):
-    """Update queue status (for Branch Admin)"""
+async def update_queue_status(
+    queue_id: int,
+    status_update: dict,
+    db: Session = Depends(get_db),
+    current_staff: BranchStaff = Depends(get_current_branch_staff),
+):
+    """Update queue status (authenticated branch staff only)"""
     queue = db.query(Queue).filter(Queue.id == queue_id).first()
     if not queue:
         raise HTTPException(status_code=404, detail="Queue not found")
+    if current_staff.branch_id != queue.branch_id and current_staff.role not in {"main_admin", "superadmin"}:
+        raise HTTPException(status_code=403, detail="Not authorized to update queues for this branch")
     ensure_queue_operations_manageable(db, queue.branch_id)
     
     queue.status = status_update.get("status", queue_value(queue, "status"))
@@ -752,14 +795,17 @@ async def register_queue(
     if effective_email:
         effective_email = normalize_email(effective_email, check_deliverability=True)
 
-    existing_active_queue = find_existing_active_queue(
-        db,
-        current_citizen,
-        validated_contact_number,
-        effective_email,
-    )
-    if existing_active_queue:
-        raise HTTPException(status_code=409, detail=ACTIVE_QUEUE_MESSAGE)
+    # Only check for duplicate active queues when authenticated to prevent
+    # unauthenticated contact-number/email probing.
+    if current_citizen:
+        existing_active_queue = find_existing_active_queue(
+            db,
+            current_citizen,
+            validated_contact_number,
+            effective_email,
+        )
+        if existing_active_queue:
+            raise HTTPException(status_code=409, detail=ACTIVE_QUEUE_MESSAGE)
 
     active_queue_count = db.query(Queue).filter(
         Queue.branch_id == registration.branch_id,
@@ -1251,7 +1297,21 @@ async def initiate_payment(
     db.add(new_payment)
     db.commit()
     db.refresh(new_payment)
-    
+
+    append_ledger_entry(
+        entry_type="payment_initiated",
+        record_id=new_payment.id,
+        actor=payment.taxpayer_name or "anonymous",
+        action="Payment Initiated",
+        data={
+            "ref_number": ref_number,
+            "txn_id": txn_id,
+            "amount": float(payment.amount or 0),
+            "tax_type": payment.tax_type,
+            "branch_id": branch_record.id if branch_record else None,
+        },
+    )
+
     return {
         "ref_number": ref_number,
         "txn_id": txn_id,
@@ -1297,7 +1357,19 @@ async def verify_payment(request: Request, ref_number: str, db: Session = Depend
     from utils.field_crypto import apply_payment_security
     apply_payment_security(payment)
     db.commit()
-    
+
+    append_ledger_entry(
+        entry_type="payment_verified",
+        record_id=payment.id,
+        actor=payment.taxpayer_name or "system",
+        action="Payment Verified",
+        data={
+            "ref_number": ref_number,
+            "status": payment.status,
+            "amount": float(payment.amount or 0),
+        },
+    )
+
     return {
         "ref_number": get_decrypted_or_raw(payment, "ref_number"),
         "status": payment.status,

@@ -29,6 +29,7 @@ from utils.announcement_attachments import (
 from services.email_service import send_payment_receipt_email
 from routes.payments import apply_business_tax_application_security_fields, revert_linked_request_status_for_declined_payment, update_linked_request_status
 from utils.field_crypto import apply_announcement_view_security, apply_memo_security, apply_memo_view_security, apply_payment_security, apply_queue_security, apply_receipt_request_security, collection_account_number_value, collection_account_value, decrypt_optional_value, find_announcement_view, find_memo_view, get_announcement_viewed_ids, get_decrypted_or_raw, get_memo_viewed_ids, hash_aware_any, hash_aware_match, hash_optional_value, queue_value, remittance_numeric_value, remittance_value
+from utils.distributed_ledger import append_ledger_entry
 from utils.security_validation import format_tin, normalize_citizen_full_name, normalize_ph_contact_number
 from utils.branch_system_settings import get_branch_setting_value
 from utils.branch_window_config import (
@@ -530,11 +531,9 @@ def get_next_waiting_queue_for_staff(
         if is_immediate or is_ready_appointment or is_legacy_immediate:
             candidate_ids.append(queue.id)
 
-    supports_row_locking = db.bind is not None and db.bind.dialect.name != "sqlite"
     for queue_id in candidate_ids:
         queue_query = db.query(Queue).filter(Queue.id == queue_id, Queue.branch_id == current_staff.branch_id)
-        if supports_row_locking:
-            queue_query = queue_query.with_for_update(skip_locked=True)
+        queue_query = queue_query.with_for_update(skip_locked=True)
         queue = queue_query.first()
         if not queue or (queue_value(queue, "status") or "").strip().lower() != "waiting":
             continue
@@ -1121,6 +1120,19 @@ def create_branch_remittance_record(
     branch_account.total_remitted = float(branch_account.total_remitted or 0) + total_amount
     branch_account.updated_at = datetime.utcnow()
     log_branch_action(db, current_staff, "Remittance Submitted", f"Submitted {remittance_number} for {format_currency(total_amount)}", ip=ip)
+
+    append_ledger_entry(
+        entry_type="remittance_submitted",
+        record_id=remittance.id,
+        actor=current_staff.username,
+        action="Remittance Submitted",
+        data={
+            "remittance_number": remittance_number,
+            "branch_id": current_staff.branch_id,
+            "total_amount": float(total_amount),
+            "payment_count": len(selected_payments),
+        },
+    )
     return remittance
 
 
@@ -1500,8 +1512,7 @@ async def call_next_queue(
             queue = None
             if queue_id is not None:
                 queue_query = db.query(Queue).filter(Queue.id == queue_id, Queue.branch_id == current_staff.branch_id)
-                if db.bind is not None and db.bind.dialect.name != "sqlite":
-                    queue_query = queue_query.with_for_update(skip_locked=True)
+                queue_query = queue_query.with_for_update(skip_locked=True)
                 queue = queue_query.first()
                 if not queue:
                     raise HTTPException(status_code=404, detail="Selected queue record was not found.")

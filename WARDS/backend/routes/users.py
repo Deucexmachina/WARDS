@@ -472,6 +472,8 @@ async def update_user(
     if isinstance(account, Admin):
         if not is_admin_role(user.role):
             raise HTTPException(status_code=400, detail="Admin accounts must keep an admin role")
+        if user.role == "main_admin" and current_user.role not in {"main_admin", "superadmin"}:
+            raise HTTPException(status_code=403, detail="Only Main Admin or Super Admin can assign the main_admin role")
         branch_name = "All Branches"
     elif isinstance(account, BranchStaff):
         if not is_branch_role(user.role):

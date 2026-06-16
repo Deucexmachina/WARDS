@@ -98,9 +98,9 @@ def test_admin_login_without_mfa_returns_400():
             json={"identifier": account.email, "password": "CorrectPass1!"},
         )
         assert response.status_code == 400
-        assert response.json()["detail"] == "MFA not configured. Please setup MFA first."
-        assert response.headers.get("x-requires-mfa-setup") == "true"
-        assert response.headers.get("x-auth-portal") == "admin"
+        assert response.json()["detail"] == "Invalid credentials or account status."
+        assert "requires_mfa_setup" not in response.json()
+        assert response.headers.get("x-auth-portal") is None
     finally:
         unified_auth.find_account_for_portal = original_find
         unified_auth.log_activity = original_log
@@ -131,9 +131,9 @@ def test_branch_login_without_mfa_returns_400():
             json={"identifier": account.email, "password": "CorrectPass1!", "portal": "branch"},
         )
         assert response.status_code == 400
-        assert response.json()["detail"] == "MFA not configured. Please setup MFA first."
-        assert response.headers.get("x-requires-mfa-setup") == "true"
-        assert response.headers.get("x-auth-portal") == "branch"
+        assert response.json()["detail"] == "Invalid credentials or account status."
+        assert "requires_mfa_setup" not in response.json()
+        assert response.headers.get("x-auth-portal") is None
     finally:
         unified_auth.find_account_for_portal = original_find
         unified_auth.log_activity = original_log

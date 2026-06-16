@@ -1,6 +1,6 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import axios from 'axios';
+import api from '../services/api';
 
 const ALLOWED_ADMIN_INTERNAL_ROLES = new Set(['main_admin', 'superadmin']);
 const AUTH_VERIFY_TIMEOUT_MS = 8000;
@@ -49,7 +49,7 @@ const ProtectedRoute = ({ children }) => {
     }
 
     try {
-      const response = await axios.get('http://localhost:8000/api/auth/unified/verify', {
+      const response = await api.get('/auth/unified/verify', {
         headers: {
           'Authorization': `Bearer ${token}`
         },

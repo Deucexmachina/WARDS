@@ -8,7 +8,7 @@ import { unifiedAuthAPI } from '../../services/api';
 import { AUTH_GRADIENTS } from '../../utils/authTheme';
 import cityHall from '../../assets/branding/qc_city_hall.jpg';
 
-const API_URL = 'http://localhost:8000';
+import { API_HOST } from '../../services/api';
 const RECAPTCHA_SITE_KEY = '6LdOdsAsAAAAAKW-mZvEfaesLvdAwCm_SnZoiirK';
 const CAPTCHA_THRESHOLD = 3;
 const LOCKOUT_THRESHOLD = 5;
@@ -391,7 +391,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
     setNotice('');
 
     try {
-      const response = await axios.post(`${API_URL}/api/auth/unified/setup-mfa`, {
+      const response = await axios.post(`${API_HOST}/api/auth/unified/setup-mfa`, {
         identifier,
         password,
         portal: requestedPortal,
@@ -450,7 +450,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
     setShowMfaSetup(false);
 
     try {
-      const response = await axios.post(`${API_URL}/api/auth/unified/login`, {
+      const response = await axios.post(`${API_HOST}/api/auth/unified/login`, {
         identifier,
         password,
         portal: getSubmissionPortal(),
@@ -549,7 +549,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
     setNotice('');
 
     try {
-      const response = await axios.post(`${API_URL}/api/auth/unified/login`, {
+      const response = await axios.post(`${API_HOST}/api/auth/unified/login`, {
         identifier,
         password,
         portal: getSubmissionPortal(),
@@ -649,14 +649,14 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
     setError('');
     setNotice('');
     try {
-      await axios.post(`${API_URL}/api/auth/unified/verify-mfa-setup`, {
+      await axios.post(`${API_HOST}/api/auth/unified/verify-mfa-setup`, {
         identifier,
         password,
         portal: getSubmissionPortal(),
         totp_code: totpCode,
       });
 
-      const loginResponse = await axios.post(`${API_URL}/api/auth/unified/login`, {
+      const loginResponse = await axios.post(`${API_HOST}/api/auth/unified/login`, {
         identifier,
         password,
         portal: getSubmissionPortal(),

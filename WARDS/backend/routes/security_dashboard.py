@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from pathlib import Path
@@ -12,8 +13,9 @@ MASTER_ROOT = Path(__file__).resolve().parents[3]
 if str(MASTER_ROOT) not in sys.path:
     sys.path.insert(0, str(MASTER_ROOT))
 
-from database.models import get_db, ActivityLog, PermanentIpBlock, SecurityLogView
+from database.models import get_db, SessionLocal, ActivityLog, PermanentIpBlock, SecurityLogView
 from auth import get_current_admin_from_token
+from utils.background_jobs import job_manager, JobStatus
 from middleware.dos_protection import get_blocked_ips, unblock_ip, block_ip, account_rate_limit_state, record_rate_limit_detection
 from services.ip_reputation import get_permanent_blocks, add_permanent_block, remove_permanent_block, check_ip_reputation
 from SECURITY.security_engine import (
@@ -23,21 +25,28 @@ from SECURITY.security_engine import (
     available_ai_rule_templates,
     bulk_update_incidents,
     create_manual_backup,
+    current_hash_index,
     dashboard_payload,
     full_system_recovery,
     get_setting,
     get_ai_rules,
     get_ai_sensitivity,
-    set_ai_sensitivity,
+    is_database_entry,
     manual_recover_file,
     mark_stale_backup_events_failed,
     mark_admin_change,
     mark_false_positive,
+    mark_verified_removal,
+    migrate_portable_monitored_files,
     MissingFileConfirmationRequired,
+    normalize_database_monitor_entry,
+    now_utc,
+    portable_monitored_path,
     query_detections,
     query_recoveries,
     register_initial_files,
     remove_monitored_folder,
+    replacement_path_for,
     resolve_incident,
     retrain_ai,
     scan_all_files,
@@ -60,7 +69,19 @@ router = APIRouter()
 BACKEND_ENV_PATH = MASTER_ROOT / "WARDS" / "backend" / ".env"
 
 
+ALLOWED_ENV_KEYS = {
+    "SECURITY_SCAN_INTERVAL_SECONDS",
+    "SECURITY_MONITORING_ENABLED",
+}
+
+
 def update_backend_env(updates: dict[str, str], env_path: Path = BACKEND_ENV_PATH) -> dict[str, str]:
+    disallowed = set(updates.keys()) - ALLOWED_ENV_KEYS
+    if disallowed:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Env mutation restricted. Disallowed keys: {sorted(disallowed)}"
+        )
     lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
     pending = {key: str(value) for key, value in updates.items()}
     written = set()
@@ -184,8 +205,15 @@ class BulkIncidentRequest(BaseModel):
     confirm_missing_files: bool = False
 
 
+ROLE_MAIN_ADMIN = "main_admin"
+ROLE_SUPERADMIN = "superadmin"
+
+
 async def current_admin(request: Request, db: Session = Depends(get_db)):
-    return await get_current_admin_from_token(request, db)
+    admin = await get_current_admin_from_token(request, db)
+    if admin.role not in {ROLE_MAIN_ADMIN, ROLE_SUPERADMIN}:
+        raise HTTPException(status_code=403, detail="Security dashboard restricted to Main Admin and Super Admin only")
+    return admin
 
 
 @router.post("/initialize")
@@ -206,20 +234,34 @@ def list_files(db: Session = Depends(get_db), _=Depends(current_admin)):
 
 
 @router.post("/files/{file_id}/scan")
-def scan_file(file_id: int, db: Session = Depends(get_db), _=Depends(current_admin)):
+def scan_file(file_id: int, request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
     file_entry = active_monitored_files_query(db).filter(SecurityMonitoredFile.id == file_id).first()
     if not file_entry:
         raise HTTPException(status_code=404, detail="Monitored file not found")
     detection = scan_single_file(db, file_entry, context={"manual_scan": True})
+    db.add(ActivityLog(
+        action="Security File Scan",
+        user=admin.username,
+        details=f"Scanned file id={file_id}. Detection: {detection is not None} | IP: {request.client.host if request.client else 'unknown'}",
+        type="security",
+    ))
+    db.commit()
     return {"message": "Scan complete", "detection": serialize_detection(detection) if detection else None}
 
 
 @router.post("/files/{file_id}/recover")
-def recover_file(file_id: int, db: Session = Depends(get_db), admin=Depends(current_admin)):
+def recover_file(file_id: int, request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
     try:
         event = manual_recover_file(db, file_id, admin.id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+    db.add(ActivityLog(
+        action="Security File Recovery",
+        user=admin.username,
+        details=f"Recovered file id={file_id} | IP: {request.client.host if request.client else 'unknown'}",
+        type="security",
+    ))
+    db.commit()
     return serialize_recovery(event)
 
 
@@ -360,13 +402,21 @@ def mark_security_logs_viewed(log_type: str, ids: list[int] | None = None, db: S
 
 
 @router.patch("/incidents/bulk-action")
-def bulk_incidents(payload: BulkIncidentRequest, db: Session = Depends(get_db), admin=Depends(current_admin)):
+def bulk_incidents(payload: BulkIncidentRequest, request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
     if payload.action not in {"resolve", "false_positive", "investigating"}:
         raise HTTPException(status_code=400, detail="Action must be resolve, false_positive, or investigating.")
     try:
-        return bulk_update_incidents(db, payload.action, admin.id, confirm_missing_files=payload.confirm_missing_files)
+        result = bulk_update_incidents(db, payload.action, admin.id, confirm_missing_files=payload.confirm_missing_files)
     except MissingFileConfirmationRequired as exc:
         raise HTTPException(status_code=409, detail=exc.details)
+    db.add(ActivityLog(
+        action="Security Bulk Incident Update",
+        user=admin.username,
+        details=f"Action={payload.action} | IP: {request.client.host if request.client else 'unknown'}",
+        type="security",
+    ))
+    db.commit()
+    return result
 
 
 @router.patch("/incidents/{incident_id}/resolve")
@@ -391,24 +441,122 @@ def false_positive(incident_id: int, confirm_missing_files: bool = False, db: Se
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@router.post("/scan")
-def full_scan(db: Session = Depends(get_db), _=Depends(current_admin)):
-    detections = scan_all_files(db, context={"manual_scan": True})
+def _run_scan_all_files_sync(job_id: str) -> list:
+    db = SessionLocal()
+    try:
+        job_manager.update_progress(job_id, 10, "registering_files")
+        register_initial_files(db, refresh_existing=False)
+        migrate_portable_monitored_files(db)
+        database_entry = normalize_database_monitor_entry(db, reset_baseline=False, ensure_snapshot=True)
+        set_setting(db, "last_scan_at", now_utc().isoformat(), "security_scanner")
+        detections = []
+        hash_index = current_hash_index(db)
+        files = active_monitored_files_query(db).order_by(SecurityMonitoredFile.relative_path.asc()).all()
+        total = len(files)
+        for idx, file_entry in enumerate(files, start=1):
+            if is_database_entry(file_entry) and database_entry and file_entry.id != database_entry.id:
+                file_entry.status = "clean"
+                file_entry.last_checked = now_utc()
+                db.add(file_entry)
+                continue
+            if not portable_monitored_path(file_entry).exists():
+                replacement_path = replacement_path_for(file_entry, hash_index)
+                if replacement_path:
+                    mark_verified_removal(db, file_entry, "verified_renamed", replacement_path=replacement_path, actor="active_scan")
+                    continue
+            detection = scan_single_file(db, file_entry, context={"manual_scan": True}, commit_clean=False)
+            if detection:
+                detections.append(detection)
+            progress = 10 + int((idx / total) * 80) if total else 50
+            job_manager.update_progress(job_id, progress, f"scanning {file_entry.relative_path}")
+        db.commit()
+        job_manager.update_progress(job_id, 100, "complete")
+        return detections
+    finally:
+        db.close()
+
+
+async def _run_scan_background(job_id: str) -> list:
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, lambda: _run_scan_all_files_sync(job_id))
+
+
+@router.post("/scan/submit")
+async def submit_full_scan(request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
+    try:
+        job = job_manager.submit("security_full_scan")
+    except Exception as exc:
+        raise HTTPException(status_code=429, detail=str(exc))
+    db.add(ActivityLog(
+        action="Security Full Scan Submitted",
+        user=admin.username,
+        details=f"Background scan job submitted. Job ID: {job.id} | IP: {request.client.host if request.client else 'unknown'}",
+        type="security",
+    ))
+    db.commit()
+    # Start background task without awaiting
+    asyncio.create_task(job_manager.run(job.id, lambda: _run_scan_background(job.id)))
+    return {"job_id": job.id, "status": job.status, "message": "Scan job submitted successfully."}
+
+
+@router.get("/scan/status/{job_id}")
+def scan_status(job_id: str, _=Depends(current_admin)):
+    job = job_manager.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
     return {
-        "message": "Full integrity scan complete",
+        "job_id": job.id,
+        "type": job.type,
+        "status": job.status,
+        "progress": job.progress,
+        "current_step": job.current_step,
+        "created_at": job.created_at,
+        "started_at": job.started_at,
+        "completed_at": job.completed_at,
+    }
+
+
+@router.get("/scan/result/{job_id}")
+def scan_result(job_id: str, _=Depends(current_admin)):
+    job = job_manager.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    if job.status not in {JobStatus.COMPLETED, JobStatus.FAILED}:
+        raise HTTPException(status_code=400, detail=f"Scan still in progress ({job.status}).")
+    if job.status == JobStatus.FAILED:
+        raise HTTPException(status_code=500, detail=job.error)
+    detections = job.result or []
+    return {
+        "job_id": job.id,
+        "status": job.status,
         "summary": f"{len(detections)} change(s) found." if detections else "No changes found. All monitored files match the trusted backup.",
         "detections": [serialize_detection(item) for item in detections],
     }
 
 
 @router.post("/recover/full")
-def recover_full(db: Session = Depends(get_db), admin=Depends(current_admin)):
-    return full_system_recovery(db, admin.id)
+def recover_full(request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
+    result = full_system_recovery(db, admin.id)
+    db.add(ActivityLog(
+        action="Security Full System Recovery",
+        user=admin.username,
+        details=f"Full system recovery triggered. | IP: {request.client.host if request.client else 'unknown'}",
+        type="security",
+    ))
+    db.commit()
+    return result
 
 
 @router.post("/backup/manual")
-def manual_backup(db: Session = Depends(get_db), admin=Depends(current_admin)):
+def manual_backup(request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
     event = create_manual_backup(db, admin.id)
+    db.add(ActivityLog(
+        action="Security Manual Backup",
+        user=admin.username,
+        details=f"Manual backup created. | IP: {request.client.host if request.client else 'unknown'}",
+        type="security",
+    ))
+    db.commit()
     return serialize_recovery(event)
 
 
@@ -554,7 +702,7 @@ def save_scan_interval(payload: ScanIntervalRequest, db: Session = Depends(get_d
 
 
 @router.put("/monitoring")
-def set_monitoring(payload: MonitoringToggleRequest, db: Session = Depends(get_db), admin=Depends(current_admin)):
+def set_monitoring(payload: MonitoringToggleRequest, request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
     previous = (get_setting(db, "monitoring_enabled", "true") or "true").lower() == "true"
     if payload.enabled and not previous:
         event = create_manual_backup(db, admin.id, label="monitoring_resume")
@@ -562,6 +710,13 @@ def set_monitoring(payload: MonitoringToggleRequest, db: Session = Depends(get_d
             raise HTTPException(status_code=500, detail=event.error_message or "Unable to refresh backup before enabling automatic scans.")
     set_setting(db, "monitoring_enabled", "true" if payload.enabled else "false", admin.username)
     update_backend_env({"SECURITY_MONITORING_ENABLED": "true" if payload.enabled else "false"})
+    db.add(ActivityLog(
+        action="Security Monitoring Toggle",
+        user=admin.username,
+        details=f"Monitoring set to {payload.enabled}. | IP: {request.client.host if request.client else 'unknown'}",
+        type="security",
+    ))
+    db.commit()
     return {"monitoring_enabled": payload.enabled, "backup_refreshed": payload.enabled and not previous, "env_updated": True}
 
 
@@ -784,3 +939,19 @@ def check_ip_reputation_endpoint(ip: str, db: Session = Depends(get_db), admin=D
     """Check IP reputation using AbuseIPDB."""
     reputation = check_ip_reputation(ip, db)
     return reputation
+
+
+# --- Distributed Ledger ---
+
+from utils.distributed_ledger import verify_ledger_integrity, ledger_tail
+
+
+@router.get("/ledger/verify")
+def verify_ledger(_=Depends(current_admin)):
+    violations = verify_ledger_integrity()
+    return {"valid": len(violations) == 0, "violations": violations}
+
+
+@router.get("/ledger/tail")
+def ledger_tail_endpoint(limit: int = Query(100, ge=1, le=1000), _=Depends(current_admin)):
+    return {"entries": ledger_tail(limit)}

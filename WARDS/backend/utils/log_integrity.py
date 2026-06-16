@@ -109,6 +109,14 @@ def sign_before_update(mapper, connection, target) -> None:
     target.integrity_hash = calculate_integrity_hash(target)
 
 
+def reject_activity_log_update(mapper, connection, target) -> None:
+    raise RuntimeError("ActivityLog records are append-only and cannot be modified.")
+
+
+def reject_protected_delete(mapper, connection, target) -> None:
+    raise RuntimeError(f"{target.__class__.__name__} records are append-only and cannot be deleted.")
+
+
 def verify_record_integrity(record) -> bool | None:
     stored = getattr(record, "integrity_hash", None)
     if not stored:
@@ -120,6 +128,9 @@ def register_log_integrity_listeners() -> None:
     for model in PROTECTED_MODELS:
         event.listen(model, "before_insert", sign_before_insert, propagate=True)
         event.listen(model, "before_update", sign_before_update, propagate=True)
+        event.listen(model, "before_delete", reject_protected_delete, propagate=True)
+    # ActivityLog is strictly append-only: also reject updates
+    event.listen(ActivityLog, "before_update", reject_activity_log_update, propagate=True)
 
 
 def backfill_log_integrity_hashes(db) -> dict[str, int]:

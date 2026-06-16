@@ -49,6 +49,11 @@ DEFACEMENT/venv/
 OCR/frontend/node_modules/
 WARDS/frontend/node_modules/
 
+# Runtime data and state
+DATABASE/
+abuse_state.json
+tmp/
+
 # OS and editor files
 .DS_Store
 Thumbs.db

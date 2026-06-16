@@ -1,6 +1,6 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import axios from 'axios';
+import api from '../services/api';
 import { clearBranchSettingsSession } from '../utils/settingsSecurity';
 
 const AUTH_VERIFY_TIMEOUT_MS = 8000;
@@ -31,7 +31,7 @@ const BranchProtectedRoute = ({ children }) => {
     }
 
     try {
-      const response = await axios.get('http://localhost:8000/api/auth/unified/verify', {
+      const response = await api.get('/auth/unified/verify', {
         headers: {
           'Authorization': `Bearer ${token}`
         },

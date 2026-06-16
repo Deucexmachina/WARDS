@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from database.models import Service, User, get_db
+from database.models import Service, Admin, get_db
 from auth import get_current_admin_user
 from utils.field_crypto import service_value
 from utils.rbac import require_permission
@@ -17,7 +17,7 @@ from utils.system_settings import (
 router = APIRouter()
 
 
-def ensure_settings_access(current_user: User):
+def ensure_settings_access(current_user: Admin):
     if current_user.role not in {"main_admin", "superadmin"}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -43,7 +43,7 @@ class SettingsUpdateRequest(BaseModel):
 
 @router.get("/")
 async def get_settings(
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
     ensure_settings_access(current_user)
@@ -61,7 +61,7 @@ async def get_settings(
 
 @router.get("/access")
 async def get_settings_access(
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
 ):
     ensure_settings_access(current_user)
     return {
@@ -76,7 +76,7 @@ async def get_settings_history(
     page_size: int = Query(default=10, ge=1, le=50),
     search: str | None = Query(default=None),
     category: str | None = Query(default=None),
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
     ensure_settings_access(current_user)
@@ -92,7 +92,7 @@ async def get_settings_history(
 @router.delete("/history/{audit_id}")
 async def delete_settings_history_entry(
     audit_id: int,
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
     ensure_settings_access(current_user)
@@ -102,7 +102,7 @@ async def delete_settings_history_entry(
 @router.put("/")
 async def update_settings(
     request: SettingsUpdateRequest,
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
     ensure_settings_access(current_user)

@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
+import hmac
+import hashlib
 import json
 import random
 import os
@@ -33,6 +35,7 @@ from services.email_service import send_payment_receipt_email
 from services.paymongo import paymongo_service
 from utils.branch_system_settings import get_branch_setting_value
 from utils.field_crypto import apply_citizen_user_security, apply_payment_security, apply_receipt_request_security, build_redacted_text, collection_account_number_value, collection_account_value, find_payment_by_field, find_payment_by_ref_number, get_decrypted_or_raw, hash_aware_match, hash_optional_value, receipt_request_value, remittance_numeric_value, remittance_value, set_encrypted_hash_companions, tax_assessment_value
+from utils.distributed_ledger import append_ledger_entry
 from utils.file_delivery import deliver_file_response
 from utils.file_validation import validate_upload_file
 from utils.security_validation import format_tin, normalize_email, normalize_identity_name, normalize_tin, ensure_tin_is_unique
@@ -81,16 +84,16 @@ BT_ALLOWED_UPLOAD_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
 SIMULATED_RPT_PROPERTIES = {
     "Galas Branch": {
         "RPT-GAL-2026-0001": {
-            "taxpayer_name": "Justin Paolo M. Cortez",
-            "property_address": "18 Sampaguita St., Galas, Quezon City",
+            "taxpayer_name": "Test Taxpayer A",
+            "property_address": "123 Demo Street, Galas, Quezon City",
             "fair_market_value": 1250000.0,
             "assessment_level": 0.2,
             "months_late": 2,
             "discount_rate": 0.0,
         },
         "RPT-GAL-2026-0002": {
-            "taxpayer_name": "Justin Paolo M. Cortez",
-            "property_address": "41 Maayos St., Galas, Quezon City",
+            "taxpayer_name": "Test Taxpayer A",
+            "property_address": "456 Sample Avenue, Galas, Quezon City",
             "fair_market_value": 2180000.0,
             "assessment_level": 0.2,
             "months_late": 0,
@@ -99,8 +102,8 @@ SIMULATED_RPT_PROPERTIES = {
     },
     "District 1 Branch": {
         "RPT-D1-2026-0001": {
-            "taxpayer_name": "Maria Lourdes Santos",
-            "property_address": "72 Sto. Domingo Ave., District 1, Quezon City",
+            "taxpayer_name": "Test Taxpayer B",
+            "property_address": "789 Example Road, District 1, Quezon City",
             "fair_market_value": 1625000.0,
             "assessment_level": 0.2,
             "months_late": 1,
@@ -109,8 +112,8 @@ SIMULATED_RPT_PROPERTIES = {
     },
     "Novaliches Branch": {
         "RPT-NOV-2026-0001": {
-            "taxpayer_name": "Ramon Dela Cruz",
-            "property_address": "104 Quirino Highway, Novaliches, Quezon City",
+            "taxpayer_name": "Test Taxpayer C",
+            "property_address": "321 Placeholder Blvd, Novaliches, Quezon City",
             "fair_market_value": 2860000.0,
             "assessment_level": 0.2,
             "months_late": 3,
@@ -2923,6 +2926,19 @@ async def accept_main_remittance(
     ))
     db.commit()
     db.refresh(remittance)
+
+    append_ledger_entry(
+        entry_type="remittance_accepted",
+        record_id=remittance.id,
+        actor=remittance.reviewed_by or "main_admin",
+        action="Remittance Accepted",
+        data={
+            "remittance_number": remittance.remittance_number,
+            "total_amount": float(remittance.total_amount or 0),
+            "reviewed_by": remittance.reviewed_by,
+        },
+    )
+
     return serialize_remittance(remittance)
 
 
@@ -2953,6 +2969,19 @@ async def reject_main_remittance(
     ))
     db.commit()
     db.refresh(remittance)
+
+    append_ledger_entry(
+        entry_type="remittance_rejected",
+        record_id=remittance.id,
+        actor=remittance.reviewed_by or "main_admin",
+        action="Remittance Rejected",
+        data={
+            "remittance_number": remittance.remittance_number,
+            "total_amount": float(remittance.total_amount or 0),
+            "reviewed_by": remittance.reviewed_by,
+        },
+    )
+
     return serialize_remittance(remittance)
 
 
@@ -3238,13 +3267,45 @@ async def download_payment_confirmation(payment_id: int, db: Session = Depends(g
     )
 
 
+PAYMONGO_WEBHOOK_SECRET = os.getenv("PAYMONGO_WEBHOOK_SECRET", "")
+
+
+def _verify_paymongo_signature(request: Request, raw_body: bytes) -> bool:
+    """Verify PayMongo webhook HMAC-SHA256 signature."""
+    if not PAYMONGO_WEBHOOK_SECRET:
+        return False
+    signature_header = request.headers.get("Paymongo-Signature", "")
+    if not signature_header:
+        return False
+    parts = {}
+    for part in signature_header.split(","):
+        if "=" in part:
+            key, value = part.split("=", 1)
+            parts[key.strip()] = value.strip()
+    timestamp = parts.get("t", "")
+    signature = parts.get("v1", "")
+    if not timestamp or not signature:
+        return False
+    signed_payload = f"{timestamp}.{raw_body.decode('utf-8')}"
+    expected = hmac.new(
+        PAYMONGO_WEBHOOK_SECRET.encode("utf-8"),
+        signed_payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return hmac.compare_digest(expected, signature)
+
+
 @router.post("/paymongo/webhook")
-async def paymongo_webhook(payload: PayMongoWebhookPayload, db: Session = Depends(get_db)):
+async def paymongo_webhook(request: Request, db: Session = Depends(get_db)):
     """
     Handle PayMongo webhook events for payment status updates
     """
+    raw_body = await request.body()
+    if not _verify_paymongo_signature(request, raw_body):
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
     try:
-        event_data = payload.data
+        payload = json.loads(raw_body)
+        event_data = payload.get("data", {})
         event_type = event_data.get("attributes", {}).get("type")
         
         if event_type == "source.chargeable":

@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
-from database.models import PrivacyConsent, User, get_db
+from database.models import PrivacyConsent, Admin, get_db
 from auth import get_current_admin_user
 from utils.field_crypto import get_decrypted_or_raw
 from utils.privacy_agreement import get_public_privacy_agreement
@@ -25,7 +25,7 @@ async def get_data_privacy_agreement():
 
 @router.get("/consents")
 async def get_privacy_consents(
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
     user_id: int | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),

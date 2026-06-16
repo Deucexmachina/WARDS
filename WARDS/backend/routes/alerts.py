@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from database.models import Alert, AlertView, User, get_db
+from database.models import Alert, AlertView, Admin, get_db
 from auth import get_current_admin_user
 from utils.rbac import check_permission
 
@@ -10,15 +10,15 @@ router = APIRouter()
 BRANCH_ALERT_TYPES = {"branch", "branch_operation", "branch_alert", "queue", "receipt", "payment", "operational"}
 
 
-def can_view_alerts(user: User) -> bool:
+def can_view_alerts(user: Admin) -> bool:
     return check_permission(user, "view_alerts") or check_permission(user, "view_branch_alerts")
 
 
-def viewer_type_for(user: User) -> str:
+def viewer_type_for(user: Admin) -> str:
     return "branch" if getattr(user, "role", "") in {"branch_admin", "branch_staff"} else "admin"
 
 
-def scoped_alert_query(db: Session, user: User):
+def scoped_alert_query(db: Session, user: Admin):
     query = db.query(Alert)
     if check_permission(user, "view_alerts"):
         return query
@@ -28,7 +28,7 @@ def scoped_alert_query(db: Session, user: User):
 async def get_all_alerts(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
     if not can_view_alerts(current_user):
@@ -63,7 +63,7 @@ async def get_all_alerts(
 
 @router.get("/unread-count")
 async def get_unread_alert_count(
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
     if not can_view_alerts(current_user):
@@ -82,7 +82,7 @@ async def get_unread_alert_count(
 
 @router.put("/read-all")
 async def mark_all_alerts_as_read(
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
     if not can_view_alerts(current_user):
@@ -109,7 +109,7 @@ async def mark_all_alerts_as_read(
 @router.put("/{alert_id}/read")
 async def mark_alert_as_read(
     alert_id: int,
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
     if not can_view_alerts(current_user):

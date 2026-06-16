@@ -1,16 +1,19 @@
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
+import json
 import os
 import random
 import secrets
 import string
 import time
+from pathlib import Path
 
 import pyotp
 import requests
 import base64
 import io
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse
 from jose import JWTError, jwt
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.exc import IntegrityError
@@ -21,6 +24,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from database.models import ActivityLog, Admin, BranchStaff, CitizenUser, EmailOTP, Invite, MFASecret, get_db
+from utils.redis_client import get_redis_client
 from services.email_service import (
     send_account_change_notification_email,
     send_citizen_verification_email,
@@ -86,8 +90,61 @@ RATE_LIMIT_WINDOW = 60
 MAX_REQUESTS_PER_WINDOW = 30
 MFA_VALID_WINDOW_STEPS = 2
 
-login_attempts = {}
-locked_accounts = {}
+_ABUSE_STATE_PATH = Path(os.getenv("ABUSE_STATE_PATH", "./abuse_state.json"))
+
+
+def _load_abuse_state() -> tuple[dict, dict]:
+    r = get_redis_client()
+    if r:
+        try:
+            raw_login = r.hgetall("wards:auth:login_attempts")
+            raw_locked = r.hgetall("wards:auth:locked_accounts")
+            return (
+                {k: json.loads(v) for k, v in raw_login.items()},
+                {k: json.loads(v) for k, v in raw_locked.items()},
+            )
+        except Exception:
+            return {}, {}
+    # Fallback to file
+    if not _ABUSE_STATE_PATH.exists():
+        return {}, {}
+    try:
+        with _ABUSE_STATE_PATH.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("login_attempts", {}), data.get("locked_accounts", {})
+    except (json.JSONDecodeError, OSError):
+        return {}, {}
+
+
+def _save_abuse_state() -> None:
+    r = get_redis_client()
+    if r:
+        try:
+            pipe = r.pipeline()
+            if login_attempts:
+                pipe.hset("wards:auth:login_attempts", mapping={k: json.dumps(v) for k, v in login_attempts.items()})
+            else:
+                pipe.delete("wards:auth:login_attempts")
+            if locked_accounts:
+                pipe.hset("wards:auth:locked_accounts", mapping={k: json.dumps(v) for k, v in locked_accounts.items()})
+            else:
+                pipe.delete("wards:auth:locked_accounts")
+            pipe.execute()
+        except Exception:
+            pass
+        return
+    # Fallback to file
+    try:
+        with _ABUSE_STATE_PATH.open("w", encoding="utf-8") as f:
+            json.dump(
+                {"login_attempts": login_attempts, "locked_accounts": locked_accounts},
+                f,
+            )
+    except OSError:
+        pass
+
+
+login_attempts, locked_accounts = _load_abuse_state()
 
 
 class UnifiedLoginRequest(BaseModel):
@@ -152,15 +209,33 @@ def tracking_key(portal: str, identifier: str) -> str:
     return f"{portal}:{normalize_identifier(identifier)}"
 
 
+def _refresh_abuse_state() -> None:
+    """Reload distributed abuse state from Redis so other instances' changes are visible."""
+    r = get_redis_client()
+    if not r:
+        return
+    try:
+        global login_attempts, locked_accounts
+        raw_login = r.hgetall("wards:auth:login_attempts")
+        login_attempts = {k: json.loads(v) for k, v in raw_login.items()}
+        raw_locked = r.hgetall("wards:auth:locked_accounts")
+        locked_accounts = {k: json.loads(v) for k, v in raw_locked.items()}
+    except Exception:
+        pass
+
+
 def clear_tracking(identifier: str):
+    _refresh_abuse_state()
     normalized = normalize_identifier(identifier)
     for portal in PORTAL_CONFIG.keys():
         key = f"{portal}:{normalized}"
         if key in locked_accounts:
             del locked_accounts[key]
+    _save_abuse_state()
 
 
 def check_rate_limit(ip_address: str) -> bool:
+    _refresh_abuse_state()
     current_time = time.time()
     if ip_address not in login_attempts:
         login_attempts[ip_address] = []
@@ -174,10 +249,12 @@ def check_rate_limit(ip_address: str) -> bool:
         return False
 
     login_attempts[ip_address].append(current_time)
+    _save_abuse_state()
     return True
 
 
 def is_account_locked(portal: str, identifier: str) -> bool:
+    _refresh_abuse_state()
     key = tracking_key(portal, identifier)
     if key in locked_accounts:
         lock_time = locked_accounts[key]["locked_at"]
@@ -185,10 +262,12 @@ def is_account_locked(portal: str, identifier: str) -> bool:
         if lock_time and time.time() - lock_time < duration:
             return True
         del locked_accounts[key]
+    _save_abuse_state()
     return False
 
 
 def record_failed_attempt(portal: str, identifier: str):
+    _refresh_abuse_state()
     key = tracking_key(portal, identifier)
     if key not in locked_accounts:
         locked_accounts[key] = {"attempts": 0, "locked_at": None}
@@ -196,15 +275,19 @@ def record_failed_attempt(portal: str, identifier: str):
     locked_accounts[key]["attempts"] += 1
     if locked_accounts[key]["attempts"] >= MAX_LOGIN_ATTEMPTS:
         locked_accounts[key]["locked_at"] = time.time()
+    _save_abuse_state()
 
 
 def reset_failed_attempts(portal: str, identifier: str):
+    _refresh_abuse_state()
     key = tracking_key(portal, identifier)
     if key in locked_accounts:
         del locked_accounts[key]
+    _save_abuse_state()
 
 
 def requires_captcha(portal: str, identifier: str) -> bool:
+    _refresh_abuse_state()
     key = tracking_key(portal, identifier)
     if key not in locked_accounts:
         return False
@@ -357,37 +440,43 @@ def build_user_response(portal: str, account: object) -> dict:
     }
 
 
-def build_token_payload(portal: str, account: object) -> dict:
+def build_token_payload(portal: str, account: object, ip: str | None = None, ua: str | None = None) -> dict:
+    payload: dict = {}
     if portal == "public":
         profile = serialize_citizen_user(account)
-        return {
+        payload = {
             "sub": profile["email"],
             "user_id": account.id,
             "role": "public",
             "type": "user",
         }
-
-    if portal == "admin":
-        return {
+    elif portal == "admin":
+        payload = {
             "sub": account.username,
             "user_id": account.id,
             "role": "admin",
             "internal_role": account.role,
             "type": "admin",
         }
+    else:
+        payload = {
+            "sub": account.username,
+            "user_id": account.id,
+            "role": "branch",
+            "internal_role": account.role,
+            "branch_id": account.branch_id,
+            "account_scope": getattr(account, "account_scope", "full_branch"),
+            "service_window": getattr(account, "service_window", None),
+            "service_window_label": get_branch_window_label(account),
+            "assigned_window_number": get_branch_assigned_window_number(account),
+            "type": "branch",
+        }
 
-    return {
-        "sub": account.username,
-        "user_id": account.id,
-        "role": "branch",
-        "internal_role": account.role,
-        "branch_id": account.branch_id,
-        "account_scope": getattr(account, "account_scope", "full_branch"),
-        "service_window": getattr(account, "service_window", None),
-        "service_window_label": get_branch_window_label(account),
-        "assigned_window_number": get_branch_assigned_window_number(account),
-        "type": "branch",
-    }
+    if ip:
+        payload["ip"] = ip
+    if ua:
+        payload["ua"] = ua
+    return payload
 
 
 def build_password_reset_token(portal: str, account: object) -> str:
@@ -452,17 +541,13 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
             wait_message = f"{max(remaining, 1)} seconds" if remaining < 60 else f"{max(remaining // 60, 1)} minute(s)"
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Account is locked. Please try again in {wait_message}.",
+                detail="Invalid credentials or account status.",
             )
 
         record_failed_attempt("unknown", credentials.identifier)
-        headers = {}
-        if requires_captcha("unknown", credentials.identifier):
-            headers["X-Requires-Captcha"] = "true"
-        raise HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials. Please check your email and password.",
-            headers=headers,
+            content={"detail": "Invalid credentials or account status."},
         )
 
     if is_account_locked(portal, credentials.identifier):
@@ -476,8 +561,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
             wait_message = f"{max(remaining, 1)} seconds"
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Account is locked. Please try again in {wait_message}.",
-            headers={"X-Auth-Portal": portal},
+            detail="Invalid credentials or account status.",
         )
 
     password_valid = pwd_context.verify(credentials.password, account.hashed_password)
@@ -491,17 +575,9 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
             "security",
         )
 
-        if requires_captcha(portal, credentials.identifier):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid credentials. Please complete the captcha.",
-                headers={"X-Requires-Captcha": "true", "X-Auth-Portal": portal},
-            )
-
-        raise HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials. Please check your email and password.",
-            headers={"X-Auth-Portal": portal},
+            content={"detail": "Invalid credentials or account status."},
         )
 
     if portal == "branch" and (
@@ -510,40 +586,32 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
     ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Login failed. This branch account has not been verified yet. Please verify the registered email before logging in.",
-            headers={"X-Auth-Portal": portal},
+            detail="Invalid credentials or account status.",
         )
 
     if portal == "public" and not getattr(account, "is_verified", True):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Your account is not verified yet. Enter the OTP code sent to your email to continue.",
-            headers={
-                "X-Auth-Portal": portal,
-                "X-Requires-Email-Verification": "true",
-            },
+            detail="Invalid credentials or account status.",
         )
 
     if getattr(account, "status", "Active") != "Active":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account is not active",
-            headers={"X-Auth-Portal": portal},
+            detail="Invalid credentials or account status.",
         )
 
     if requires_captcha(portal, credentials.identifier):
         if not credentials.recaptcha_token:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="reCAPTCHA verification required",
-                headers={"X-Requires-Captcha": "true", "X-Auth-Portal": portal},
+                detail="Invalid credentials or account status.",
             )
 
         if not verify_recaptcha(credentials.recaptcha_token, client_ip):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="reCAPTCHA verification failed",
-                headers={"X-Auth-Portal": portal},
+                detail="Invalid credentials or account status.",
             )
 
     if portal in {"public", "admin", "branch"}:
@@ -560,8 +628,8 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
                 )
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="MFA not configured. Please setup MFA first.",
-                    headers={"X-Requires-MFA-Setup": "true", "X-Auth-Portal": portal},
+                    detail="Invalid credentials or account status.",
+                    headers={"x-requires-mfa-setup": "true"},
                 )
             # For public: MFA not configured; allow login and require setup later via mfa_setup_required flag
             pass
@@ -575,25 +643,21 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
                         "email": get_account_email(portal, account),
                     },
                     "requires_mfa": True,
-                    "requires_captcha": requires_captcha(portal, credentials.identifier),
                 }
 
             totp = pyotp.TOTP(mfa_secret)
             if not totp.verify(credentials.totp_code, valid_window=MFA_VALID_WINDOW_STEPS):
                 record_failed_attempt(portal, credentials.identifier)
-                headers = {"X-Auth-Portal": portal}
-                if requires_captcha(portal, credentials.identifier):
-                    headers["X-Requires-Captcha"] = "true"
-                raise HTTPException(
+                return JSONResponse(
                     status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Invalid or expired authenticator code. Check that your device time is set automatically, then try again.",
-                    headers=headers,
+                    content={"detail": "Invalid credentials or account status."},
                 )
 
     reset_failed_attempts(portal, credentials.identifier)
     clear_tracking(credentials.identifier)
 
-    access_token = create_access_token(portal, build_token_payload(portal, account))
+    user_agent = request.headers.get("user-agent")
+    access_token = create_access_token(portal, build_token_payload(portal, account, ip=client_ip, ua=user_agent))
     account.last_login = datetime.utcnow()
     if portal == "public":
         apply_citizen_user_security(account)
@@ -667,22 +731,19 @@ async def unified_setup_mfa(request: Request, credentials: UnifiedSetupMFAReques
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-            headers={"X-Auth-Portal": portal},
+            detail="Invalid credentials or account status.",
         )
 
     if portal == "public" and not getattr(account, "is_verified", True):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Please verify your email before setting up MFA.",
-            headers={"X-Auth-Portal": portal},
         )
 
     if getattr(account, "status", "Active") != "Active":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account is not active",
-            headers={"X-Auth-Portal": portal},
+            detail="Invalid credentials or account status.",
         )
 
     secret = pyotp.random_base32()
@@ -717,15 +778,13 @@ async def unified_verify_mfa_setup(
     if not pwd_context.verify(credentials.password, account.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-            headers={"X-Auth-Portal": portal},
+            detail="Invalid credentials or account status.",
         )
 
     if getattr(account, "status", "Active") != "Active":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account is not active",
-            headers={"X-Auth-Portal": portal},
+            detail="Invalid credentials or account status.",
         )
 
     mfa_username = get_mfa_username(portal, account)
@@ -868,15 +927,13 @@ async def unified_mfa_recovery_send_otp(
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-            headers={"X-Auth-Portal": portal},
+            detail="Invalid credentials or account status.",
         )
 
     if getattr(account, "status", "Active") != "Active":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account is not active",
-            headers={"X-Auth-Portal": portal},
+            detail="Invalid credentials or account status.",
         )
 
     mfa_username = get_mfa_username(portal, account)
@@ -932,15 +989,13 @@ async def unified_mfa_recovery_verify_otp(
     if not pwd_context.verify(credentials.password, account.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-            headers={"X-Auth-Portal": portal},
+            detail="Invalid credentials or account status.",
         )
 
     if getattr(account, "status", "Active") != "Active":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account is not active",
-            headers={"X-Auth-Portal": portal},
+            detail="Invalid credentials or account status.",
         )
 
     email = serialize_citizen_user(account)["email"] if portal == "public" else account.email

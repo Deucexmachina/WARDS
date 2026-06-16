@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
-const API_URL = 'http://localhost:8000';
+import { API_HOST } from '../../services/api';
 const PENDING_VERIFICATION_STORAGE_KEY = 'pendingCitizenVerification';
 const DEFAULT_RESEND_SECONDS = 120;
 
@@ -90,7 +90,7 @@ function VerifyCitizenEmail() {
       setError('');
 
       try {
-        const response = await axios.post(`${API_URL}/api/auth/unified/verification/request`, {
+        const response = await axios.post(`${API_HOST}/api/auth/unified/verification/request`, {
           email,
         });
 
@@ -145,7 +145,7 @@ function VerifyCitizenEmail() {
     setError('');
 
     try {
-      const response = await axios.post(`${API_URL}/api/auth/unified/verification/confirm`, {
+      const response = await axios.post(`${API_HOST}/api/auth/unified/verification/confirm`, {
         email,
         code,
       });
@@ -167,7 +167,7 @@ function VerifyCitizenEmail() {
     setError('');
 
     try {
-      const response = await axios.post(`${API_URL}/api/auth/unified/verification/request`, {
+      const response = await axios.post(`${API_HOST}/api/auth/unified/verification/request`, {
         email,
       });
 

@@ -11,7 +11,7 @@ from pathlib import Path
 from utils.file_delivery import deliver_file_response
 from utils.file_validation import validate_upload_file
 
-from database.models import Memo, MemoView, get_db, ActivityLog, User, Branch
+from database.models import Memo, MemoView, get_db, ActivityLog, Admin, Branch
 from auth import get_current_admin_user, require_main_admin
 from utils.field_crypto import apply_memo_security, apply_memo_view_security, get_decrypted_or_raw, get_memo_viewed_ids, find_memo_view
 from utils.rbac import require_permission
@@ -92,7 +92,7 @@ def validate_recipients(memo_data: MemoCreate | MemoUpdate):
 
 @router.get("/")
 async def get_all_memos(
-    current_user: User = Depends(require_main_admin()),
+    current_user: Admin = Depends(require_main_admin()),
     db: Session = Depends(get_db)
 ):
     """Get full memo archive for the main admin office"""
@@ -108,7 +108,7 @@ async def create_memo(
     recipient_type: str = Form("all"),
     priority: str = Form("normal"),
     attachment: Optional[UploadFile] = File(None),
-    current_user: User = Depends(require_main_admin()),
+    current_user: Admin = Depends(require_main_admin()),
     db: Session = Depends(get_db)
 ):
     """Create internal memo (main admin only)"""
@@ -182,7 +182,7 @@ async def update_memo(
     recipient_type: str = Form("all"),
     priority: str = Form("normal"),
     attachment: Optional[UploadFile] = File(None),
-    current_user: User = Depends(require_main_admin()),
+    current_user: Admin = Depends(require_main_admin()),
     db: Session = Depends(get_db)
 ):
     """Update memo (main admin only)"""
@@ -253,7 +253,7 @@ async def update_memo(
 @router.delete("/{memo_id}")
 async def delete_memo(
     memo_id: int,
-    current_user: User = Depends(require_main_admin()),
+    current_user: Admin = Depends(require_main_admin()),
     db: Session = Depends(get_db)
 ):
     """Delete memo (main admin only)"""
@@ -290,7 +290,7 @@ async def delete_memo(
 
 @router.get("/branches")
 async def get_available_branches(
-    current_user: User = Depends(require_main_admin()),
+    current_user: Admin = Depends(require_main_admin()),
     db: Session = Depends(get_db)
 ):
     """Get list of branches for recipient selection"""
@@ -303,7 +303,7 @@ async def get_available_branches(
 @router.post("/{memo_id}/mark-viewed")
 async def mark_memo_viewed(
     memo_id: int,
-    current_user: User = Depends(require_main_admin()),
+    current_user: Admin = Depends(require_main_admin()),
     db: Session = Depends(get_db)
 ):
     """Mark a memo as viewed by the current admin"""
@@ -329,7 +329,7 @@ async def mark_memo_viewed(
 @router.get("/{memo_id}/download-attachment")
 async def download_attachment(
     memo_id: int,
-    current_user: User = Depends(require_main_admin()),
+    current_user: Admin = Depends(require_main_admin()),
     db: Session = Depends(get_db)
 ):
     """Download memo attachment"""
@@ -350,7 +350,7 @@ async def download_attachment(
 
 @router.get("/unread-count")
 async def get_unread_count(
-    current_user: User = Depends(require_main_admin()),
+    current_user: Admin = Depends(require_main_admin()),
     db: Session = Depends(get_db)
 ):
     """Get count of unread memos for the current admin"""

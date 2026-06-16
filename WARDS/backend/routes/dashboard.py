@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from database.models import (
-    get_db, Branch, Queue, QueueActivity, Payment, User, 
+    get_db, Branch, Queue, QueueActivity, Payment, Admin, 
     Alert, AlertView, ActivityLog, Announcement
 )
 from auth import get_current_admin_user
@@ -33,7 +33,7 @@ async def get_dashboard_statistics(
     service_type: Optional[str] = Query(None),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
 ):
     """Get real-time operational statistics from all or specific branches"""
@@ -214,7 +214,7 @@ async def get_dashboard_stats(
     service_type: Optional[str] = Query(None),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
 ):
     """Alias for the admin dashboard statistics endpoint."""
@@ -231,7 +231,7 @@ async def get_dashboard_stats(
 async def get_queue_activity(
     branch_id: Optional[int] = Query(None),
     hours: int = Query(24),
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
 ):
     """Get queue activity history for charts"""
@@ -262,7 +262,7 @@ async def get_queue_activity(
 @router.get("/performance-metrics")
 async def get_performance_metrics(
     period: str = Query("daily"),  # daily, weekly, monthly
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
 ):
     """Get branch performance metrics"""

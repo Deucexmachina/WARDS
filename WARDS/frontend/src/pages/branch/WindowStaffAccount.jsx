@@ -1,4 +1,4 @@
-import axios from 'axios';
+import api from '../../services/api';
 import { useEffect, useState } from 'react';
 import { windowStaffAccountAPI, branchSettingsAPI } from '../../services/api';
 import WardsPageHero from '../../components/WardsPageHero';
@@ -130,7 +130,7 @@ function EditProfileModal({ open, profile, onClose, onSuccess }) {
     setContactCheckingUniqueness(true);
     try {
       const storedStaff = JSON.parse(localStorage.getItem('branchUser') || '{}');
-      const response = await axios.post('http://localhost:8000/api/branch/account/check-contact', {
+      const response = await api.post('/branch/account/check-contact', {
         contact_number: `+63${digits}`,
         exclude_staff_id: storedStaff?.id ?? null,
       });

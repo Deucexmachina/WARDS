@@ -7,7 +7,7 @@ import { formatTin } from '../../utils/validation';
 import { appendLanguageParam, usePublicLanguage } from '../../utils/publicLanguage';
 import { safeOpen } from '../../utils/urlValidator';
 
-const API_ORIGIN = 'http://localhost:8000';
+import { API_HOST } from '../../services/api';
 const SEARCH_OPTIONS = [
   { value: 'tracking_mp_no', label: 'Tracking/MP No.' },
   { value: 'mayors_permit_number', label: "Mayor's Permit Number" },
@@ -31,7 +31,7 @@ const formatCurrency = (value) =>
 const buildApiAssetUrl = (path) => {
   if (!path) return '';
   if (/^https?:\/\//i.test(path)) return path;
-  return `${API_ORIGIN}${path.startsWith('/') ? path : `/${path}`}`;
+  return `${API_HOST}${path.startsWith('/') ? path : `/${path}`}`;
 };
 
 const getApplicationStatusLabel = (status, language) => {

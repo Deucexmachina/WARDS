@@ -1,4 +1,5 @@
 import os
+import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -65,6 +66,7 @@ def create_access_token(portal: str, data: dict) -> str:
     expires_delta = timedelta(minutes=config["expires_minutes"])
     to_encode = data.copy()
     to_encode["exp"] = datetime.utcnow() + expires_delta
+    to_encode.setdefault("jti", str(uuid.uuid4()))
     return jwt.encode(to_encode, config["secret_key"], algorithm=ALGORITHM)
 
 

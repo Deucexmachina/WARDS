@@ -1,6 +1,6 @@
 import { Navigate } from 'react-router-dom';
 import { useEffect, useRef, useState } from 'react';
-import axios from 'axios';
+import api from '../services/api';
 import {
   clearSettingsSession,
   isSettingsRoleAllowed,
@@ -47,10 +47,10 @@ const SystemSettingsProtectedRoute = ({ children }) => {
 
       try {
         const [verifyResponse, accessResponse] = await Promise.all([
-          axios.get('http://localhost:8000/api/auth/unified/verify', {
+          api.get('/auth/unified/verify', {
             headers: { Authorization: `Bearer ${token}` },
           }),
-          axios.get('http://localhost:8000/api/settings/access', {
+          api.get('/settings/access', {
             headers: { Authorization: `Bearer ${token}` },
           }),
         ]);

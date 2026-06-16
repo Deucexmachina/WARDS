@@ -3,7 +3,7 @@ import axios from 'axios';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 
-const API_BASE_URL = 'http://localhost:8000/api';
+import { API_BASE_URL } from '../../services/api';
 const DEFAULT_DISABLED_MESSAGE = 'This service is currently unavailable because it has been disabled by system administration.';
 
 const getRelevantQueueTimestamp = (queue) =>

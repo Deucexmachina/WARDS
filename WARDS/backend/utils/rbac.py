@@ -1,7 +1,7 @@
 from fastapi import HTTPException, status, Depends
 from sqlalchemy.orm import Session
 from typing import Optional
-from database.models import User, get_db
+from database.models import Admin, get_db
 
 # Role definitions
 ROLE_MAIN_ADMIN = "main_admin"
@@ -64,7 +64,7 @@ PERMISSIONS = {
     ]
 }
 
-def check_permission(user: User, permission: str) -> bool:
+def check_permission(user: Admin, permission: str) -> bool:
     """Check if user has a specific permission"""
     if not user or not user.role:
         return False
@@ -74,7 +74,7 @@ def check_permission(user: User, permission: str) -> bool:
 
 def require_permission(permission: str):
     """Decorator to require a specific permission"""
-    def permission_checker(user: User):
+    def permission_checker(user: Admin):
         if not check_permission(user, permission):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -85,7 +85,7 @@ def require_permission(permission: str):
 
 def require_role(*allowed_roles: str):
     """Decorator to require specific roles"""
-    def role_checker(user: User):
+    def role_checker(user: Admin):
         if not user or user.role not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -94,7 +94,7 @@ def require_role(*allowed_roles: str):
         return user
     return role_checker
 
-def check_branch_access(user: User, branch_id: int) -> bool:
+def check_branch_access(user: Admin, branch_id: int) -> bool:
     """Check if user has access to a specific branch"""
     if user.role in {ROLE_MAIN_ADMIN, ROLE_SUPERADMIN}:
         return True
@@ -106,7 +106,7 @@ def check_branch_access(user: User, branch_id: int) -> bool:
 
 def require_branch_access(branch_id: int):
     """Decorator to require access to a specific branch"""
-    def branch_checker(user: User):
+    def branch_checker(user: Admin):
         if not check_branch_access(user, branch_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -115,7 +115,7 @@ def require_branch_access(branch_id: int):
         return user
     return branch_checker
 
-def filter_by_branch(user: User, query, model):
+def filter_by_branch(user: Admin, query, model):
     """Filter query results by user's branch access"""
     if user.role in {ROLE_MAIN_ADMIN, ROLE_SUPERADMIN}:
         return query
@@ -126,7 +126,7 @@ def filter_by_branch(user: User, query, model):
     
     return query
 
-def get_accessible_branches(user: User, db: Session):
+def get_accessible_branches(user: Admin, db: Session):
     """Get list of branches accessible to user"""
     from database.models import Branch
     

@@ -1,4 +1,4 @@
-import axios from 'axios';
+import api from '../../services/api';
 import { useEffect, useMemo, useState } from 'react';
 import { CustomSelect } from '../../components/FormControls';
 import { useSearchParams } from 'react-router-dom';
@@ -313,7 +313,7 @@ const AccountManagement = () => {
     const storedUser = getStoredPublicUser();
     setContactCheckingUniqueness(true);
     try {
-      const response = await axios.post('http://localhost:8000/api/auth/unified/check-contact', {
+      const response = await api.post('/auth/unified/check-contact', {
         contact_number: `+63${digits}`,
         exclude_citizen_id: storedUser?.id ?? null,
       });

@@ -1,6 +1,6 @@
 import { Navigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import axios from 'axios';
+import api from '../services/api';
 
 const clearSecuritySession = () => {
   localStorage.removeItem('securityAuthenticated');
@@ -42,7 +42,7 @@ const SecurityProtectedRoute = ({ children }) => {
       }
 
       try {
-        const response = await axios.get('http://localhost:8000/api/auth/unified/verify', {
+        const response = await api.get('/auth/unified/verify', {
           headers: { Authorization: `Bearer ${token}` },
         });
         const serverStartedAt = Date.parse(response.data.server_started_at || '');

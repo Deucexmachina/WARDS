@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from database.models import ActivityLog, Policy, PolicyView, User, get_db
+from database.models import ActivityLog, Policy, PolicyView, Admin, get_db
 from auth import get_current_admin_user
 from utils.rbac import require_permission
 
@@ -42,7 +42,7 @@ class PolicyPayload(BaseModel):
 
 @router.get("/")
 async def get_all_policies(
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
     require_permission("manage_policies")(current_user)
@@ -53,7 +53,7 @@ async def get_all_policies(
 @router.post("/{policy_id}/mark-viewed")
 async def mark_policy_viewed(
     policy_id: int,
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
     require_permission("manage_policies")(current_user)
@@ -78,7 +78,7 @@ async def mark_policy_viewed(
 
 @router.get("/unread-count")
 async def get_policy_unread_count(
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
     require_permission("manage_policies")(current_user)
@@ -97,7 +97,7 @@ async def get_policy_unread_count(
 async def update_policy(
     policy_id: int,
     payload: PolicyPayload,
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
     require_permission("manage_policies")(current_user)
@@ -123,7 +123,7 @@ async def update_policy(
 @router.delete("/{policy_id}")
 async def delete_policy(
     policy_id: int,
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
     require_permission("manage_policies")(current_user)

@@ -51,11 +51,10 @@ def verify_auth_users():
                     admin.role,
                     admin.status,
                     pw_test,
-                    admin.hashed_password[:20] + "..."
                 ])
 
             print(tabulate(admin_data,
-                          headers=["ID", "Username", "Email", "Role", "Status", "PW Test", "Hash Preview"],
+                          headers=["ID", "Username", "Email", "Role", "Status", "PW Test"],
                           tablefmt="grid"))
             print(f"\nTotal Admins: {len(admins)}")
         else:

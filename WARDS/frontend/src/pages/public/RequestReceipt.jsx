@@ -3,7 +3,7 @@ import { CustomSelect, CustomDatePicker } from '../../components/FormControls';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 
-import { paymentAPI, receiptAPI } from '../../services/api';
+import api, { paymentAPI, receiptAPI } from '../../services/api';
 import PaymentGatewayExperience from '../../components/PaymentGatewayExperience';
 import { getStoredPublicUser, PUBLIC_USER_STORAGE_EVENT } from '../../utils/publicSession';
 import { getEmailValidationMessage } from '../../utils/validation';
@@ -362,8 +362,8 @@ const RequestReceipt = () => {
     const fetchContext = async () => {
       try {
         const [branchesResponse, statusResponse] = await Promise.all([
-          axios.get('http://localhost:8000/api/public/branches'),
-          axios.get('http://localhost:8000/api/public/system-status'),
+          api.get('/public/branches'),
+          api.get('/public/system-status'),
         ]);
         setBranches(branchesResponse.data);
         setSystemStatus(statusResponse.data);
@@ -422,7 +422,7 @@ const RequestReceipt = () => {
     }
 
     setBranchServicesLoading(true);
-    axios.get(`http://localhost:8000/api/public/branches/${selectedBranchId}`)
+    api.get(`/public/branches/${selectedBranchId}`)
       .then((response) => {
         const nextServices = response.data?.services || [];
         setBranchServices(nextServices);

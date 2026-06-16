@@ -126,7 +126,7 @@ def validate_upload_file(
         HTTPException: If validation fails
     """
     if allowed_extensions is None:
-        allowed_extensions = {".pdf", ".png", ".jpg", ".jpeg", ".doc", ".docx", ".xls", ".xlsx"}
+        allowed_extensions = {".pdf", ".png", ".jpg", ".jpeg", ".docx", ".xlsx"}
     
     filename = (upload.filename or "").strip()
     if not filename:

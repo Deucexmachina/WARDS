@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from database.models import ActivityLog, Announcement, AnnouncementAttachment, AnnouncementView, User, get_db
+from database.models import ActivityLog, Announcement, AnnouncementAttachment, AnnouncementView, Admin, get_db
 from auth import get_current_admin_user
 from utils.announcement_attachments import (
     enforce_attachment_limit,
@@ -223,7 +223,7 @@ async def get_all_announcements(db: Session = Depends(get_db)):
 
 @router.get("/admin/all")
 async def get_all_announcements_admin(
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
 ):
     require_permission("manage_announcements")(current_user)
@@ -265,7 +265,7 @@ async def get_all_announcements_admin(
 
 @router.get("/unread-count")
 async def get_admin_announcement_unread_count(
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
     require_permission("manage_announcements")(current_user)
@@ -283,7 +283,7 @@ async def get_admin_announcement_unread_count(
 @router.get("/{announcement_id}")
 async def get_announcement(
     announcement_id: int,
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
 ):
     require_permission("manage_announcements")(current_user)
@@ -297,7 +297,7 @@ async def get_announcement(
 @router.post("/{announcement_id}/mark-viewed")
 async def mark_announcement_viewed(
     announcement_id: int,
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
     require_permission("manage_announcements")(current_user)
@@ -317,7 +317,7 @@ async def mark_announcement_viewed(
 @router.post("/")
 async def create_announcement(
     announcement: AnnouncementCreate,
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
 ):
     require_permission("manage_announcements")(current_user)
@@ -406,7 +406,7 @@ async def create_announcement(
 async def update_announcement(
     announcement_id: int,
     announcement: AnnouncementUpdate,
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
 ):
     require_permission("manage_announcements")(current_user)
@@ -481,7 +481,7 @@ async def update_announcement(
 @router.delete("/{announcement_id}")
 async def delete_announcement(
     announcement_id: int,
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
 ):
     require_permission("manage_announcements")(current_user)
@@ -533,7 +533,7 @@ async def delete_announcement(
 @router.get("/{announcement_id}/attachments")
 async def list_announcement_attachments(
     announcement_id: int,
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
     require_permission("manage_announcements")(current_user)
@@ -545,7 +545,7 @@ async def list_announcement_attachments(
 async def upload_announcement_attachments(
     announcement_id: int,
     files: List[UploadFile] = File(...),
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
     require_permission("manage_announcements")(current_user)
@@ -715,7 +715,7 @@ async def preview_announcement_attachment(
 async def delete_announcement_attachment(
     announcement_id: int,
     attachment_id: int,
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
     require_permission("manage_announcements")(current_user)

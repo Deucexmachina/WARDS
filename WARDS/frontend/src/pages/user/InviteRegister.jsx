@@ -5,7 +5,7 @@ import { getBranchPortalPath } from '../../utils/auth';
 import { getEmailValidationMessage } from '../../utils/validation';
 import PasswordField from '../../components/PasswordField';
 
-const API_URL = 'http://localhost:8000';
+import { API_HOST } from '../../services/api';
 
 const redirectByRole = (role, navigate) => {
   if (role === 'admin') {
@@ -69,7 +69,7 @@ const InviteRegister = () => {
     setError('');
 
     try {
-      const response = await axios.post(`${API_URL}/api/auth/unified/register/invite`, {
+      const response = await axios.post(`${API_HOST}/api/auth/unified/register/invite`, {
         email: formData.email,
         password: formData.password,
         invite_token: formData.invite_token,

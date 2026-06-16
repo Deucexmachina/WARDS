@@ -20,12 +20,12 @@ class String(SQLString):
 
 
 def build_database_url() -> str:
-    default_sqlite_url = f"sqlite:///{(BASE_DIR / 'wards.db').as_posix()}"
-    database_url = os.getenv("DATABASE_URL", default_sqlite_url).strip()
-
-    if database_url.startswith("sqlite:///./"):
-        sqlite_path = BASE_DIR / database_url.removeprefix("sqlite:///./")
-        return f"sqlite:///{sqlite_path.as_posix()}"
+    database_url = os.getenv("DATABASE_URL", "").strip()
+    if not database_url:
+        raise RuntimeError(
+            "DATABASE_URL environment variable is required but not set. "
+            "Please configure a persistent database (e.g., MySQL, PostgreSQL)."
+        )
 
     if database_url.startswith("mysql://"):
         return database_url.replace("mysql://", "mysql+pymysql://", 1)
@@ -35,13 +35,7 @@ def build_database_url() -> str:
 
 SQLALCHEMY_DATABASE_URL = build_database_url()
 
-engine_kwargs = {}
-if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
-    engine_kwargs["connect_args"] = {"check_same_thread": False}
-else:
-    engine_kwargs["pool_pre_ping"] = True
-
-engine = create_engine(SQLALCHEMY_DATABASE_URL, **engine_kwargs)
+engine = create_engine(SQLALCHEMY_DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -247,7 +241,6 @@ class Invite(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 # Legacy alias for backward compatibility
-User = Admin
 PublicUser = CitizenUser
 
 class Branch(Base):
@@ -1407,8 +1400,8 @@ class PublicPageContent(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     page_key = Column(String, unique=True, nullable=False, index=True)
-    draft_content_json = Column(LONGTEXT().with_variant(Text, "sqlite"), nullable=True)
-    published_content_json = Column(LONGTEXT().with_variant(Text, "sqlite"), nullable=True)
+    draft_content_json = Column(LONGTEXT(), nullable=True)
+    published_content_json = Column(LONGTEXT(), nullable=True)
     last_saved_at = Column(DateTime, nullable=True)
     last_saved_by = Column(String, nullable=True)
     published_at = Column(DateTime, nullable=True)

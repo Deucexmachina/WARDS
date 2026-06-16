@@ -9,7 +9,7 @@ import {
   startBranchSettingsSession,
 } from '../../utils/settingsSecurity';
 
-const API_URL = 'http://localhost:8000';
+import { API_HOST } from '../../services/api';
 
 const BranchSystemSettingsLogin = () => {
   const [identifier, setIdentifier] = useState('');
@@ -87,14 +87,14 @@ const BranchSystemSettingsLogin = () => {
 
       try {
         const requests = [
-          axios.get(`${API_URL}/api/branch/settings/access`, {
+          axios.get(`${API_HOST}/api/branch/settings/access`, {
             headers: { Authorization: `Bearer ${token}` },
           }),
         ];
 
         if (isSuperadminManagedBranch) {
           requests.push(
-            axios.get(`${API_URL}/api/auth/unified/verify`, {
+            axios.get(`${API_HOST}/api/auth/unified/verify`, {
               headers: { Authorization: `Bearer ${localStorage.getItem('adminToken')}` },
             }),
           );
@@ -154,7 +154,7 @@ const BranchSystemSettingsLogin = () => {
         return;
       }
 
-      const response = await axios.post(`${API_URL}/api/auth/unified/login`, {
+      const response = await axios.post(`${API_HOST}/api/auth/unified/login`, {
         identifier,
         password,
         portal: isSuperadminManagedBranch ? 'admin' : 'branch',

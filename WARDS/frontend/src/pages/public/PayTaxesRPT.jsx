@@ -10,7 +10,7 @@ import { appendLanguageParam, usePublicLanguage } from '../../utils/publicLangua
 import { openCheckoutPopupShell } from '../../utils/checkoutPopup';
 import { safeReplace, safeNavigate } from '../../utils/urlValidator';
 
-const API_BASE_URL = 'http://localhost:8000/api';
+import { API_BASE_URL } from '../../services/api';
 const RECAPTCHA_SITE_KEY = '6LdOdsAsAAAAAKW-mZvEfaesLvdAwCm_SnZoiirK';
 const RPT_SEARCH_GUARD_STORAGE_KEY = 'wards-rpt-search-guard';
 const RPT_FAILED_SEARCH_THRESHOLD = 3;

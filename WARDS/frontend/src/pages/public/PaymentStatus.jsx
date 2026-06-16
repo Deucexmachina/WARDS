@@ -4,7 +4,7 @@ import axios from 'axios';
 import { paymentAPI } from '../../services/api';
 import { appendLanguageParam, resolvePublicLanguage, setPublicLanguage } from '../../utils/publicLanguage';
 
-const API_BASE_URL = 'http://localhost:8000/api';
+import { API_BASE_URL } from '../../services/api';
 const SUCCESS_STATUSES = new Set(['confirmed', 'verified', 'paid', 'succeeded', 'successful', 'success']);
 const FAILED_STATUSES = new Set(['failed', 'declined', 'cancelled', 'canceled']);
 const EXPIRED_STATUSES = new Set(['expired']);

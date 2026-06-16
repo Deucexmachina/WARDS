@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from typing import Optional
 
-from database.models import ActivityLog, Branch, BranchStaff, User, get_db
+from database.models import ActivityLog, Branch, BranchStaff, Admin, get_db
 from utils.field_crypto import get_decrypted_or_raw
 from auth import get_current_admin_user
 from utils.log_integrity import verify_record_integrity
@@ -37,7 +37,7 @@ def _apply_branch_filter(query, branch_name: str):
 async def get_activity_logs_unread_count(
     since: Optional[str] = None,
     branch_name: Optional[str] = None,
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
 ):
     is_branch_admin = isinstance(current_user, BranchStaff) and current_user.role == "branch_admin"
@@ -68,7 +68,7 @@ async def get_activity_logs(
     branch_name: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
-    current_user: User = Depends(get_current_admin_user),
+    current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
 ):
     is_branch_admin = isinstance(current_user, BranchStaff) and current_user.role == "branch_admin"

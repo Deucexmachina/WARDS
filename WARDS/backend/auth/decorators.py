@@ -1,3 +1,5 @@
+import os
+
 from fastapi import HTTPException, status, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
@@ -14,6 +16,30 @@ from auth.jwt_utils import (
     PORTAL_CONFIG,
     decode_token,
 )
+
+BINDING_STRICT_MODE = os.getenv("TOKEN_BINDING_STRICT", "true").lower() == "true"
+
+
+def _validate_token_binding(request: Request, payload: dict) -> None:
+    """Raise 401 if token ip or ua claims do not match the current request."""
+    if not BINDING_STRICT_MODE:
+        return
+    client_ip = request.client.host if request.client else "unknown"
+    user_agent = request.headers.get("user-agent") or ""
+    token_ip = payload.get("ip")
+    token_ua = payload.get("ua")
+    if token_ip and token_ip != client_ip:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session binding mismatch (IP). Please log in again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if token_ua and token_ua != user_agent:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session binding mismatch (device). Please log in again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 from auth.permissions import (
     ROLE_SUPERADMIN,
     ROLE_MAIN_ADMIN,
@@ -42,6 +68,7 @@ async def get_current_admin_user(
 
     try:
         payload = decode_token(token, ADMIN_SECRET_KEY)
+        _validate_token_binding(request, payload)
         email = payload.get("email") or payload.get("sub")
         username = payload.get("sub")
         token_type = payload.get("type")
@@ -88,6 +115,7 @@ def require_any_admin():
 
 
 async def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db),
 ) -> CitizenUser:
@@ -103,6 +131,7 @@ async def get_current_user(
 
     try:
         payload = decode_token(token, USER_SECRET_KEY)
+        _validate_token_binding(request, payload)
         email = payload.get("email") or payload.get("sub")
         token_type = payload.get("type")
 
@@ -117,6 +146,7 @@ async def get_current_user(
 
 
 async def get_optional_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(optional_user_security),
     db: Session = Depends(get_db),
 ) -> CitizenUser | None:
@@ -129,6 +159,7 @@ async def get_optional_current_user(
 
     try:
         payload = decode_token(token, USER_SECRET_KEY)
+        _validate_token_binding(request, payload)
         email = payload.get("email") or payload.get("sub")
         token_type = payload.get("type")
         if email and token_type in ("user", "public"):
@@ -142,6 +173,7 @@ async def get_optional_current_user(
 
 
 async def get_current_branch_staff(
+    request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db),
 ) -> BranchStaff:
@@ -157,6 +189,7 @@ async def get_current_branch_staff(
 
     try:
         payload = decode_token(token, BRANCH_SECRET_KEY)
+        _validate_token_binding(request, payload)
         email = payload.get("email") or payload.get("sub")
         username = payload.get("sub")
         token_type = payload.get("type")
@@ -232,6 +265,7 @@ async def get_current_admin_from_token(request: Request, db: Session) -> Admin:
 
     try:
         payload = decode_token(token, ADMIN_SECRET_KEY)
+        _validate_token_binding(request, payload)
         email = payload.get("email") or payload.get("sub")
         username = payload.get("sub")
 

@@ -1,4 +1,4 @@
-import axios from 'axios';
+import api from '../../services/api';
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { accountAPI, branchAPI, branchSettingsAPI } from '../../services/api';
@@ -296,7 +296,7 @@ const Accounts = () => {
     if (!digits || validatePhilippineContactDigits(digits)) return;
     setContactCheckingUniqueness(true);
     try {
-      const response = await axios.post('http://localhost:8000/api/auth/unified/check-contact', {
+      const response = await api.post('/auth/unified/check-contact', {
         contact_number: `+63${digits}`,
         exclude_citizen_id: editingAccount?.id ?? null,
       });
