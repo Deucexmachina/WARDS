@@ -253,8 +253,14 @@ class OCRService:
             candidates.append(configured_path)
             candidates.append(configured_path / "backend")
 
-        desktop_sibling = Path(__file__).resolve().parents[3] / "OCR" / "backend"
-        candidates.append(desktop_sibling)
+        try:
+            desktop_sibling = Path(__file__).resolve().parents[3] / "OCR" / "backend"
+            candidates.append(desktop_sibling)
+        except IndexError:
+            pass
+
+        docker_sibling = Path("/OCR/backend")
+        candidates.append(docker_sibling)
 
         for candidate in candidates:
             if candidate.exists() and (candidate / "core").exists():
