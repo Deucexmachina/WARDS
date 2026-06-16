@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_
@@ -27,6 +30,15 @@ from utils.field_crypto import (
     receipt_request_value,
     receipt_request_history_value,
 )
+
+def get_rate_limit_key(request: Request) -> str:
+    """Get rate limit key - user-based if authenticated, otherwise IP-based"""
+    if hasattr(request.state, 'user') and request.state.user:
+        return f"user:{request.state.user.id}"
+    return get_remote_address(request)
+
+
+limiter = Limiter(key_func=get_rate_limit_key)
 
 router = APIRouter()
 branch_router = APIRouter()
@@ -1326,8 +1338,10 @@ def dispatch_due_automatic_branch_report(
     return result
 
 @router.post("/generate")
+@limiter.limit("10/minute")
 async def generate_report(
-    request: ReportGenerateRequest,
+    request: Request,
+    payload: ReportGenerateRequest,
     current_user = Depends(get_current_admin_user),
 ):
     raise HTTPException(

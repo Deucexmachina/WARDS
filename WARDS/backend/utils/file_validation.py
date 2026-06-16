@@ -24,7 +24,8 @@ class SafeFileType(str, Enum):
     # Image types that share the JPEG signature
     JPG = "image/jpg"
 
-    # Microsoft Office legacy (OLE compound file)
+    # Microsoft Office legacy (OLE compound file). Detected only so it can be
+    # rejected explicitly; legacy DOC/XLS is not safe for WARDS uploads.
     OLE = "application/x-ole-storage"
 
     # Microsoft Office Open XML
@@ -33,7 +34,7 @@ class SafeFileType(str, Enum):
 
     @classmethod
     def all_types(cls) -> set[str]:
-        return {cls.PDF, cls.PNG, cls.JPEG, cls.JPG, cls.OLE, cls.DOCX, cls.XLSX}
+        return {cls.PDF, cls.PNG, cls.JPEG, cls.JPG, cls.DOCX, cls.XLSX}
 
     @classmethod
     def is_safe_for_preview(cls, mime_type: str) -> bool:
@@ -161,6 +162,12 @@ def validate_upload_file(
                 status_code=400,
                 detail=f"'{filename}' has an unrecognized or unsupported file format. "
                        "Only PDF, PNG, JPEG, Word, and Excel files are allowed.",
+            )
+
+        if detected_mime == SafeFileType.OLE:
+            raise HTTPException(
+                status_code=400,
+                detail=f"'{filename}' uses a legacy Office format. Upload .docx or .xlsx instead.",
             )
         
         # Verify extension matches detected type

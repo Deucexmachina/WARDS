@@ -9,7 +9,7 @@
 
 /**
  * Validates that a URL is safe for use in navigation or href attributes.
- * Only allows http:// and https:// schemes.
+ * Allows same-origin relative paths plus http:// and https:// schemes.
  * Rejects javascript:, data:, vbscript:, and malformed URLs.
  * 
  * @param {string} url - The URL string to validate
@@ -18,6 +18,10 @@
 export const isSafeUrl = (url) => {
   if (!url || typeof url !== 'string') {
     return false;
+  }
+
+  if (url.startsWith('/') && !url.startsWith('//')) {
+    return true;
   }
 
   try {
@@ -64,7 +68,11 @@ export const sanitizeUrl = (url) => {
  */
 export const safeNavigate = (url, windowObj = window) => {
   if (isSafeUrl(url)) {
-    windowObj.location.href = url;
+    if (url.startsWith('/') && !url.startsWith('//')) {
+      windowObj.location.assign(url);
+    } else {
+      windowObj.location.href = url;
+    }
     return true;
   }
   console.error('Unsafe URL blocked:', url);
@@ -81,7 +89,11 @@ export const safeNavigate = (url, windowObj = window) => {
  */
 export const safeReplace = (url, windowObj = window) => {
   if (isSafeUrl(url)) {
-    windowObj.location.replace(url);
+    if (url.startsWith('/') && !url.startsWith('//')) {
+      windowObj.location.replace(url);
+    } else {
+      windowObj.location.replace(url);
+    }
     return true;
   }
   console.error('Unsafe URL blocked:', url);

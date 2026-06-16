@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -13,6 +16,15 @@ from utils.system_settings import (
     get_settings_payload,
     update_system_settings,
 )
+
+def get_rate_limit_key(request: Request) -> str:
+    """Get rate limit key - user-based if authenticated, otherwise IP-based"""
+    if hasattr(request.state, 'user') and request.state.user:
+        return f"user:{request.state.user.id}"
+    return get_remote_address(request)
+
+
+limiter = Limiter(key_func=get_rate_limit_key)
 
 router = APIRouter()
 
@@ -100,15 +112,17 @@ async def delete_settings_history_entry(
 
 
 @router.put("/")
+@limiter.limit("10/minute")
 async def update_settings(
-    request: SettingsUpdateRequest,
+    request: Request,
+    payload: SettingsUpdateRequest,
     current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
     ensure_settings_access(current_user)
     return update_system_settings(
         db=db,
-        payload=request.model_dump(exclude={"reason"}),
+        payload=payload.model_dump(exclude={"reason"}),
         changed_by=current_user.username,
-        reason=request.reason,
+        reason=payload.reason,
     )

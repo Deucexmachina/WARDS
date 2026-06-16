@@ -467,7 +467,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
           return;
         }
         setStep('totp');
-        setRequiresCaptcha(response.data.requires_captcha || false);
+        setRequiresCaptcha(false);
         return;
       }
 
@@ -478,7 +478,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
       }
       redirectAfterLogin(response.data.portal);
     } catch (err) {
-      const portal = err.response?.headers?.['x-auth-portal'] || getSubmissionPortal() || 'default';
+      const portal = getSubmissionPortal() || 'default';
       const detail = normalizeLoginErrorMessage(err.response?.data?.detail || 'Login failed. Please try again.');
       const requiresEmailVerification = err.response?.headers?.['x-requires-email-verification'] === 'true';
 
@@ -510,17 +510,13 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
       setError(updatedGuardState.lockedUntil ? getLockMessage(updatedGuardState.lockedUntil) : detail);
 
       if (
-        err.response?.headers?.['x-requires-captcha'] === 'true' ||
         detail.toLowerCase().includes('captcha') ||
         updatedGuardState.attempts >= CAPTCHA_THRESHOLD
       ) {
         setRequiresCaptcha(true);
       }
 
-      if (
-        err.response?.headers?.['x-requires-mfa-setup'] === 'true' ||
-        detail.toLowerCase().includes('mfa not configured')
-      ) {
+      if (detail.toLowerCase().includes('mfa not configured')) {
         await prepareMfaSetup(portal || getActivePortal(), true);
       }
     } finally {
@@ -561,14 +557,13 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
       persistSession(response.data);
       redirectAfterLogin(response.data.portal);
     } catch (err) {
-      const portal = err.response?.headers?.['x-auth-portal'] || getSubmissionPortal() || detectedPortal;
+      const portal = getSubmissionPortal() || detectedPortal;
       lockDetectedPortal(portal);
       const detail = normalizeLoginErrorMessage(err.response?.data?.detail || 'Invalid TOTP code. Please try again.');
       const updatedGuardState = registerFailedAttempt(identifier, portal || getActivePortal());
       setError(updatedGuardState.lockedUntil ? getLockMessage(updatedGuardState.lockedUntil) : detail);
       setTotpCode('');
       if (
-        err.response?.headers?.['x-requires-captcha'] === 'true' ||
         detail.toLowerCase().includes('captcha') ||
         updatedGuardState.attempts >= CAPTCHA_THRESHOLD
       ) {

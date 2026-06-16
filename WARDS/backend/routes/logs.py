@@ -2,17 +2,42 @@ from datetime import datetime, timedelta
 
 import re
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 from typing import Optional
 
 from database.models import ActivityLog, Branch, BranchStaff, Admin, get_db
 from utils.field_crypto import get_decrypted_or_raw
-from auth import get_current_admin_user
+from auth import get_current_admin_user, get_current_branch_staff
 from utils.log_integrity import verify_record_integrity
 from utils.rbac import require_permission
 
 router = APIRouter()
+security = HTTPBearer()
+
+
+async def get_logs_current_user(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
+) -> Admin | BranchStaff:
+    try:
+        return await get_current_admin_user(request, credentials, db)
+    except HTTPException as admin_exc:
+        try:
+            staff = await get_current_branch_staff(request, credentials, db)
+        except HTTPException as branch_exc:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required. Please log in again.",
+            ) from branch_exc
+        if staff.role != "branch_admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only branch admin accounts can access branch activity logs.",
+            )
+        return staff
 
 
 def _get_branch_name_for_user(current_user, db: Session) -> Optional[str]:
@@ -21,7 +46,7 @@ def _get_branch_name_for_user(current_user, db: Session) -> Optional[str]:
         branch = db.query(Branch).filter(Branch.id == current_user.branch_id).first()
         if not branch:
             return None
-        return get_decrypted_or_raw(branch, "name") or branch.name
+        return get_decrypted_or_raw(branch, "name")
     return None
 
 
@@ -37,7 +62,7 @@ def _apply_branch_filter(query, branch_name: str):
 async def get_activity_logs_unread_count(
     since: Optional[str] = None,
     branch_name: Optional[str] = None,
-    current_user: Admin = Depends(get_current_admin_user),
+    current_user: Admin | BranchStaff = Depends(get_logs_current_user),
     db: Session = Depends(get_db)
 ):
     is_branch_admin = isinstance(current_user, BranchStaff) and current_user.role == "branch_admin"
@@ -68,7 +93,7 @@ async def get_activity_logs(
     branch_name: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
-    current_user: Admin = Depends(get_current_admin_user),
+    current_user: Admin | BranchStaff = Depends(get_logs_current_user),
     db: Session = Depends(get_db)
 ):
     is_branch_admin = isinstance(current_user, BranchStaff) and current_user.role == "branch_admin"

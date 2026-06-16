@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 import json
 import os
@@ -33,11 +33,13 @@ from services.email_service import (
 )
 from utils.field_crypto import (
     apply_citizen_user_security,
+    apply_email_otp_security,
     find_citizen_by_contact_number,
     find_citizen_by_email,
     find_invite_by_token,
     find_mfa_secret_record,
     get_decrypted_or_raw,
+    hash_optional_value,
     serialize_citizen_user,
 )
 from utils.security_validation import normalize_email
@@ -47,6 +49,7 @@ from auth import (
     PASSWORD_RESET_SECRET_KEY,
     PORTAL_CONFIG,
     create_access_token,
+    create_refresh_token,
     decode_token,
     get_portal_config,
     get_branch_assigned_window_number,
@@ -91,6 +94,24 @@ MAX_REQUESTS_PER_WINDOW = 30
 MFA_VALID_WINDOW_STEPS = 2
 
 _ABUSE_STATE_PATH = Path(os.getenv("ABUSE_STATE_PATH", "./abuse_state.json"))
+
+
+def utc_now() -> datetime:
+    return datetime.utcnow()
+
+
+def is_expired_at(value: datetime | None) -> bool:
+    if value is None:
+        return True
+    if value.tzinfo is not None:
+        value = value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value <= utc_now()
+
+
+def seconds_since(value: datetime) -> float:
+    if value.tzinfo is not None:
+        value = value.astimezone(timezone.utc).replace(tzinfo=None)
+    return (utc_now() - value).total_seconds()
 
 
 def _load_abuse_state() -> tuple[dict, dict]:
@@ -183,12 +204,16 @@ class UnifiedMFARecoveryVerifyOTPRequest(BaseModel):
 
 class UnifiedToken(BaseModel):
     access_token: str
+    refresh_token: Optional[str] = None
     token_type: str
     portal: str
     user: dict
     requires_mfa: Optional[bool] = False
-    requires_captcha: Optional[bool] = False
     mfa_setup_required: Optional[bool] = False
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
 
 
 class UnifiedPasswordResetRequest(BaseModel):
@@ -429,6 +454,11 @@ def build_user_response(portal: str, account: object) -> dict:
         "role": "branch",
         "internal_role": account.role,
         "branch_id": account.branch_id,
+        "branch_name": (
+            get_decrypted_or_raw(account.branch, "name")
+            if getattr(account, "branch", None)
+            else None
+        ),
         "dashboard_url": get_branch_dashboard_url(account),
         "status": account.status,
         "account_scope": getattr(account, "account_scope", "full_branch"),
@@ -461,6 +491,7 @@ def build_token_payload(portal: str, account: object, ip: str | None = None, ua:
     else:
         payload = {
             "sub": account.username,
+            "email": account.email,
             "user_id": account.id,
             "role": "branch",
             "internal_role": account.role,
@@ -592,7 +623,8 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
     if portal == "public" and not getattr(account, "is_verified", True):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid credentials or account status.",
+            detail="Please verify your email before logging in.",
+            headers={"x-requires-email-verification": "true"},
         )
 
     if getattr(account, "status", "Active") != "Active":
@@ -629,7 +661,6 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Invalid credentials or account status.",
-                    headers={"x-requires-mfa-setup": "true"},
                 )
             # For public: MFA not configured; allow login and require setup later via mfa_setup_required flag
             pass
@@ -657,7 +688,9 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
     clear_tracking(credentials.identifier)
 
     user_agent = request.headers.get("user-agent")
-    access_token = create_access_token(portal, build_token_payload(portal, account, ip=client_ip, ua=user_agent))
+    token_payload = build_token_payload(portal, account, ip=client_ip, ua=user_agent)
+    access_token = create_access_token(portal, token_payload)
+    refresh_token = create_refresh_token(portal, token_payload)
     account.last_login = datetime.utcnow()
     if portal == "public":
         apply_citizen_user_security(account)
@@ -687,11 +720,11 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
 
     return {
         "access_token": access_token,
+        "refresh_token": refresh_token,
         "token_type": "bearer",
         "portal": portal,
         "user": build_user_response(portal, account),
         "requires_mfa": False,
-        "requires_captcha": False,
         "mfa_setup_required": mfa_setup_required,
     }
 
@@ -710,7 +743,53 @@ async def unified_logout(request: Request, db: Session = Depends(get_db)):
     return {"message": "Logged out successfully"}
 
 
+@router.post("/refresh")
+@limiter.limit("10/minute")
+async def unified_refresh_token(request: Request, payload: RefreshTokenRequest, db: Session = Depends(get_db)):
+    decoded = None
+    portal = None
+    for candidate_portal, config in PORTAL_CONFIG.items():
+        if candidate_portal == "unknown":
+            continue
+        try:
+            candidate = decode_token(payload.refresh_token, config["secret_key"])
+        except JWTError:
+            continue
+        if candidate.get("type") == "refresh":
+            decoded = candidate
+            portal = candidate.get("portal") or candidate_portal
+            break
+
+    if not decoded or portal not in {"public", "admin", "branch"}:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token")
+
+    identifier = decoded.get("email") or decoded.get("sub")
+    if portal == "public":
+        account = find_citizen_by_email(db, CitizenUser, identifier)
+    elif portal == "admin":
+        account = db.query(Admin).filter((Admin.email == identifier) | (Admin.username == decoded.get("sub"))).first()
+    else:
+        account = db.query(BranchStaff).filter((BranchStaff.email == identifier) | (BranchStaff.username == decoded.get("sub"))).first()
+
+    if not account or getattr(account, "status", "Active") != "Active":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
+
+    token_payload = build_token_payload(
+        portal,
+        account,
+        ip=request.client.host if request.client else None,
+        ua=request.headers.get("user-agent"),
+    )
+    return {
+        "access_token": create_access_token(portal, token_payload),
+        "token_type": "bearer",
+        "portal": portal,
+        "user": build_user_response(portal, account),
+    }
+
+
 @router.post("/setup-mfa")
+@limiter.limit("5/minute")
 async def unified_setup_mfa(request: Request, credentials: UnifiedSetupMFARequest, db: Session = Depends(get_db)):
     client_ip = request.client.host
     portal, account = find_account_for_portal(db, credentials.identifier, credentials.portal)
@@ -761,6 +840,7 @@ async def unified_setup_mfa(request: Request, credentials: UnifiedSetupMFAReques
 
 
 @router.post("/verify-mfa-setup")
+@limiter.limit("5/minute")
 async def unified_verify_mfa_setup(
     request: Request,
     credentials: UnifiedVerifyMFASetup,
@@ -1067,6 +1147,7 @@ async def unified_mfa_recovery_verify_otp(
 
 
 @router.get("/verify")
+@limiter.limit("30/minute")
 async def unified_verify(request: Request, db: Session = Depends(get_db)):
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
@@ -1171,6 +1252,40 @@ def _get_citizen_email(citizen: CitizenUser) -> str:
     return serialize_citizen_user(citizen)["email"]
 
 
+def _find_latest_public_email_otp(db: Session, email: str) -> EmailOTP | None:
+    normalized_email = normalize_identifier(email)
+    email_hash = hash_optional_value(normalized_email)
+    role_hash = hash_optional_value("public")
+
+    otp_record = (
+        db.query(EmailOTP)
+        .filter(
+            EmailOTP.email_hash == email_hash,
+            EmailOTP.role_hash == role_hash,
+            EmailOTP.consumed_at.is_(None),
+        )
+        .order_by(EmailOTP.created_at.desc(), EmailOTP.id.desc())
+        .first()
+    )
+    if otp_record:
+        return otp_record
+
+    # Fallback: decrypt and compare for rows where the raw email/role have been
+    # redacted to OTP_EMAIL_* / OTP_ROLE_* placeholders.
+    for candidate in (
+        db.query(EmailOTP)
+        .filter(EmailOTP.consumed_at.is_(None))
+        .order_by(EmailOTP.created_at.desc(), EmailOTP.id.desc())
+        .all()
+    ):
+        candidate_email = (get_decrypted_or_raw(candidate, "email") or "").strip().lower()
+        candidate_role = (get_decrypted_or_raw(candidate, "role") or "").strip().lower()
+        if candidate_email == normalized_email and candidate_role == "public":
+            return candidate
+
+    return None
+
+
 @router.post("/register")
 @limiter.limit("3/minute")
 async def unified_register(
@@ -1230,11 +1345,13 @@ async def unified_register(
         email=email,
         role="public",
         code_hash=pwd_context.hash(code),
-        expires_at=datetime.utcnow() + timedelta(minutes=10),
+        expires_at=utc_now() + timedelta(minutes=10),
         resend_count=1,
-        last_sent_at=datetime.utcnow(),
+        last_sent_at=utc_now(),
     )
     db.add(email_otp)
+    db.flush()
+    apply_email_otp_security(email_otp)
     db.commit()
 
     email_result = send_citizen_verification_email(email, code, expires_minutes=10)
@@ -1259,7 +1376,9 @@ async def unified_register(
 
 
 @router.post("/check-contact")
+@limiter.limit("10/minute")
 async def unified_check_contact(
+    request: Request,
     payload: CheckContactRequest,
     db: Session = Depends(get_db),
 ):
@@ -1283,19 +1402,10 @@ async def unified_verification_request(
             detail="No account found with this email address.",
         )
 
-    recent_otp = (
-        db.query(EmailOTP)
-        .filter(
-            EmailOTP.email == email,
-            EmailOTP.role == "public",
-            EmailOTP.consumed_at.is_(None),
-        )
-        .order_by(EmailOTP.created_at.desc())
-        .first()
-    )
+    recent_otp = _find_latest_public_email_otp(db, email)
 
     if recent_otp and recent_otp.last_sent_at:
-        elapsed = (datetime.utcnow() - recent_otp.last_sent_at).total_seconds()
+        elapsed = seconds_since(recent_otp.last_sent_at)
         if elapsed < 60:
             remaining = int(60 - elapsed)
             raise HTTPException(
@@ -1307,20 +1417,23 @@ async def unified_verification_request(
 
     if recent_otp:
         recent_otp.code_hash = pwd_context.hash(code)
-        recent_otp.expires_at = datetime.utcnow() + timedelta(minutes=10)
+        recent_otp.expires_at = utc_now() + timedelta(minutes=10)
         recent_otp.resend_count = (recent_otp.resend_count or 0) + 1
-        recent_otp.last_sent_at = datetime.utcnow()
+        recent_otp.last_sent_at = utc_now()
         recent_otp.attempts = 0
+        apply_email_otp_security(recent_otp)
     else:
         email_otp = EmailOTP(
             email=email,
             role="public",
             code_hash=pwd_context.hash(code),
-            expires_at=datetime.utcnow() + timedelta(minutes=10),
+            expires_at=utc_now() + timedelta(minutes=10),
             resend_count=1,
-            last_sent_at=datetime.utcnow(),
+            last_sent_at=utc_now(),
         )
         db.add(email_otp)
+        db.flush()
+        apply_email_otp_security(email_otp)
 
     db.commit()
 
@@ -1337,7 +1450,9 @@ async def unified_verification_request(
 
 
 @router.post("/verification/confirm")
+@limiter.limit("5/minute")
 async def unified_verification_confirm(
+    request: Request,
     payload: VerificationConfirmRequest,
     db: Session = Depends(get_db),
 ):
@@ -1349,18 +1464,9 @@ async def unified_verification_confirm(
             detail="No account found with this email address.",
         )
 
-    otp_record = (
-        db.query(EmailOTP)
-        .filter(
-            EmailOTP.email == email,
-            EmailOTP.role == "public",
-            EmailOTP.consumed_at.is_(None),
-        )
-        .order_by(EmailOTP.created_at.desc())
-        .first()
-    )
+    otp_record = _find_latest_public_email_otp(db, email)
 
-    if not otp_record or otp_record.expires_at < datetime.utcnow():
+    if not otp_record or is_expired_at(otp_record.expires_at):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="The verification code has expired. Please request a new one.",
@@ -1374,7 +1480,7 @@ async def unified_verification_confirm(
             detail="Invalid verification code. Please try again.",
         )
 
-    otp_record.consumed_at = datetime.utcnow()
+    otp_record.consumed_at = utc_now()
     citizen.is_verified = True
     db.commit()
 
@@ -1391,13 +1497,16 @@ async def unified_invite_register(
     email = normalize_identifier(payload.email)
 
     invite = find_invite_by_token(db, Invite, payload.invite_token)
-    if not invite or invite.used or invite.expires_at < datetime.utcnow():
+    if not invite or invite.used or is_expired_at(invite.expires_at):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired invite token.",
         )
 
-    if normalize_identifier(invite.email) != email:
+    invite_email = normalize_identifier(get_decrypted_or_raw(invite, "email") or invite.email)
+    invite_role = (get_decrypted_or_raw(invite, "role") or invite.role or "").strip().lower()
+
+    if invite_email != email:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invite email does not match.",
@@ -1405,7 +1514,7 @@ async def unified_invite_register(
 
     validate_password_strength(payload.password)
 
-    portal = invite.role
+    portal = invite_role
     account = None
 
     if portal in ("admin", "main_admin", "superadmin"):
@@ -1670,6 +1779,7 @@ class WindowStaffVerifyMFARequest(BaseModel):
 
 
 @router.put("/branch/staff/password")
+@limiter.limit("5/minute")
 async def branch_staff_change_password(
     request: Request,
     payload: WindowStaffChangePasswordRequest,
@@ -1709,6 +1819,7 @@ async def branch_staff_change_password(
 
 
 @router.post("/branch/staff/reset-mfa")
+@limiter.limit("3/minute")
 async def branch_staff_reset_mfa(
     request: Request,
     payload: WindowStaffResetMFARequest,
@@ -1735,6 +1846,7 @@ async def branch_staff_reset_mfa(
 
 
 @router.post("/branch/staff/verify-mfa")
+@limiter.limit("5/minute")
 async def branch_staff_verify_mfa(
     request: Request,
     payload: WindowStaffVerifyMFARequest,
@@ -1788,7 +1900,9 @@ class PublicUserChangePasswordRequest(BaseModel):
 
 
 @router.put("/user/password")
+@limiter.limit("5/minute")
 async def public_user_change_password(
+    request: Request,
     payload: PublicUserChangePasswordRequest,
     db: Session = Depends(get_db),
     current_user: CitizenUser = Depends(get_current_user),
@@ -1831,6 +1945,7 @@ class AdminInviteCreateRequest(BaseModel):
 
 
 @router.post("/admin/invite")
+@limiter.limit("10/minute")
 async def admin_create_invite(
     request: Request,
     invite_data: AdminInviteCreateRequest,

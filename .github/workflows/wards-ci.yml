@@ -84,6 +84,21 @@ jobs:
           RECAPTCHA_SECRET_KEY: ci-test-recaptcha-secret
           PAYMONGO_WEBHOOK_SECRET: ci-test-webhook-secret
         run: pytest -q tests
+      - name: Run authentication workflow tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}/WARDS/backend:${{ github.workspace }}
+          ADMIN_SECRET_KEY: ci-test-admin-secret
+          USER_SECRET_KEY: ci-test-user-secret
+          BRANCH_SECRET_KEY: ci-test-branch-secret
+          PASSWORD_RESET_SECRET_KEY: ci-test-reset-secret
+          DATA_ENCRYPTION_SECRET: ci-test-data-encryption-secret
+          DATA_HASH_SECRET: ci-test-data-hash-secret
+          LOG_INTEGRITY_SECRET: ci-test-log-integrity-secret
+          BACKUP_INTEGRITY_SECRET: ci-test-backup-integrity-secret
+          RECAPTCHA_SECRET_KEY: ci-test-recaptcha-secret
+          PAYMONGO_WEBHOOK_SECRET: ci-test-webhook-secret
+          TOKEN_BINDING_STRICT: "true"
+        run: pytest -q tests/test_unified_auth.py tests/test_unified_auth_extended.py tests/test_auth_workflows.py
 
   frontend:
     needs: repository-hygiene
@@ -101,3 +116,40 @@ jobs:
       - name: Build frontend
         working-directory: WARDS/frontend
         run: npm run build
+
+  deploy-digitalocean:
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.ENABLE_DIGITALOCEAN_DEPLOY == 'true'
+    environment: production
+    steps:
+      - name: Configure SSH key
+        env:
+          DO_SSH_KEY: ${{ secrets.DO_SSH_KEY }}
+        run: |
+          test -n "$DO_SSH_KEY"
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DO_SSH_KEY" > ~/.ssh/wards_deploy_key
+          chmod 600 ~/.ssh/wards_deploy_key
+      - name: Trust DigitalOcean host
+        env:
+          DO_HOST: ${{ secrets.DO_HOST }}
+        run: |
+          test -n "$DO_HOST"
+          ssh-keyscan -H "$DO_HOST" >> ~/.ssh/known_hosts
+      - name: Deploy application
+        env:
+          DO_HOST: ${{ secrets.DO_HOST }}
+          DO_USER: ${{ secrets.DO_USER }}
+          DO_APP_DIR: ${{ secrets.DO_APP_DIR }}
+        run: |
+          test -n "$DO_HOST"
+          test -n "$DO_USER"
+          test -n "$DO_APP_DIR"
+          ssh -i ~/.ssh/wards_deploy_key "$DO_USER@$DO_HOST" "cd '$DO_APP_DIR' && git fetch origin main && git checkout main && git pull --ff-only origin main && docker compose up -d --build && docker compose ps"
+      - name: Smoke test deployment
+        env:
+          DO_HOST: ${{ secrets.DO_HOST }}
+        run: |
+          curl --fail --retry 10 --retry-delay 5 "http://$DO_HOST:3000/"
+          curl --fail --retry 10 --retry-delay 5 "http://$DO_HOST:8000/api/health"

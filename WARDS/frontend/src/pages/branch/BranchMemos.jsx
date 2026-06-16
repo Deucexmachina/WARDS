@@ -166,7 +166,7 @@ const BranchMemos = () => {
     handleInputChange({ target: { name: fieldName, value } });
   };
 
-  const ALLOWED_MEMO_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.pdf', '.doc', '.docx', '.xls', '.xlsx'];
+  const ALLOWED_MEMO_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.pdf', '.docx', '.xlsx'];
 
   const handleFileChange = (event) => {
     const file = event.target.files?.[0] || null;
@@ -176,7 +176,7 @@ const BranchMemos = () => {
         setFileErrorModal({
           open: true,
           title: 'Invalid File Type',
-          message: 'Only JPG, PNG, Word, Excel, and PDF files are allowed.',
+          message: 'Only JPG, PNG, DOCX, XLSX, and PDF files are allowed.',
         });
         event.target.value = '';
         return;
@@ -599,7 +599,7 @@ const BranchMemos = () => {
                 <input
                   type="file"
                   onChange={handleFileChange}
-                  accept=".jpg,.jpeg,.png,.pdf,.doc,.docx,.xls,.xlsx"
+                  accept=".jpg,.jpeg,.png,.pdf,.docx,.xlsx"
                   className="mb-4 w-full cursor-pointer rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm shadow-sm file:mr-4 file:rounded-xl file:border-0 file:bg-[#0f2f5f] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:border-blue-400 hover:bg-slate-50 focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-slate-200 transition"
                 />
                 {formState.attachment && (

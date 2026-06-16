@@ -27,9 +27,24 @@ from services import ocr_routes
 from database.models import Base, engine, SessionLocal, Admin, Announcement, AnnouncementAttachment, Branch, BusinessRegistry, BusinessTaxApplication, CollectionAccount, DiscrepancyReport, EmailOTP, EmailVerificationToken, FAQ, Invite, Memo, MemoView, MFASecret, Payment, Queue, QueueActivity, ReceiptRecord, ReceiptRequest, ReceiptRequestHistory, Remittance, RemittanceItem, RPTPropertyRecord, Service, ServiceWindowConfig, TaxpayerGuide
 from utils.field_crypto import apply_citizen_user_security, apply_collection_account_security, apply_discrepancy_report_security, apply_email_otp_security, apply_email_verification_token_security, apply_faq_security, apply_invite_security, apply_memo_security, apply_memo_view_security, apply_mfa_secret_security, apply_payment_security, apply_queue_activity_security, apply_queue_security, apply_receipt_record_security, apply_receipt_request_history_security, apply_receipt_request_security, apply_remittance_item_security, apply_remittance_security, apply_rpt_property_record_security, apply_service_security, apply_service_window_config_security, apply_system_setting_security, apply_tax_assessment_record_security, apply_taxpayer_guide_security, apply_taxpayer_identifier_submission_security, build_redacted_text, get_decrypted_or_raw, hash_optional_value, set_encrypted_hash_companions
 from utils import log_integrity  # noqa: F401 - registers tamper-evident log signing hooks
+from utils.log_sanitization import install_uvicorn_reload_path_filter
+from utils.redis_client import require_redis
 from utils.system_settings import seed_system_settings
 from utils.branch_system_settings import cleanup_duplicate_branch_system_settings
 from middleware.dos_protection import RequestSizeMiddleware, RequestTimeoutMiddleware, ConnectionLimitMiddleware, AbuseDetectionMiddleware, account_from_request
+from middleware.https import HttpsEnforcementMiddleware
+
+install_uvicorn_reload_path_filter()
+
+
+def is_production() -> bool:
+    return os.getenv("APP_ENV", os.getenv("ENV", "development")).strip().lower() in {"prod", "production"}
+
+
+DEBUG = os.getenv("DEBUG", "false").strip().lower() in {"true", "1", "yes"}
+if is_production() and DEBUG:
+    raise RuntimeError("DEBUG cannot be True when APP_ENV=production")
+require_redis()
 
 
 class SecuritySettings:
@@ -283,11 +298,12 @@ def build_allowed_origins() -> list[str]:
         if parsed.scheme and parsed.netloc:
             origins.append(f"{parsed.scheme}://{parsed.netloc}")
 
-    origins.extend([
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://localhost:5173",
-    ])
+    if not is_production():
+        origins.extend([
+            "http://localhost:3000",
+            "http://localhost:3001",
+            "http://localhost:5173",
+        ])
 
     deduped_origins: list[str] = []
     seen: set[str] = set()
@@ -304,8 +320,10 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Requested-With", "Accept", "Origin"],
-    expose_headers=["Content-Disposition", "x-requires-mfa-setup", "x-requires-captcha", "x-requires-email-verification", "x-auth-portal"],
+    expose_headers=["Content-Disposition"],
 )
+
+app.add_middleware(HttpsEnforcementMiddleware)
 
 # Security Headers Middleware
 # Adds security headers to all responses (CSP, X-Frame-Options, etc.)
@@ -348,6 +366,15 @@ def ensure_auth_extensions():
             "security_admin_file_changes",
         ):
             ensure_integrity_columns(protected_table)
+
+        if "backups" in table_names:
+            backup_columns = {column["name"] for column in inspector.get_columns("backups")}
+            if "checksum" not in backup_columns:
+                conn.execute(text("ALTER TABLE backups ADD COLUMN checksum VARCHAR(128)"))
+            if "db_type" not in backup_columns:
+                conn.execute(text("ALTER TABLE backups ADD COLUMN db_type VARCHAR(40)"))
+            if "retention_days" not in backup_columns:
+                conn.execute(text("ALTER TABLE backups ADD COLUMN retention_days INTEGER DEFAULT 30"))
 
         report_columns = {column["name"] for column in inspector.get_columns("reports")}
         if "branch_id" not in report_columns:
@@ -1617,6 +1644,7 @@ def start_security_monitor_if_enabled():
         return
 
     default_interval = max(5, int(os.getenv("SECURITY_SCAN_INTERVAL_SECONDS", "30")))
+    adaptive_enabled = (os.getenv("SECURITY_ADAPTIVE_INTERVAL_ENABLED") or "false").strip().lower() == "true"
 
     def monitor_loop():
         from SECURITY.security_engine import activate_database_runtime_monitoring, create_manual_backup, get_setting, scan_all_files, seed_settings, set_setting
@@ -1652,22 +1680,37 @@ def start_security_monitor_if_enabled():
                 break
 
         first_scan = True
+        consecutive_clean = 0
         while True:
             db = SessionLocal()
             interval = default_interval
             try:
                 monitoring_enabled = (get_setting(db, "monitoring_enabled", "true") or "true").lower() == "true"
+                configured_interval = max(5, int(get_setting(db, "scan_interval_seconds", str(default_interval))))
                 if monitoring_enabled:
                     detections = scan_all_files(db, context={"background_monitor": True})
                     if first_scan:
                         print(f"[SECURITY MONITOR] first automatic scan complete; {len(detections)} change(s) found")
+                    if adaptive_enabled:
+                        if detections:
+                            consecutive_clean = 0
+                            interval = min(30, configured_interval)
+                        else:
+                            consecutive_clean += 1
+                            if consecutive_clean >= 5:
+                                interval = min(configured_interval * (2 ** min(consecutive_clean - 4, 4)), 300)
+                            else:
+                                interval = configured_interval
+                    else:
+                        interval = configured_interval
+                else:
+                    interval = configured_interval
                 first_scan = False
-                interval = max(5, int(get_setting(db, "scan_interval_seconds", str(default_interval))))
             except Exception as exc:
                 print(f"[SECURITY MONITOR] scan failed: {exc}")
             finally:
                 db.close()
-            time.sleep(interval)
+            time.sleep(max(5, int(interval)))
 
     thread = threading.Thread(target=monitor_loop, daemon=True, name="wards-security-monitor")
     thread.start()
@@ -1739,4 +1782,10 @@ def health_check():
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        reload_dirs=["."],
+    )

@@ -2473,7 +2473,9 @@ async def save_mobile_receipt_record(
 
 
 @router.post("/records")
+@limiter.limit("10/minute")
 async def save_receipt_record(
+    request: Request,
     payload: ReceiptRecordPayload,
     current_staff=Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
@@ -2871,7 +2873,9 @@ async def complete_appointment_request(request_id: str, current_staff=Depends(ge
 
 
 @router.post("/requests/{request_id}/upload-release-copy")
+@limiter.limit("10/minute")
 async def upload_release_copy(
+    request: Request,
     request_id: str,
     file: UploadFile = File(...),
     auto_rename: bool = Form(False),
@@ -3157,7 +3161,9 @@ async def get_request_status(request_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/request/{request_id}/pay")
+@limiter.limit("5/minute")
 async def pay_request_fee(
+    request: Request,
     request_id: str,
     payment_data: ReceiptFeePaymentRequest,
     db: Session = Depends(get_db),
@@ -3246,7 +3252,11 @@ async def pay_request_fee(
 
 
 @router.post("/upload-proof")
-async def upload_proof(file: UploadFile = File(...)):
+@limiter.limit("10/minute")
+async def upload_proof(
+    request: Request,
+    file: UploadFile = File(...),
+):
     file_bytes = await file.read()
     validate_upload_file(
         file,

@@ -13,6 +13,7 @@ import sys
 import tempfile
 import time
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -2032,54 +2033,76 @@ def prune_all_backup_types(backup_location: Path, keep: int = BACKUP_RETENTION_L
     return removed
 
 
-def register_initial_files(db: Session, ensure_backup: bool = True, refresh_existing: bool = True) -> int:
+def register_initial_files(db: Session, ensure_backup: bool = True, refresh_existing: bool = True, incremental: bool = False) -> int:
     seed_settings(db)
     migrate_portable_monitored_files(db)
     dedupe_monitored_files_by_relative_path(db)
     created = 0
-    for root_name, path in iter_monitorable_files():
-        relative = safe_rel(path)
-        matches = (
-            db.query(SecurityMonitoredFile)
-            .filter(or_(SecurityMonitoredFile.file_path == str(path), SecurityMonitoredFile.relative_path == relative))
-            .order_by(SecurityMonitoredFile.id.asc())
-            .all()
-        )
-        existing = None
-        if matches:
-            path_key = normalized_path_key(path)
-            existing = next((item for item in matches if normalized_path_key(item.file_path) == path_key), None) or matches[0]
-            for duplicate in matches:
-                if duplicate.id != existing.id:
-                    existing = merge_monitored_file_entry(db, duplicate, existing)
-        if existing:
-            existing.file_path = str(path)
-            existing.relative_path = relative
-            existing.folder_root = root_name
-            existing.file_type = file_type(path)
-            if refresh_existing:
-                current_hash = sha256_file(path)
-                existing.current_hash = current_hash
-                existing.baseline_hash = existing.baseline_hash or current_hash
-                existing.status = "clean" if existing.baseline_hash == current_hash else existing.status
-                existing.size_bytes = path.stat().st_size
-                existing.last_checked = now_utc()
-            db.add(existing)
-            continue
-        current_hash = sha256_file(path)
-        db.add(
-            SecurityMonitoredFile(
-                file_path=str(path),
-                relative_path=relative,
-                folder_root=root_name,
-                baseline_hash=current_hash,
-                current_hash=current_hash,
-                status="clean",
-                file_type=file_type(path),
-                size_bytes=path.stat().st_size,
+    if incremental:
+        for file_entry in active_monitored_files_query(db).all():
+            if is_database_entry(file_entry):
+                continue
+            path = portable_monitored_path(file_entry)
+            if path.exists():
+                stat = path.stat()
+                if refresh_existing:
+                    current_hash = sha256_file(path)
+                    file_entry.current_hash = current_hash
+                    file_entry.baseline_hash = file_entry.baseline_hash or current_hash
+                    file_entry.status = "clean" if file_entry.baseline_hash == current_hash else file_entry.status
+                    file_entry.size_bytes = stat.st_size
+                    file_entry.last_checked = datetime.utcfromtimestamp(stat.st_mtime)
+                else:
+                    file_entry.last_checked = datetime.utcfromtimestamp(stat.st_mtime)
+                file_entry.file_type = file_type(path)
+                db.add(file_entry)
+    else:
+        for root_name, path in iter_monitorable_files():
+            relative = safe_rel(path)
+            matches = (
+                db.query(SecurityMonitoredFile)
+                .filter(or_(SecurityMonitoredFile.file_path == str(path), SecurityMonitoredFile.relative_path == relative))
+                .order_by(SecurityMonitoredFile.id.asc())
+                .all()
             )
-        )
-        created += 1
+            existing = None
+            if matches:
+                path_key = normalized_path_key(path)
+                existing = next((item for item in matches if normalized_path_key(item.file_path) == path_key), None) or matches[0]
+                for duplicate in matches:
+                    if duplicate.id != existing.id:
+                        existing = merge_monitored_file_entry(db, duplicate, existing)
+            if existing:
+                existing.file_path = str(path)
+                existing.relative_path = relative
+                existing.folder_root = root_name
+                existing.file_type = file_type(path)
+                if refresh_existing:
+                    current_hash = sha256_file(path)
+                    existing.current_hash = current_hash
+                    existing.baseline_hash = existing.baseline_hash or current_hash
+                    existing.status = "clean" if existing.baseline_hash == current_hash else existing.status
+                    existing.size_bytes = path.stat().st_size
+                    existing.last_checked = datetime.utcfromtimestamp(path.stat().st_mtime)
+                else:
+                    existing.last_checked = datetime.utcfromtimestamp(path.stat().st_mtime)
+                db.add(existing)
+                continue
+            current_hash = sha256_file(path)
+            db.add(
+                SecurityMonitoredFile(
+                    file_path=str(path),
+                    relative_path=relative,
+                    folder_root=root_name,
+                    baseline_hash=current_hash,
+                    current_hash=current_hash,
+                    status="clean",
+                    file_type=file_type(path),
+                    size_bytes=path.stat().st_size,
+                    last_checked=datetime.utcfromtimestamp(path.stat().st_mtime),
+                )
+            )
+            created += 1
     try:
         had_database_entry = bool(database_monitor_entries(db))
         normalize_database_monitor_entry(db, reset_baseline=refresh_existing, ensure_snapshot=True)
@@ -3151,6 +3174,22 @@ def scan_database_entry(db: Session, file_entry: SecurityMonitoredFile, context:
 
     existing_path = Path(file_entry.file_path)
     checksum_existed = existing_path.exists()
+
+    if not audit_changes and not unauthorized_audit_changes and checksum_existed:
+        current_hash = sha256_file(existing_path)
+        file_entry.current_hash = current_hash
+        file_entry.size_bytes = existing_path.stat().st_size
+        file_entry.last_checked = now_utc()
+        if current_hash != file_entry.baseline_hash:
+            file_entry.baseline_hash = current_hash
+        file_entry.status = "clean"
+        db.add(file_entry)
+        set_setting(db, "database_audit_last_id", str(latest_database_audit_id(db)), "database_monitor")
+        prune_database_authorized_operations(db)
+        if commit_clean:
+            db.commit()
+        return None
+
     path = create_database_checksum_manifest(db, existing_path)
     old_hash = file_entry.current_hash
     current_hash = sha256_file(path)
@@ -3182,8 +3221,6 @@ def scan_database_entry(db: Session, file_entry: SecurityMonitoredFile, context:
         prune_database_authorized_operations(db)
         if commit_clean:
             db.commit()
-        else:
-            db.flush()
         return None
 
     file_entry.status = "clean"
@@ -3192,12 +3229,10 @@ def scan_database_entry(db: Session, file_entry: SecurityMonitoredFile, context:
     prune_database_authorized_operations(db)
     if commit_clean:
         db.commit()
-    else:
-        db.flush()
     return None
 
 
-def scan_single_file(db: Session, file_entry: SecurityMonitoredFile, context: dict | None = None, commit_clean: bool = True) -> SecurityDetectionEvent | None:
+def scan_single_file(db: Session, file_entry: SecurityMonitoredFile, context: dict | None = None, commit_clean: bool = True, precomputed_hash: str | None = None) -> SecurityDetectionEvent | None:
     context = context or {}
     if is_database_entry(file_entry):
         return scan_database_entry(db, file_entry, context=context, commit_clean=commit_clean)
@@ -3214,8 +3249,6 @@ def scan_single_file(db: Session, file_entry: SecurityMonitoredFile, context: di
             db.add(file_entry)
             if commit_clean:
                 db.commit()
-            else:
-                db.flush()
             return None
         file_entry.status = "missing"
         file_entry.current_hash = None
@@ -3224,9 +3257,26 @@ def scan_single_file(db: Session, file_entry: SecurityMonitoredFile, context: di
         db.commit()
         return record_detection(db, file_entry, "file_deleted", old_hash, None, old_content, "", context)
 
-    current_hash = sha256_file(path)
+    stat = path.stat()
+    mtime = datetime.utcfromtimestamp(stat.st_mtime)
+    if (
+        file_entry.size_bytes == stat.st_size
+        and file_entry.last_checked is not None
+        and file_entry.last_checked >= mtime
+    ):
+        file_entry.status = "clean"
+        file_entry.last_checked = now_utc()
+        db.add(file_entry)
+        if commit_clean:
+            db.commit()
+        return None
+
+    if precomputed_hash is not None:
+        current_hash = precomputed_hash
+    else:
+        current_hash = sha256_file(path)
     file_entry.current_hash = current_hash
-    file_entry.size_bytes = path.stat().st_size
+    file_entry.size_bytes = stat.st_size
     file_entry.last_checked = now_utc()
 
     if current_hash != file_entry.baseline_hash:
@@ -3240,8 +3290,6 @@ def scan_single_file(db: Session, file_entry: SecurityMonitoredFile, context: di
     db.add(file_entry)
     if commit_clean:
         db.commit()
-    else:
-        db.flush()
     return None
 
 
@@ -3336,14 +3384,47 @@ def build_trigger_summary(change_type: str, flags: list[str], changed: dict, is_
     return " | ".join(pieces)
 
 
+_last_full_registration_at = None
+
 def scan_all_files(db: Session, context: dict | None = None) -> list[SecurityDetectionEvent]:
-    register_initial_files(db, refresh_existing=False)
+    global _last_full_registration_at
+    now = now_utc()
+    if _last_full_registration_at is None or (now - _last_full_registration_at) > timedelta(hours=1):
+        register_initial_files(db, refresh_existing=False, incremental=False)
+        _last_full_registration_at = now
+    else:
+        register_initial_files(db, refresh_existing=False, incremental=True)
     migrate_portable_monitored_files(db)
     database_entry = normalize_database_monitor_entry(db, reset_baseline=False, ensure_snapshot=True)
     set_setting(db, "last_scan_at", now_utc().isoformat(), "security_scanner")
     detections = []
     hash_index = current_hash_index(db)
-    for file_entry in active_monitored_files_query(db).order_by(SecurityMonitoredFile.relative_path.asc()).all():
+    file_entries = active_monitored_files_query(db).order_by(SecurityMonitoredFile.relative_path.asc()).all()
+
+    entries_to_hash = []
+    for file_entry in file_entries:
+        if is_database_entry(file_entry):
+            continue
+        p = portable_monitored_path(file_entry)
+        if p.exists():
+            entries_to_hash.append(file_entry)
+
+    precomputed_hashes: dict[int, str] = {}
+
+    def _hash_worker(entry: SecurityMonitoredFile) -> tuple[int, str | None]:
+        p = portable_monitored_path(entry)
+        try:
+            return (entry.id, sha256_file(p))
+        except Exception:
+            return (entry.id, None)
+
+    max_workers = min(8, (os.cpu_count() or 1))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for entry_id, file_hash in executor.map(_hash_worker, entries_to_hash):
+            if file_hash is not None:
+                precomputed_hashes[entry_id] = file_hash
+
+    for file_entry in file_entries:
         if is_database_entry(file_entry) and database_entry and file_entry.id != database_entry.id:
             file_entry.status = "clean"
             file_entry.last_checked = now_utc()
@@ -3354,7 +3435,7 @@ def scan_all_files(db: Session, context: dict | None = None) -> list[SecurityDet
             if replacement_path:
                 mark_verified_removal(db, file_entry, "verified_renamed", replacement_path=replacement_path, actor="active_scan")
                 continue
-        detection = scan_single_file(db, file_entry, context=context, commit_clean=False)
+        detection = scan_single_file(db, file_entry, context=context, commit_clean=False, precomputed_hash=precomputed_hashes.get(file_entry.id))
         if detection:
             detections.append(detection)
     db.commit()

@@ -69,7 +69,7 @@ def _bool_to_db(value: Optional[bool], default: bool = True) -> int:
 
 
 def _serialize_announcement(row) -> dict:
-    branch_name = row.get("branch_name")
+    branch_name = decrypt_optional_value(row.get("branch_name_enc")) or row.get("branch_name")
     title = decrypt_optional_value(row.get("title_enc")) or row.get("title")
     content = decrypt_optional_value(row.get("content_enc")) or row.get("content")
     created_by = decrypt_optional_value(row.get("created_by_enc")) or row.get("created_by")
@@ -109,6 +109,7 @@ def _fetch_announcement_row(db: Session, announcement_id: int, main_admin_only: 
             a.icon_color,
             a.branch_id,
             b.name AS branch_name,
+            b.name_enc AS branch_name_enc,
             a.publish_date,
             a.is_active,
             a.created_by,
@@ -200,6 +201,7 @@ async def get_all_announcements(db: Session = Depends(get_db)):
                 a.icon_color,
                 a.branch_id,
                 b.name AS branch_name,
+                b.name_enc AS branch_name_enc,
                 a.publish_date,
                 a.is_active,
                 a.created_by,
@@ -241,6 +243,7 @@ async def get_all_announcements_admin(
                 a.icon_color,
                 a.branch_id,
                 b.name AS branch_name,
+                b.name_enc AS branch_name_enc,
                 a.publish_date,
                 a.is_active,
                 a.created_by,

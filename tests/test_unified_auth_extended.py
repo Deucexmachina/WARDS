@@ -15,6 +15,9 @@ class FakeQuery:
     def filter(self, *_args, **_kwargs):
         return self
 
+    def order_by(self, *_args, **_kwargs):
+        return self
+
     def first(self):
         return self._result
 
@@ -25,10 +28,11 @@ class FakeQuery:
 
 
 class FakeDB:
-    def __init__(self, admin=None, branch=None, citizen=None):
+    def __init__(self, admin=None, branch=None, citizen=None, email_otp=None):
         self.admin = admin
         self.branch = branch
         self.citizen = citizen
+        self.email_otp = email_otp
         self._committed = False
 
     def query(self, model):
@@ -38,6 +42,8 @@ class FakeDB:
             return FakeQuery(self.branch)
         if model is unified_auth.CitizenUser:
             return FakeQuery(self.citizen)
+        if model is unified_auth.EmailOTP:
+            return FakeQuery(self.email_otp)
         return FakeQuery(None)
 
     def add(self, obj):
@@ -186,6 +192,69 @@ def test_public_login_without_mfa_succeeds_with_setup_flag():
         unified_auth.send_login_notification_email = original_send
         unified_auth.log_unified_security_context = original_sec
         unified_auth.get_mfa_secret = original_get_mfa
+        app.dependency_overrides.clear()
+        client.close()
+
+
+def test_public_login_unverified_requires_email_verification():
+    unified_auth.locked_accounts.clear()
+    unified_auth.login_attempts.clear()
+    account = make_account(
+        "public",
+        username="citizen@example.com",
+        email="citizen@example.com",
+        full_name="Test Citizen",
+        contact_number="09123456789",
+        is_verified=False,
+    )
+    db = FakeDB(citizen=account)
+    app, client = make_client(db)
+
+    original_find = unified_auth.find_account_for_portal
+    try:
+        unified_auth.find_account_for_portal = lambda *_args, **_kwargs: ("public", account)
+        response = client.post(
+            "/api/auth/unified/login",
+            json={"identifier": account.email, "password": "CorrectPass1!"},
+        )
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Please verify your email before logging in."
+        assert response.headers.get("x-requires-email-verification") == "true"
+    finally:
+        unified_auth.find_account_for_portal = original_find
+        app.dependency_overrides.clear()
+        client.close()
+
+
+def test_verification_confirm_uses_hashed_otp_lookup():
+    citizen = make_account(
+        "public",
+        username="citizen@example.com",
+        email="citizen@example.com",
+        full_name="Test Citizen",
+        contact_number="09123456789",
+        is_verified=False,
+    )
+    otp_record = SimpleNamespace(
+        code_hash=unified_auth.pwd_context.hash("123456"),
+        expires_at=unified_auth.datetime.utcnow() + unified_auth.timedelta(minutes=10),
+        consumed_at=None,
+        attempts=0,
+    )
+    db = FakeDB(citizen=citizen, email_otp=otp_record)
+    app, client = make_client(db)
+
+    try:
+        response = client.post(
+            "/api/auth/unified/verification/confirm",
+            json={"email": citizen.email, "code": "123456"},
+        )
+        assert response.status_code == 200
+        assert response.json()["message"] == "Email verified. You can now log in."
+        assert citizen.is_verified is True
+        assert otp_record.consumed_at is not None
+        assert db._committed is True
+    finally:
         app.dependency_overrides.clear()
         client.close()
 

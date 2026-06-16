@@ -28,3 +28,15 @@ def get_redis_client():
     except Exception:
         _redis_client = None
     return _redis_client
+
+
+def require_redis():
+    app_env = os.getenv("APP_ENV", os.getenv("ENV", "development")).strip().lower()
+    if app_env not in {"prod", "production"}:
+        return get_redis_client()
+    if not os.getenv("REDIS_URL", "").strip():
+        raise RuntimeError("REDIS_URL is required when APP_ENV=production")
+    client = get_redis_client()
+    if client is None:
+        raise RuntimeError("Redis is required for production rate-limit and lockout state")
+    return client

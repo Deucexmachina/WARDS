@@ -4,10 +4,22 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
 from auth import get_current_admin_user
 from services.ocr_runtime import run_ocr_in_executor
 from services.ocr_service import OCRProcessingError, ocr_service
 from utils.file_validation import validate_upload_file
+
+def get_rate_limit_key(request: Request) -> str:
+    """Get rate limit key - user-based if authenticated, otherwise IP-based"""
+    if hasattr(request.state, 'user') and request.state.user:
+        return f"user:{request.state.user.id}"
+    return get_remote_address(request)
+
+
+limiter = Limiter(key_func=get_rate_limit_key)
 
 router = APIRouter()
 
@@ -15,6 +27,7 @@ UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads",
 
 
 @router.post("/process")
+@limiter.limit("20/hour")
 async def process_receipt_ocr(
     request: Request,
     file: UploadFile = File(...),

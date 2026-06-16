@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from database.models import Admin, get_db
 from auth import get_current_admin_user
 from utils.rbac import get_sidebar_modules, get_accessible_branches
+from utils.field_crypto import get_decrypted_or_raw
 
 router = APIRouter()
 
@@ -23,8 +24,8 @@ async def get_user_accessible_branches(
         "branches": [
             {
                 "id": branch.id,
-                "name": branch.name,
-                "location": branch.location,
+                "name": get_decrypted_or_raw(branch, "name") or branch.name,
+                "location": get_decrypted_or_raw(branch, "location") or branch.location,
                 "status": branch.status
             }
             for branch in branches

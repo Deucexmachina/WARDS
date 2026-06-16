@@ -172,7 +172,8 @@ def get_sidebar_modules(role: str) -> list:
             {"name": "Announcements", "path": "/branch/announcements", "icon": "announcements"},
             {"name": "System Alerts", "path": "/branch/alerts", "icon": "alerts"},
             {"name": "Discrepancy Reports", "path": "/branch/discrepancies", "icon": "discrepancies"},
-            {"name": "Policies & SOPs", "path": "/branch/policies", "icon": "policies"}
+            {"name": "Policies & SOPs", "path": "/branch/policies", "icon": "policies"},
+            {"name": "Activity Logs", "path": "/branch/activity-logs", "icon": "logs"}
         ]
     
     elif role == ROLE_BRANCH_STAFF:

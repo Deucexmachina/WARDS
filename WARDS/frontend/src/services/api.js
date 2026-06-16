@@ -37,6 +37,15 @@ const isAdminApiRequest = (url = '') => (
   || /\/discrepancies\/\d+\/verify(?:\?|$)/.test(url)
 );
 
+const isBranchPortalContext = () => {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  const pathname = window.location?.pathname || '';
+  return pathname.startsWith('/branch-dashboard/') || pathname.startsWith('/live-monitor/');
+};
+
 api.interceptors.request.use((config) => {
   if (config.headers?.Authorization) {
     return config;
@@ -47,13 +56,21 @@ api.interceptors.request.use((config) => {
   const url = config.url || '';
   
   if (url.includes('/public-content')) {
-    token = localStorage.getItem('adminToken') || localStorage.getItem('branchToken');
+    token = isBranchPortalContext()
+      ? (localStorage.getItem('branchToken') || localStorage.getItem('adminToken'))
+      : (localStorage.getItem('adminToken') || localStorage.getItem('branchToken'));
   } else if (url.includes('/alerts')) {
-    token = localStorage.getItem('adminToken') || localStorage.getItem('branchToken');
+    token = isBranchPortalContext()
+      ? (localStorage.getItem('branchToken') || localStorage.getItem('adminToken'))
+      : (localStorage.getItem('adminToken') || localStorage.getItem('branchToken'));
   } else if (url.includes('/accounts')) {
-    token = localStorage.getItem('adminToken') || localStorage.getItem('branchToken');
+    token = isBranchPortalContext()
+      ? (localStorage.getItem('branchToken') || localStorage.getItem('adminToken'))
+      : (localStorage.getItem('adminToken') || localStorage.getItem('branchToken'));
   } else if (url.includes('/activity-logs')) {
-    token = localStorage.getItem('adminToken') || localStorage.getItem('branchToken');
+    token = isBranchPortalContext()
+      ? (localStorage.getItem('branchToken') || localStorage.getItem('adminToken'))
+      : (localStorage.getItem('adminToken') || localStorage.getItem('branchToken'));
   } else if (isBranchApiRequest(url)) {
     token = localStorage.getItem('branchToken');
   } else if (isAdminApiRequest(url)) {
@@ -111,7 +128,20 @@ api.interceptors.response.use(
       errorDetail.toLowerCase().includes('incorrect') && 
       (errorDetail.toLowerCase().includes('password') || errorDetail.toLowerCase().includes('super admin') || errorDetail.toLowerCase().includes('main admin') || errorDetail.toLowerCase().includes('branch admin'));
 
-    if (hasAdminToken && isAdminRequest && (!error.response || [401, 403].includes(error.response.status))) {
+    const isSessionExpirationError = status === 401 && (
+      !errorDetail ||
+      errorDetail.toLowerCase().includes('credentials') ||
+      errorDetail.toLowerCase().includes('session') ||
+      errorDetail.toLowerCase().includes('expired') ||
+      errorDetail.toLowerCase().includes('logged out') ||
+      errorDetail.toLowerCase().includes('token') ||
+      errorDetail.toLowerCase().includes('unauthorized')
+    );
+
+    const isBranchPortalRequest = isBranchPortalContext() || url.startsWith('/branch/');
+    const isSuperadminAccessRequest = /\/branches\/\d+\/superadmin-access/.test(url);
+
+    if (hasAdminToken && isAdminRequest && isSessionExpirationError && !isBranchPortalRequest && !isSuperadminAccessRequest) {
       // Don't redirect if it's a password confirmation error - let the component handle it
       if (isPasswordConfirmationError || (url.includes('/accounts') && isProtectedPasswordRequest)) {
         return Promise.reject(error);

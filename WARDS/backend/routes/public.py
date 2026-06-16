@@ -379,26 +379,17 @@ async def get_branch_details(
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
 
-    # Get operating hours (always public)
-    hours = db.query(BranchOperatingHours).filter(
-        BranchOperatingHours.branch_id == branch_id
-    ).all()
-
     result = {
         "id": branch.id,
         "name": get_decrypted_or_raw(branch, "name") or branch.name,
         "location": get_decrypted_or_raw(branch, "location") or branch.location,
-        "operating_hours": [
-            {
-                "day": h.day_of_week,
-                "opening": h.opening_time,
-                "closing": h.closing_time,
-                "is_open": h.is_open
-            } for h in hours
-        ],
     }
 
     if current_user:
+        hours = db.query(BranchOperatingHours).filter(
+            BranchOperatingHours.branch_id == branch_id
+        ).all()
+
         # Get branch announcements
         announcements = db.query(Announcement).filter(
             Announcement.is_active == True,
@@ -414,6 +405,14 @@ async def get_branch_details(
 
         result["counters"] = branch.counters
         result["status"] = branch.status
+        result["operating_hours"] = [
+            {
+                "day": h.day_of_week,
+                "opening": h.opening_time,
+                "closing": h.closing_time,
+                "is_open": h.is_open
+            } for h in hours
+        ]
         result["queue_enabled"] = bool(get_branch_setting_value(db, "queueEnabled", branch_id))
         result["announcements"] = [serialize_public_announcement(a) for a in announcements]
         result["services"] = services

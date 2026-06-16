@@ -4,6 +4,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from utils.system_settings import get_setting_value
+from utils.field_crypto import get_decrypted_or_raw
 
 
 def get_session_timeout_minutes(db: Session) -> int:
@@ -19,11 +20,13 @@ def slugify_branch_name(name: str) -> str:
 
 def get_branch_dashboard_url(account: object) -> str:
     branch = getattr(account, "branch", None)
-    if branch and getattr(branch, "dashboard_url", None):
-        return branch.dashboard_url
+    if branch:
+        branch_dashboard_url = get_decrypted_or_raw(branch, "dashboard_url") or getattr(branch, "dashboard_url", None)
+        if branch_dashboard_url:
+            return branch_dashboard_url
 
     base_url = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000").rstrip("/")
-    branch_name = getattr(branch, "name", "") if branch else ""
+    branch_name = (get_decrypted_or_raw(branch, "name") or getattr(branch, "name", "")) if branch else ""
     if branch_name:
         return f"{base_url}/branch-dashboard/{slugify_branch_name(branch_name)}"
 

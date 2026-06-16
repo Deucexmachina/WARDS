@@ -1200,7 +1200,11 @@ def serialize_branch_policy(policy: Policy, current_username: str | None = None,
 
 
 def serialize_branch_announcement(announcement: Announcement, branch_name: Optional[str] = None, is_viewed: bool = False):
-    source_name = branch_name or (announcement.branch.name if announcement.branch else None)
+    source_name = branch_name or (
+        (get_decrypted_or_raw(announcement.branch, "name") or announcement.branch.name)
+        if announcement.branch
+        else None
+    )
     title = decrypt_optional_value(getattr(announcement, "title_enc", None)) or announcement.title
     content = decrypt_optional_value(getattr(announcement, "content_enc", None)) or announcement.content
     attachments = serialize_attachments(
@@ -2075,7 +2079,7 @@ async def verify_branch_payment(
                 "payment_method": payment.payment_method,
                 "amount": format_currency(payment.amount),
                 "status": "Payment Verified",
-                "branch": branch.name if branch else payment.branch,
+                "branch": (get_decrypted_or_raw(branch, "name") or branch.name) if branch else (get_decrypted_or_raw(payment, "branch") or payment.branch),
                 "email_context": "branch_verified",
             },
         )
@@ -2221,7 +2225,7 @@ def _store_memo_attachment(attachment: Optional[UploadFile]) -> tuple[str | None
     validate_upload_file(
         attachment,
         file_bytes,
-        allowed_extensions={".pdf", ".png", ".jpg", ".jpeg", ".doc", ".docx", ".xls", ".xlsx"},
+        allowed_extensions={".pdf", ".png", ".jpg", ".jpeg", ".docx", ".xlsx"},
     )
 
     upload_dir = Path("uploads/memos")
@@ -2330,7 +2334,7 @@ async def list_branch_announcements(
     db: Session = Depends(get_db),
 ):
     branch = db.query(Branch).filter(Branch.id == current_staff.branch_id).first()
-    branch_name = branch.name if branch else f"Branch {current_staff.branch_id}"
+    branch_name = (get_decrypted_or_raw(branch, "name") or branch.name) if branch else f"Branch {current_staff.branch_id}"
     announcements = (
         db.query(Announcement)
         .filter(Announcement.branch_id == current_staff.branch_id)
@@ -2416,7 +2420,8 @@ async def create_branch_announcement(
         db.rollback()
         raise HTTPException(status_code=500, detail="Failed to create branch announcement") from error
 
-    return serialize_branch_announcement(announcement, branch.name, True)
+    branch_name = get_decrypted_or_raw(branch, "name") or branch.name
+    return serialize_branch_announcement(announcement, branch_name, True)
 
 
 @router.put("/announcements/{announcement_id}")
@@ -2463,7 +2468,8 @@ async def update_branch_announcement(
         db.rollback()
         raise HTTPException(status_code=500, detail="Failed to update branch announcement") from error
 
-    return serialize_branch_announcement(announcement, branch.name, True)
+    branch_name = get_decrypted_or_raw(branch, "name") or branch.name
+    return serialize_branch_announcement(announcement, branch_name, True)
 
 
 @router.delete("/announcements/{announcement_id}")

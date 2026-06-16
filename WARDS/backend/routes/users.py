@@ -1,12 +1,16 @@
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from database.models import ActivityLog, Admin, Branch, BranchStaff, CitizenUser, PrivacyConsent, Queue, QueueHistory, TaxAssessmentRecord, TaxpayerIdentifierSubmission, get_db
-from auth import get_current_admin_user, hash_password, verify_password, verify_account_password
+from auth import get_current_admin_user, get_current_branch_staff, hash_password, verify_password, verify_account_password
 from utils.field_crypto import apply_citizen_user_security, get_decrypted_or_raw, serialize_citizen_user
 from utils.security_validation import (
     ensure_contact_number_is_unique,
@@ -20,7 +24,37 @@ from utils.security_validation import (
 )
 from utils.rbac import require_permission
 
+def get_rate_limit_key(request: Request) -> str:
+    """Get rate limit key - user-based if authenticated, otherwise IP-based"""
+    if hasattr(request.state, 'user') and request.state.user:
+        return f"user:{request.state.user.id}"
+    return get_remote_address(request)
+
+
+limiter = Limiter(key_func=get_rate_limit_key)
+
 router = APIRouter()
+security = HTTPBearer()
+
+
+async def get_accounts_current_user(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
+) -> Admin | BranchStaff:
+    try:
+        return await get_current_admin_user(request, credentials, db)
+    except HTTPException as admin_exc:
+        try:
+            staff = await get_current_branch_staff(request, credentials, db)
+        except HTTPException:
+            raise admin_exc
+        if staff.role != "branch_admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only Branch Admin accounts can manage branch accounts.",
+            )
+        return staff
 
 
 class UserCreate(BaseModel):
@@ -289,7 +323,7 @@ async def get_all_users(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
     branch_id: Optional[int] = Query(None),
-    current_user: Admin | BranchStaff = Depends(get_current_admin_user),
+    current_user: Admin | BranchStaff = Depends(get_accounts_current_user),
     db: Session = Depends(get_db),
 ):
     require_accounts_access(current_user)
@@ -348,9 +382,11 @@ async def get_all_users(
 
 
 @router.post("/")
+@limiter.limit("10/minute")
 async def create_user(
+    request: Request,
     user: UserCreate,
-    current_user: Admin | BranchStaff = Depends(get_current_admin_user),
+    current_user: Admin | BranchStaff = Depends(get_accounts_current_user),
     db: Session = Depends(get_db),
 ):
     require_accounts_access(current_user)
@@ -436,10 +472,12 @@ async def create_user(
 
 
 @router.put("/{user_id}")
+@limiter.limit("10/minute")
 async def update_user(
+    request: Request,
     user_id: int,
     user: UserUpdate,
-    current_user: Admin | BranchStaff = Depends(get_current_admin_user),
+    current_user: Admin | BranchStaff = Depends(get_accounts_current_user),
     db: Session = Depends(get_db),
 ):
     require_accounts_access(current_user)
@@ -507,7 +545,7 @@ async def deactivate_user(
     user_id: int,
     role: Optional[str] = Query(None),
     payload: ProtectedAccountAction = None,
-    current_user: Admin | BranchStaff = Depends(get_current_admin_user),
+    current_user: Admin | BranchStaff = Depends(get_accounts_current_user),
     db: Session = Depends(get_db),
 ):
     require_accounts_access(current_user)
@@ -538,7 +576,7 @@ async def activate_user(
     user_id: int,
     role: Optional[str] = Query(None),
     payload: ProtectedAccountAction = None,
-    current_user: Admin | BranchStaff = Depends(get_current_admin_user),
+    current_user: Admin | BranchStaff = Depends(get_accounts_current_user),
     db: Session = Depends(get_db),
 ):
     require_accounts_access(current_user)
@@ -565,11 +603,13 @@ async def activate_user(
 
 
 @router.delete("/{user_id}")
+@limiter.limit("10/minute")
 async def delete_user(
+    request: Request,
     user_id: int,
     role: Optional[str] = Query(None),
     payload: ProtectedAccountAction = None,
-    current_user: Admin | BranchStaff = Depends(get_current_admin_user),
+    current_user: Admin | BranchStaff = Depends(get_accounts_current_user),
     db: Session = Depends(get_db),
 ):
     require_accounts_access(current_user)

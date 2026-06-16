@@ -1,0 +1,151 @@
+import gzip
+import hashlib
+import os
+import shutil
+import subprocess
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from urllib.parse import urlparse
+
+
+@dataclass
+class BackupResult:
+    filename: str
+    path: Path
+    size_bytes: int
+    checksum: str
+    db_type: str
+
+
+def _database_url() -> str:
+    value = os.getenv("DATABASE_URL", "").strip()
+    if not value:
+        raise RuntimeError("DATABASE_URL is required for database backup operations")
+    return value
+
+
+def backup_dir() -> Path:
+    path = Path(os.getenv("BACKUP_DIR", "./backups")).resolve()
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _db_type(database_url: str) -> str:
+    scheme = urlparse(database_url).scheme.lower()
+    if scheme.startswith("postgres"):
+        return "postgresql"
+    if scheme.startswith("mysql"):
+        return "mysql"
+    if scheme.startswith("sqlite"):
+        return "sqlite"
+    raise RuntimeError(f"Unsupported DATABASE_URL scheme for backup: {scheme}")
+
+
+def _dump_command(database_url: str, db_type: str) -> list[str]:
+    parsed = urlparse(database_url)
+    if db_type == "postgresql":
+        command = ["pg_dump", "--no-owner", "--no-privileges"]
+        if parsed.hostname:
+            command += ["--host", parsed.hostname]
+        if parsed.port:
+            command += ["--port", str(parsed.port)]
+        if parsed.username:
+            command += ["--username", parsed.username]
+        command.append((parsed.path or "").lstrip("/"))
+        return command
+    if db_type == "mysql":
+        command = ["mysqldump"]
+        if parsed.hostname:
+            command += ["--host", parsed.hostname]
+        if parsed.port:
+            command += ["--port", str(parsed.port)]
+        if parsed.username:
+            command += ["--user", parsed.username]
+        if parsed.password:
+            command.append(f"--password={parsed.password}")
+        command.append((parsed.path or "").lstrip("/"))
+        return command
+    raise RuntimeError(f"External dump command is not supported for {db_type}")
+
+
+def _restore_command(database_url: str, db_type: str) -> list[str]:
+    parsed = urlparse(database_url)
+    if db_type == "postgresql":
+        command = ["psql"]
+        if parsed.hostname:
+            command += ["--host", parsed.hostname]
+        if parsed.port:
+            command += ["--port", str(parsed.port)]
+        if parsed.username:
+            command += ["--username", parsed.username]
+        command.append((parsed.path or "").lstrip("/"))
+        return command
+    if db_type == "mysql":
+        command = ["mysql"]
+        if parsed.hostname:
+            command += ["--host", parsed.hostname]
+        if parsed.port:
+            command += ["--port", str(parsed.port)]
+        if parsed.username:
+            command += ["--user", parsed.username]
+        if parsed.password:
+            command.append(f"--password={parsed.password}")
+        command.append((parsed.path or "").lstrip("/"))
+        return command
+    raise RuntimeError(f"External restore command is not supported for {db_type}")
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def create_database_backup() -> BackupResult:
+    database_url = _database_url()
+    db_type = _db_type(database_url)
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    output_path = backup_dir() / f"database_{timestamp}.sql.gz"
+
+    if db_type == "sqlite":
+        parsed = urlparse(database_url)
+        db_path = Path(parsed.path).resolve()
+        with db_path.open("rb") as source, gzip.open(output_path, "wb") as target:
+            shutil.copyfileobj(source, target)
+    else:
+        command = _dump_command(database_url, db_type)
+        with gzip.open(output_path, "wb") as target:
+            subprocess.run(command, stdout=target, stderr=subprocess.PIPE, check=True)
+
+    checksum = sha256_file(output_path)
+    return BackupResult(
+        filename=output_path.name,
+        path=output_path,
+        size_bytes=output_path.stat().st_size,
+        checksum=checksum,
+        db_type=db_type,
+    )
+
+
+def restore_database_backup(path: Path, expected_checksum: str | None, db_type: str | None = None) -> None:
+    path = Path(path).resolve()
+    if not path.exists():
+        raise RuntimeError("Backup file is missing from disk")
+    if expected_checksum and sha256_file(path) != expected_checksum:
+        raise RuntimeError("Backup checksum mismatch")
+
+    database_url = _database_url()
+    resolved_db_type = db_type or _db_type(database_url)
+    if resolved_db_type == "sqlite":
+        parsed = urlparse(database_url)
+        db_path = Path(parsed.path).resolve()
+        with gzip.open(path, "rb") as source, db_path.open("wb") as target:
+            shutil.copyfileobj(source, target)
+        return
+
+    command = _restore_command(database_url, resolved_db_type)
+    with gzip.open(path, "rb") as source:
+        subprocess.run(command, stdin=source, stderr=subprocess.PIPE, check=True)

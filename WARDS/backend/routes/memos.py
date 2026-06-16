@@ -90,6 +90,14 @@ def validate_recipients(memo_data: MemoCreate | MemoUpdate):
     if memo_data.recipient_type == "all":
         memo_data.recipients = "all"
 
+
+def build_branch_lookup(db: Session) -> dict[int, str]:
+    return {
+        branch.id: (get_decrypted_or_raw(branch, "name") or branch.name)
+        for branch in db.query(Branch).all()
+    }
+
+
 @router.get("/")
 async def get_all_memos(
     current_user: Admin = Depends(require_main_admin()),
@@ -97,7 +105,7 @@ async def get_all_memos(
 ):
     """Get full memo archive for the main admin office"""
     memos = db.query(Memo).order_by(Memo.created_at.desc()).all()
-    branch_lookup = {branch.id: branch.name for branch in db.query(Branch).all()}
+    branch_lookup = build_branch_lookup(db)
     return [serialize_memo(memo, branch_lookup, current_user.username, db) for memo in memos]
 
 @router.post("/")
@@ -131,7 +139,7 @@ async def create_memo(
         validate_upload_file(
             attachment,
             file_bytes,
-            allowed_extensions={".pdf", ".png", ".jpg", ".jpeg", ".doc", ".docx", ".xls", ".xlsx"},
+            allowed_extensions={".pdf", ".png", ".jpg", ".jpeg", ".docx", ".xlsx"},
         )
 
         upload_dir = Path("uploads/memos")
@@ -170,7 +178,7 @@ async def create_memo(
     db.commit()
     db.refresh(new_memo)
 
-    branch_lookup = {branch.id: branch.name for branch in db.query(Branch).all()}
+    branch_lookup = build_branch_lookup(db)
     return serialize_memo(new_memo, branch_lookup, current_user.username, db)
 
 @router.put("/{memo_id}")
@@ -215,7 +223,7 @@ async def update_memo(
         validate_upload_file(
             attachment,
             file_bytes,
-            allowed_extensions={".pdf", ".png", ".jpg", ".jpeg", ".doc", ".docx", ".xls", ".xlsx"},
+            allowed_extensions={".pdf", ".png", ".jpg", ".jpeg", ".docx", ".xlsx"},
         )
 
         upload_dir = Path("uploads/memos")
@@ -247,7 +255,7 @@ async def update_memo(
     db.commit()
 
     db.refresh(db_memo)
-    branch_lookup = {branch.id: branch.name for branch in db.query(Branch).all()}
+    branch_lookup = build_branch_lookup(db)
     return serialize_memo(db_memo, branch_lookup, current_user.username, db)
 
 @router.delete("/{memo_id}")

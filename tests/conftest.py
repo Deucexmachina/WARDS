@@ -15,3 +15,16 @@ for candidate in (ROOT, BACKEND_ROOT):
     path_text = str(candidate)
     if path_text not in sys.path:
         sys.path.insert(0, path_text)
+
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def reset_auth_rate_limiter_state():
+    try:
+        from routes import unified_auth
+
+        unified_auth.limiter.reset()
+    except Exception:
+        pass

@@ -1,7 +1,10 @@
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
@@ -16,6 +19,16 @@ from utils.security_validation import (
     normalize_citizen_full_name,
     validate_strong_password,
 )
+from utils.request_signing import require_internal_signature
+
+def get_rate_limit_key(request: Request) -> str:
+    """Get rate limit key - user-based if authenticated, otherwise IP-based"""
+    if hasattr(request.state, 'user') and request.state.user:
+        return f"user:{request.state.user.id}"
+    return get_remote_address(request)
+
+
+limiter = Limiter(key_func=get_rate_limit_key)
 
 router = APIRouter()
 
@@ -104,7 +117,9 @@ async def list_users(current_admin=Depends(get_current_admin_user), db: Session 
 
 
 @router.post("/users")
+@limiter.limit("10/minute")
 async def create_user(
+    request: Request,
     user_data: AdminUserCreate,
     current_admin=Depends(get_current_admin_user),
     db: Session = Depends(get_db),
@@ -170,10 +185,13 @@ async def create_user(
 
 
 @router.put("/users/{role}/{user_id}")
+@limiter.limit("10/minute")
 async def update_user(
+    request: Request,
     role: str,
     user_id: int,
     user_data: AdminUserUpdate,
+    _signature_ok: bool = Depends(require_internal_signature),
     current_admin=Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
@@ -262,7 +280,9 @@ async def activate_user(
 
 
 @router.delete("/users/{role}/{user_id}")
+@limiter.limit("10/minute")
 async def delete_user(
+    request: Request,
     role: str,
     user_id: int,
     current_admin=Depends(get_current_admin_user),

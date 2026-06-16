@@ -11,6 +11,9 @@ from textwrap import wrap
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -40,6 +43,16 @@ from utils.file_delivery import deliver_file_response
 from utils.file_validation import validate_upload_file
 from utils.security_validation import format_tin, normalize_email, normalize_identity_name, normalize_tin, ensure_tin_is_unique
 from utils.system_settings import SYSTEM_DISABLED_MESSAGE, get_setting_value
+from utils.request_signing import require_internal_signature
+
+def get_rate_limit_key(request: Request) -> str:
+    """Get rate limit key - user-based if authenticated, otherwise IP-based"""
+    if hasattr(request.state, 'user') and request.state.user:
+        return f"user:{request.state.user.id}"
+    return get_remote_address(request)
+
+
+limiter = Limiter(key_func=get_rate_limit_key)
 
 router = APIRouter()
 OUTPUT_DIR = Path(__file__).resolve().parents[1] / "output" / "payments"
@@ -2317,7 +2330,9 @@ async def get_business_tax_application(
 
 
 @router.post("/bt/applications/{tracking_number}/uploads")
+@limiter.limit("10/minute")
 async def upload_business_tax_documents(
+    request: Request,
     tracking_number: str,
     sales_declaration: UploadFile | None = File(default=None),
     financial_statements: UploadFile | None = File(default=None),
@@ -2485,23 +2500,25 @@ async def generate_business_tax_reference(
 
 
 @router.post("/generate-reference")
+@limiter.limit("10/minute")
 async def generate_payment_reference(
-    request: PaymentReferenceRequest,
+    request: Request,
+    payload: PaymentReferenceRequest,
     db: Session = Depends(get_db),
     current_user: CitizenUser = Depends(get_current_user),
 ):
-    payment_method = normalize_public_payment_method(request.paymentMethod)
-    contact_number = normalize_contact_number(request.contactNumber)
-    normalized_tin = verify_payment_identity(db, current_user, request.taxpayerName, request.tin)
+    payment_method = normalize_public_payment_method(payload.paymentMethod)
+    contact_number = normalize_contact_number(payload.contactNumber)
+    normalized_tin = verify_payment_identity(db, current_user, payload.taxpayerName, payload.tin)
     ref_number = build_unique_payment_reference(db)
     txn_id = f"TX-{datetime.utcnow().strftime('%Y')}-{random.randint(10000, 99999)}"
     expiry = datetime.utcnow() + timedelta(hours=24)
 
-    branch = resolve_branch(db, request.branch)
+    branch = resolve_branch(db, payload.branch)
     if not branch:
         raise HTTPException(status_code=404, detail="Selected branch not found")
     ensure_public_payment_gateway_enabled(db, branch.id)
-    if request.amount <= 0:
+    if payload.amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be greater than zero")
 
     payment = Payment(
@@ -2509,12 +2526,12 @@ async def generate_payment_reference(
         txn_id=txn_id,
         taxpayer_name=citizen_name(current_user),
         tin=normalized_tin,
-        property_ref_number=request.refNumber,
-        tax_type=request.taxType,
-        amount=request.amount,
+        property_ref_number=payload.refNumber,
+        tax_type=payload.taxType,
+        amount=payload.amount,
         payment_method=payment_method,
         branch_id=branch.id if branch else None,
-        branch=request.branch,
+        branch=payload.branch,
         email=citizen_email(current_user),
         contact_number=contact_number,
         status="Pending",
@@ -2545,8 +2562,9 @@ async def generate_payment_reference(
 
 
 @router.post("/process")
-async def process_payment(request: PaymentProcessRequest, http_request: Request, db: Session = Depends(get_db)):
-    payment = find_payment_by_ref_number(db, Payment, request.refNumber)
+@limiter.limit("10/minute")
+async def process_payment(request: Request, payload: PaymentProcessRequest, _signature_ok: bool = Depends(require_internal_signature), db: Session = Depends(get_db)):
+    payment = find_payment_by_ref_number(db, Payment, payload.refNumber)
     if not payment:
         raise HTTPException(status_code=404, detail="Payment reference not found")
     ensure_public_payment_gateway_enabled(db, payment.branch_id)
@@ -2554,16 +2572,16 @@ async def process_payment(request: PaymentProcessRequest, http_request: Request,
     existing_metadata = parse_payment_metadata(payment)
     existing_payment_method = payment_value(payment, "payment_method")
     requested_payment_method = (
-        normalize_public_payment_method(request.paymentMethod)
-        if request.paymentMethod
+        normalize_public_payment_method(payload.paymentMethod)
+        if payload.paymentMethod
         else existing_payment_method
     )
-    requested_bank_code = (request.bankCode or "").strip().lower()
+    requested_bank_code = (payload.bankCode or "").strip().lower()
     existing_bank_code = (existing_metadata.get("selected_bank") or "").strip().lower()
-    method_changed = bool(request.paymentMethod) and bool(existing_payment_method) and existing_payment_method != requested_payment_method
+    method_changed = bool(payload.paymentMethod) and bool(existing_payment_method) and existing_payment_method != requested_payment_method
     bank_changed = requested_payment_method == "banking" and bool(requested_bank_code) and requested_bank_code != existing_bank_code
     use_direct_redirect = requested_payment_method in {"gcash", "maya", "banking"}
-    frontend_url = resolve_frontend_base_url(http_request)
+    frontend_url = resolve_frontend_base_url(request)
 
     if has_active_checkout_session(payment) and not method_changed and not bank_changed and not use_direct_redirect:
         return {
@@ -2575,9 +2593,9 @@ async def process_payment(request: PaymentProcessRequest, http_request: Request,
         }
     
     try:
-        selected_method = request.paymentMethod or existing_payment_method or "gcash"
+        selected_method = payload.paymentMethod or existing_payment_method or "gcash"
         normalized_payment_method = normalize_public_payment_method(selected_method)
-        checkout_payment_methods = resolve_checkout_payment_methods(selected_method, request.bankCode)
+        checkout_payment_methods = resolve_checkout_payment_methods(selected_method, payload.bankCode)
         payment.payment_method = normalized_payment_method
         
         metadata = {
@@ -2590,7 +2608,7 @@ async def process_payment(request: PaymentProcessRequest, http_request: Request,
             "branch": payment_value(payment, "branch"),
             "email": payment_value(payment, "email") or "",
             "contact_number": payment_value(payment, "contact_number") or "",
-            "selected_bank": (request.bankCode or "").strip().lower(),
+            "selected_bank": (payload.bankCode or "").strip().lower(),
             "payment_method": normalized_payment_method,
         }
         
@@ -2629,7 +2647,7 @@ async def process_payment(request: PaymentProcessRequest, http_request: Request,
             db.add(ActivityLog(
                 action="PayMongo Source Created",
                 user=taxpayer_email or taxpayer_name,
-                details=f"Direct PayMongo gcash source created for {request.refNumber}",
+                details=f"Direct PayMongo gcash source created for {payload.refNumber}",
                 type="transaction",
             ))
             db.commit()
@@ -2691,7 +2709,7 @@ async def process_payment(request: PaymentProcessRequest, http_request: Request,
             db.add(ActivityLog(
                 action="PayMongo Payment Intent Created",
                 user=taxpayer_email or taxpayer_name,
-                details=f"Direct PayMongo Maya payment intent created for {request.refNumber}",
+                details=f"Direct PayMongo Maya payment intent created for {payload.refNumber}",
                 type="transaction",
             ))
             db.commit()
@@ -2706,7 +2724,7 @@ async def process_payment(request: PaymentProcessRequest, http_request: Request,
             }
 
         if normalized_payment_method == "banking":
-            selected_bank_code = (request.bankCode or "").strip().lower()
+            selected_bank_code = (payload.bankCode or "").strip().lower()
             if selected_bank_code not in {"bpi", "ubp"}:
                 raise HTTPException(
                     status_code=400,
@@ -2759,7 +2777,7 @@ async def process_payment(request: PaymentProcessRequest, http_request: Request,
             db.add(ActivityLog(
                 action="PayMongo Online Banking Intent Created",
                 user=taxpayer_email or taxpayer_name,
-                details=f"Direct PayMongo {bank_method_type} banking intent created for {request.refNumber} using {selected_bank_code}",
+                details=f"Direct PayMongo {bank_method_type} banking intent created for {payload.refNumber} using {selected_bank_code}",
                 type="transaction",
             ))
             db.commit()
@@ -2809,7 +2827,7 @@ async def process_payment(request: PaymentProcessRequest, http_request: Request,
         db.add(ActivityLog(
             action="PayMongo Checkout Session Created",
             user=taxpayer_email or taxpayer_name,
-            details=f"PayMongo checkout session created for {request.refNumber}",
+            details=f"PayMongo checkout session created for {payload.refNumber}",
             type="transaction",
         ))
         db.commit()
@@ -2827,7 +2845,7 @@ async def process_payment(request: PaymentProcessRequest, http_request: Request,
         db.add(ActivityLog(
             action="PayMongo Error",
             user=payment.email or payment.taxpayer_name,
-            details=f"PayMongo error for {request.refNumber}: {str(e)}",
+            details=f"PayMongo error for {payload.refNumber}: {str(e)}",
             type="error",
         ))
         db.commit()
@@ -3296,6 +3314,7 @@ def _verify_paymongo_signature(request: Request, raw_body: bytes) -> bool:
 
 
 @router.post("/paymongo/webhook")
+@limiter.limit("60/minute")
 async def paymongo_webhook(request: Request, db: Session = Depends(get_db)):
     """
     Handle PayMongo webhook events for payment status updates

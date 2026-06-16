@@ -6,6 +6,9 @@ import sys
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -64,6 +67,15 @@ from SECURITY.security_engine import (
 )
 from SECURITY.security_models import SecurityIncident, SecurityMonitoredFile
 from SECURITY.security_models import SecurityDetectionEvent, SecurityRecoveryEvent
+
+def get_rate_limit_key(request: Request) -> str:
+    """Get rate limit key - user-based if authenticated, otherwise IP-based"""
+    if hasattr(request.state, 'user') and request.state.user:
+        return f"user:{request.state.user.id}"
+    return get_remote_address(request)
+
+
+limiter = Limiter(key_func=get_rate_limit_key)
 
 router = APIRouter()
 BACKEND_ENV_PATH = MASTER_ROOT / "WARDS" / "backend" / ".env"
@@ -482,6 +494,7 @@ async def _run_scan_background(job_id: str) -> list:
 
 
 @router.post("/scan/submit")
+@limiter.limit("5/minute")
 async def submit_full_scan(request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
     try:
         job = job_manager.submit("security_full_scan")

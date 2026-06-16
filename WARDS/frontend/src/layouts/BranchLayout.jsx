@@ -33,9 +33,11 @@ const BranchLayout = () => {
   const assignedServiceLabel = rawAssignedServiceLabel.replace(/\s+Window$/i, '');
   const assignedPhysicalWindowLabel = staff?.assigned_window_number ? `Window ${staff.assigned_window_number}` : '';
   const assignedWindowLabel = [assignedPhysicalWindowLabel, assignedServiceLabel].filter(Boolean).join(' - ');
-  const branchDisplayName = branchSlug
-    ? `${branchSlug.replace(/-/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase())} Branch`
-    : 'Galas Branch';
+  const branchDisplayName = staff?.branch_name
+    ? `${staff.branch_name} Branch`
+    : branchSlug
+      ? `${branchSlug.replace(/-/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase())} Branch`
+      : 'Branch Portal';
   const basePath = branchSlug ? `/branch-dashboard/${branchSlug}` : getBranchPortalPath(staff);
   const queueOnlyPath = `${basePath}/queue`;
   const [unreadMemoCount, setUnreadMemoCount] = useState(0);

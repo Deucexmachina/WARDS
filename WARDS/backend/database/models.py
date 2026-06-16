@@ -1080,6 +1080,9 @@ class Backup(Base):
     size = Column(String)
     type = Column(String)
     status = Column(String, default="Completed")
+    checksum = Column(String(128), nullable=True)
+    db_type = Column(String(40), nullable=True)
+    retention_days = Column(Integer, default=30)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class RevokedToken(Base):

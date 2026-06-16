@@ -77,7 +77,7 @@ def build_branch_dashboard_url(name: str) -> str:
 
 def ensure_branch_dashboard_url(branch: Branch) -> Branch:
     if not branch.dashboard_url:
-        branch.dashboard_url = build_branch_dashboard_url(get_decrypted_or_raw(branch, "name") or branch.name)
+        branch.dashboard_url = build_branch_dashboard_url(get_decrypted_or_raw(branch, "name") or "")
     return branch
 
 
@@ -111,10 +111,10 @@ def get_branch_verification_status(branch: Branch, db: Session) -> str:
 
 def serialize_branch(branch: Branch, db: Session) -> dict:
     ensure_branch_dashboard_url(branch)
-    branch_name = get_decrypted_or_raw(branch, "name") or branch.name
-    branch_location = get_decrypted_or_raw(branch, "location") or branch.location
-    branch_contact = get_decrypted_or_raw(branch, "contact") or branch.contact
-    branch_dashboard_url = get_decrypted_or_raw(branch, "dashboard_url") or branch.dashboard_url
+    branch_name = get_decrypted_or_raw(branch, "name")
+    branch_location = get_decrypted_or_raw(branch, "location")
+    branch_contact = get_decrypted_or_raw(branch, "contact")
+    branch_dashboard_url = get_decrypted_or_raw(branch, "dashboard_url")
     window_accounts = (
         db.query(BranchStaff)
         .filter(
@@ -345,8 +345,10 @@ async def create_superadmin_branch_session(
     )
 
     access_token = create_access_token(
-        data={
+        "branch",
+        {
             "sub": staff.username,
+            "email": staff.email,
             "role": "branch",
             "internal_role": staff.role,
             "branch_id": staff.branch_id,
@@ -358,7 +360,6 @@ async def create_superadmin_branch_session(
             "type": "branch",
             "managed_by": "superadmin",
         },
-        expires_delta=timedelta(minutes=get_session_timeout_minutes(db)),
     )
     db.add(ActivityLog(
         action="Superadmin Branch Access",
@@ -387,6 +388,7 @@ async def create_superadmin_branch_session(
             "window_label": get_window_display_label(staff),
             "assigned_window_number": staff.assigned_window_number,
             "superadmin_managed_branch": True,
+            "branch_name": get_decrypted_or_raw(branch, "name"),
             "window_accounts": [
                 {
                     "id": account.id,

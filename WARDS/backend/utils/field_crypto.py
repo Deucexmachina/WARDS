@@ -67,6 +67,8 @@ def hash_optional_value(value: Optional[str]) -> Optional[str]:
 def build_redacted_text(prefix: str, value: Optional[str], max_length: int = 255) -> Optional[str]:
     if value is None:
         return None
+    if is_redacted_placeholder(value):
+        return value
     text = str(value).strip()
     if not text:
         return None
@@ -91,7 +93,7 @@ def is_redacted_placeholder(value: Optional[str]) -> bool:
 def get_decrypted_or_raw(entity, field_name: str) -> Optional[str]:
     encrypted_value = getattr(entity, f"{field_name}_enc", None)
     decrypted = decrypt_optional_value(encrypted_value)
-    if decrypted:
+    if decrypted and not is_redacted_placeholder(decrypted):
         return decrypted
     raw_value = getattr(entity, field_name, None)
     if is_redacted_placeholder(raw_value):
@@ -132,6 +134,8 @@ def get_preferred_write_value(entity, field_name: str) -> Optional[str]:
 
 def set_encrypted_hash_companions(entity, field_name: str, value: Optional[str] = None):
     source_value = value if value is not None else getattr(entity, field_name, None)
+    if is_redacted_placeholder(source_value):
+        return
     setattr(entity, f"{field_name}_enc", encrypt_optional_value(source_value))
     setattr(entity, f"{field_name}_hash", hash_optional_value(source_value))
 
@@ -879,6 +883,18 @@ def find_citizen_by_email(db, CitizenUser, email: Optional[str]):
                 CitizenUser.email == normalized,
                 CitizenUser.email_hash == email_hash,
             )
+        )
+        .first()
+    )
+    if user:
+        return user
+
+    # Fallback for legacy plaintext records with NULL email_hash
+    user = (
+        db.query(CitizenUser)
+        .filter(
+            CitizenUser.email_hash.is_(None),
+            CitizenUser.email == normalized,
         )
         .first()
     )

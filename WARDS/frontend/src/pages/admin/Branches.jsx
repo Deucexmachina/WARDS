@@ -4,6 +4,7 @@ import { getEmailValidationMessage, validateStrongPassword } from '../../utils/v
 import WardsPageHero from '../../components/WardsPageHero';
 import PasswordField from '../../components/PasswordField';
 import { safeNavigate } from '../../utils/urlValidator';
+import { persistSession } from '../../utils/auth';
 import { CustomSelect } from '../../components/FormControls';
 
 const slugifyBranchName = (name) => {
@@ -430,9 +431,12 @@ const Branches = () => {
     try {
       setPageError('');
       const response = await api.post(`/branches/${branch.id}/superadmin-access`);
-      localStorage.setItem('branchToken', response.data.access_token);
-      localStorage.setItem('branchUser', JSON.stringify(response.data.user));
-      localStorage.setItem('branchAuthenticatedAt', new Date().toISOString());
+      persistSession({
+        portal: 'branch',
+        access_token: response.data.access_token,
+        user: response.data.user,
+        preserveAdminSession: true,
+      });
       const dashboardUrl = response.data.user?.dashboard_url || buildBranchDashboardUrl(branch.name || 'branch');
       safeNavigate(dashboardUrl);
     } catch (error) {

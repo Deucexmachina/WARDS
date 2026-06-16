@@ -64,7 +64,13 @@ export const getPortalHome = (portal) => {
   return '/';
 };
 
-export const persistSession = ({ portal, access_token, user, mfa_setup_required }) => {
+export const persistSession = ({
+  portal,
+  access_token,
+  user,
+  mfa_setup_required,
+  preserveAdminSession = false,
+}) => {
   const enrichedUser = mfa_setup_required !== undefined
     ? { ...user, mfa_setup_required }
     : user;
@@ -96,8 +102,11 @@ export const persistSession = ({ portal, access_token, user, mfa_setup_required 
     localStorage.removeItem('branchSettingsAuthenticatedAt');
     sessionStorage.removeItem('branchSettingsAuthenticated');
     sessionStorage.removeItem('branchSettingsAuthenticatedAt');
-    localStorage.removeItem('adminToken');
-    localStorage.removeItem('adminUser');
+    if (!preserveAdminSession) {
+      localStorage.removeItem('adminToken');
+      localStorage.removeItem('adminUser');
+      localStorage.removeItem('adminAuthenticatedAt');
+    }
     localStorage.removeItem('userToken');
     clearStoredPublicUser();
     return;

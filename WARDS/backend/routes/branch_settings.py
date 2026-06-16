@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -14,6 +17,15 @@ from utils.branch_appointment_settings import (
 from utils.branch_system_settings import get_branch_settings_payload, update_branch_system_settings
 from utils.system_settings import get_settings_payload
 
+
+def get_rate_limit_key(request: Request) -> str:
+    """Get rate limit key - user-based if authenticated, otherwise IP-based"""
+    if hasattr(request.state, 'user') and request.state.user:
+        return f"user:{request.state.user.id}"
+    return get_remote_address(request)
+
+
+limiter = Limiter(key_func=get_rate_limit_key)
 
 router = APIRouter()
 
@@ -75,7 +87,9 @@ async def get_branch_system_settings(
 
 
 @router.put("/system")
+@limiter.limit("10/minute")
 async def save_branch_system_settings(
+    request: Request,
     payload: BranchSystemSettingsPayload,
     current_staff: BranchStaff = Depends(require_branch_admin()),
     db: Session = Depends(get_db),
@@ -135,7 +149,9 @@ async def save_branch_appointment_settings(
 
 
 @router.post("/appointments/publish")
+@limiter.limit("10/minute")
 async def publish_branch_appointment_settings(
+    request: Request,
     payload: AppointmentSchedulePayload,
     current_staff: BranchStaff = Depends(require_branch_admin()),
     db: Session = Depends(get_db),
