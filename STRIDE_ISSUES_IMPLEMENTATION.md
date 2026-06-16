@@ -335,7 +335,7 @@ Main OCR runs in `run_ocr_in_executor()`. `qrcode.make()` is wrapped. However, `
    fallback = await asyncio.get_event_loop().run_in_executor(
        None, _build_queue_ocr_fallback_result, ...
    )
-   ```
+   ``` 
 4. Verify the change does not increase fallback response time beyond the existing timeout threshold.
 
 **Files to touch:** `routes/receipts.py` or wherever `_build_queue_ocr_fallback_result` lives.
