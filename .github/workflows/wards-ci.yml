@@ -134,6 +134,7 @@ jobs:
         env:
           DO_HOST: ${{ secrets.DO_HOST }}
         run: |
+          echo "DO_HOST length: ${#DO_HOST}"
           test -n "$DO_HOST"
           ssh-keyscan -H "$DO_HOST" >> ~/.ssh/known_hosts
       - name: Deploy application
