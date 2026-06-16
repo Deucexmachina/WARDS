@@ -121,7 +121,6 @@ jobs:
     needs: [backend, frontend]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.ENABLE_DIGITALOCEAN_DEPLOY == 'true'
-    environment: production
     steps:
       - name: Configure SSH key
         env:
