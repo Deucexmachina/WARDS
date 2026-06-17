@@ -110,7 +110,7 @@ def test_admin_login_without_mfa_succeeds():
         assert data["token_type"] == "bearer"
         assert data["portal"] == "admin"
         assert "user" in data
-        assert data["mfa_setup_required"] is False
+        assert data["mfa_setup_required"] is True
     finally:
         unified_auth.find_account_for_portal = original_find
         unified_auth.log_activity = original_log
@@ -146,7 +146,7 @@ def test_branch_login_without_mfa_succeeds():
         assert data["token_type"] == "bearer"
         assert data["portal"] == "branch"
         assert "user" in data
-        assert data["mfa_setup_required"] is False
+        assert data["mfa_setup_required"] is True
     finally:
         unified_auth.find_account_for_portal = original_find
         unified_auth.log_activity = original_log

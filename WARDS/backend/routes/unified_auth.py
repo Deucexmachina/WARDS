@@ -702,9 +702,9 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
     )
     log_unified_security_context(db, portal=portal, actor=get_mfa_username(portal, account), client_ip=client_ip, account=account)
 
-    mfa_setup_required = False
-    if portal == "public":
-        mfa_setup_required = get_mfa_secret(db, portal, get_mfa_username(portal, account)) is None
+    # Report MFA setup status truthfully for all portals.
+    # Frontend enforces it for admin/branch; citizens see a dismissible prompt.
+    mfa_setup_required = get_mfa_secret(db, portal, get_mfa_username(portal, account)) is None
 
     return {
         "access_token": access_token,
