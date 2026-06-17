@@ -15,7 +15,7 @@ from sqlalchemy import event, select
 try:
     MASTER_ROOT = Path(__file__).resolve().parents[3]
 except IndexError:
-    MASTER_ROOT = Path("/app")
+    MASTER_ROOT = Path("/")
 if str(MASTER_ROOT) not in sys.path:
     sys.path.insert(0, str(MASTER_ROOT))
 

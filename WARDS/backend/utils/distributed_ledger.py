@@ -21,7 +21,7 @@ from typing import Any
 try:
     MASTER_ROOT = Path(__file__).resolve().parents[3]
 except IndexError:
-    MASTER_ROOT = Path("/app")
+    MASTER_ROOT = Path("/")
 LEDGER_DIR = Path(os.getenv("DISTRIBUTED_LEDGER_DIR", str(MASTER_ROOT / "DATABASE" / "ledger")))
 LEDGER_FILE = LEDGER_DIR / "high_value_transactions.jsonl"
 INTEGRITY_SECRET = os.getenv("LEDGER_INTEGRITY_SECRET", os.getenv("LOG_INTEGRITY_SECRET", ""))
