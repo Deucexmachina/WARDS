@@ -2,7 +2,8 @@ import axios from 'axios';
 import { stripPlaceholderSuffixInResponse } from '../utils/responseSanitizer';
 import { getFriendlyErrorMessage, getModalToneForError, shouldSuppressGlobalErrorModal } from '../utils/errorMessages';
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+const rawBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+export const API_BASE_URL = rawBaseUrl.endsWith('/api') ? rawBaseUrl : rawBaseUrl + '/api';
 export const API_HOST = API_BASE_URL.replace(/\/api$/, '');
 
 const api = axios.create({

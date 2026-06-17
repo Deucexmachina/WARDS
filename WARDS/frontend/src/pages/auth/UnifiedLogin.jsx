@@ -9,7 +9,7 @@ import { AUTH_GRADIENTS } from '../../utils/authTheme';
 import cityHall from '../../assets/branding/qc_city_hall.jpg';
 
 import { API_HOST } from '../../services/api';
-const RECAPTCHA_SITE_KEY = '6LdOdsAsAAAAAKW-mZvEfaesLvdAwCm_SnZoiirK';
+const RECAPTCHA_SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY || '';
 const CAPTCHA_THRESHOLD = 3;
 const LOCKOUT_THRESHOLD = 5;
 const LOCKOUT_DURATION_MS = 2 * 60 * 1000;
@@ -763,7 +763,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
                 </div>
               </div>
 
-              {requiresCaptcha && (
+              {requiresCaptcha && RECAPTCHA_SITE_KEY && (
                 <div className="flex justify-center">
                   <ReCAPTCHA sitekey={RECAPTCHA_SITE_KEY} onChange={setRecaptchaToken} />
                 </div>
@@ -771,7 +771,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
 
               <button
                 type="submit"
-                disabled={loading || (requiresCaptcha && !recaptchaToken)}
+                disabled={loading || (requiresCaptcha && RECAPTCHA_SITE_KEY && !recaptchaToken)}
                 className={`w-full ${copy.button} text-white py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 shadow-md mt-1`}
               >
                 {loading ? 'Checking account…' : 'Continue'}
@@ -844,7 +844,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
                 </div>
               </div>
 
-              {requiresCaptcha && (
+              {requiresCaptcha && RECAPTCHA_SITE_KEY && (
                 <div className="flex justify-center">
                   <ReCAPTCHA sitekey={RECAPTCHA_SITE_KEY} onChange={setRecaptchaToken} />
                 </div>
@@ -860,7 +860,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
                 </button>
                 <button
                   type="submit"
-                  disabled={loading || totpCode.length !== 6 || (requiresCaptcha && !recaptchaToken)}
+                  disabled={loading || totpCode.length !== 6 || (requiresCaptcha && RECAPTCHA_SITE_KEY && !recaptchaToken)}
                   className={`flex-1 ${copy.button} text-white py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 shadow-md`}
                 >
                   {loading ? 'Signing in…' : 'Login'}

@@ -15,7 +15,7 @@ import {
 } from '../../utils/validation';
 
 import { API_HOST } from '../../services/api';
-const RECAPTCHA_SITE_KEY = '6LdOdsAsAAAAAKW-mZvEfaesLvdAwCm_SnZoiirK';
+const RECAPTCHA_SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY || '';
 const EyeIcon = ({ open }) => (
   <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
     {open ? (
@@ -288,7 +288,7 @@ const UserRegister = () => {
       return;
     }
 
-    if (!recaptchaToken) {
+    if (RECAPTCHA_SITE_KEY && !recaptchaToken) {
       setError('Please complete the reCAPTCHA verification.');
       setLoading(false);
       return;
@@ -303,7 +303,7 @@ const UserRegister = () => {
         password: formData.password,
         dpa_consent: true,
         dpa_version: agreement.version,
-        recaptcha_token: recaptchaToken,
+        recaptcha_token: recaptchaToken || undefined,
       });
 
       if (response.data.requires_email_verification) {
@@ -531,7 +531,7 @@ const UserRegister = () => {
                       </span>
                     </label>
 
-                    {hasAcceptedAgreement && (
+                    {hasAcceptedAgreement && RECAPTCHA_SITE_KEY && (
                       <div className="flex justify-center">
                         <ReCAPTCHA
                           ref={recaptchaRef}

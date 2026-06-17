@@ -11,7 +11,7 @@ import { openCheckoutPopupShell } from '../../utils/checkoutPopup';
 import { safeReplace, safeNavigate } from '../../utils/urlValidator';
 
 import { API_BASE_URL } from '../../services/api';
-const RECAPTCHA_SITE_KEY = '6LdOdsAsAAAAAKW-mZvEfaesLvdAwCm_SnZoiirK';
+const RECAPTCHA_SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY || '';
 const RPT_SEARCH_GUARD_STORAGE_KEY = 'wards-rpt-search-guard';
 const RPT_FAILED_SEARCH_THRESHOLD = 3;
 const RPT_LOCKOUT_DURATION_MS = 120 * 1000;
@@ -446,7 +446,7 @@ const PayTaxesRPT = () => {
   const text = RPT_COPY[language] || RPT_COPY.en;
   const isSearchLockedOut = lockoutUntil > now;
   const lockoutSecondsRemaining = isSearchLockedOut ? Math.max(1, Math.ceil((lockoutUntil - now) / 1000)) : 0;
-  const isSearchCaptchaRequired = requiresRecaptcha || isSearchLockedOut;
+  const isSearchCaptchaRequired = RECAPTCHA_SITE_KEY && (requiresRecaptcha || isSearchLockedOut);
   const isBranchSearchError =
     searchError === text.branchRequired ||
     searchError === (language === 'en' ? 'Please select the correct branch.' : 'Mangyaring piliin ang tamang sangay.');

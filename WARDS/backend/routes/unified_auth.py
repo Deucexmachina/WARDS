@@ -650,19 +650,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
         mfa_username = get_mfa_username(portal, account)
         mfa_secret = get_mfa_secret(db, portal, mfa_username)
         if not mfa_secret:
-            if portal in {"admin", "branch"}:
-                log_activity(
-                    db,
-                    "Login Without MFA Setup",
-                    credentials.identifier,
-                    f"Portal: {portal}, IP: {client_ip}",
-                    "security",
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Invalid credentials or account status.",
-                )
-            # For public: MFA not configured; allow login and require setup later via mfa_setup_required flag
+            # Allow login for all portals when MFA is not yet configured
             pass
         else:
             if not credentials.totp_code:

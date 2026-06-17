@@ -89,6 +89,12 @@ DATA_HASH_SECRET=long-random-data-hash-secret
 LOG_INTEGRITY_SECRET=long-random-log-integrity-secret
 BACKUP_INTEGRITY_SECRET=long-random-backup-integrity-secret
 INTERNAL_API_SECRET=long-random-internal-api-secret
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=CHANGE_ME_STRONG_ADMIN_PASSWORD
+ADMIN_EMAIL=admin@your-domain.local
+SUPERADMIN_USERNAME=superadmin
+SUPERADMIN_PASSWORD=CHANGE_ME_STRONG_SUPERADMIN_PASSWORD
+SUPERADMIN_EMAIL=superadmin@your-domain.local
 RECAPTCHA_SECRET_KEY=your-recaptcha-secret
 PAYMONGO_WEBHOOK_SECRET=your-paymongo-webhook-secret
 ```
@@ -104,7 +110,8 @@ Add:
 ```env
 MYSQL_ROOT_PASSWORD=CHANGE_ME_STRONG_MYSQL_ROOT_PASSWORD
 MYSQL_DATABASE=wards_db
-VITE_API_BASE_URL=http://DROPLET_PUBLIC_IP:8000
+VITE_API_BASE_URL=http://DROPLET_PUBLIC_IP:8000/api
+VITE_RECAPTCHA_SITE_KEY=your-recaptcha-site-key
 ```
 
 Keep `HTTPS_ONLY=false` until you have a domain and TLS reverse proxy. After adding a domain and certificate, set URLs to `https://...`, update `CORS_ORIGINS`, and set `HTTPS_ONLY=true`.

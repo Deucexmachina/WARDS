@@ -1166,83 +1166,62 @@ def ensure_auth_extensions():
         db.close()
 
 def bootstrap_admin():
-    admin_email = os.getenv("ADMIN_EMAIL", "treasurermain@gmail.com")
+    admin_username = os.getenv("ADMIN_USERNAME", "admin")
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@wards.local")
     admin_password = os.getenv("ADMIN_PASSWORD")
     if not admin_email or not admin_password:
         return
 
     db = SessionLocal()
     try:
-        admin_exists = db.query(Admin).filter(Admin.role.in_(["main_admin", "admin"])).first()
-        if admin_exists:
-            return
-
         from auth import hash_password
-        username = admin_email.split("@", 1)[0]
-        db.add(Admin(
-            username=username,
-            email=admin_email.lower(),
-            hashed_password=hash_password(admin_password),
-            role="main_admin",
-            status="Active",
-            is_verified=True,
-        ))
+        admin = db.query(Admin).filter(Admin.role.in_(["main_admin", "admin"])).first()
+        if admin:
+            admin.username = admin_username
+            admin.email = admin_email.lower()
+            admin.hashed_password = hash_password(admin_password)
+            admin.status = "Active"
+            admin.is_verified = True
+        else:
+            db.add(Admin(
+                username=admin_username,
+                email=admin_email.lower(),
+                hashed_password=hash_password(admin_password),
+                role="main_admin",
+                status="Active",
+                is_verified=True,
+            ))
         db.commit()
     finally:
         db.close()
 
 def bootstrap_superadmin():
+    superadmin_username = os.getenv("SUPERADMIN_USERNAME", "superadmin")
+    superadmin_email = os.getenv("SUPERADMIN_EMAIL", "superadmin@wards.local")
+    superadmin_password = os.getenv("SUPERADMIN_PASSWORD")
+    if not superadmin_email or not superadmin_password:
+        return
+
     db = SessionLocal()
     try:
-        existing = db.query(Admin).filter(Admin.username == "superadmin").first()
-        if existing:
-            return
-
-        superadmin_password = os.getenv("SUPERADMIN_PASSWORD")
-        if not superadmin_password:
-            import secrets
-            superadmin_password = secrets.token_urlsafe(24)
-            print("\n" + "=" * 70)
-            print("SECURITY WARNING: SUPERADMIN_PASSWORD env var not set.")
-            print("A one-time secure password has been generated.")
-            print("You MUST record this password now; it will not be shown again.")
-            print("=" * 70)
-            print(f"  Username: superadmin")
-            print(f"  Password: {superadmin_password}")
-            print("=" * 70 + "\n")
-
         from auth import hash_password
-        db.add(Admin(
-            username="superadmin",
-            email=os.getenv("SUPERADMIN_EMAIL", "treasurersuper@gmail.com"),
-            hashed_password=hash_password(superadmin_password),
-            role="superadmin",
-            status="Active",
-            is_verified=True,
-        ))
+        admin = db.query(Admin).filter(Admin.role == "superadmin").first()
+        if admin:
+            admin.username = superadmin_username
+            admin.email = superadmin_email.lower()
+            admin.hashed_password = hash_password(superadmin_password)
+            admin.status = "Active"
+            admin.is_verified = True
+        else:
+            db.add(Admin(
+                username=superadmin_username,
+                email=superadmin_email.lower(),
+                hashed_password=hash_password(superadmin_password),
+                role="superadmin",
+                status="Active",
+                is_verified=True,
+            ))
         db.commit()
-    finally:
-        db.close()
-
-
-def migrate_canonical_admin_emails():
-    db = SessionLocal()
-    try:
-        changed = False
-        for admin in db.query(Admin).filter(Admin.role.in_(["superadmin", "main_admin", "admin"])).all():
-            current_email = (admin.email or "").strip().lower()
-            target_email = None
-            if admin.role == "superadmin":
-                if not current_email or current_email.endswith(".local") or current_email != "treasurersuper@gmail.com":
-                    target_email = "treasurersuper@gmail.com"
-            elif admin.role in {"main_admin", "admin"}:
-                if not current_email or current_email.endswith(".local") or current_email != "treasurermain@gmail.com":
-                    target_email = "treasurermain@gmail.com"
-            if target_email and current_email != target_email:
-                admin.email = target_email
-                changed = True
-        if changed:
-            db.commit()
     finally:
         db.close()
 
@@ -1629,7 +1608,6 @@ def backfill_existing_log_integrity():
 
 
 backfill_existing_log_integrity()
-migrate_canonical_admin_emails()
 bootstrap_admin()
 bootstrap_superadmin()
 seed_business_registry()

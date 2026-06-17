@@ -35,6 +35,11 @@ def _get_seed_password(env_var: str, default_label: str) -> str:
 def seed_auth_users():
     """Create default admin and branch staff users"""
 
+    # Skip if admin credentials are managed via .env
+    if os.getenv("ADMIN_PASSWORD") or os.getenv("SUPERADMIN_PASSWORD"):
+        print("ℹ Admin credentials are managed via environment variables; skipping seed.")
+        return
+
     # Create tables if they don't exist
     Base.metadata.create_all(bind=engine)
 
