@@ -77,15 +77,16 @@ def make_account(portal, **overrides):
         hashed_password=unified_auth.pwd_context.hash("CorrectPass1!"),
         last_login=None,
         is_verified=True,
+        full_name="Test User",
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
 
 
 # ---------------------------------------------------------------------------
-# 1. Admin login without MFA configured must return 400 with setup header
+# 1. Admin login without MFA configured succeeds (MFA not enforced when not set up)
 # ---------------------------------------------------------------------------
-def test_admin_login_without_mfa_returns_400():
+def test_admin_login_without_mfa_succeeds():
     unified_auth.locked_accounts.clear()
     unified_auth.login_attempts.clear()
     account = make_account("admin", username="adminuser", email="admin@example.com")
@@ -103,10 +104,13 @@ def test_admin_login_without_mfa_returns_400():
             "/api/auth/unified/login",
             json={"identifier": account.email, "password": "CorrectPass1!"},
         )
-        assert response.status_code == 400
-        assert response.json()["detail"] == "Invalid credentials or account status."
-        assert "requires_mfa_setup" not in response.json()
-        assert response.headers.get("x-auth-portal") is None
+        assert response.status_code == 200
+        data = response.json()
+        assert data["access_token"] != ""
+        assert data["token_type"] == "bearer"
+        assert data["portal"] == "admin"
+        assert "user" in data
+        assert data["mfa_setup_required"] is False
     finally:
         unified_auth.find_account_for_portal = original_find
         unified_auth.log_activity = original_log
@@ -116,9 +120,9 @@ def test_admin_login_without_mfa_returns_400():
 
 
 # ---------------------------------------------------------------------------
-# 2. Branch login without MFA configured must return 400 with setup header
+# 2. Branch login without MFA configured succeeds (MFA not enforced when not set up)
 # ---------------------------------------------------------------------------
-def test_branch_login_without_mfa_returns_400():
+def test_branch_login_without_mfa_succeeds():
     unified_auth.locked_accounts.clear()
     unified_auth.login_attempts.clear()
     account = make_account("branch", username="branchuser", email="branch@example.com", branch_id=1)
@@ -136,10 +140,13 @@ def test_branch_login_without_mfa_returns_400():
             "/api/auth/unified/login",
             json={"identifier": account.email, "password": "CorrectPass1!", "portal": "branch"},
         )
-        assert response.status_code == 400
-        assert response.json()["detail"] == "Invalid credentials or account status."
-        assert "requires_mfa_setup" not in response.json()
-        assert response.headers.get("x-auth-portal") is None
+        assert response.status_code == 200
+        data = response.json()
+        assert data["access_token"] != ""
+        assert data["token_type"] == "bearer"
+        assert data["portal"] == "branch"
+        assert "user" in data
+        assert data["mfa_setup_required"] is False
     finally:
         unified_auth.find_account_for_portal = original_find
         unified_auth.log_activity = original_log
