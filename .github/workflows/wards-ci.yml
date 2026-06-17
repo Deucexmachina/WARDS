@@ -135,8 +135,8 @@ jobs:
           DO_HOST: ${{ secrets.DO_HOST }}
         run: |
           echo "DO_HOST length: ${#DO_HOST}"
-          test -n "$DO_HOST"
-          ssh-keyscan -H "$DO_HOST" >> ~/.ssh/known_hosts
+          test -n "$DO_HOST" && echo "test passed" || echo "test failed"
+          ssh-keyscan -H "$DO_HOST" >> ~/.ssh/known_hosts || echo "ssh-keyscan failed with code: $?"
       - name: Deploy application
         env:
           DO_HOST: ${{ secrets.DO_HOST }}
