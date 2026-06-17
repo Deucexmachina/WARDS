@@ -134,9 +134,8 @@ jobs:
         env:
           DO_HOST: ${{ secrets.DO_HOST }}
         run: |
-          echo "DO_HOST length: ${#DO_HOST}"
-          test -n "$DO_HOST" && echo "test passed" || echo "test failed"
-          ssh-keyscan -H "$DO_HOST" >> ~/.ssh/known_hosts || echo "ssh-keyscan failed with code: $?"
+          test -n "$DO_HOST"
+          ssh-keyscan -H "$DO_HOST" >> ~/.ssh/known_hosts
       - name: Deploy application
         env:
           DO_HOST: ${{ secrets.DO_HOST }}
@@ -151,5 +150,5 @@ jobs:
         env:
           DO_HOST: ${{ secrets.DO_HOST }}
         run: |
-          curl --fail --retry 10 --retry-delay 5 "http://$DO_HOST:3000/"
-          curl --fail --retry 10 --retry-delay 5 "http://$DO_HOST:8000/api/health"
+          curl --fail --retry 10 --retry-delay 5 --retry-connrefused "http://$DO_HOST:3000/"
+          curl --fail --retry 10 --retry-delay 5 --retry-connrefused "http://$DO_HOST:8000/api/health"
