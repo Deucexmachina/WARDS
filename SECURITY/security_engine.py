@@ -24,7 +24,6 @@ import requests
 from sqlalchemy import MetaData, Table, inspect, or_, text
 from sqlalchemy.orm import Session
 from database.models import Admin, Alert
-from services.vpn_detection import detect_vpn
 from services.email_service import send_security_incident_alert_email
 from utils.log_integrity import verify_record_integrity
 
@@ -579,6 +578,7 @@ def create_incident_system_alert(db: Session, incident: SecurityIncident, detect
 
 
 def enrich_security_context(db: Session, context: dict | None) -> dict:
+    from services.vpn_detection import detect_vpn
     context = dict(context or {})
     source_ip = context.get("source_ip") or context.get("client_ip") or context.get("ip_address")
     if not source_ip or str(source_ip).lower() == "unknown":
