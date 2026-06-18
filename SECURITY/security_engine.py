@@ -24,7 +24,6 @@ import requests
 from sqlalchemy import MetaData, Table, inspect, or_, text
 from sqlalchemy.orm import Session
 from database.models import Admin, Alert
-from services.email_service import send_security_incident_alert_email
 from utils.log_integrity import verify_record_integrity
 
 from SECURITY.security_models import (
@@ -519,6 +518,7 @@ def dispatch_system_alert_email(
     detection: dict | None = None,
     recoveries: list[dict] | None = None,
 ) -> dict | None:
+    from services.email_service import send_security_incident_alert_email
     if alert.type not in IMPORTANT_SYSTEM_ALERT_KEYS:
         return None
     recipients = system_alert_email_recipients(db)
@@ -3140,6 +3140,7 @@ def create_incident(db: Session, detection: SecurityDetectionEvent, classificati
     db.commit()
     db.refresh(incident)
     try:
+        from services.email_service import send_security_incident_alert_email
         recipients = system_alert_email_recipients(db)
         recoveries = [
             serialize_recovery(item)
