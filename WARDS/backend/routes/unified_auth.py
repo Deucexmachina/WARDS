@@ -433,6 +433,7 @@ def build_user_response(portal: str, account: object, mfa_setup_required: bool =
             "full_name": profile["full_name"],
             "contact_number": profile["contact_number"],
             "address": profile["address"],
+            "mfa_setup_required": mfa_setup_required,
         }
 
     if portal == "admin":
@@ -768,11 +769,13 @@ async def unified_refresh_token(request: Request, payload: RefreshTokenRequest, 
         ip=request.client.host if request.client else None,
         ua=request.headers.get("user-agent"),
     )
+    mfa_setup_required = get_mfa_secret(db, portal, get_mfa_username(portal, account)) is None
+
     return {
         "access_token": create_access_token(portal, token_payload),
         "token_type": "bearer",
         "portal": portal,
-        "user": build_user_response(portal, account),
+        "user": build_user_response(portal, account, mfa_setup_required),
     }
 
 
@@ -1146,12 +1149,13 @@ async def unified_verify(request: Request, db: Session = Depends(get_db)):
 
     token = auth_header.split(" ", 1)[1]
     portal, account, _payload = decode_active_account_from_bearer_token(token, db)
+    mfa_setup_required = get_mfa_secret(db, portal, get_mfa_username(portal, account)) is None
 
     return {
         "valid": True,
         "portal": portal,
         "server_started_at": SERVER_STARTED_AT,
-        "user": build_user_response(portal, account),
+        "user": build_user_response(portal, account, mfa_setup_required),
     }
 
 
@@ -1199,7 +1203,8 @@ async def unified_me(request: Request, db: Session = Depends(get_db)):
 
     token = auth_header.split(" ", 1)[1]
     portal, account, _payload = decode_active_account_from_bearer_token(token, db)
-    return build_user_response(portal, account)
+    mfa_setup_required = get_mfa_secret(db, portal, get_mfa_username(portal, account)) is None
+    return build_user_response(portal, account, mfa_setup_required)
 
 
 class RegisterRequest(BaseModel):
