@@ -423,7 +423,7 @@ def get_portal_login_label(portal: Optional[str]) -> str:
     return labels.get((portal or "").strip().lower(), "WARDS Login")
 
 
-def build_user_response(portal: str, account: object) -> dict:
+def build_user_response(portal: str, account: object, mfa_setup_required: bool = False) -> dict:
     if portal == "public":
         profile = serialize_citizen_user(account)
         return {
@@ -443,7 +443,7 @@ def build_user_response(portal: str, account: object) -> dict:
             "role": "admin",
             "internal_role": account.role,
             "status": account.status,
-            "mfa_setup_required": False,
+            "mfa_setup_required": mfa_setup_required,
         }
 
     return {
@@ -466,7 +466,7 @@ def build_user_response(portal: str, account: object) -> dict:
         "service_window_label": get_branch_window_label(account),
         "window_label": get_branch_window_label(account),
         "assigned_window_number": get_branch_assigned_window_number(account),
-        "mfa_setup_required": False,
+        "mfa_setup_required": mfa_setup_required,
     }
 
 
@@ -711,7 +711,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
         "refresh_token": refresh_token,
         "token_type": "bearer",
         "portal": portal,
-        "user": build_user_response(portal, account),
+        "user": build_user_response(portal, account, mfa_setup_required),
         "requires_mfa": False,
         "mfa_setup_required": mfa_setup_required,
     }
