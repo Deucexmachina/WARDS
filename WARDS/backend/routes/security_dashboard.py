@@ -24,7 +24,7 @@ from auth import get_current_admin_from_token
 from utils.background_jobs import job_manager, JobStatus
 from middleware.dos_protection import get_blocked_ips, unblock_ip, block_ip, account_rate_limit_state, record_rate_limit_detection
 from services.ip_reputation import get_permanent_blocks, add_permanent_block, remove_permanent_block, check_ip_reputation
-from SECURITY.security_engine import (
+from utils.security_client import (
     active_monitored_files_query,
     add_monitored_folder,
     add_ai_rule,

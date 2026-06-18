@@ -39,6 +39,8 @@ services:
       REDIS_URL: redis://redis:6379/0
       SECURITY_DEPLOYMENT_MODE: deployed
       SECURITY_MONITORING_ENABLED: "true"
+      SECURITY_API_URL: ${SECURITY_API_URL:-}
+      SECURITY_API_KEY: ${SECURITY_API_KEY:-}
     ports:
       - "8000:8000"
     depends_on:
@@ -49,8 +51,10 @@ services:
     volumes:
       - ./WARDS:/WARDS
       - ./OCR:/OCR
-      - ./SECURITY:/SECURITY
-      - ./QUARANTINE:/QUARANTINE
+      # TEMPORARY (Phase 2-6): read-only SECURITY mount during 2-VM transition.
+      # security_dashboard.py still imports SECURITY.security_models for ORM queries.
+      # Remove this mount once dashboard routes fully proxy to VM 2 (future Phase 8).
+      - ./SECURITY:/SECURITY:ro
 
   frontend:
     build:

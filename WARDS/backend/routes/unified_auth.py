@@ -344,7 +344,7 @@ def log_unified_security_context(db: Session, *, portal: str, actor: str, client
     if portal != "admin":
         return
     try:
-        from SECURITY.security_engine import record_context_detection
+        from utils.security_client import record_context_detection
 
         record_context_detection(
             db,

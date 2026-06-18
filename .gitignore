@@ -25,6 +25,7 @@
 **/*.log
 
 # Security runtime artifacts
+DEFACEMENT/
 SECURITY/local_backups/
 SECURITY/database_monitor/wards_db_checksum.json
 SECURITY/database_monitor/wards_db_snapshot.json

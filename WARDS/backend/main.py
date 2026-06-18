@@ -1617,6 +1617,10 @@ backfill_branch_and_business_registry_security()
 def start_security_monitor_if_enabled():
     enabled = (os.getenv("SECURITY_MONITORING_ENABLED") or "false").strip().lower() == "true"
     deployed = (os.getenv("SECURITY_DEPLOYMENT_MODE") or "development").strip().lower() == "deployed"
+    security_api_url = os.getenv("SECURITY_API_URL", "").strip()
+    if security_api_url:
+        print("[SECURITY MONITOR] remote security API configured; local monitor disabled (monitoring runs on VM 2)")
+        return
     if not deployed or not enabled:
         print("[SECURITY MONITOR] automatic monitoring disabled; deployed mode and monitoring flag must both be enabled")
         return
@@ -1702,6 +1706,9 @@ start_security_monitor_if_enabled()
 def stop_database_runtime_monitoring():
     deployed = (os.getenv("SECURITY_DEPLOYMENT_MODE") or "development").strip().lower() == "deployed"
     enabled = (os.getenv("SECURITY_MONITORING_ENABLED") or "false").strip().lower() == "true"
+    security_api_url = os.getenv("SECURITY_API_URL", "").strip()
+    if security_api_url:
+        return
     if not deployed or not enabled:
         return
     try:

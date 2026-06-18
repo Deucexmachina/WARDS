@@ -21,6 +21,15 @@ Backend API: http://DROPLET_PUBLIC_IP:8000
 Health check: http://DROPLET_PUBLIC_IP:8000/api/health
 ```
 
+### What is DROPLET_PUBLIC_IP?
+
+`DROPLET_PUBLIC_IP` is the IPv4 address assigned to your DigitalOcean droplet. You can find it in:
+- The DigitalOcean dashboard under your droplet's name.
+- The droplet's networking tab.
+- It looks like `192.0.2.1` or similar.
+
+Replace every occurrence of `DROPLET_PUBLIC_IP` in commands and config files with your actual droplet IP before running them.
+
 ## 2. Install Server Packages
 
 SSH into the droplet:
@@ -28,7 +37,6 @@ SSH into the droplet:
 ```bash
 ssh root@DROPLET_PUBLIC_IP
 ```
-152.42.249.84
 Install Docker, Compose, Git, and MySQL client tools:
 
 ```bash
@@ -41,6 +49,39 @@ echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.
 apt update
 apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 systemctl enable --now docker
+```
+
+### Server Basics & Navigation
+
+Common commands you will use on the droplet:
+
+```bash
+# List files in the current directory
+ls -la
+
+# Change directory
+cd /opt/wards/app
+
+# View file contents
+cat WARDS/backend/.env
+
+# Edit a file with nano
+nano WARDS/backend/.env
+
+# Check running Docker containers
+docker compose ps
+
+# View live logs for a service
+docker compose logs -f backend
+
+# Restart a service
+docker compose restart backend
+
+# Check disk space
+df -h
+
+# Check memory usage
+free -h
 ```
 
 ## 3. Clone The Repository
@@ -69,7 +110,7 @@ cp WARDS/backend/.env.example WARDS/backend/.env
 nano WARDS/backend/.env
 ```
 
-Set strong production values:
+Set strong production values. **Never commit real passwords or secrets to Git.** The values shown below are placeholders — replace every `CHANGE_ME_...` or `your-...` string with strong, unique secrets before starting the stack.
 
 ```env
 APP_ENV=production
@@ -220,7 +261,36 @@ systemctl restart wazuh-agent
 
 Confirm the agent appears in the Wazuh manager. Keep `SECURITY/wazuh/local_rules.xml` synced with the manager rules if you use the WARDS custom rules.
 
-## 9. Configure Continuous Delivery
+## 9. Manual Deployment On The Droplet
+
+If the GitHub Actions workflow is not available (e.g., CI secrets are not configured), you can deploy manually from the droplet.
+
+### Update Code From The Repository
+
+```bash
+cd /opt/wards/app
+git status
+git stash          # optional: stash any local changes
+git pull origin main
+```
+
+### Rebuild And Restart
+
+```bash
+cd /opt/wards/app
+docker compose down
+docker compose up -d --build
+docker compose ps
+```
+
+### View Logs After Manual Deploy
+
+```bash
+docker compose logs -f backend
+docker compose logs -f frontend
+```
+
+## 10. Configure Continuous Delivery
 
 In GitHub, add repository variable:
 
@@ -245,7 +315,7 @@ The workflow `.github/workflows/wards-ci.yml` now runs:
 4. Frontend `npm ci` and production build.
 5. Deployment to DigitalOcean only after all CI jobs pass on `main`.
 
-## 10. Team Git Workflow
+## 11. Team Git Workflow
 
 Use branches for all work:
 
@@ -280,7 +350,22 @@ git pull origin main
 
 If two members edit the same file, pull first and resolve conflicts locally. Never force-push shared branches unless everyone working on that branch agrees.
 
-## 11. Post-Deployment Checklist
+### Pulling Changes On The Droplet
+
+When a teammate merges to `main`, update the droplet:
+
+```bash
+cd /opt/wards/app
+git pull origin main
+```
+
+Then rebuild services:
+
+```bash
+docker compose up -d --build
+```
+
+## 12. Post-Deployment Checklist
 
 - Confirm `docker compose ps` shows all services healthy/running.
 - Confirm frontend loads at `http://DROPLET_PUBLIC_IP:3000`.

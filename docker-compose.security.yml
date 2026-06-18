@@ -1,0 +1,35 @@
+services:
+  security-db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${SEC_MYSQL_ROOT_PASSWORD:-sec_root_password}
+      MYSQL_DATABASE: wards_security_db
+    volumes:
+      - sec_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  security-api:
+    build:
+      context: .
+      dockerfile: ./SECURITY/Dockerfile.security
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: mysql+pymysql://root:${SEC_MYSQL_ROOT_PASSWORD:-sec_root_password}@security-db:3306/wards_security_db
+      APP_API_KEY: ${APP_API_KEY:-change-me}
+      WARDS_APP_IP: ${WARDS_APP_IP:-}
+    ports:
+      - "8443:8443"
+    depends_on:
+      security-db:
+        condition: service_healthy
+    volumes:
+      - ./SECURITY:/app/SECURITY
+      - ./QUARANTINE:/app/QUARANTINE
+
+volumes:
+  sec_mysql_data:
