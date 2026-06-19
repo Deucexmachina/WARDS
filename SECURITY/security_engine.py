@@ -539,6 +539,11 @@ def dispatch_system_alert_email(
 
 
 def create_system_alert(db: Session, alert_key: str, message: str, severity: str = "low", *, title: str | None = None, dedupe_key: str | None = None) -> Alert | None:
+    try:
+        if "alerts" not in inspect(db.bind).get_table_names():
+            return None
+    except Exception:
+        return None
     resolved_title = title or SYSTEM_ALERT_CATALOG.get(alert_key, alert_key.replace("_", " ").title())
     if dedupe_key:
         existing = (
