@@ -531,7 +531,10 @@ def dispatch_system_alert_email(
     detection: dict | None = None,
     recoveries: list[dict] | None = None,
 ) -> dict | None:
-    from services.email_service import send_security_incident_alert_email
+    try:
+        from services.email_service import send_security_incident_alert_email
+    except Exception:
+        return None
     if alert.type not in IMPORTANT_SYSTEM_ALERT_KEYS:
         return None
     recipients = system_alert_email_recipients(db)
@@ -4846,7 +4849,9 @@ def serialize_detection(item: SecurityDetectionEvent) -> dict:
     }
 
 
-def serialize_recovery(item: SecurityRecoveryEvent) -> dict:
+def serialize_recovery(item: SecurityRecoveryEvent | dict) -> dict:
+    if isinstance(item, dict):
+        return item
     raw_type = item.recovery_type or ""
     display_status = "success" if item.status == "verified_removal" else item.status
     if raw_type in {"reverted", "false_positive_restore"} or str(item.summary or "").lower().find("false positive") >= 0:

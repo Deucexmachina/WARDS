@@ -759,10 +759,11 @@ def backup_full(request: Request, db: Session = Depends(get_db), admin=Depends(c
     db.add(vm1_backup)
     # VM2 full system backup
     event = create_full_system_backup(db, admin.id)
+    vm2_event_id = event.get("id") if isinstance(event, dict) else getattr(event, "id", None)
     db.add(ActivityLog(
         action="Security Full System Backup",
         user=admin.username,
-        details=f"Full system backup created. VM1: {vm1_result.filename}; VM2: Backup #{event.id}. | IP: {request.client.host if request.client else 'unknown'}",
+        details=f"Full system backup created. VM1: {vm1_result.filename}; VM2: Backup #{vm2_event_id}. | IP: {request.client.host if request.client else 'unknown'}",
         type="security",
     ))
     db.commit()
