@@ -3,6 +3,7 @@
 # via authenticated REST endpoints consumed by the App VM adapter.
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from pathlib import Path
