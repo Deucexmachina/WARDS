@@ -1327,8 +1327,9 @@ const BackupRecovery = () => {
           {activeTab === 'Manual Controls' && (
             <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
               <Section title="Integrity and Recovery">
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                   <button disabled={busy} className="rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Manual system scan?', 'WARDS will scan every monitored file and create logs for any changes it finds.', () => api.post('/security/scan'), (result) => result?.data?.summary || 'Full system integrity scan complete.', 'Start scan')}>Manual System Scan</button>
+                  <button disabled={busy} className="rounded-xl bg-primary px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Full system backup?', 'WARDS will back up VM1 database and all VM2 components (database, files, ML).', () => api.post('/security/backup/full'), 'Full system backup created.', 'Full backup')}>Full System Backup</button>
                   <button
                     disabled={busy}
                     className="rounded-xl bg-red-600 px-4 py-3 font-semibold text-white disabled:opacity-60"
@@ -1348,9 +1349,8 @@ const BackupRecovery = () => {
                 </div>
               </Section>
 
-              <Section title="Backups">
+              <Section title="Scheduled Backups">
                 <div className="space-y-3">
-                  <button disabled={busy} className="w-full rounded-xl bg-primary px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Create manual backup?', 'WARDS will replace the latest trusted local backup with the current monitored files.', () => api.post('/security/backup/manual'), 'Manual local backup completed.', 'Create backup')}>Manual Backup</button>
                   <div className="grid gap-3 md:grid-cols-[1fr_auto]">
                     <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" type="datetime-local" min={toDateInputMin()} value={controls.backupDate} onChange={(e) => setControls({ ...controls, backupDate: e.target.value })} />
                     <button disabled={busy} className={`rounded-xl bg-slate-900 px-4 py-2 font-semibold text-white${disabledButtonClass}`} onClick={() => {
@@ -1383,18 +1383,17 @@ const BackupRecovery = () => {
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   <button disabled={busy} className="rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Backup VM1 database?', 'WARDS will create a full dump of the VM1 business database.', () => api.post('/security/backup/vm1-database'), 'VM1 database backup created.', 'Backup VM1 DB')}>VM1 Database Backup</button>
                   <button disabled={busy} className="rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Backup VM2 database?', 'WARDS will snapshot the VM2 security database.', () => api.post('/security/backup/vm2-database'), 'VM2 database backup created.', 'Backup VM2 DB')}>VM2 Database Backup</button>
-                  <button disabled={busy} className="rounded-xl bg-slate-800 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Backup files?', 'WARDS will back up monitored WARDS and OCR files.', () => api.post('/security/backup/files'), 'Files backup created.', 'Backup files')}>Files Backup</button>
-                  <button disabled={busy} className="rounded-xl bg-slate-800 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Backup ML artifacts?', 'WARDS will back up ML model state and metadata.', () => api.post('/security/backup/ml'), 'ML backup created.', 'Backup ML')}>ML Backup</button>
-                  <button disabled={busy} className="col-span-1 rounded-xl bg-primary px-4 py-3 font-semibold text-white disabled:opacity-60 md:col-span-2" onClick={() => askConfirm('Full system backup?', 'WARDS will back up VM1 database and all VM2 components (database, files, ML).', () => api.post('/security/backup/full'), 'Full system backup created.', 'Full backup')}>Full System Backup</button>
+                  <button disabled={busy} className="rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Backup files?', 'WARDS will back up monitored WARDS and OCR files.', () => api.post('/security/backup/files'), 'Files backup created.', 'Backup files')}>Files Backup</button>
+                  <button disabled={busy} className="rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Backup ML artifacts?', 'WARDS will back up ML model state and metadata.', () => api.post('/security/backup/ml'), 'ML backup created.', 'Backup ML')}>ML Backup</button>
                 </div>
               </Section>
 
               <Section title="Granular Recovery">
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <button disabled={busy} className="rounded-xl bg-red-700 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Recover VM1 database?', 'Are you sure? This will restore the VM1 business database from the latest backup and log you out.', async () => { await api.post('/security/recover/vm1-database'); localStorage.removeItem('adminToken'); localStorage.removeItem('adminUser'); localStorage.removeItem('securityAuthenticated'); sessionStorage.removeItem('securityAuthenticated'); sessionStorage.removeItem('securityAuthenticatedAt'); navigate('/admin/backup/login'); return { skipRefresh: true }; }, 'VM1 database recovery complete.', 'Recover VM1 DB')}>VM1 Database Recovery</button>
+                  <button disabled={busy} className="rounded-xl bg-red-600 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Recover VM1 database?', 'Are you sure? This will restore the VM1 business database from the latest backup and log you out.', async () => { await api.post('/security/recover/vm1-database'); localStorage.removeItem('adminToken'); localStorage.removeItem('adminUser'); localStorage.removeItem('securityAuthenticated'); sessionStorage.removeItem('securityAuthenticated'); sessionStorage.removeItem('securityAuthenticatedAt'); navigate('/admin/backup/login'); return { skipRefresh: true }; }, 'VM1 database recovery complete.', 'Recover VM1 DB')}>VM1 Database Recovery</button>
                   <button disabled={busy} className="rounded-xl bg-red-600 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Recover VM2 database?', 'WARDS will restore the VM2 security database from the latest backup.', () => api.post('/security/recover/vm2-database'), 'VM2 database recovery complete.', 'Recover VM2 DB')}>VM2 Database Recovery</button>
-                  <button disabled={busy} className="rounded-xl bg-red-500 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Recover files?', 'WARDS will restore monitored files from the latest backup.', () => api.post('/security/recover/files'), 'Files recovery complete.', 'Recover files')}>Files Recovery</button>
-                  <button disabled={busy} className="rounded-xl bg-red-500 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Recover ML artifacts?', 'WARDS will restore ML model state from the latest backup.', () => api.post('/security/recover/ml'), 'ML recovery complete.', 'Recover ML')}>ML Recovery</button>
+                  <button disabled={busy} className="rounded-xl bg-red-600 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Recover files?', 'WARDS will restore monitored files from the latest backup.', () => api.post('/security/recover/files'), 'Files recovery complete.', 'Recover files')}>Files Recovery</button>
+                  <button disabled={busy} className="rounded-xl bg-red-600 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Recover ML artifacts?', 'WARDS will restore ML model state from the latest backup.', () => api.post('/security/recover/ml'), 'ML recovery complete.', 'Recover ML')}>ML Recovery</button>
                 </div>
               </Section>
 

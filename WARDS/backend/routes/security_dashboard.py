@@ -518,6 +518,33 @@ async def submit_full_scan(request: Request, db: Session = Depends(get_db), admi
     return {"job_id": job.id, "status": job.status, "message": "Scan job submitted successfully."}
 
 
+@router.post("/scan")
+@limiter.limit("5/minute")
+def run_full_scan(request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
+    try:
+        job = job_manager.submit("security_full_scan")
+    except Exception as exc:
+        raise HTTPException(status_code=429, detail=str(exc))
+    db.add(ActivityLog(
+        action="Security Full Scan",
+        user=admin.username,
+        details=f"Manual system scan initiated. | IP: {request.client.host if request.client else 'unknown'}",
+        type="security",
+    ))
+    db.commit()
+    job_manager._start(job.id)
+    try:
+        detections = _run_scan_all_files_sync(job.id)
+        job_manager._complete(job.id, detections)
+        return {
+            "summary": f"{len(detections)} change(s) found." if detections else "No changes found. All monitored files match the trusted backup.",
+            "detections": [serialize_detection(item) for item in detections],
+        }
+    except Exception as exc:
+        job_manager._fail(job.id, str(exc))
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @router.get("/scan/status/{job_id}")
 def scan_status(job_id: str, _=Depends(current_admin)):
     job = job_manager.get(job_id)
