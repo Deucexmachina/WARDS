@@ -22,6 +22,10 @@ services:
       DATABASE_URL: mysql+pymysql://root:${SEC_MYSQL_ROOT_PASSWORD:-sec_root_password}@security-db:3306/wards_security_db
       APP_API_KEY: ${APP_API_KEY:-change-me}
       WARDS_APP_IP: ${WARDS_APP_IP:-}
+      SECURITY_DEPLOYMENT_MODE: ${SECURITY_DEPLOYMENT_MODE:-deployed}
+      SECURITY_MONITORING_ENABLED: ${SECURITY_MONITORING_ENABLED:-true}
+      WAZUH_ENABLED: ${WAZUH_ENABLED:-false}
+      SECURITY_SCAN_INTERVAL_SECONDS: ${SECURITY_SCAN_INTERVAL_SECONDS:-30}
     ports:
       - "8443:8443"
     depends_on:
