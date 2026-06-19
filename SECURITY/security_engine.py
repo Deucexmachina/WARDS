@@ -503,10 +503,15 @@ def canonical_admin_recipients() -> list[str]:
 
 def system_alert_email_recipients(db: Session) -> list[str]:
     recipients = set(canonical_admin_recipients())
-    for admin in db.query(Admin).filter(Admin.status == "Active", Admin.role.in_(["main_admin", "admin", "superadmin"])).all():
-        email = (admin.email or "").strip().lower()
-        if email:
-            recipients.add(email)
+    try:
+        if "admins" not in inspect(db.bind).get_table_names():
+            return sorted(recipients)
+        for admin in db.query(Admin).filter(Admin.status == "Active", Admin.role.in_(["main_admin", "admin", "superadmin"])).all():
+            email = (admin.email or "").strip().lower()
+            if email:
+                recipients.add(email)
+    except Exception:
+        pass
     return sorted(recipients)
 
 
@@ -583,7 +588,10 @@ def create_incident_system_alert(db: Session, incident: SecurityIncident, detect
 
 
 def enrich_security_context(db: Session, context: dict | None) -> dict:
-    from services.vpn_detection import detect_vpn
+    try:
+        from services.vpn_detection import detect_vpn
+    except Exception:
+        return dict(context or {})
     context = dict(context or {})
     source_ip = context.get("source_ip") or context.get("client_ip") or context.get("ip_address")
     if not source_ip or str(source_ip).lower() == "unknown":
