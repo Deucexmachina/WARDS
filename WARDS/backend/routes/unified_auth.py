@@ -686,18 +686,20 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
         apply_citizen_user_security(account)
     db.commit()
 
-    loop = asyncio.get_event_loop()
-    loop.run_in_executor(
-        None,
-        lambda: send_login_notification_email(
-            recipient_email=get_account_email(portal, account),
-            display_name=get_account_display_name(portal, account),
-            account_type=get_account_type_label(portal, account),
-            logged_in_at=account.last_login or datetime.utcnow(),
-            ip_address=client_ip,
-            user_agent=request.headers.get("user-agent"),
-        ),
-    )
+    try:
+        loop = asyncio.get_running_loop()
+        loop.run_in_executor(
+            None,
+            send_login_notification_email,
+            get_account_email(portal, account),
+            get_account_display_name(portal, account),
+            get_account_type_label(portal, account),
+            account.last_login or datetime.utcnow(),
+            client_ip,
+            request.headers.get("user-agent"),
+        )
+    except Exception:
+        pass
 
     log_activity(
         db,
