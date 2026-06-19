@@ -145,7 +145,7 @@ jobs:
           test -n "$DO_HOST"
           test -n "$DO_USER"
           test -n "$DO_APP_DIR"
-          ssh -i ~/.ssh/wards_deploy_key "$DO_USER@$DO_HOST" "cd '$DO_APP_DIR' && docker compose stop backend && git fetch origin main && git checkout main && git pull --ff-only origin main && docker compose up -d --build && docker compose ps"
+          ssh -i ~/.ssh/wards_deploy_key "$DO_USER@$DO_HOST" "cd '$DO_APP_DIR' && docker compose stop backend && git fetch origin main && git reset --hard origin/main && docker compose up -d --build && docker compose ps"
       - name: Smoke test deployment
         env:
           DO_HOST: ${{ secrets.DO_HOST }}
