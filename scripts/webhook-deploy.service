@@ -1,0 +1,19 @@
+[Unit]
+Description=WARDS GitHub Webhook Deploy Receiver
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/wards/app
+Environment="WEBHOOK_SECRET=replace-with-your-github-webhook-secret"
+Environment="DEPLOY_DIR=/opt/wards/app"
+Environment="VM2_HOST=146.190.97.87"
+Environment="VM2_USER=root"
+Environment="VM2_APP_DIR=/opt/wards/security/app"
+ExecStart=/opt/wards/app/venv/bin/python /opt/wards/app/scripts/webhook_deploy.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
