@@ -397,3 +397,15 @@ def api_internal_deploy():
 
     threading.Thread(target=_deploy, daemon=True).start()
     return {"status": "deploy_triggered"}
+
+
+@app.get("/internal/deploy-status", dependencies=[Depends(require_api_key)])
+def api_internal_deploy_status():
+    import subprocess
+    app_dir = os.getenv("VM2_APP_DIR", "/opt/wards/security/app")
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        capture_output=True, text=True, cwd=app_dir,
+    )
+    commit = result.stdout.strip() if result.returncode == 0 else "unknown"
+    return {"vm": "vm2", "commit": commit, "deploy_dir": app_dir}

@@ -117,5 +117,33 @@ jobs:
         working-directory: WARDS/frontend
         run: npm run build
 
-  # Deployment is handled by the webhook deployer running on VM1.
-  # See scripts/webhook_deploy.py and scripts/webhook-deploy.service
+  deploy-status:
+    needs: [backend, frontend]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Wait for webhook deploy
+        run: sleep 60
+      - name: Check VM1 deploy status
+        run: |
+          EXPECTED="${{ github.sha }}"
+          VM1_COMMIT=$(curl -sSf http://152.42.249.84:9000/deploy-status | jq -r '.commit')
+          echo "VM1 commit: $VM1_COMMIT"
+          if [ "$VM1_COMMIT" != "$EXPECTED" ]; then
+            echo "VM1 is NOT at expected commit $EXPECTED"
+            exit 1
+          fi
+          echo "VM1 deploy verified."
+      - name: Check VM2 deploy status
+        env:
+          VM2_API_KEY: ${{ secrets.VM2_API_KEY || '3e5833e12a888a95601b31f69b4e9bb8612f0e17807020deeb4d24f43e3e68c1' }}
+        run: |
+          EXPECTED="${{ github.sha }}"
+          VM2_COMMIT=$(curl -sSf -H "X-API-Key: $VM2_API_KEY" http://146.190.97.87:8443/internal/deploy-status | jq -r '.commit')
+          echo "VM2 commit: $VM2_COMMIT"
+          if [ "$VM2_COMMIT" != "$EXPECTED" ]; then
+            echo "VM2 is NOT at expected commit $EXPECTED"
+            exit 1
+          fi
+          echo "VM2 deploy verified."

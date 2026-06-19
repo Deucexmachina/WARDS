@@ -109,6 +109,17 @@ async def health():
     return {"status": "healthy"}
 
 
+@app.get("/deploy-status")
+async def deploy_status():
+    import subprocess
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        capture_output=True, text=True, cwd=DEPLOY_DIR,
+    )
+    commit = result.stdout.strip() if result.returncode == 0 else "unknown"
+    return {"vm": "vm1", "commit": commit, "deploy_dir": DEPLOY_DIR}
+
+
 if __name__ == "__main__":
     if not WEBHOOK_SECRET:
         logger.warning("WEBHOOK_SECRET is not set. All webhook requests will be rejected.")
