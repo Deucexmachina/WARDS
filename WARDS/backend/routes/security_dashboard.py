@@ -454,6 +454,7 @@ def _run_scan_all_files_sync(job_id: str) -> list:
         try:
             job_manager.update_progress(job_id, 10, "registering_files")
             detections = scan_all_files(db, context={"manual_scan": True})
+            set_setting(db, "last_scan_at", now_utc().isoformat(), "security_scanner")
             job_manager.update_progress(job_id, 100, "complete")
             return detections
         finally:

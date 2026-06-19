@@ -243,7 +243,10 @@ def _resolve_admin_id(db, admin_id):
     """Validate admin_id exists in local VM2 admins table; return None if foreign."""
     if admin_id is None:
         return None
-    return db.query(Admin.id).filter(Admin.id == admin_id).scalar()
+    try:
+        return db.query(Admin.id).filter(Admin.id == admin_id).scalar()
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
