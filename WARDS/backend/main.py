@@ -1629,7 +1629,7 @@ def start_security_monitor_if_enabled():
     adaptive_enabled = (os.getenv("SECURITY_ADAPTIVE_INTERVAL_ENABLED") or "false").strip().lower() == "true"
 
     def monitor_loop():
-        from SECURITY.security_engine import activate_database_runtime_monitoring, create_manual_backup, get_setting, scan_all_files, seed_settings, set_setting
+        from SECURITY.security_engine import activate_database_runtime_monitoring, create_manual_backup, get_setting, now_utc, scan_all_files, seed_settings, set_setting
 
         while True:
             retry_delay = False
@@ -1666,11 +1666,15 @@ def start_security_monitor_if_enabled():
         while True:
             db = SessionLocal()
             interval = default_interval
+            scan_status = "failed"
             try:
                 monitoring_enabled = (get_setting(db, "monitoring_enabled", "true") or "true").lower() == "true"
                 configured_interval = max(5, int(get_setting(db, "scan_interval_seconds", str(default_interval))))
                 if monitoring_enabled:
                     detections = scan_all_files(db, context={"background_monitor": True})
+                    scan_status = "success"
+                    set_setting(db, "last_scan_at", now_utc().isoformat(), "interval_scanner")
+                    set_setting(db, "last_interval_scan_status", "success", "interval_scanner")
                     if first_scan:
                         print(f"[SECURITY MONITOR] first automatic scan complete; {len(detections)} change(s) found")
                     if adaptive_enabled:
@@ -1687,9 +1691,14 @@ def start_security_monitor_if_enabled():
                         interval = configured_interval
                 else:
                     interval = configured_interval
+                    set_setting(db, "last_interval_scan_status", "monitoring_disabled", "interval_scanner")
                 first_scan = False
             except Exception as exc:
                 print(f"[SECURITY MONITOR] scan failed: {exc}")
+                try:
+                    set_setting(db, "last_interval_scan_status", f"failed: {exc}", "interval_scanner")
+                except Exception:
+                    pass
             finally:
                 db.close()
             time.sleep(max(5, int(interval)))

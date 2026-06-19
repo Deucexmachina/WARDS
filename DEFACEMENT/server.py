@@ -88,12 +88,12 @@ def visual_defacement():
     path = target_path("frontend/src/pages/public/Home.jsx")
     original = read(path)
     payload = """<>
-      <div style={{position:'fixed', inset:0, zIndex:2147483647, background:'rgba(127, 29, 29, 0.96)', color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', textAlign:'center', padding:'40px'}}>
+      <div style={{position:'fixed', inset:0, zIndex:2147483647, background:'linear-gradient(180deg, #7f1d1d 0%, #450a0a 100%)', color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', textAlign:'center', padding:'40px', pointerEvents:'none'}}>
         <div>
-          <p style={{fontSize:'14px', letterSpacing:'0.24em', fontWeight:900}}>WARDS_DEFACEMENT_TEST</p>
-          <h1 style={{fontSize:'56px', margin:'16px 0', fontWeight:900}}>SYSTEM COMPROMISED</h1>
-          <p style={{fontSize:'22px'}}>Public tax services have been replaced by an unauthorized page.</p>
-          <p style={{marginTop:'18px', fontSize:'16px'}}>Restore operations from the Security Dashboard immediately.</p>
+          <p style={{fontSize:'14px', letterSpacing:'0.24em', fontWeight:900, color:'#fca5a5'}}>WARDS_DEFACEMENT_TEST</p>
+          <h1 style={{fontSize:'72px', margin:'16px 0', fontWeight:900, textShadow:'0 4px 24px rgba(0,0,0,0.6)'}}>SYSTEM COMPROMISED</h1>
+          <p style={{fontSize:'26px', color:'#fecaca'}}>Public tax services have been replaced by an unauthorized page.</p>
+          <p style={{marginTop:'24px', fontSize:'18px', color:'#fca5a5'}}>Restore operations from the Security Dashboard immediately.</p>
         </div>
       </div>
 """
@@ -138,6 +138,11 @@ body::after {
   font: 900 64px Arial, sans-serif;
   letter-spacing: 0.08em;
   pointer-events: none;
+  animation: wardsDefacePulse 2s infinite;
+}
+@keyframes wardsDefacePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 """
     write(path, original + payload)

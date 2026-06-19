@@ -2128,7 +2128,7 @@ def register_initial_files(db: Session, ensure_backup: bool = True, refresh_exis
                     status="clean",
                     file_type=file_type(path),
                     size_bytes=path.stat().st_size,
-                    last_checked=datetime.utcfromtimestamp(path.stat().st_mtime),
+                    last_checked=None,
                 )
             )
             created += 1
@@ -3322,19 +3322,6 @@ def scan_single_file(db: Session, file_entry: SecurityMonitoredFile, context: di
         return record_detection(db, file_entry, "file_deleted", old_hash, None, old_content, "", context)
 
     stat = path.stat()
-    mtime = datetime.utcfromtimestamp(stat.st_mtime)
-    if (
-        file_entry.size_bytes == stat.st_size
-        and file_entry.last_checked is not None
-        and file_entry.last_checked >= mtime
-    ):
-        file_entry.status = "clean"
-        file_entry.last_checked = now_utc()
-        db.add(file_entry)
-        if commit_clean:
-            db.commit()
-        return None
-
     if precomputed_hash is not None:
         current_hash = precomputed_hash
     else:
@@ -4404,6 +4391,7 @@ def dashboard_payload(db: Session) -> dict:
             "deployment_mode": get_setting(db, "deployment_mode", "development"),
             "monitoring_enabled": "true" if monitoring_enabled else "false",
             "scan_interval_seconds": get_setting(db, "scan_interval_seconds", "30"),
+            "last_interval_scan_status": get_setting(db, "last_interval_scan_status", "unknown"),
             "time_source": time_source_label(),
         },
     }
