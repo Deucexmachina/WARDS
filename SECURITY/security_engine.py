@@ -75,10 +75,18 @@ DATABASE_EXCLUDED_TABLES = {
 }
 DATABASE_EXCLUDED_PREFIXES = ("security_",)
 
-MONITORED_ROOTS = {
-    "WARDS": MASTER_ROOT / "WARDS",
-    "OCR": MASTER_ROOT / "OCR",
-}
+_vm2_app_dir = os.getenv("VM2_APP_DIR")
+if _vm2_app_dir:
+    _deploy_root = Path(_vm2_app_dir)
+    MONITORED_ROOTS = {
+        "WARDS": _deploy_root / "WARDS",
+        "OCR": _deploy_root / "OCR",
+    }
+else:
+    MONITORED_ROOTS = {
+        "WARDS": MASTER_ROOT / "WARDS",
+        "OCR": MASTER_ROOT / "OCR",
+    }
 
 DEFAULT_EXCLUDED_DIRS = {
     ".git",
