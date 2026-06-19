@@ -59,7 +59,12 @@ from SECURITY.security_engine import (
     now_utc,
     json_dumps,
 )
-from SECURITY.security_models import SecurityMonitoredFile
+from SECURITY.security_models import (
+    SecurityMonitoredFile,
+    SecurityIncident,
+    SecurityDetectionEvent,
+    SecurityRecoveryEvent,
+)
 
 API_KEY = os.getenv("APP_API_KEY", "")
 if not API_KEY or API_KEY in ("change-me", ""):
