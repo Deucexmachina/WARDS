@@ -224,11 +224,11 @@ def weekly_ai_behavior_data(db):
 # ---------------------------------------------------------------------------
 # Backup / recovery proxies
 # ---------------------------------------------------------------------------
-def create_manual_backup(db, admin_id):
+def create_manual_backup(db, admin_id, label: str = "manual"):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import create_manual_backup as _local
-        return _local(db, admin_id)
-    return _sync_post("/v1/backup/manual", {"admin_id": admin_id})
+        return _local(db, admin_id, label=label)
+    return _sync_post("/v1/backup/manual", {"admin_id": admin_id, "label": label})
 
 
 def set_backup_location(db, path, delete_previous=False, actor=None):

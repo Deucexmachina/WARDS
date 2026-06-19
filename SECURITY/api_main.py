@@ -259,7 +259,7 @@ def _resolve_admin_id(db, admin_id):
 # ---------------------------------------------------------------------------
 @app.post("/v1/backup/manual", dependencies=[Depends(require_api_key)])
 def api_backup_manual(payload: dict = {}, db=Depends(get_db)):
-    event = create_manual_backup(db, _resolve_admin_id(db, payload.get("admin_id")))
+    event = create_manual_backup(db, _resolve_admin_id(db, payload.get("admin_id")), label=payload.get("label", "manual"))
     return serialize_recovery(event)
 
 
