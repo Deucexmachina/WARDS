@@ -196,3 +196,4 @@ app.include_router(unified_auth.router, prefix="/api/public/auth", tags=["Public
 2. **Fail-fast** on missing environment variables.
 3. **Single source of truth** for JWT, password, MFA, and permission logic.
 4. **Token revocation** checked in every dependency injector.
+
