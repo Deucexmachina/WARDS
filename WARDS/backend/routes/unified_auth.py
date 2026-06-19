@@ -656,6 +656,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
             pass
         else:
             if not credentials.totp_code:
+                reset_failed_attempts(portal, credentials.identifier)
                 return {
                     "access_token": "",
                     "token_type": "bearer",
