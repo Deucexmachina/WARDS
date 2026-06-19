@@ -388,6 +388,10 @@ def api_internal_deploy():
 
     def _deploy():
         app_dir = os.getenv("VM2_APP_DIR", "/opt/wards/security/app")
+        if not os.path.isdir(os.path.join(app_dir, ".git")):
+            logger = logging.getLogger(__name__)
+            logger.warning("Repo not accessible in container at %s — skipping auto-deploy", app_dir)
+            return
         subprocess.run(["git", "fetch", "origin", "main"], cwd=app_dir, capture_output=True)
         subprocess.run(["git", "reset", "--hard", "origin/main"], cwd=app_dir, capture_output=True)
         subprocess.run(
@@ -403,9 +407,15 @@ def api_internal_deploy():
 def api_internal_deploy_status():
     import subprocess
     app_dir = os.getenv("VM2_APP_DIR", "/opt/wards/security/app")
-    result = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        capture_output=True, text=True, cwd=app_dir,
-    )
-    commit = result.stdout.strip() if result.returncode == 0 else "unknown"
+    commit = "unknown"
+    try:
+        if os.path.isdir(os.path.join(app_dir, ".git")):
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                capture_output=True, text=True, cwd=app_dir,
+            )
+            if result.returncode == 0:
+                commit = result.stdout.strip()
+    except Exception:
+        pass
     return {"vm": "vm2", "commit": commit, "deploy_dir": app_dir}
