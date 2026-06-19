@@ -1701,6 +1701,9 @@ def start_security_monitor_if_enabled():
 
 start_security_monitor_if_enabled()
 
+from utils.scheduled_backup import start_scheduled_backup_runner
+start_scheduled_backup_runner()
+
 
 @app.on_event("shutdown")
 def stop_database_runtime_monitoring():
