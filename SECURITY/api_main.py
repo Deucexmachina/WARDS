@@ -500,16 +500,19 @@ def api_internal_deploy():
 
     def _deploy():
         app_dir = os.getenv("VM2_APP_DIR", "/opt/wards/security/app")
+        logger = logging.getLogger(__name__)
         if not os.path.isdir(os.path.join(app_dir, ".git")):
-            logger = logging.getLogger(__name__)
             logger.warning("Repo not accessible in container at %s — skipping auto-deploy", app_dir)
             return
         subprocess.run(["git", "fetch", "origin", "main"], cwd=app_dir, capture_output=True)
         subprocess.run(["git", "reset", "--hard", "origin/main"], cwd=app_dir, capture_output=True)
-        subprocess.run(
-            ["docker", "compose", "-f", "docker-compose.security.yml", "up", "-d", "--build"],
-            cwd=app_dir, capture_output=True,
-        )
+        try:
+            subprocess.run(
+                ["docker", "compose", "-f", "docker-compose.security.yml", "up", "-d", "--build"],
+                cwd=app_dir, capture_output=True, check=False,
+            )
+        except FileNotFoundError:
+            logger.warning("docker CLI not available inside container — run 'docker compose up -d --build' on the host")
 
     threading.Thread(target=_deploy, daemon=True).start()
     return {"status": "deploy_triggered"}
