@@ -1,17 +1,28 @@
 # WARDS DigitalOcean Deployment Implementation
 
-This guide deploys WARDS on a DigitalOcean Ubuntu droplet using Docker Compose, MySQL, Redis, the FastAPI backend, the built React frontend, and optional Wazuh agent monitoring.
+This guide deploys WARDS on **two DigitalOcean Ubuntu droplets** using Docker Compose, MySQL, Redis, the FastAPI backend, the built React frontend, and optional Wazuh agent monitoring.
+
+- **VM 1 (App Server):** WARDS backend, frontend, OCR, MySQL (business tables), Redis, Wazuh agent.
+- **VM 2 (Security Server):** Security API, AI/ML engine, quarantine storage, MySQL (security tables), Wazuh agent.
+
+For the full two-VM migration guide, see `VM_IMPLEMENTATION.md`.
 
 ## 1. Prepare DigitalOcean
 
-1. Create an Ubuntu 22.04 or 24.04 droplet.
-2. Recommended minimum size: 2 vCPU, 4 GB RAM, 80 GB disk.
-3. Add your SSH key during droplet creation.
-4. In the DigitalOcean firewall, allow:
-   - SSH: `22` from your team IPs only. You can find your IP by visiting https://api.ipify.org + /32
-   - Frontend: `3000` from all IPv4/IPv6 while you do not have a domain.
-   - Backend API: `8000` from all IPv4/IPv6 while you do not have a domain.
+1. **Create two Ubuntu 22.04 or 24.04 droplets:**
+   - **VM 1 (App):** 2 vCPU, 4 GB RAM, 80 GB disk.
+   - **VM 2 (Security):** 1 vCPU, 2 GB RAM, 40 GB disk (separate account or region for blast-radius isolation).
+2. Add your SSH key during droplet creation.
+3. In the DigitalOcean firewall for **VM 1**, allow:
+   - SSH: `22` from your team IPs only.
+   - Frontend: `3000` from all IPv4/IPv6.
+   - Backend API: `8000` from all IPv4/IPv6.
+   - Webhook deployer: `9000` from GitHub IPs (or all, protected by signature verification).
    - MySQL and Redis: do not expose publicly.
+4. In the firewall for **VM 2**, allow:
+   - SSH: `22` from your team IPs only.
+   - Security API: `8443` from VM 1 IP only.
+   - Block all other inbound traffic.
 
 Without a domain, your temporary URLs are:
 
@@ -248,9 +259,13 @@ nano /var/ossec/etc/ossec.conf
 Include file integrity monitoring for:
 
 ```xml
+<!-- On VM 1 -->
 <directories check_all="yes" realtime="yes">/opt/wards/app/WARDS</directories>
 <directories check_all="yes" realtime="yes">/opt/wards/app/OCR</directories>
-<directories check_all="yes" realtime="yes">/opt/wards/app/SECURITY</directories>
+
+<!-- On VM 2 (Security Server) -->
+<directories check_all="yes" realtime="yes">/opt/wards/security/app/SECURITY</directories>
+<directories check_all="yes" realtime="yes">/opt/wards/security/app/QUARANTINE</directories>
 ```
 
 Restart:
@@ -290,30 +305,65 @@ docker compose logs -f backend
 docker compose logs -f frontend
 ```
 
-## 10. Configure Continuous Delivery
+## 10. Configure Continuous Delivery (Webhook Deployer)
 
-In GitHub, add repository variable:
+WARDS uses a **webhook deployer** on VM 1 instead of SSH-based CI deployment. When you push to `main`, GitHub sends a webhook payload to VM 1, which then pulls code and rebuilds both VM 1 and VM 2 automatically.
 
-```text
-ENABLE_DIGITALOCEAN_DEPLOY=true
+### 10.1 Install the Webhook Deployer on VM 1
+
+```bash
+ssh root@DROPLET_PUBLIC_IP
+
+cd /opt/wards/app
+pip install -r scripts/requirements-webhook.txt
+
+# Create the systemd service file
+cp scripts/webhook-deploy.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now webhook-deploy
 ```
 
-Add repository secrets:
+The service file sets these environment variables:
 
 ```text
-DO_HOST=DROPLET_PUBLIC_IP
-DO_USER=root
-DO_APP_DIR=/opt/wards/app
-DO_SSH_KEY=private SSH key allowed to access the droplet
+WEBHOOK_SECRET=your-github-webhook-secret
+DEPLOY_DIR=/opt/wards/app
+VM2_API_URL=http://VM2_IP:8443
+VM2_APP_DIR=/opt/wards/security/app
+API_KEY=shared-api-key-between-vms
 ```
 
-The workflow `.github/workflows/wards-ci.yml` now runs:
+> **Generate a strong webhook secret:** `openssl rand -hex 32`
 
-1. Repository hygiene checks.
-2. Backend compile and pytest.
-3. Focused auth workflow tests.
-4. Frontend `npm ci` and production build.
-5. Deployment to DigitalOcean only after all CI jobs pass on `main`.
+### 10.2 Configure the GitHub Webhook
+
+1. In your GitHub repo, go to **Settings → Webhooks → Add webhook**.
+2. **Payload URL:** `http://DROPLET_PUBLIC_IP:9000/webhook`
+3. **Content type:** `application/json`
+4. **Secret:** the same value as `WEBHOOK_SECRET` above
+5. **Events:** Push
+6. Click **Add webhook**.
+
+### 10.3 How It Works
+
+On every push to `main`:
+
+1. GitHub sends a signed payload to `http://VM1_IP:9000/webhook`.
+2. The deployer verifies the signature, then:
+   - Pulls `main` and rebuilds VM 1 (`docker compose up -d --build`).
+   - Sends an HTTP POST to VM 2's `/internal/deploy` endpoint to trigger VM 2's auto-deploy.
+3. The CI workflow polls `/deploy-status` (VM 1) and `/vm2-deploy-status` (VM 2 via VM 1 proxy) to verify both VMs are on the same commit.
+
+### 10.4 Verify Deployment Sync
+
+After a push, check both VMs from your local machine:
+
+```bash
+curl http://DROPLET_PUBLIC_IP:9000/deploy-status
+curl http://DROPLET_PUBLIC_IP:9000/vm2-deploy-status
+```
+
+Both should show the same commit hash. The CI workflow in `.github/workflows/wards-ci.yml` does this automatically in the `deploy-status` job.
 
 ## 11. Team Git Workflow
 
@@ -367,15 +417,19 @@ docker compose up -d --build
 
 ## 12. Post-Deployment Checklist
 
-- Confirm `docker compose ps` shows all services healthy/running.
+- Confirm `docker compose ps` on VM 1 shows all services healthy/running.
+- Confirm `docker compose -f docker-compose.security.yml ps` on VM 2 shows `security-db` and `security-api` healthy.
 - Confirm frontend loads at `http://DROPLET_PUBLIC_IP:3000`.
 - Confirm backend health at `http://DROPLET_PUBLIC_IP:8000/api/health`.
 - Confirm login works for superadmin, branch admin, branch staff, and citizen users.
 - Confirm citizen registration email verification works.
 - Confirm queue, payment, memo, backup, and security dashboard workflows.
+- Confirm security dashboard File Status, Detection History, and Security Incidents tabs load data from VM 2.
 - Confirm Redis is used for production rate limiting.
 - Confirm database backup creates a real `.sql.gz`.
-- Confirm Wazuh agent is connected.
+- Confirm Wazuh agent is connected on both VMs.
 - Confirm DigitalOcean firewall does not expose MySQL or Redis.
-- Review `docker compose logs backend` for startup errors or missing env vars.
+- Confirm webhook deployer is running (`systemctl status webhook-deploy`) and GitHub webhooks deliver successfully.
+- Confirm `/deploy-status` and `/vm2-deploy-status` return matching commits after a push.
+- Review `docker compose logs backend` on VM 1 for startup errors or missing env vars.
 

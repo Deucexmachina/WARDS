@@ -46,10 +46,11 @@ This guide migrates WARDS from a **single VM** (App + Security on one droplet) t
 ```
 
 **Communication flow:**
-1. App VM sends security events (file changes, logins, admin actions) to Security VM via authenticated HTTPS API.
+1. App VM sends security events (file changes, logins, admin actions) to Security VM via authenticated HTTP API (port 8443).
 2. Security VM runs AI scoring, creates incidents, and stores audit data in its own database.
 3. The security dashboard queries the Security VM for detections, incidents, and AI state.
-4. If the App VM is compromised, the attacker cannot reach the Security VM to delete audit logs or quarantined files.
+4. GitHub pushes trigger the webhook deployer on VM 1, which auto-deploys both VM 1 and VM 2.
+5. If the App VM is compromised, the attacker cannot reach the Security VM to delete audit logs or quarantined files.
 
 ---
 
@@ -220,19 +221,9 @@ SECURITY_API_KEY=long-random-api-key-shared-between-vms
 
 ### Important: Security ORM Models During Transition
 
-The following files still import `SecurityIncident`, `SecurityMonitoredFile`, `SecurityDetectionEvent`, and `SecurityRecoveryEvent` from `SECURITY.security_models` for direct ORM queries. This is expected during the transition:
+The adapter (`utils/security_client.py`) handles all security engine calls. When `SECURITY_API_URL` is configured on VM 1, every dashboard route, scan, AI rule, and backup operation proxies to VM 2 over HTTP. When it is empty, the adapter falls back to local imports.
 
-- `WARDS/backend/routes/security_dashboard.py` — `db.query(SecurityIncident)` etc.
-- `WARDS/backend/middleware/dos_protection.py` — records rate-limit detections.
-- `WARDS/backend/utils/log_integrity.py` — integrity checks against security events.
-
-This means:
-
-- **Phase 2 (this phase)** moves the *engine functions* (scanning, AI scoring, backup logic) to the adapter.
-- **Phase 5** migrates the security database tables to VM 2.
-- **Future Phase 8** (not covered here) would update all dashboard, middleware, and utility code to query the Security VM API instead of local ORM, fully removing the local security table dependency.
-
-Until then, keep `SECURITY/security_models.py` accessible on VM 1 and do not delete the security tables from VM 1's database.
+> **Update:** Module-level imports of `SECURITY.security_models` have been removed from `security_dashboard.py`. All ORM queries now go through the adapter. This means the `./SECURITY:/SECURITY:ro` mount in `docker-compose.yml` can be safely removed by the cleanup script (Phase 2b) once VM 2 is confirmed healthy.
 
 ### Wazuh FIM Paths After Migration
 
@@ -264,7 +255,7 @@ Because VM 1 was already deployed with the full repo, the `SECURITY/` and `QUARA
 
 ### What you CAN and CANNOT delete yet
 
-Because `security_dashboard.py` still imports `SecurityIncident`, `SecurityMonitoredFile`, etc. from `SECURITY.security_models` at **module load time**, you **must keep the Python source files (`SECURITY/*.py`) on VM 1** until Phase 8 (future work) fully decouples those imports.
+Module-level imports of `SECURITY.security_models` have been removed from `security_dashboard.py`. All security ORM queries now go through the adapter (`utils/security_client.py`). This means the cleanup script can safely remove the temporary `./SECURITY:/SECURITY:ro` Docker mount.
 
 **You CAN safely delete:**
 - `QUARANTINE/` — entire folder moves to VM 2.
@@ -273,10 +264,10 @@ Because `security_dashboard.py` still imports `SecurityIncident`, `SecurityMonit
 - `SECURITY/monitoring/` — monitoring data moves to VM 2.
 - `SECURITY/wazuh/` — Wazuh config moves to VM 2.
 - `SECURITY/database_monitor/` — DB snapshots move to VM 2.
-
-**You MUST keep (for now):**
-- `SECURITY/*.py` files — `security_engine.py`, `security_models.py`, etc.
 - The read-only `./SECURITY:/SECURITY:ro` mount in `docker-compose.yml`.
+
+**You MAY keep (optional safety net):**
+- `SECURITY/*.py` files — `security_engine.py`, `security_models.py`, etc. These are only used if `SECURITY_API_URL` is ever unset (fallback mode). They can remain in the repo for rollback safety.
 
 ### Step-by-step cleanup on VM 1
 
@@ -428,8 +419,6 @@ services:
       REDIS_URL: redis://redis:6379/0
       SECURITY_DEPLOYMENT_MODE: deployed
       SECURITY_MONITORING_ENABLED: "true"
-      SECURITY_API_URL: ${SECURITY_API_URL:-}
-      SECURITY_API_KEY: ${SECURITY_API_KEY:-}
     ports:
       - "8000:8000"
     depends_on:
@@ -440,8 +429,7 @@ services:
     volumes:
       - ./WARDS:/WARDS
       - ./OCR:/OCR
-      # TEMPORARY (Phase 2-6): read-only SECURITY mount so security_dashboard.py
-      # can still import SECURITY.security_models during transition.
+      # TEMPORARY (Phase 2-6): read-only SECURITY mount during transition.
       # Remove in Phase 2b after confirming VM 2 is fully handling security.
       - ./SECURITY:/SECURITY:ro
 
@@ -493,16 +481,22 @@ services:
       DATABASE_URL: mysql+pymysql://root:${SEC_MYSQL_ROOT_PASSWORD:-sec_root_password}@security-db:3306/wards_security_db
       APP_API_KEY: ${APP_API_KEY:-change-me}
       WARDS_APP_IP: ${WARDS_APP_IP:-}
+      SECURITY_DEPLOYMENT_MODE: ${SECURITY_DEPLOYMENT_MODE:-development}
+      SECURITY_MONITORING_ENABLED: ${SECURITY_MONITORING_ENABLED:-false}
+      WAZUH_ENABLED: ${WAZUH_ENABLED:-false}
+      SECURITY_SCAN_INTERVAL_SECONDS: ${SECURITY_SCAN_INTERVAL_SECONDS:-30}
+      VM2_APP_DIR: /app/repo
     ports:
       - "8443:8443"
     depends_on:
       security-db:
         condition: service_healthy
     volumes:
-      # Mount the entire SECURITY folder so ml/, local_backups/, monitoring/
-      # are all available at the paths security_engine.py expects.
       - ./SECURITY:/app/SECURITY
       - ./QUARANTINE:/app/QUARANTINE
+      # Writable repo mount + Docker socket enable VM 2 auto-deploy via /internal/deploy
+      - .:/app/repo
+      - /var/run/docker.sock:/var/run/docker.sock
 
 volumes:
   sec_mysql_data:
@@ -516,6 +510,10 @@ Create `/opt/wards/security/app/.env`:
 SEC_MYSQL_ROOT_PASSWORD=CHANGE_ME_STRONG_PASSWORD
 APP_API_KEY=long-random-api-key-shared-between-vms
 WARDS_APP_IP=VM1_DROPLET_PUBLIC_IP
+SECURITY_DEPLOYMENT_MODE=production
+SECURITY_MONITORING_ENABLED=true
+WAZUH_ENABLED=false
+SECURITY_SCAN_INTERVAL_SECONDS=30
 ```
 
 > **Never commit this file.** It is already in `.gitignore`.
@@ -571,13 +569,13 @@ scp -r /opt/wards/app/SECURITY/local_backups root@SECURITY_VM_IP:/opt/wards/secu
 
 2. **Test the Security API from VM 1:**
    ```bash
-   curl -H "X-API-Key: YOUR_SHARED_KEY" https://SECURITY_VM_IP:8443/
+   curl -H "X-API-Key: YOUR_SHARED_KEY" http://SECURITY_VM_IP:8443/
    ```
-   You should see the FastAPI docs redirect or a JSON response.
+   You should see `{"status":"ok","service":"wards-security-api"}`.
 
 3. **Set `SECURITY_API_URL` on VM 1** in `WARDS/backend/.env`:
    ```env
-   SECURITY_API_URL=https://SECURITY_VM_IP:8443
+   SECURITY_API_URL=http://SECURITY_VM_IP:8443
    SECURITY_API_KEY=YOUR_SHARED_KEY
    ```
 
@@ -592,6 +590,7 @@ scp -r /opt/wards/app/SECURITY/local_backups root@SECURITY_VM_IP:/opt/wards/secu
    - Go to the security dashboard.
    - Confirm detections, incidents, and AI rules load correctly.
    - Run a manual file scan and confirm it works.
+   - Check the File Status tab shows monitored files from VM 2.
 
 6. **Monitor logs on both VMs:**
    ```bash
@@ -599,6 +598,29 @@ scp -r /opt/wards/app/SECURITY/local_backups root@SECURITY_VM_IP:/opt/wards/secu
    docker compose logs -f backend
    # VM 2
    docker compose -f docker-compose.security.yml logs -f security-api
+   ```
+
+### 6.1 Enable Webhook Auto-Deploy (Recommended)
+
+Instead of manually pulling code on each VM, configure the webhook deployer on VM 1:
+
+1. **On VM 1**, install the webhook deployer service:
+   ```bash
+   cd /opt/wards/app
+   pip install -r scripts/requirements-webhook.txt
+   cp scripts/webhook-deploy.service /etc/systemd/system/
+   systemctl daemon-reload
+   systemctl enable --now webhook-deploy
+   ```
+
+2. **In GitHub**, add a webhook pointing to `http://VM1_IP:9000/webhook` with the secret matching `WEBHOOK_SECRET` in the service file.
+
+3. The deployer will automatically pull `main` and rebuild both VM 1 and VM 2 on every push.
+
+4. **Verify deployment sync** via the status endpoints:
+   ```bash
+   curl http://VM1_IP:9000/deploy-status
+   curl http://VM1_IP:9000/vm2-deploy-status
    ```
 
 ---
@@ -650,6 +672,10 @@ If you do not have a domain with TLS for VM 2, you can:
 | `docker-compose.security.yml` | New compose file for the security stack | VM 2 |
 | `scripts/setup_vm2.sh` | Automates Docker install, clone, and first start on VM 2 | VM 2 |
 | `scripts/cleanup_vm1_security.sh` | Safely removes SECURITY/QUARANTINE from VM 1 after cutover | VM 1 |
+| `scripts/webhook_deploy.py` | GitHub webhook receiver that auto-deploys both VMs | VM 1 |
+| `scripts/webhook-deploy.service` | systemd service for the webhook deployer | VM 1 |
+| `scripts/requirements-webhook.txt` | Python dependencies for the webhook deployer | VM 1 |
+| `.github/workflows/wards-ci.yml` | CI workflow with deploy-status verification for both VMs | GitHub |
 | `WARDS/backend/.env.example` (updated) | Added `SECURITY_API_URL` and `SECURITY_API_KEY` placeholders | VM 1 |
 
 ---
