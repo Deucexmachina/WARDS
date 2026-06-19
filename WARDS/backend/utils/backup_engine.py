@@ -55,7 +55,7 @@ def _dump_command(database_url: str, db_type: str) -> list[str]:
         command.append((parsed.path or "").lstrip("/"))
         return command
     if db_type == "mysql":
-        command = ["mysqldump", "--ssl-mode=DISABLED"]
+        command = ["mysqldump", "--skip-ssl"]
         if parsed.hostname:
             command += ["--host", parsed.hostname]
         if parsed.port:

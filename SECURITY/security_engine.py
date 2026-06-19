@@ -2709,9 +2709,29 @@ def cleanup_quarantine_paths(paths: list[str]) -> None:
             pass
 
 
-def restore_from_backup(db: Session, file_entry: SecurityMonitoredFile, detection_id: int | None, recovery_type: str, initiated_by: int | None, quarantine_path: str | None = None) -> SecurityRecoveryEvent:
+def restore_from_backup(db: Session, file_entry: SecurityMonitoredFile, detection_id: int | None, recovery_type: str, initiated_by: int | None, quarantine_path: str | None = None, *, create_event: bool = True) -> SecurityRecoveryEvent | None:
     if is_database_entry(file_entry):
-        return restore_database_from_backup(db, file_entry, detection_id, recovery_type, initiated_by, quarantine_path)
+        return restore_database_from_backup(db, file_entry, detection_id, recovery_type, initiated_by, quarantine_path, create_event=create_event)
+
+    if not create_event:
+        backup_root = latest_backup_root(db)
+        if not backup_root:
+            raise RuntimeError("No local backup exists. Create a manual backup first.")
+        source = backup_file_path(backup_root, file_entry.relative_path)
+        target = portable_monitored_path(file_entry)
+        if not source.exists():
+            raise FileNotFoundError(f"Backup copy not found for {file_entry.relative_path}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+        restored_hash = sha256_file(target)
+        file_entry.current_hash = restored_hash
+        file_entry.baseline_hash = restored_hash
+        file_entry.status = "recovered"
+        file_entry.size_bytes = target.stat().st_size
+        file_entry.last_checked = now_utc()
+        db.add(file_entry)
+        db.commit()
+        return None
 
     recovery = SecurityRecoveryEvent(
         detection_event_id=detection_id,
@@ -2766,18 +2786,20 @@ def restore_from_backup(db: Session, file_entry: SecurityMonitoredFile, detectio
     return recovery
 
 
-def restore_database_from_backup(db: Session, file_entry: SecurityMonitoredFile, detection_id: int | None, recovery_type: str, initiated_by: int | None, quarantine_path: str | None = None) -> SecurityRecoveryEvent:
-    recovery = SecurityRecoveryEvent(
-        detection_event_id=detection_id,
-        file_id=file_entry.id,
-        recovery_type=recovery_type,
-        initiated_by=initiated_by,
-        status="in_progress",
-        quarantine_path=quarantine_path,
-    )
-    db.add(recovery)
-    db.commit()
-    db.refresh(recovery)
+def restore_database_from_backup(db: Session, file_entry: SecurityMonitoredFile, detection_id: int | None, recovery_type: str, initiated_by: int | None, quarantine_path: str | None = None, *, create_event: bool = True) -> SecurityRecoveryEvent | None:
+    recovery = None
+    if create_event:
+        recovery = SecurityRecoveryEvent(
+            detection_event_id=detection_id,
+            file_id=file_entry.id,
+            recovery_type=recovery_type,
+            initiated_by=initiated_by,
+            status="in_progress",
+            quarantine_path=quarantine_path,
+        )
+        db.add(recovery)
+        db.commit()
+        db.refresh(recovery)
 
     started = time.time()
     try:
@@ -2798,28 +2820,34 @@ def restore_database_from_backup(db: Session, file_entry: SecurityMonitoredFile,
         file_entry.status = "recovered"
         file_entry.size_bytes = target.stat().st_size
         file_entry.last_checked = now_utc()
-        recovery.status = "success"
-        recovery.backup_path = stored_path_value(source) or str(source)
-        recovery.completed_at = now_utc()
-        recovery.recovery_duration_ms = int((time.time() - started) * 1000)
-        recovery.summary = "Restored wards_db from the latest trusted database snapshot."
+        if recovery:
+            recovery.status = "success"
+            recovery.backup_path = stored_path_value(source) or str(source)
+            recovery.completed_at = now_utc()
+            recovery.recovery_duration_ms = int((time.time() - started) * 1000)
+            recovery.summary = "Restored wards_db from the latest trusted database snapshot."
         db.add(file_entry)
-        db.add(recovery)
+        if recovery:
+            db.add(recovery)
         set_setting(db, "database_audit_last_id", str(latest_database_audit_id(db)), "database_monitor")
         db.commit()
-        if recovery_type != "automatic":
+        if recovery and recovery_type != "automatic":
             create_system_alert(db, "recovery_completed", f"Recovery #{recovery.id}: {recovery.summary}", "low", dedupe_key=f"Recovery #{recovery.id}")
     except Exception as exc:
-        recovery.status = "failed"
-        recovery.error_message = str(exc)
-        recovery.completed_at = now_utc()
-        recovery.recovery_duration_ms = int((time.time() - started) * 1000)
-        recovery.summary = "Database recovery failed."
-        db.add(recovery)
-        db.commit()
-        if recovery_type != "automatic":
-            create_system_alert(db, "recovery_failed", f"Recovery #{recovery.id}: {recovery.summary} {recovery.error_message or ''}", "high", dedupe_key=f"Recovery #{recovery.id}")
-    db.refresh(recovery)
+        if recovery:
+            recovery.status = "failed"
+            recovery.error_message = str(exc)
+            recovery.completed_at = now_utc()
+            recovery.recovery_duration_ms = int((time.time() - started) * 1000)
+            recovery.summary = "Database recovery failed."
+            db.add(recovery)
+            db.commit()
+            if recovery_type != "automatic":
+                create_system_alert(db, "recovery_failed", f"Recovery #{recovery.id}: {recovery.summary} {recovery.error_message or ''}", "high", dedupe_key=f"Recovery #{recovery.id}")
+        if not create_event:
+            raise
+    if recovery:
+        db.refresh(recovery)
     return recovery
 
 
@@ -2925,7 +2953,9 @@ def restore_quarantined_copy_to_original(
     quarantine_path: str,
     initiated_by: int,
     detection_id: int | None = None,
-) -> SecurityRecoveryEvent:
+    *,
+    create_event: bool = True,
+) -> SecurityRecoveryEvent | None:
     source = safe_quarantine_path(quarantine_path)
     if not source or not source.exists() or not source.is_file():
         raise FileNotFoundError(f"Quarantined copy not found for {file_entry.relative_path}")
@@ -2941,6 +2971,10 @@ def restore_quarantined_copy_to_original(
     file_entry.size_bytes = target.stat().st_size
     file_entry.last_checked = now_utc()
     db.add(file_entry)
+
+    if not create_event:
+        db.commit()
+        return None
 
     recovery = SecurityRecoveryEvent(
         detection_event_id=detection_id,
@@ -3891,7 +3925,7 @@ def recover_files(db: Session, admin_id: int) -> dict:
     """Restore all monitored files (not database or ML) from the latest backup."""
     restored = 0
     failed = 0
-    first_event = None
+    started = time.time()
     for file_entry in (
         db.query(SecurityMonitoredFile)
         .filter(SecurityMonitoredFile.status != "monitoring_removed")
@@ -3900,16 +3934,27 @@ def recover_files(db: Session, admin_id: int) -> dict:
     ):
         if is_database_entry(file_entry):
             continue
-        event = restore_from_backup(db, file_entry, None, "files_recovery", admin_id)
-        first_event = first_event or event
-        if event.status == "success":
+        try:
+            restore_from_backup(db, file_entry, None, "files_recovery", admin_id, create_event=False)
             restored += 1
-        else:
+        except Exception:
             failed += 1
+    recovery = SecurityRecoveryEvent(
+        recovery_type="files_recovery",
+        initiated_by=admin_id,
+        status="success" if failed == 0 else "failed",
+        completed_at=now_utc(),
+        recovery_duration_ms=int((time.time() - started) * 1000),
+        summary=f"Restored {restored} file(s) from backup; {failed} failed.",
+    )
+    db.add(recovery)
+    db.commit()
+    db.refresh(recovery)
+    create_system_alert(db, "recovery_completed", f"Recovery #{recovery.id}: {recovery.summary}", "low", dedupe_key=f"Recovery #{recovery.id}")
     return {
         "restored": restored,
         "failed": failed,
-        "first_recovery_event_id": first_event.id if first_event else None,
+        "recovery_event_id": recovery.id,
     }
 
 
@@ -3973,20 +4018,31 @@ def manual_recover_file(db: Session, file_id: int, admin_id: int) -> SecurityRec
 def full_system_recovery(db: Session, admin_id: int) -> dict:
     restored = 0
     failed = 0
-    first_event = None
+    started = time.time()
     for file_entry in db.query(SecurityMonitoredFile).order_by(SecurityMonitoredFile.relative_path.asc()).all():
-        event = restore_from_backup(db, file_entry, None, "manual_full", admin_id)
-        first_event = first_event or event
-        if event.status == "success":
+        try:
+            restore_from_backup(db, file_entry, None, "manual_full", admin_id, create_event=False)
             restored += 1
-        else:
+        except Exception:
             failed += 1
     restored_ml_artifacts = restore_ml_artifacts_from_backup(db)
+    recovery = SecurityRecoveryEvent(
+        recovery_type="full_system_recovery",
+        initiated_by=admin_id,
+        status="success" if failed == 0 else "failed",
+        completed_at=now_utc(),
+        recovery_duration_ms=int((time.time() - started) * 1000),
+        summary=f"Full system recovery: {restored} file(s) restored, {failed} failed, {restored_ml_artifacts} ML artifact(s).",
+    )
+    db.add(recovery)
+    db.commit()
+    db.refresh(recovery)
+    create_system_alert(db, "recovery_completed", f"Recovery #{recovery.id}: {recovery.summary}", "low", dedupe_key=f"Recovery #{recovery.id}")
     return {
         "restored": restored,
         "failed": failed,
         "restored_ml_artifacts": restored_ml_artifacts,
-        "first_recovery_event_id": first_event.id if first_event else None,
+        "recovery_event_id": recovery.id,
     }
 
 
@@ -4079,7 +4135,7 @@ def ensure_missing_file_confirmation(db: Session, incidents: list[SecurityIncide
         })
 
 
-def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missing_files: bool = False) -> SecurityIncident:
+def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missing_files: bool = False, *, create_event: bool = True) -> SecurityIncident:
     migrate_portable_monitored_files(db)
     dedupe_monitored_files_by_relative_path(db)
     incident = db.query(SecurityIncident).filter(SecurityIncident.id == incident_id).first()
@@ -4096,20 +4152,22 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
             backup_source = backup_file_path(backup_root, file_entry.relative_path) if backup_root else None
             if backup_source and backup_source.exists() and backup_source.is_file():
                 started = time.time()
-                recovery = SecurityRecoveryEvent(
-                    detection_event_id=incident.detection_event_id,
-                    file_id=file_entry.id,
-                    recovery_type="automatic",
-                    initiated_by=admin_id,
-                    status="success",
-                    backup_path=str(backup_source),
-                    summary=f"Resolved incident restored missing trusted file for {file_entry.relative_path}.",
-                )
+                if create_event:
+                    recovery = SecurityRecoveryEvent(
+                        detection_event_id=incident.detection_event_id,
+                        file_id=file_entry.id,
+                        recovery_type="automatic",
+                        initiated_by=admin_id,
+                        status="success",
+                        backup_path=str(backup_source),
+                        summary=f"Resolved incident restored missing trusted file for {file_entry.relative_path}.",
+                    )
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(backup_source, target)
-                recovery.completed_at = now_utc()
-                recovery.recovery_duration_ms = int((time.time() - started) * 1000)
-                db.add(recovery)
+                if create_event:
+                    recovery.completed_at = now_utc()
+                    recovery.recovery_duration_ms = int((time.time() - started) * 1000)
+                    db.add(recovery)
                 restored_from_backup = True
         if target.exists() and target.is_file():
             current_hash = sha256_file(target)
@@ -4131,11 +4189,12 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
     db.add(incident)
     db.commit()
     db.refresh(incident)
-    create_system_alert(db, "incident_resolved", f"SEC-{incident.id}: Incident resolved. Quarantine was cleared and trusted backup baseline was retained.", "low", dedupe_key=f"SEC-{incident.id}")
+    if create_event:
+        create_system_alert(db, "incident_resolved", f"SEC-{incident.id}: Incident resolved. Quarantine was cleared and trusted backup baseline was retained.", "low", dedupe_key=f"SEC-{incident.id}")
     return incident
 
 
-def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_backup: bool = True, confirm_missing_files: bool = False) -> SecurityIncident:
+def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_backup: bool = True, confirm_missing_files: bool = False, *, create_event: bool = True) -> SecurityIncident:
     migrate_portable_monitored_files(db)
     dedupe_monitored_files_by_relative_path(db)
     incident = db.query(SecurityIncident).filter(SecurityIncident.id == incident_id).first()
@@ -4164,8 +4223,9 @@ def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_ba
             str(safe_source),
             admin_id,
             incident.detection_event_id,
+            create_event=create_event,
         )
-        if false_positive_recovery.status != "reverted":
+        if false_positive_recovery and false_positive_recovery.status != "reverted":
             raise RuntimeError(false_positive_recovery.error_message or "Unable to restore the quarantined file")
     if detection:
         detection.is_legitimate = True
@@ -4175,13 +4235,14 @@ def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_ba
         detection.severity_level = "info"
         detection.trigger_summary = f"False positive accepted by admin; {'authorized quarantined copy restored to its original location' if has_quarantine_copy else 'missing file acknowledged'} for {detection.target_name}."
         db.add(detection)
-    for recovery in db.query(SecurityRecoveryEvent).filter(SecurityRecoveryEvent.detection_event_id == incident.detection_event_id).all():
-        if false_positive_recovery and recovery.id == false_positive_recovery.id:
-            continue
-        if "backup" not in (recovery.recovery_type or ""):
-            recovery.status = "reverted"
-            recovery.summary = "False positive accepted; previous recovery was reversed to the quarantined incident state." if has_quarantine_copy else "False positive accepted after admin confirmed the affected or quarantined file is missing."
-        db.add(recovery)
+    if create_event:
+        for recovery in db.query(SecurityRecoveryEvent).filter(SecurityRecoveryEvent.detection_event_id == incident.detection_event_id).all():
+            if false_positive_recovery and recovery.id == false_positive_recovery.id:
+                continue
+            if "backup" not in (recovery.recovery_type or ""):
+                recovery.status = "reverted"
+                recovery.summary = "False positive accepted; previous recovery was reversed to the quarantined incident state." if has_quarantine_copy else "False positive accepted after admin confirmed the affected or quarantined file is missing."
+            db.add(recovery)
     incident.status = "false_positive"
     incident.response_action = "authorized_quarantined_copy_restored" if has_quarantine_copy else "authorized_change_missing_file_acknowledged"
     incident.resolved_at = now_utc()
@@ -4218,13 +4279,14 @@ def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_ba
         false_positive_summary = "Quarantined copy restored; backup baseline will be refreshed by the bulk operation."
     else:
         false_positive_summary = "Missing quarantine acknowledged; no reversion or backup was performed."
-    create_system_alert(
-        db,
-        "incident_false_positive",
-        f"SEC-{incident.id}: Incident marked false positive. {false_positive_summary}",
-        "medium",
-        dedupe_key=f"SEC-{incident.id}",
-    )
+    if create_event:
+        create_system_alert(
+            db,
+            "incident_false_positive",
+            f"SEC-{incident.id}: Incident marked false positive. {false_positive_summary}",
+            "medium",
+            dedupe_key=f"SEC-{incident.id}",
+        )
     db.refresh(incident)
     return incident
 
@@ -4236,24 +4298,41 @@ def bulk_update_incidents(db: Session, action: str, admin_id: int, confirm_missi
     rows = db.query(SecurityIncident).filter(SecurityIncident.status.in_(["open", "investigating"])).order_by(SecurityIncident.id.asc()).all()
     if action in {"resolve", "false_positive"}:
         ensure_missing_file_confirmation(db, rows, action, confirm_missing_files)
+    started = time.time()
+    failed = 0
     for incident in rows:
-        if action == "resolve":
-            resolve_incident(db, incident.id, admin_id, confirm_missing_files=confirm_missing_files)
-            updated += 1
-        elif action == "false_positive":
-            mark_false_positive(db, incident.id, admin_id, refresh_backup=False, confirm_missing_files=confirm_missing_files)
-            updated += 1
-        elif action == "investigating":
-            incident.status = "investigating"
-            incident.response_action = "under_review"
-            db.add(incident)
-            db.commit()
-            updated += 1
-        else:
-            raise ValueError("Unsupported bulk incident action")
+        try:
+            if action == "resolve":
+                resolve_incident(db, incident.id, admin_id, confirm_missing_files=confirm_missing_files, create_event=False)
+                updated += 1
+            elif action == "false_positive":
+                mark_false_positive(db, incident.id, admin_id, refresh_backup=False, confirm_missing_files=confirm_missing_files, create_event=False)
+                updated += 1
+            elif action == "investigating":
+                incident.status = "investigating"
+                incident.response_action = "under_review"
+                db.add(incident)
+                db.commit()
+                updated += 1
+            else:
+                raise ValueError("Unsupported bulk incident action")
+        except Exception:
+            failed += 1
     if action == "false_positive" and updated:
         create_manual_backup(db, admin_id, label="false_positive_bulk")
-    return {"updated": updated, "action": action}
+    recovery = SecurityRecoveryEvent(
+        recovery_type="bulk_incident_update",
+        initiated_by=admin_id,
+        status="success" if failed == 0 else "failed",
+        completed_at=now_utc(),
+        recovery_duration_ms=int((time.time() - started) * 1000),
+        summary=f"Bulk {action}: {updated} incident(s) updated, {failed} failed.",
+    )
+    db.add(recovery)
+    db.commit()
+    db.refresh(recovery)
+    create_system_alert(db, "bulk_incident_update", f"Bulk {action}: {updated} incident(s) updated, {failed} failed.", "low", dedupe_key=f"bulk-{action}-{updated}")
+    return {"updated": updated, "failed": failed, "action": action, "recovery_event_id": recovery.id}
 
 
 def dashboard_payload(db: Session) -> dict:
