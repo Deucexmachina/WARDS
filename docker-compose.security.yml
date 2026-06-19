@@ -28,6 +28,8 @@ services:
       SECURITY_SCAN_INTERVAL_SECONDS: ${SECURITY_SCAN_INTERVAL_SECONDS:-30}
       VM2_APP_DIR: /app/repo
       LOG_INTEGRITY_SECRET: ${LOG_INTEGRITY_SECRET:-change-me-log-integrity-secret}
+      DATA_HASH_SECRET: ${DATA_HASH_SECRET:-change-me-data-hash-secret}
+      BACKUP_INTEGRITY_SECRET: ${BACKUP_INTEGRITY_SECRET:-change-me-backup-integrity-secret}
     ports:
       - "8443:8443"
     depends_on:
