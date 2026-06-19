@@ -164,3 +164,4 @@ The following endpoints are **NOT** protected by an explicit SlowAPI `@limiter.l
 
 - The `tax_assessment.py` route file defines a **hybrid limiter** (`get_rate_limit_key`) but does **not** apply any `@limiter.limit` decorators to its endpoints.
 - The `main.py` global limiter (`hybrid_rate_limit_key`) is initialized as `app.state.limiter`, but most route files instantiate their own local `Limiter` objects. This means decorator state is **not shared** across route modules.
+
