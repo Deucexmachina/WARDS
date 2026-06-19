@@ -35,19 +35,19 @@ export const CustomSelect = ({
   const activeRing = open && !disabled && !hasError ? 'border-blue-500 ring-2 ring-blue-500/20' : '';
 
   return (
-    <div ref={ref} className={`relative ${className}`}>
+    <div ref={ref} className={`relative min-w-0 ${className}`}>
       <button
         type="button"
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
         className={`${base} ${disabled ? dis : idle} ${activeRing}`}
       >
-        <span className={selectedLabel ? '' : 'text-slate-400'}>{selectedLabel || placeholder}</span>
+        <span className={`${selectedLabel ? '' : 'text-slate-400'} flex-1 min-w-0 truncate text-left`}>{selectedLabel || placeholder}</span>
         <span className={`transition-transform ${open ? 'rotate-180' : ''}`}>{CHEVRON}</span>
       </button>
 
       {open && !disabled && (
-        <div className="absolute left-0 right-0 z-50 mt-1 rounded-2xl border border-slate-200 bg-white shadow-xl overflow-hidden">
+        <div className="absolute left-0 right-0 z-50 mt-1 min-w-[160px] rounded-2xl border border-slate-200 bg-white shadow-xl overflow-hidden">
           <div className="max-h-56 overflow-y-auto">
             {placeholder && (
               <button

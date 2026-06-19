@@ -27,6 +27,7 @@ from SECURITY.security_engine import (
     query_recoveries,
     get_ai_rules,
     get_ai_sensitivity,
+    set_ai_sensitivity,
     update_ai_rules,
     add_ai_rule,
     available_ai_rule_templates,
@@ -225,6 +226,11 @@ def api_ai_rule_add(payload: dict = {}, db=Depends(get_db)):
 @app.get("/v1/ai/sensitivity", dependencies=[Depends(require_api_key)])
 def api_ai_sensitivity(db=Depends(get_db)):
     return {"sensitivity": get_ai_sensitivity(db)}
+
+
+@app.post("/v1/ai/sensitivity", dependencies=[Depends(require_api_key)])
+def api_ai_sensitivity_set(payload: dict = {}, db=Depends(get_db)):
+    return {"sensitivity": set_ai_sensitivity(db, payload.get("sensitivity", "medium"), payload.get("actor", "api"))}
 
 
 @app.get("/v1/ai/rule-templates", dependencies=[Depends(require_api_key)])

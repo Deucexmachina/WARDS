@@ -853,7 +853,6 @@ def folder_browser(path: str | None = Query(None), _=Depends(current_admin)):
             "parent": str(current.parent) if current.parent != current else None,
             "directories": sorted(directories, key=lambda item: item["name"].lower()),
             "quick_roots": [
-                {"name": "WARDS MASTERFILE", "path": str(MASTER_ROOT)},
                 {"name": "WARDS", "path": str(MASTER_ROOT / "WARDS")},
                 {"name": "OCR", "path": str(MASTER_ROOT / "OCR")},
             ],

@@ -2082,7 +2082,7 @@ def register_initial_files(db: Session, ensure_backup: bool = True, refresh_exis
                     file_entry.size_bytes = stat.st_size
                     file_entry.last_checked = datetime.utcfromtimestamp(stat.st_mtime)
                 else:
-                    file_entry.last_checked = datetime.utcfromtimestamp(stat.st_mtime)
+                    pass
                 file_entry.file_type = file_type(path)
                 db.add(file_entry)
     else:
@@ -2114,7 +2114,7 @@ def register_initial_files(db: Session, ensure_backup: bool = True, refresh_exis
                     existing.size_bytes = path.stat().st_size
                     existing.last_checked = datetime.utcfromtimestamp(path.stat().st_mtime)
                 else:
-                    existing.last_checked = datetime.utcfromtimestamp(path.stat().st_mtime)
+                    pass
                 db.add(existing)
                 continue
             current_hash = sha256_file(path)
