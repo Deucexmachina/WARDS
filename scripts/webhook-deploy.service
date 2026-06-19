@@ -9,8 +9,7 @@ WorkingDirectory=/opt/wards/app
 Environment="WEBHOOK_SECRET=replace-with-your-github-webhook-secret"
 Environment="DEPLOY_DIR=/opt/wards/app"
 Environment="VM2_HOST=146.190.97.87"
-Environment="VM2_USER=root"
-Environment="VM2_APP_DIR=/opt/wards/security/app"
+Environment="VM2_API_KEY=3e5833e12a888a95601b31f69b4e9bb8612f0e17807020deeb4d24f43e3e68c1"
 ExecStart=/opt/wards/app/venv/bin/python /opt/wards/app/scripts/webhook_deploy.py
 Restart=always
 RestartSec=5

@@ -376,3 +376,24 @@ def api_admin_change(payload: dict = {}, db=Depends(get_db)):
 @app.post("/v1/backups/mark-stale", dependencies=[Depends(require_api_key)])
 def api_mark_stale(db=Depends(get_db)):
     return mark_stale_backup_events_failed(db)
+
+
+# ---------------------------------------------------------------------------
+# Internal deploy trigger (called by VM1 webhook deployer)
+# ---------------------------------------------------------------------------
+@app.post("/internal/deploy", dependencies=[Depends(require_api_key)])
+def api_internal_deploy():
+    import subprocess
+    import threading
+
+    def _deploy():
+        app_dir = os.getenv("VM2_APP_DIR", "/opt/wards/security/app")
+        subprocess.run(["git", "fetch", "origin", "main"], cwd=app_dir, capture_output=True)
+        subprocess.run(["git", "reset", "--hard", "origin/main"], cwd=app_dir, capture_output=True)
+        subprocess.run(
+            ["docker", "compose", "-f", "docker-compose.security.yml", "up", "-d", "--build"],
+            cwd=app_dir, capture_output=True,
+        )
+
+    threading.Thread(target=_deploy, daemon=True).start()
+    return {"status": "deploy_triggered"}

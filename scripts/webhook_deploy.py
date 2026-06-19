@@ -2,14 +2,13 @@
 GitHub Webhook Deploy Receiver
 ================================
 Run this on VM1 (port 9000) to auto-deploy on push to main.
-Verifies GitHub webhook signatures. Supports triggering VM2 rebuild.
+Verifies GitHub webhook signatures. Triggers VM2 rebuild via HTTP API.
 
 Usage:
     export WEBHOOK_SECRET=your_github_webhook_secret
     export DEPLOY_DIR=/opt/wards/app
     export VM2_HOST=146.190.97.87
-    export VM2_USER=root
-    export VM2_APP_DIR=/opt/wards/security/app
+    export VM2_API_KEY=shared_api_key
     python webhook_deploy.py
 
 Systemd service:
@@ -24,6 +23,7 @@ import json
 import subprocess
 import logging
 
+import httpx
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import PlainTextResponse
 import uvicorn
@@ -36,8 +36,7 @@ app = FastAPI()
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "").encode()
 DEPLOY_DIR = os.environ.get("DEPLOY_DIR", "/opt/wards/app")
 VM2_HOST = os.environ.get("VM2_HOST", "")
-VM2_USER = os.environ.get("VM2_USER", "root")
-VM2_APP_DIR = os.environ.get("VM2_APP_DIR", "/opt/wards/security/app")
+VM2_API_KEY = os.environ.get("VM2_API_KEY", "")
 
 
 def verify_signature(body: bytes, signature: str) -> bool:
@@ -84,17 +83,19 @@ async def github_webhook(request: Request):
         run_cmd(["git", "reset", "--hard", "origin/main"], cwd=DEPLOY_DIR)
         run_cmd(["docker", "compose", "up", "-d", "--build"], cwd=DEPLOY_DIR)
 
-        # Deploy VM2 (via SSH if configured)
-        if VM2_HOST:
-            logger.info("Deploying VM2 at %s", VM2_HOST)
-            ssh_cmd = (
-                f"ssh -o StrictHostKeyChecking=no -i ~/.ssh/vm2_deploy_key "
-                f"{VM2_USER}@{VM2_HOST} "
-                f"'cd {VM2_APP_DIR} && docker compose -f docker-compose.security.yml stop security-api && "
-                f"git fetch origin main && git reset --hard origin/main && "
-                f"docker compose -f docker-compose.security.yml up -d --build'"
-            )
-            run_cmd(["bash", "-c", ssh_cmd])
+        # Deploy VM2 via authenticated HTTP trigger
+        if VM2_HOST and VM2_API_KEY:
+            logger.info("Triggering VM2 deploy at %s", VM2_HOST)
+            try:
+                resp = httpx.post(
+                    f"http://{VM2_HOST}:8443/internal/deploy",
+                    headers={"X-API-Key": VM2_API_KEY},
+                    timeout=30.0,
+                )
+                resp.raise_for_status()
+                logger.info("VM2 deploy triggered: %s", resp.json())
+            except Exception as e:
+                logger.error("VM2 deploy trigger failed: %s", e)
 
         return PlainTextResponse("Deployed VM1 and VM2", status_code=200)
 
