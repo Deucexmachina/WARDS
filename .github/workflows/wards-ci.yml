@@ -125,23 +125,27 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 10
-      - name: Wait for webhook deploy
-        run: sleep 180
-      - name: Check VM sync and commit validity
+      - name: Wait for VMs to sync
         run: |
-          VM1_COMMIT=$(curl -sSf http://152.42.249.84:9000/deploy-status | jq -r '.commit')
-          VM2_COMMIT=$(curl -sSf http://152.42.249.84:9000/vm2-deploy-status | jq -r '.commit')
-          echo "VM1 commit: $VM1_COMMIT"
-          echo "VM2 commit: $VM2_COMMIT"
+          START=$(date +%s)
+          MAX_WAIT=180
+          while true; do
+            VM1_COMMIT=$(curl -sSf http://152.42.249.84:9000/deploy-status | jq -r '.commit')
+            VM2_COMMIT=$(curl -sSf http://152.42.249.84:9000/vm2-deploy-status | jq -r '.commit')
+            echo "VM1=$VM1_COMMIT VM2=$VM2_COMMIT"
 
-          if [ "$VM1_COMMIT" != "$VM2_COMMIT" ]; then
-            echo "VMs are NOT synchronized (commits differ)"
-            exit 1
-          fi
+            if [ "$VM1_COMMIT" = "$VM2_COMMIT" ] && [ "$VM1_COMMIT" != "unknown" ]; then
+              if git merge-base --is-ancestor "$VM1_COMMIT" origin/main; then
+                echo "VMs synchronized at $VM1_COMMIT (on origin/main) — deploy verified."
+                exit 0
+              fi
+            fi
 
-          if ! git merge-base --is-ancestor "$VM1_COMMIT" origin/main; then
-            echo "Deployed commit $VM1_COMMIT is not on origin/main"
-            exit 1
-          fi
+            ELAPSED=$(($(date +%s) - START))
+            if [ "$ELAPSED" -ge "$MAX_WAIT" ]; then
+              echo "Timeout after ${MAX_WAIT}s — VMs still not synchronized."
+              exit 1
+            fi
 
-          echo "VMs synchronized at $VM1_COMMIT (on origin/main) — deploy verified."
+            sleep 5
+          done
