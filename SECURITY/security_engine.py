@@ -501,6 +501,20 @@ IMPORTANT_SYSTEM_ALERT_KEYS = {
 }
 
 
+def _valid_admin_id(db: Session, admin_id: int | None) -> int | None:
+    """Return admin_id only if the admin exists locally; otherwise None.
+
+    This prevents cross-VM foreign-key failures when VM1 admin IDs are
+    passed to VM2, which does not share the same admins table.
+    """
+    if admin_id is None:
+        return None
+    try:
+        return admin_id if db.query(Admin).filter(Admin.id == admin_id).first() else None
+    except Exception:
+        return None
+
+
 def canonical_admin_recipients() -> list[str]:
     recipients = [
         (os.getenv("SUPERADMIN_EMAIL") or CANONICAL_SUPERADMIN_EMAIL).strip().lower(),
@@ -2985,7 +2999,7 @@ def restore_quarantined_copy_to_original(
         detection_event_id=detection_id,
         file_id=file_entry.id,
         recovery_type="reverted",
-        initiated_by=initiated_by,
+        initiated_by=_valid_admin_id(db, initiated_by),
         status="reverted",
         quarantine_path=stored_path_value(source) or str(source),
         backup_path=stored_path_value(source) or str(source),
@@ -4149,7 +4163,7 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                         detection_event_id=incident.detection_event_id,
                         file_id=file_entry.id,
                         recovery_type="automatic",
-                        initiated_by=admin_id,
+                        initiated_by=_valid_admin_id(db, admin_id),
                         status="success",
                         backup_path=str(backup_source),
                         summary=f"Resolved incident restored missing trusted file for {file_entry.relative_path}.",
@@ -4175,7 +4189,7 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
         db.add(file_entry)
     incident.status = "resolved"
     incident.resolved_at = now_utc()
-    incident.resolved_by = admin_id
+    incident.resolved_by = _valid_admin_id(db, admin_id)
     incident.response_action = "resolved_clean_backup_retained"
     cleanup_quarantine_paths(json_loads(incident.quarantine_paths_json, []))
     db.add(incident)
@@ -4238,7 +4252,7 @@ def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_ba
     incident.status = "false_positive"
     incident.response_action = "authorized_quarantined_copy_restored" if has_quarantine_copy else "authorized_change_missing_file_acknowledged"
     incident.resolved_at = now_utc()
-    incident.resolved_by = admin_id
+    incident.resolved_by = _valid_admin_id(db, admin_id)
     db.add(incident)
     db.commit()
     backup_refreshed = False
@@ -4253,7 +4267,7 @@ def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_ba
                 except Exception:
                     backup_refresh_failed = True
             else:
-                backup_event = create_manual_backup(db, admin_id, label="false_positive")
+                backup_event = create_manual_backup(db, _valid_admin_id(db, admin_id), label="false_positive")
                 backup_refreshed = backup_event.status == "success"
                 backup_refresh_failed = backup_event.status != "success"
             if backup_refreshed:
@@ -4311,10 +4325,10 @@ def bulk_update_incidents(db: Session, action: str, admin_id: int, confirm_missi
         except Exception:
             failed += 1
     if action == "false_positive" and updated:
-        create_manual_backup(db, admin_id, label="false_positive_bulk")
+        create_manual_backup(db, _valid_admin_id(db, admin_id), label="false_positive_bulk")
     recovery = SecurityRecoveryEvent(
         recovery_type="bulk_incident_update",
-        initiated_by=admin_id,
+        initiated_by=_valid_admin_id(db, admin_id),
         status="success" if failed == 0 else "failed",
         completed_at=now_utc(),
         recovery_duration_ms=int((time.time() - started) * 1000),
