@@ -34,11 +34,19 @@ async def _post(path: str, json_data: dict | None = None) -> Any:
 
 
 def _sync_post(path: str, json_data: dict | None = None) -> Any:
-    return asyncio.get_event_loop().run_until_complete(_post(path, json_data))
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(_post(path, json_data))
+    finally:
+        loop.close()
 
 
 def _sync_get(path: str, params: dict | None = None) -> Any:
-    return asyncio.get_event_loop().run_until_complete(_get(path, params))
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(_get(path, params))
+    finally:
+        loop.close()
 
 
 # ---------------------------------------------------------------------------
