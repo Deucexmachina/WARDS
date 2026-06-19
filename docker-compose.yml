@@ -39,8 +39,6 @@ services:
       REDIS_URL: redis://redis:6379/0
       SECURITY_DEPLOYMENT_MODE: deployed
       SECURITY_MONITORING_ENABLED: "true"
-      SECURITY_API_URL: ${SECURITY_API_URL:-}
-      SECURITY_API_KEY: ${SECURITY_API_KEY:-}
     ports:
       - "8000:8000"
     depends_on:
