@@ -4371,7 +4371,7 @@ def dashboard_payload(db: Session) -> dict:
         status = "Compromised"
     elif incidents:
         status = "At Risk"
-    monitoring_enabled = (runtime_env.get("monitoring_enabled") or get_setting(db, "monitoring_enabled", "false") or "false").lower() == "true"
+    monitoring_enabled = (get_setting(db, "monitoring_enabled", "false") or "false").lower() == "true"
     return {
         "system_status": status,
         "monitored_files": monitored_files_count,
@@ -4401,9 +4401,9 @@ def dashboard_payload(db: Session) -> dict:
             "ai_model": "trained" if MODEL_STATE_PATH.exists() else "bootstrap-ready",
             "ai_model_version": model_metadata.get("version") or get_setting(db, "ai_model_version", ""),
             "ai_rules_enabled": sum(1 for item in get_ai_rules(db).values() if item.get("enabled", True)),
-            "deployment_mode": runtime_env.get("deployment_mode") or get_setting(db, "deployment_mode", "development"),
+            "deployment_mode": get_setting(db, "deployment_mode", "development"),
             "monitoring_enabled": "true" if monitoring_enabled else "false",
-            "scan_interval_seconds": runtime_env.get("scan_interval_seconds") or get_setting(db, "scan_interval_seconds", "30"),
+            "scan_interval_seconds": get_setting(db, "scan_interval_seconds", "30"),
             "time_source": time_source_label(),
         },
     }
