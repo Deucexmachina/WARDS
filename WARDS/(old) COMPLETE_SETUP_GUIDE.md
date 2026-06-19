@@ -469,3 +469,4 @@ WARDS/
 **Setup Complete! 🎉**
 
 Your WARDS system is now ready for use with MySQL database and PayMongo payment processing.
+
