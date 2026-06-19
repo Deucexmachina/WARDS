@@ -128,11 +128,9 @@ jobs:
       - name: Wait for webhook deploy
         run: sleep 60
       - name: Check VM sync and commit validity
-        env:
-          VM2_API_KEY: ${{ secrets.VM2_API_KEY || '3e5833e12a888a95601b31f69b4e9bb8612f0e17807020deeb4d24f43e3e68c1' }}
         run: |
           VM1_COMMIT=$(curl -sSf http://152.42.249.84:9000/deploy-status | jq -r '.commit')
-          VM2_COMMIT=$(curl -sSf -H "X-API-Key: $VM2_API_KEY" http://146.190.97.87:8443/internal/deploy-status | jq -r '.commit')
+          VM2_COMMIT=$(curl -sSf http://152.42.249.84:9000/vm2-deploy-status | jq -r '.commit')
           echo "VM1 commit: $VM1_COMMIT"
           echo "VM2 commit: $VM2_COMMIT"
 
@@ -142,7 +140,7 @@ jobs:
           fi
 
           if ! git merge-base --is-ancestor "$VM1_COMMIT" origin/main; then
-            echo "Deployed commit $VM1_COMMIT is not on origin/main"
+            echo "Deployed commit $VM1_COMMIT$ is not on origin/main"
             exit 1
           fi
 

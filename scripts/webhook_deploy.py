@@ -120,6 +120,23 @@ async def deploy_status():
     return {"vm": "vm1", "commit": commit, "deploy_dir": DEPLOY_DIR}
 
 
+@app.get("/vm2-deploy-status")
+async def vm2_deploy_status():
+    if not VM2_HOST or not VM2_API_KEY:
+        raise HTTPException(status_code=503, detail="VM2 not configured")
+    try:
+        resp = httpx.get(
+            f"http://{VM2_HOST}:8443/internal/deploy-status",
+            headers={"X-API-Key": VM2_API_KEY},
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as e:
+        logger.error("Failed to fetch VM2 status: %s", e)
+        raise HTTPException(status_code=502, detail=f"VM2 status unavailable: {e}")
+
+
 if __name__ == "__main__":
     if not WEBHOOK_SECRET:
         logger.warning("WEBHOOK_SECRET is not set. All webhook requests will be rejected.")
