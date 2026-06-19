@@ -118,7 +118,17 @@ def create_database_backup() -> BackupResult:
     else:
         command = _dump_command(database_url, db_type)
         with gzip.open(output_path, "wb") as target:
-            subprocess.run(command, stdout=target, stderr=subprocess.PIPE, check=True)
+            result = subprocess.run(command, stdout=target, stderr=subprocess.PIPE)
+        stderr_text = result.stderr.decode("utf-8", errors="ignore") if result.stderr else ""
+        # mysqldump exit code 2 = completed with warnings; treat as success
+        if result.returncode == 0 or (db_type == "mysql" and result.returncode == 2):
+            if stderr_text:
+                import logging
+                logging.getLogger(__name__).warning("mysqldump stderr: %s", stderr_text)
+        else:
+            raise RuntimeError(
+                f"Database dump failed (exit {result.returncode}). stderr: {stderr_text}"
+            )
 
     checksum = sha256_file(output_path)
     return BackupResult(

@@ -14,9 +14,10 @@ sys.path.insert(0, str(MASTER_ROOT / "WARDS" / "backend"))
 
 from fastapi import FastAPI, HTTPException, Header, Depends
 from pydantic import BaseModel
+from sqlalchemy import inspect
 from typing import Any
 
-from database.models import SessionLocal, engine, Admin
+from database.models import SessionLocal, engine, Admin, Base
 from SECURITY.security_engine import (
     dashboard_payload,
     scan_single_file,
@@ -80,6 +81,7 @@ if not API_KEY or API_KEY in ("change-me", ""):
     warnings.warn("APP_API_KEY is not set or is using a default value. Set a strong key before production use.")
 
 app = FastAPI(title="WARDS Security API", version="1.0.0")
+Base.metadata.create_all(bind=engine)
 
 
 def require_api_key(x_api_key: str = Header(..., alias="X-API-Key")):
@@ -242,6 +244,8 @@ def api_ai_weekly(db=Depends(get_db)):
 def _resolve_admin_id(db, admin_id):
     """Validate admin_id exists in local VM2 admins table; return None if foreign."""
     if admin_id is None:
+        return None
+    if "admins" not in inspect(db.bind).get_table_names():
         return None
     try:
         return db.query(Admin.id).filter(Admin.id == admin_id).scalar()
