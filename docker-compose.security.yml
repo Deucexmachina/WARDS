@@ -35,7 +35,8 @@ services:
     volumes:
       - ./SECURITY:/app/SECURITY
       - ./QUARANTINE:/app/QUARANTINE
-      - .:/app/repo:ro
+      - .:/app/repo
+      - /var/run/docker.sock:/var/run/docker.sock
 
 volumes:
   sec_mysql_data:
