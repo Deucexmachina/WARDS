@@ -73,9 +73,6 @@ from utils.security_client import (
     next_weekday,
     json_dumps,
 )
-from SECURITY.security_models import SecurityIncident, SecurityMonitoredFile
-from SECURITY.security_models import SecurityDetectionEvent, SecurityRecoveryEvent
-
 def get_rate_limit_key(request: Request) -> str:
     """Get rate limit key - user-based if authenticated, otherwise IP-based"""
     if hasattr(request.state, 'user') and request.state.user:
@@ -462,6 +459,7 @@ def _run_scan_all_files_sync(job_id: str) -> list:
         set_setting(db, "last_scan_at", now_utc().isoformat(), "security_scanner")
         detections = []
         hash_index = current_hash_index(db)
+        from SECURITY.security_models import SecurityMonitoredFile
         files = active_monitored_files_query(db).order_by(SecurityMonitoredFile.relative_path.asc()).all()
         total = len(files)
         for idx, file_entry in enumerate(files, start=1):
