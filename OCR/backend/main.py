@@ -81,12 +81,13 @@ app.add_middleware(SecurityHeadersMiddleware)
 # =========================
 # 🔐 CORS CONFIG
 # =========================
+def _ocr_cors_origins() -> list[str]:
+    raw = os.getenv("CORS_ORIGINS", "")
+    return [o.strip() for o in raw.split(",") if o.strip()] or []
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5173"
-    ],
+    allow_origins=_ocr_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
