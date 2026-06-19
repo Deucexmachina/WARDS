@@ -42,8 +42,10 @@ from SECURITY.security_engine import (
     get_setting,
     set_setting,
     serialize_detection,
+    serialize_file,
     serialize_incident,
     serialize_recovery,
+    active_monitored_files_query,
     register_initial_files,
     mark_stale_backup_events_failed,
     current_hash_index,
@@ -304,6 +306,34 @@ def api_incident_bulk(payload: dict = {}, db=Depends(get_db)):
     )
 
 
+@app.post("/v1/incidents/query", dependencies=[Depends(require_api_key)])
+def api_incidents_query(payload: dict = {}, db=Depends(get_db)):
+    from datetime import datetime
+    query = db.query(SecurityIncident)
+    status = payload.get("status")
+    severity = payload.get("severity")
+    keyword = payload.get("keyword")
+    date_from = payload.get("date_from")
+    date_to = payload.get("date_to")
+    sort = payload.get("sort", "newest")
+    limit = payload.get("limit", 200)
+    if status:
+        if status == "resolved":
+            query = query.filter(SecurityIncident.status.in_(["resolved", "verified_deleted", "verified_renamed"]))
+        else:
+            query = query.filter(SecurityIncident.status == status)
+    if severity:
+        query = query.filter(SecurityIncident.severity_level == severity)
+    if keyword:
+        query = query.filter(SecurityIncident.description.like(f"%{keyword}%"))
+    if date_from:
+        query = query.filter(SecurityIncident.created_at >= datetime.fromisoformat(date_from))
+    if date_to:
+        query = query.filter(SecurityIncident.created_at <= datetime.fromisoformat(f"{date_to}T23:59:59" if len(date_to) == 10 else date_to))
+    order = SecurityIncident.created_at.asc() if sort == "oldest" else SecurityIncident.created_at.desc()
+    return [serialize_incident(item) for item in query.order_by(order).limit(limit).all()]
+
+
 # ---------------------------------------------------------------------------
 # Settings
 # ---------------------------------------------------------------------------
@@ -317,9 +347,29 @@ def api_settings_set(payload: dict = {}, db=Depends(get_db)):
     return set_setting(db, payload["key"], payload["value"], actor=payload.get("actor"))
 
 
+@app.get("/v1/source-ids/{log_type}", dependencies=[Depends(require_api_key)])
+def api_source_ids(log_type: str, db=Depends(get_db)):
+    if log_type == "detections":
+        rows = db.query(SecurityDetectionEvent.id).filter(SecurityDetectionEvent.is_legitimate == False).all()
+    elif log_type == "recoveries":
+        rows = db.query(SecurityRecoveryEvent.id).filter(SecurityRecoveryEvent.recovery_type.notlike("%backup%")).all()
+    elif log_type == "incidents":
+        rows = db.query(SecurityIncident.id).filter(SecurityIncident.status.in_(["open", "investigating"])).all()
+    elif log_type == "backups":
+        rows = db.query(SecurityRecoveryEvent.id).filter(SecurityRecoveryEvent.recovery_type.like("%backup%")).all()
+    else:
+        raise HTTPException(status_code=400, detail="Invalid security log type.")
+    return {"ids": [row[0] for row in rows]}
+
+
 # ---------------------------------------------------------------------------
 # File helpers
 # ---------------------------------------------------------------------------
+@app.get("/v1/files", dependencies=[Depends(require_api_key)])
+def api_files_list(db=Depends(get_db)):
+    return [serialize_file(item) for item in active_monitored_files_query(db).order_by(SecurityMonitoredFile.relative_path.asc()).all()]
+
+
 @app.post("/v1/files/register", dependencies=[Depends(require_api_key)])
 def api_files_register(db=Depends(get_db)):
     return {"registered": register_initial_files(db)}

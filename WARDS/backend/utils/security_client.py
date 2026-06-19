@@ -67,6 +67,58 @@ def active_monitored_files_query(db):
     return _local(db)
 
 
+def list_monitored_files(db):
+    if not SECURITY_API_URL:
+        from SECURITY.security_engine import active_monitored_files_query as _local
+        from SECURITY.security_models import SecurityMonitoredFile
+        return [serialize_file(item) for item in _local(db).order_by(SecurityMonitoredFile.relative_path.asc()).all()]
+    return _sync_get("/v1/files")
+
+
+def query_incidents(db, keyword=None, status=None, severity=None, date_from=None, date_to=None, limit=200, sort="newest"):
+    if not SECURITY_API_URL:
+        from SECURITY.security_models import SecurityIncident
+        from datetime import datetime
+        query = db.query(SecurityIncident)
+        if status:
+            if status == "resolved":
+                query = query.filter(SecurityIncident.status.in_(["resolved", "verified_deleted", "verified_renamed"]))
+            else:
+                query = query.filter(SecurityIncident.status == status)
+        if severity:
+            query = query.filter(SecurityIncident.severity_level == severity)
+        if keyword:
+            query = query.filter(SecurityIncident.description.like(f"%{keyword}%"))
+        if date_from:
+            query = query.filter(SecurityIncident.created_at >= datetime.fromisoformat(date_from))
+        if date_to:
+            query = query.filter(SecurityIncident.created_at <= datetime.fromisoformat(f"{date_to}T23:59:59" if len(date_to) == 10 else date_to))
+        order = SecurityIncident.created_at.asc() if sort == "oldest" else SecurityIncident.created_at.desc()
+        return query.order_by(order).limit(limit).all()
+    return _sync_post("/v1/incidents/query", {
+        "keyword": keyword, "status": status, "severity": severity,
+        "date_from": date_from, "date_to": date_to, "limit": limit, "sort": sort,
+    })
+
+
+def source_ids_for_log_type(db, log_type: str) -> list[int]:
+    if not SECURITY_API_URL:
+        from SECURITY.security_models import SecurityIncident, SecurityDetectionEvent, SecurityRecoveryEvent
+        if log_type == "detections":
+            rows = db.query(SecurityDetectionEvent.id).filter(SecurityDetectionEvent.is_legitimate == False).all()
+        elif log_type == "recoveries":
+            rows = db.query(SecurityRecoveryEvent.id).filter(SecurityRecoveryEvent.recovery_type.notlike("%backup%")).all()
+        elif log_type == "incidents":
+            rows = db.query(SecurityIncident.id).filter(SecurityIncident.status.in_(["open", "investigating"])).all()
+        elif log_type == "backups":
+            rows = db.query(SecurityRecoveryEvent.id).filter(SecurityRecoveryEvent.recovery_type.like("%backup%")).all()
+        else:
+            raise ValueError("Invalid security log type.")
+        return [row[0] for row in rows]
+    resp = _sync_get(f"/v1/source-ids/{log_type}")
+    return resp.get("ids", [])
+
+
 def query_detections(db, keyword=None, date_from=None, date_to=None, target=None, severity=None, limit=200, sort="newest", classification=None):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import query_detections as _local
@@ -153,6 +205,13 @@ def retrain_ai(db, actor):
         from SECURITY.security_engine import retrain_ai as _local
         return _local(db, actor)
     return _sync_post("/v1/ai/retrain", {"actor": actor})
+
+
+def set_ai_sensitivity(db, sensitivity: str, actor: str) -> str:
+    if not SECURITY_API_URL:
+        from SECURITY.security_engine import set_ai_sensitivity as _local
+        return _local(db, sensitivity, actor)
+    return _sync_post("/v1/ai/sensitivity", {"sensitivity": sensitivity, "actor": actor})
 
 
 def weekly_ai_behavior_data(db):

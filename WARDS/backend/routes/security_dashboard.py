@@ -25,6 +25,7 @@ from utils.background_jobs import job_manager, JobStatus
 from middleware.dos_protection import get_blocked_ips, unblock_ip, block_ip, account_rate_limit_state, record_rate_limit_detection
 from services.ip_reputation import get_permanent_blocks, add_permanent_block, remove_permanent_block, check_ip_reputation
 from utils.security_client import (
+    SECURITY_API_URL,
     active_monitored_files_query,
     add_monitored_folder,
     add_ai_rule,
@@ -38,6 +39,7 @@ from utils.security_client import (
     get_ai_rules,
     get_ai_sensitivity,
     is_database_entry,
+    list_monitored_files,
     manual_recover_file,
     mark_stale_backup_events_failed,
     mark_admin_change,
@@ -49,6 +51,7 @@ from utils.security_client import (
     now_utc,
     portable_monitored_path,
     query_detections,
+    query_incidents,
     query_recoveries,
     register_initial_files,
     remove_monitored_folder,
@@ -61,8 +64,10 @@ from utils.security_client import (
     serialize_file,
     serialize_incident,
     serialize_recovery,
+    set_ai_sensitivity,
     set_backup_location,
     set_setting,
+    source_ids_for_log_type,
     update_ai_rules,
     weekly_ai_behavior_data,
     next_weekday,
@@ -144,18 +149,14 @@ def _with_view_flags(items: list[dict], viewed: set[int]) -> list[dict]:
     return [{**item, "is_viewed": item.get("id") in viewed} for item in items]
 
 
+def _getval(obj, key, default=None):
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
 def _source_ids_for_log_type(db: Session, log_type: str) -> list[int]:
-    if log_type == "detections":
-        rows = db.query(SecurityDetectionEvent.id).filter(SecurityDetectionEvent.is_legitimate == False).all()
-    elif log_type == "recoveries":
-        rows = db.query(SecurityRecoveryEvent.id).filter(SecurityRecoveryEvent.recovery_type.notlike("%backup%")).all()
-    elif log_type == "incidents":
-        rows = db.query(SecurityIncident.id).filter(SecurityIncident.status.in_(["open", "investigating"])).all()
-    elif log_type == "backups":
-        rows = db.query(SecurityRecoveryEvent.id).filter(SecurityRecoveryEvent.recovery_type.like("%backup%")).all()
-    else:
-        raise HTTPException(status_code=400, detail="Invalid security log type.")
-    return [row[0] for row in rows]
+    return source_ids_for_log_type(db, log_type)
 
 
 def _paginate(items: list[dict], page: int, page_size: int) -> dict:
@@ -245,14 +246,13 @@ def get_dashboard(db: Session = Depends(get_db), _=Depends(current_admin)):
 
 @router.get("/files")
 def list_files(db: Session = Depends(get_db), _=Depends(current_admin)):
-    return [serialize_file(item) for item in active_monitored_files_query(db).order_by(SecurityMonitoredFile.relative_path.asc()).all()]
+    return list_monitored_files(db)
 
 
 @router.post("/files/{file_id}/scan")
 def scan_file(file_id: int, request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
-    file_entry = active_monitored_files_query(db).filter(SecurityMonitoredFile.id == file_id).first()
-    if not file_entry:
-        raise HTTPException(status_code=404, detail="Monitored file not found")
+    from types import SimpleNamespace
+    file_entry = SimpleNamespace(id=file_id, relative_path=None)
     detection = scan_single_file(db, file_entry, context={"manual_scan": True})
     db.add(ActivityLog(
         action="Security File Scan",
@@ -317,7 +317,7 @@ def recoveries(
     mark_stale_backup_events_failed(db)
     rows = query_recoveries(db, keyword, date_from, date_to, recovery_type, status, limit, sort)
     if not recovery_type:
-        rows = [row for row in rows if "backup" not in (row.recovery_type or "")]
+        rows = [row for row in rows if "backup" not in (_getval(row, "recovery_type") or "")]
     items = _with_view_flags([serialize_recovery(item) for item in rows], _viewed_ids(db, admin.username, "recoveries"))
     return _paginate(items, page, page_size)
 
@@ -336,22 +336,8 @@ def incidents(
     db: Session = Depends(get_db),
     admin=Depends(current_admin),
 ):
-    query = db.query(SecurityIncident)
-    if status:
-        if status == "resolved":
-            query = query.filter(SecurityIncident.status.in_(["resolved", "verified_deleted", "verified_renamed"]))
-        else:
-            query = query.filter(SecurityIncident.status == status)
-    if severity:
-        query = query.filter(SecurityIncident.severity_level == severity)
-    if keyword:
-        query = query.filter(SecurityIncident.description.like(f"%{keyword}%"))
-    if date_from:
-        query = query.filter(SecurityIncident.created_at >= datetime_from_iso(date_from))
-    if date_to:
-        query = query.filter(SecurityIncident.created_at <= datetime_from_iso(date_to, True))
-    order = SecurityIncident.created_at.asc() if sort == "oldest" else SecurityIncident.created_at.desc()
-    items = _with_view_flags([serialize_incident(item) for item in query.order_by(order).limit(limit).all()], _viewed_ids(db, admin.username, "incidents"))
+    rows = query_incidents(db, keyword=keyword, status=status, severity=severity, date_from=date_from, date_to=date_to, limit=limit, sort=sort)
+    items = _with_view_flags([serialize_incident(item) for item in rows], _viewed_ids(db, admin.username, "incidents"))
     return _paginate(items, page, page_size)
 
 
@@ -371,18 +357,18 @@ def backup_history(
     mark_stale_backup_events_failed(db)
     query_type = None if recovery_type in {None, "", "automatic_backup"} else recovery_type or "manual_backup"
     rows = query_recoveries(db, keyword, date_from, date_to, query_type, status, 500, sort)
-    backup_rows = [row for row in rows if "backup" in (row.recovery_type or "")]
+    backup_rows = [row for row in rows if "backup" in (_getval(row, "recovery_type") or "")]
     if recovery_type == "automatic_backup":
         backup_rows = [
             row for row in backup_rows
-            if row.initiated_by is None
-            or any(label in str(row.backup_path or row.summary or "").lower() for label in ("startup", "initial", "scheduled", "automatic"))
+            if _getval(row, "initiated_by") is None
+            or any(label in str((_getval(row, "backup_path") or _getval(row, "summary") or "")).lower() for label in ("startup", "initial", "scheduled", "automatic"))
         ]
     elif recovery_type == "manual_backup":
         backup_rows = [
             row for row in backup_rows
-            if row.initiated_by is not None
-            and not any(label in str(row.backup_path or row.summary or "").lower() for label in ("startup", "initial", "scheduled", "automatic"))
+            if _getval(row, "initiated_by") is not None
+            and not any(label in str((_getval(row, "backup_path") or _getval(row, "summary") or "")).lower() for label in ("startup", "initial", "scheduled", "automatic"))
         ]
     items = _with_view_flags([serialize_recovery(item) for item in backup_rows], _viewed_ids(db, admin.username, "backups"))
     return _paginate(items, page, page_size)
@@ -392,7 +378,7 @@ def backup_history(
 def unread_counts(db: Session = Depends(get_db), admin=Depends(current_admin)):
     counts = {}
     for log_type in ("detections", "recoveries", "incidents", "backups"):
-        ids = _source_ids_for_log_type(db, log_type)
+        ids = set(source_ids_for_log_type(db, log_type))
         if log_type == "incidents":
             counts[log_type] = len(ids)
         else:
@@ -405,7 +391,7 @@ def unread_counts(db: Session = Depends(get_db), admin=Depends(current_admin)):
 def mark_security_logs_viewed(log_type: str, ids: list[int] | None = None, db: Session = Depends(get_db), admin=Depends(current_admin)):
     if log_type not in {"detections", "recoveries", "incidents", "backups"}:
         raise HTTPException(status_code=400, detail="Invalid security log type.")
-    ids_to_mark = _source_ids_for_log_type(db, log_type) if ids is None else ids
+    ids_to_mark = source_ids_for_log_type(db, log_type) if ids is None else ids
     if not ids_to_mark:
         return {"message": "No logs marked.", "unread_counts": unread_counts(db, admin)}
     existing = _viewed_ids(db, admin.username, log_type)
@@ -457,6 +443,16 @@ def false_positive(incident_id: int, confirm_missing_files: bool = False, db: Se
 
 
 def _run_scan_all_files_sync(job_id: str) -> list:
+    if SECURITY_API_URL:
+        db = SessionLocal()
+        try:
+            job_manager.update_progress(job_id, 10, "registering_files")
+            detections = scan_all_files(db, context={"manual_scan": True})
+            job_manager.update_progress(job_id, 100, "complete")
+            return detections
+        finally:
+            db.close()
+
     db = SessionLocal()
     try:
         job_manager.update_progress(job_id, 10, "registering_files")
