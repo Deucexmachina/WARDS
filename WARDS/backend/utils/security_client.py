@@ -294,6 +294,13 @@ def recover_ml_artifacts(db, admin_id):
     return _sync_post("/v1/recover/ml", {"admin_id": admin_id})
 
 
+def recover_full_system(db, admin_id):
+    if not SECURITY_API_URL:
+        from SECURITY.security_engine import recover_full_system as _local
+        return _local(db, admin_id)
+    return _sync_post("/v1/recover/full", {"admin_id": admin_id})
+
+
 def manual_recover_file(db, file_id, admin_id):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import manual_recover_file as _local
