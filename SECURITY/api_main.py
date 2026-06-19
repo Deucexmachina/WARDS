@@ -403,7 +403,7 @@ def api_settings_get(payload: dict = {}, db=Depends(get_db)):
 
 @app.post("/v1/settings/set", dependencies=[Depends(require_api_key)])
 def api_settings_set(payload: dict = {}, db=Depends(get_db)):
-    return set_setting(db, payload["key"], payload["value"], actor=payload.get("actor"))
+    return set_setting(db, payload["key"], payload["value"], updated_by=payload.get("actor"))
 
 
 @app.get("/v1/source-ids/{log_type}", dependencies=[Depends(require_api_key)])
