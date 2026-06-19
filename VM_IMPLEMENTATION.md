@@ -510,6 +510,7 @@ Create `/opt/wards/security/app/.env`:
 SEC_MYSQL_ROOT_PASSWORD=CHANGE_ME_STRONG_PASSWORD
 APP_API_KEY=long-random-api-key-shared-between-vms
 WARDS_APP_IP=VM1_DROPLET_PUBLIC_IP
+LOG_INTEGRITY_SECRET=long-random-log-integrity-secret
 SECURITY_DEPLOYMENT_MODE=production
 SECURITY_MONITORING_ENABLED=true
 WAZUH_ENABLED=false

@@ -27,6 +27,7 @@ services:
       WAZUH_ENABLED: ${WAZUH_ENABLED:-false}
       SECURITY_SCAN_INTERVAL_SECONDS: ${SECURITY_SCAN_INTERVAL_SECONDS:-30}
       VM2_APP_DIR: /app/repo
+      LOG_INTEGRITY_SECRET: ${LOG_INTEGRITY_SECRET:-change-me-log-integrity-secret}
     ports:
       - "8443:8443"
     depends_on:
