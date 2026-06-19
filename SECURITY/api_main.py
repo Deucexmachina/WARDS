@@ -16,7 +16,7 @@ from fastapi import FastAPI, HTTPException, Header, Depends
 from pydantic import BaseModel
 from typing import Any
 
-from database.models import SessionLocal, engine
+from database.models import SessionLocal, engine, Admin
 from SECURITY.security_engine import (
     dashboard_payload,
     scan_single_file,
@@ -239,12 +239,19 @@ def api_ai_weekly(db=Depends(get_db)):
     return weekly_ai_behavior_data(db)
 
 
+def _resolve_admin_id(db, admin_id):
+    """Validate admin_id exists in local VM2 admins table; return None if foreign."""
+    if admin_id is None:
+        return None
+    return db.query(Admin.id).filter(Admin.id == admin_id).scalar()
+
+
 # ---------------------------------------------------------------------------
 # Backup & Recovery
 # ---------------------------------------------------------------------------
 @app.post("/v1/backup/manual", dependencies=[Depends(require_api_key)])
 def api_backup_manual(payload: dict = {}, db=Depends(get_db)):
-    event = create_manual_backup(db, payload.get("admin_id"))
+    event = create_manual_backup(db, _resolve_admin_id(db, payload.get("admin_id")))
     return serialize_recovery(event)
 
 
@@ -260,51 +267,51 @@ def api_backup_location(payload: dict = {}, db=Depends(get_db)):
 
 @app.post("/v1/recover/full", dependencies=[Depends(require_api_key)])
 def api_recover_full(payload: dict = {}, db=Depends(get_db)):
-    return full_system_recovery(db, payload.get("admin_id"))
+    return full_system_recovery(db, _resolve_admin_id(db, payload.get("admin_id")))
 
 
 @app.post("/v1/backup/database", dependencies=[Depends(require_api_key)])
 def api_backup_database(payload: dict = {}, db=Depends(get_db)):
-    event = create_database_backup(db, payload.get("admin_id"))
+    event = create_database_backup(db, _resolve_admin_id(db, payload.get("admin_id")))
     return serialize_recovery(event)
 
 
 @app.post("/v1/backup/files", dependencies=[Depends(require_api_key)])
 def api_backup_files(payload: dict = {}, db=Depends(get_db)):
-    event = create_files_backup(db, payload.get("admin_id"))
+    event = create_files_backup(db, _resolve_admin_id(db, payload.get("admin_id")))
     return serialize_recovery(event)
 
 
 @app.post("/v1/backup/ml", dependencies=[Depends(require_api_key)])
 def api_backup_ml(payload: dict = {}, db=Depends(get_db)):
-    event = create_ml_backup(db, payload.get("admin_id"))
+    event = create_ml_backup(db, _resolve_admin_id(db, payload.get("admin_id")))
     return serialize_recovery(event)
 
 
 @app.post("/v1/backup/full", dependencies=[Depends(require_api_key)])
 def api_backup_full(payload: dict = {}, db=Depends(get_db)):
-    event = create_full_system_backup(db, payload.get("admin_id"))
+    event = create_full_system_backup(db, _resolve_admin_id(db, payload.get("admin_id")))
     return serialize_recovery(event)
 
 
 @app.post("/v1/recover/database", dependencies=[Depends(require_api_key)])
 def api_recover_database(payload: dict = {}, db=Depends(get_db)):
-    return serialize_recovery(recover_database(db, payload.get("admin_id")))
+    return serialize_recovery(recover_database(db, _resolve_admin_id(db, payload.get("admin_id"))))
 
 
 @app.post("/v1/recover/files", dependencies=[Depends(require_api_key)])
 def api_recover_files(payload: dict = {}, db=Depends(get_db)):
-    return recover_files(db, payload.get("admin_id"))
+    return recover_files(db, _resolve_admin_id(db, payload.get("admin_id")))
 
 
 @app.post("/v1/recover/ml", dependencies=[Depends(require_api_key)])
 def api_recover_ml(payload: dict = {}, db=Depends(get_db)):
-    return serialize_recovery(recover_ml_artifacts(db, payload.get("admin_id")))
+    return serialize_recovery(recover_ml_artifacts(db, _resolve_admin_id(db, payload.get("admin_id"))))
 
 
 @app.post("/v1/files/recover", dependencies=[Depends(require_api_key)])
 def api_file_recover(payload: dict = {}, db=Depends(get_db)):
-    event = manual_recover_file(db, payload["file_id"], payload["admin_id"])
+    event = manual_recover_file(db, payload["file_id"], _resolve_admin_id(db, payload.get("admin_id")))
     return serialize_recovery(event)
 
 
