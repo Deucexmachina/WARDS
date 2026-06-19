@@ -134,11 +134,14 @@ jobs:
           echo "VM1 commit: $VM1_COMMIT"
           echo "VM2 commit: $VM2_COMMIT"
 
-          for commit in "$VM1_COMMIT" "$VM2_COMMIT"; do
-            if ! git merge-base --is-ancestor "$commit" origin/main; then
-              echo "Deployed commit $commit is not on origin/main"
-              exit 1
-            fi
-          done
+          if [ "$VM1_COMMIT" != "$VM2_COMMIT" ]; then
+            echo "VMs are NOT synchronized (commits differ)"
+            exit 1
+          fi
 
-          echo "Deploy verified — both VMs on origin.main (VM1=$VM1_COMMIT, VM2=$VM2_COMMIT)."
+          if ! git merge-base --is-ancestor "$VM1_COMMIT" origin/main; then
+            echo "Deployed commit $VM1_COMMIT is not on origin/main"
+            exit 1
+          fi
+
+          echo "VMs synchronized at $VM1_COMMIT (on origin/main) — deploy verified."

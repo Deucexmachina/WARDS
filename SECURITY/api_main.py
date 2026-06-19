@@ -501,6 +501,9 @@ def api_mark_stale(db=Depends(get_db)):
 def api_internal_deploy():
     import subprocess
     import threading
+    import signal
+    import os
+    import time
 
     def _deploy():
         app_dir = os.getenv("VM2_APP_DIR", "/opt/wards/security/app")
@@ -508,15 +511,38 @@ def api_internal_deploy():
         if not os.path.isdir(os.path.join(app_dir, ".git")):
             logger.warning("Repo not accessible in container at %s — skipping auto-deploy", app_dir)
             return
-        subprocess.run(["git", "fetch", "origin", "main"], cwd=app_dir, capture_output=True)
-        subprocess.run(["git", "reset", "--hard", "origin/main"], cwd=app_dir, capture_output=True)
+
+        fetch = subprocess.run(["git", "fetch", "origin", "main"], cwd=app_dir, capture_output=True, text=True)
+        if fetch.returncode != 0:
+            logger.error("git fetch failed: %s", fetch.stderr)
+            return
+
+        reset = subprocess.run(["git", "reset", "--hard", "origin/main"], cwd=app_dir, capture_output=True, text=True)
+        if reset.returncode != 0:
+            logger.error("git reset failed: %s", reset.stderr)
+            return
+
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=app_dir, capture_output=True, text=True)
+        logger.info("VM2 repo updated to %s", head.stdout.strip() if head.returncode == 0 else "unknown")
+
+        # Try docker compose first (requires docker CLI inside container)
         try:
-            subprocess.run(
+            docker = subprocess.run(
                 ["docker", "compose", "-f", "docker-compose.security.yml", "up", "-d", "--build"],
-                cwd=app_dir, capture_output=True, check=False,
+                cwd=app_dir, capture_output=True, text=True, check=False,
             )
+            if docker.returncode == 0:
+                logger.info("Docker compose restart succeeded")
+                return
+            logger.warning("docker compose exited %d: %s", docker.returncode, docker.stderr)
         except FileNotFoundError:
-            logger.warning("docker CLI not available inside container — run 'docker compose up -d --build' on the host")
+            logger.info("docker CLI not available in container, falling back to self-restart")
+
+        # Fallback: signal self to exit so Docker's restart: unless-stopped
+        # brings up a new container with the updated code.
+        logger.info("Scheduling container self-restart in 2s")
+        time.sleep(2)
+        os.kill(os.getpid(), signal.SIGTERM)
 
     threading.Thread(target=_deploy, daemon=True).start()
     return {"status": "deploy_triggered"}
