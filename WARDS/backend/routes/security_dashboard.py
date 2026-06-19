@@ -19,11 +19,12 @@ except IndexError:
 if str(MASTER_ROOT) not in sys.path:
     sys.path.insert(0, str(MASTER_ROOT))
 
-from database.models import get_db, SessionLocal, ActivityLog, PermanentIpBlock, SecurityLogView
+from database.models import get_db, SessionLocal, ActivityLog, PermanentIpBlock, SecurityLogView, Backup
 from auth import get_current_admin_from_token
 from utils.background_jobs import job_manager, JobStatus
 from middleware.dos_protection import get_blocked_ips, unblock_ip, block_ip, account_rate_limit_state, record_rate_limit_detection
 from services.ip_reputation import get_permanent_blocks, add_permanent_block, remove_permanent_block, check_ip_reputation
+from utils.backup_engine import create_database_backup as create_vm1_database_backup, restore_database_backup
 from utils.security_client import (
     SECURITY_API_URL,
     active_monitored_files_query,
@@ -32,9 +33,17 @@ from utils.security_client import (
     available_ai_rule_templates,
     bulk_update_incidents,
     create_manual_backup,
+    create_database_backup,
+    create_files_backup,
+    create_ml_backup,
+    create_full_system_backup,
     current_hash_index,
     dashboard_payload,
     full_system_recovery,
+    recover_database,
+    recover_files,
+    recover_ml_artifacts,
+    recover_full_system,
     get_setting,
     get_ai_rules,
     get_ai_sensitivity,
@@ -557,6 +566,66 @@ def recover_full(request: Request, db: Session = Depends(get_db), admin=Depends(
     return result
 
 
+@router.post("/recover/vm1-database")
+def recover_vm1_database(request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
+    latest = db.query(Backup).filter(Backup.status == "Completed").order_by(Backup.created_at.desc()).first()
+    if not latest:
+        raise HTTPException(status_code=404, detail="No completed VM1 database backup found.")
+    from utils.backup_engine import backup_dir
+    backup_path = backup_dir() / latest.filename
+    try:
+        restore_database_backup(backup_path, getattr(latest, "checksum", None), getattr(latest, "db_type", None))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"VM1 database restore failed: {exc}")
+    db.add(ActivityLog(
+        action="Security VM1 Database Recovery",
+        user=admin.username,
+        details=f"VM1 database restored from {latest.filename}. | IP: {request.client.host if request.client else 'unknown'}",
+        type="security",
+    ))
+    db.commit()
+    return {"restored": True, "filename": latest.filename}
+
+
+@router.post("/recover/vm2-database")
+def recover_vm2_database(request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
+    event = recover_database(db, admin.id)
+    db.add(ActivityLog(
+        action="Security VM2 Database Recovery",
+        user=admin.username,
+        details=f"VM2 database recovery triggered. | IP: {request.client.host if request.client else 'unknown'}",
+        type="security",
+    ))
+    db.commit()
+    return serialize_recovery(event)
+
+
+@router.post("/recover/files")
+def recover_files_route(request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
+    result = recover_files(db, admin.id)
+    db.add(ActivityLog(
+        action="Security Files Recovery",
+        user=admin.username,
+        details=f"Files recovery triggered. Restored: {result.get('restored', 0)}, Failed: {result.get('failed', 0)}. | IP: {request.client.host if request.client else 'unknown'}",
+        type="security",
+    ))
+    db.commit()
+    return result
+
+
+@router.post("/recover/ml")
+def recover_ml_route(request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
+    event = recover_ml_artifacts(db, admin.id)
+    db.add(ActivityLog(
+        action="Security ML Recovery",
+        user=admin.username,
+        details=f"ML artifacts recovery triggered. | IP: {request.client.host if request.client else 'unknown'}",
+        type="security",
+    ))
+    db.commit()
+    return serialize_recovery(event)
+
+
 @router.post("/backup/manual")
 def manual_backup(request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
     event = create_manual_backup(db, admin.id)
@@ -568,6 +637,117 @@ def manual_backup(request: Request, db: Session = Depends(get_db), admin=Depends
     ))
     db.commit()
     return serialize_recovery(event)
+
+
+@router.post("/backup/vm1-database")
+def backup_vm1_database(request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
+    try:
+        result = create_vm1_database_backup()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"VM1 database backup failed: {exc}")
+    backup = Backup(
+        filename=result.filename,
+        size=str(result.size_bytes),
+        type="Security VM1 Manual",
+        status="Completed",
+        checksum=result.checksum,
+        db_type=result.db_type,
+        retention_days=30,
+    )
+    db.add(backup)
+    db.add(ActivityLog(
+        action="Security VM1 Database Backup",
+        user=admin.username,
+        details=f"VM1 database backup created: {result.filename}; Size: {result.size_bytes}; Checksum: {result.checksum}. | IP: {request.client.host if request.client else 'unknown'}",
+        type="security",
+    ))
+    db.commit()
+    db.refresh(backup)
+    return {
+        "id": backup.id,
+        "filename": result.filename,
+        "size_bytes": result.size_bytes,
+        "checksum": result.checksum,
+        "db_type": result.db_type,
+        "status": "Completed",
+    }
+
+
+@router.post("/backup/vm2-database")
+def backup_vm2_database(request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
+    event = create_database_backup(db, admin.id)
+    db.add(ActivityLog(
+        action="Security VM2 Database Backup",
+        user=admin.username,
+        details=f"VM2 database backup created. | IP: {request.client.host if request.client else 'unknown'}",
+        type="security",
+    ))
+    db.commit()
+    return serialize_recovery(event)
+
+
+@router.post("/backup/files")
+def backup_files(request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
+    event = create_files_backup(db, admin.id)
+    db.add(ActivityLog(
+        action="Security Files Backup",
+        user=admin.username,
+        details=f"Files backup created. | IP: {request.client.host if request.client else 'unknown'}",
+        type="security",
+    ))
+    db.commit()
+    return serialize_recovery(event)
+
+
+@router.post("/backup/ml")
+def backup_ml(request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
+    event = create_ml_backup(db, admin.id)
+    db.add(ActivityLog(
+        action="Security ML Backup",
+        user=admin.username,
+        details=f"ML backup created. | IP: {request.client.host if request.client else 'unknown'}",
+        type="security",
+    ))
+    db.commit()
+    return serialize_recovery(event)
+
+
+@router.post("/backup/full")
+def backup_full(request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
+    # VM1 DB backup
+    try:
+        vm1_result = create_vm1_database_backup()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"VM1 database backup failed: {exc}")
+    vm1_backup = Backup(
+        filename=vm1_result.filename,
+        size=str(vm1_result.size_bytes),
+        type="Security Full VM1",
+        status="Completed",
+        checksum=vm1_result.checksum,
+        db_type=vm1_result.db_type,
+        retention_days=30,
+    )
+    db.add(vm1_backup)
+    # VM2 full system backup
+    event = create_full_system_backup(db, admin.id)
+    db.add(ActivityLog(
+        action="Security Full System Backup",
+        user=admin.username,
+        details=f"Full system backup created. VM1: {vm1_result.filename}; VM2: Backup #{event.id}. | IP: {request.client.host if request.client else 'unknown'}",
+        type="security",
+    ))
+    db.commit()
+    db.refresh(vm1_backup)
+    return {
+        "vm1": {
+            "id": vm1_backup.id,
+            "filename": vm1_result.filename,
+            "size_bytes": vm1_result.size_bytes,
+            "checksum": vm1_result.checksum,
+        },
+        "vm2": serialize_recovery(event),
+    }
 
 
 @router.post("/backup/schedule")

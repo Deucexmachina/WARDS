@@ -3614,6 +3614,352 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
     return event
 
 
+def _prepare_backup_event(
+    db: Session,
+    initiated_by: int | None,
+    label: str,
+) -> tuple[Path, Path | None, dict[str, dict[str, object]], dict[str, int], int, SecurityRecoveryEvent, float]:
+    """Shared setup for all component-level backups."""
+    seed_settings(db)
+    migrate_portable_monitored_files(db)
+    dedupe_monitored_files_by_relative_path(db)
+    mark_stale_backup_events_failed(db)
+    register_count = register_initial_files(db, ensure_backup=False, refresh_existing=False)
+    dedupe_monitored_files_by_relative_path(db)
+    removal_summary = reconcile_trusted_file_removals(db, actor=f"{label}_backup")
+    backup_location = writable_backup_location(db)
+    previous_backup_root = latest_backup_root(db)
+    previous_manifest = backup_manifest_index(previous_backup_root)
+    timestamp = now_utc().strftime("%Y%m%d_%H%M%S")
+    backup_root = backup_location / f"{label}_backup_{timestamp}"
+    started = time.time()
+    event = SecurityRecoveryEvent(
+        recovery_type=f"{label}_backup",
+        initiated_by=initiated_by,
+        status="in_progress",
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    create_system_alert(
+        db,
+        "backup_started",
+        f"Backup #{event.id}: {label.replace('_', ' ')} backup started.",
+        "low",
+        dedupe_key=f"Backup #{event.id}",
+    )
+    logger.info("Backup %s started for label '%s' at '%s'.", event.id, label, backup_root)
+    return backup_root, previous_backup_root, previous_manifest, removal_summary, register_count, event, started
+
+
+def _finalize_backup_event(
+    db: Session,
+    event: SecurityRecoveryEvent,
+    backup_root: Path,
+    label: str,
+    manifest_files: list[dict[str, object]],
+    model_artifact_count: int,
+    removal_summary: dict[str, int],
+    register_count: int,
+    started: float,
+    status: str = "success",
+    error: str | None = None,
+) -> SecurityRecoveryEvent:
+    """Shared finalization for all component-level backups."""
+    if status == "success":
+        manifest_path = write_backup_manifest(backup_root, files=manifest_files)
+        event.status = "success"
+        event.backup_path = stored_path_value(backup_root) or str(backup_root)
+        event.completed_at = now_utc()
+        event.recovery_duration_ms = int((time.time() - started) * 1000)
+        verified_deleted = removal_summary["verified_deleted"]
+        verified_renamed = removal_summary["verified_renamed"]
+        event.summary = (
+            f"{label.replace('_', ' ').title()} backup completed "
+            f"({register_count} new target(s) registered, {verified_deleted + verified_renamed} trusted removal update(s), "
+            f"{model_artifact_count} ML artifact(s), "
+            f"manifest: {manifest_path.name})."
+        )
+        set_setting(
+            db,
+            "latest_backup_path",
+            stored_path_value(backup_root) or str(backup_root),
+            str(event.initiated_by) if event.initiated_by else "system",
+        )
+        removed_backups = prune_backup_type(
+            Path(writable_backup_location(db)), label, keep=BACKUP_RETENTION_LIMIT
+        )
+        logger.info(
+            "Backup %s completed successfully. Retention kept the newest %s completed '%s' backup(s) and removed %s old backup(s).",
+            event.id,
+            BACKUP_RETENTION_LIMIT,
+            label,
+            removed_backups,
+        )
+    else:
+        event.status = "failed"
+        event.error_message = error or "Backup failed."
+        event.completed_at = now_utc()
+        event.recovery_duration_ms = int((time.time() - started) * 1000)
+        event.summary = f"{label.replace('_', ' ').title()} backup failed."
+        logger.exception("Backup %s failed for label '%s'.", event.id, label)
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    create_system_alert(
+        db,
+        "backup_completed" if event.status == "success" else "backup_failed",
+        f"Backup #{event.id}: {event.summary}",
+        "low" if event.status == "success" else "high",
+        dedupe_key=f"Backup #{event.id}",
+    )
+    return event
+
+
+def create_database_backup(
+    db: Session, initiated_by: int | None, label: str = "database"
+) -> SecurityRecoveryEvent:
+    """Backup only the VM2 security database."""
+    (
+        backup_root,
+        previous_backup_root,
+        previous_manifest,
+        removal_summary,
+        register_count,
+        event,
+        started,
+    ) = _prepare_backup_event(db, initiated_by, label)
+    manifest_files: list[dict[str, object]] = []
+    try:
+        backup_root.mkdir(parents=True, exist_ok=True)
+        database_entry = normalize_database_monitor_entry(db, reset_baseline=False, ensure_snapshot=True)
+        for entry in active_monitored_files_query(db).order_by(SecurityMonitoredFile.relative_path.asc()).all():
+            if is_database_entry(entry) and database_entry and entry.id != database_entry.id:
+                entry.status = "clean"
+                entry.last_checked = now_utc()
+                db.add(entry)
+                continue
+            if not is_database_entry(entry):
+                continue
+            path = portable_monitored_path(entry)
+            checksum_path = create_database_checksum_manifest(db, path)
+            snapshot_target = backup_file_path(backup_root, DATABASE_BACKUP_RELATIVE_PATH)
+            create_database_snapshot(db, snapshot_target)
+            checksum_target = backup_file_path(backup_root, DATABASE_CHECKSUM_RELATIVE_PATH)
+            checksum_target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(checksum_path, checksum_target)
+            file_hash = sha256_file(checksum_path)
+            manifest_files.append({
+                "path": DATABASE_BACKUP_RELATIVE_PATH,
+                "size_bytes": snapshot_target.stat().st_size,
+                "sha256": sha256_file(snapshot_target),
+            })
+            manifest_files.append({
+                "path": DATABASE_CHECKSUM_RELATIVE_PATH,
+                "size_bytes": checksum_target.stat().st_size,
+                "sha256": file_hash,
+            })
+            entry.baseline_hash = file_hash
+            entry.current_hash = file_hash
+            entry.status = "clean"
+            entry.file_type = file_type(checksum_path)
+            entry.size_bytes = checksum_path.stat().st_size
+            entry.last_checked = now_utc()
+        db.commit()
+        return _finalize_backup_event(
+            db, event, backup_root, label, manifest_files, 0,
+            removal_summary, register_count, started, status="success",
+        )
+    except Exception as exc:
+        return _finalize_backup_event(
+            db, event, backup_root, label, manifest_files, 0,
+            removal_summary, register_count, started, status="failed", error=str(exc),
+        )
+
+
+def create_files_backup(
+    db: Session, initiated_by: int | None, label: str = "files"
+) -> SecurityRecoveryEvent:
+    """Backup only monitored WARDS and OCR files (not database or ML)."""
+    (
+        backup_root,
+        previous_backup_root,
+        previous_manifest,
+        removal_summary,
+        register_count,
+        event,
+        started,
+    ) = _prepare_backup_event(db, initiated_by, label)
+    manifest_files: list[dict[str, object]] = []
+    try:
+        backup_root.mkdir(parents=True, exist_ok=True)
+        for entry in active_monitored_files_query(db).order_by(SecurityMonitoredFile.relative_path.asc()).all():
+            if is_database_entry(entry):
+                continue
+            path = portable_monitored_path(entry)
+            relative = entry.relative_path or safe_rel(path)
+            if not path.exists() or not path.is_file():
+                continue
+            target = backup_file_path(backup_root, relative)
+            file_hash = sha256_file(path)
+            previous_source = backup_file_path(previous_backup_root, relative) if previous_backup_root else None
+            previous_matches = bool(
+                previous_source and previous_source.exists()
+                and str(previous_manifest.get(relative, {}).get("sha256") or "") == file_hash
+            )
+            copy_into_backup(
+                path,
+                target,
+                previous_source=previous_source,
+                can_reuse_previous=previous_matches,
+            )
+            manifest_files.append({
+                "path": relative,
+                "size_bytes": path.stat().st_size,
+                "sha256": file_hash,
+            })
+            entry.baseline_hash = file_hash
+            entry.current_hash = file_hash
+            entry.status = "clean"
+            entry.file_type = file_type(path)
+            entry.size_bytes = path.stat().st_size
+            entry.last_checked = now_utc()
+        db.commit()
+        return _finalize_backup_event(
+            db, event, backup_root, label, manifest_files, 0,
+            removal_summary, register_count, started, status="success",
+        )
+    except Exception as exc:
+        return _finalize_backup_event(
+            db, event, backup_root, label, manifest_files, 0,
+            removal_summary, register_count, started, status="failed", error=str(exc),
+        )
+
+
+def create_ml_backup(
+    db: Session, initiated_by: int | None, label: str = "ml"
+) -> SecurityRecoveryEvent:
+    """Backup only ML artifacts."""
+    (
+        backup_root,
+        previous_backup_root,
+        previous_manifest,
+        removal_summary,
+        register_count,
+        event,
+        started,
+    ) = _prepare_backup_event(db, initiated_by, label)
+    manifest_files: list[dict[str, object]] = []
+    try:
+        backup_root.mkdir(parents=True, exist_ok=True)
+        model_artifact_count = backup_ml_artifacts(
+            backup_root,
+            manifest_files,
+            previous_backup_root=previous_backup_root,
+            previous_manifest=previous_manifest,
+        )
+        return _finalize_backup_event(
+            db, event, backup_root, label, manifest_files, model_artifact_count,
+            removal_summary, register_count, started, status="success",
+        )
+    except Exception as exc:
+        return _finalize_backup_event(
+            db, event, backup_root, label, manifest_files, 0,
+            removal_summary, register_count, started, status="failed", error=str(exc),
+        )
+
+
+def create_full_system_backup(
+    db: Session, initiated_by: int | None, label: str = "full"
+) -> SecurityRecoveryEvent:
+    """Full system backup covering database, files, and ML artifacts."""
+    return create_manual_backup(db, initiated_by, label=label)
+
+
+def recover_database(db: Session, admin_id: int) -> SecurityRecoveryEvent:
+    """Restore only the VM2 security database from the latest backup."""
+    db_entry = normalize_database_monitor_entry(db, reset_baseline=False, ensure_snapshot=False)
+    if not db_entry:
+        raise RuntimeError("No database monitor entry found.")
+    return restore_database_from_backup(db, db_entry, None, "database_recovery", admin_id)
+
+
+def recover_files(db: Session, admin_id: int) -> dict:
+    """Restore all monitored files (not database or ML) from the latest backup."""
+    restored = 0
+    failed = 0
+    first_event = None
+    for file_entry in (
+        db.query(SecurityMonitoredFile)
+        .filter(SecurityMonitoredFile.status != "monitoring_removed")
+        .order_by(SecurityMonitoredFile.relative_path.asc())
+        .all()
+    ):
+        if is_database_entry(file_entry):
+            continue
+        event = restore_from_backup(db, file_entry, None, "files_recovery", admin_id)
+        first_event = first_event or event
+        if event.status == "success":
+            restored += 1
+        else:
+            failed += 1
+    return {
+        "restored": restored,
+        "failed": failed,
+        "first_recovery_event_id": first_event.id if first_event else None,
+    }
+
+
+def recover_ml_artifacts(db: Session, admin_id: int) -> SecurityRecoveryEvent:
+    """Restore only ML artifacts from the latest backup."""
+    recovery = SecurityRecoveryEvent(
+        recovery_type="ml_recovery",
+        initiated_by=admin_id,
+        status="in_progress",
+    )
+    db.add(recovery)
+    db.commit()
+    db.refresh(recovery)
+    started = time.time()
+    try:
+        count = restore_ml_artifacts_from_backup(db)
+        recovery.status = "success"
+        recovery.completed_at = now_utc()
+        recovery.recovery_duration_ms = int((time.time() - started) * 1000)
+        recovery.summary = f"Restored {count} ML artifact(s) from the latest backup."
+        db.add(recovery)
+        db.commit()
+        create_system_alert(
+            db,
+            "recovery_completed",
+            f"Recovery #{recovery.id}: {recovery.summary}",
+            "low",
+            dedupe_key=f"Recovery #{recovery.id}",
+        )
+    except Exception as exc:
+        recovery.status = "failed"
+        recovery.error_message = str(exc)
+        recovery.completed_at = now_utc()
+        recovery.recovery_duration_ms = int((time.time() - started) * 1000)
+        recovery.summary = "ML artifact recovery failed."
+        db.add(recovery)
+        db.commit()
+        create_system_alert(
+            db,
+            "recovery_failed",
+            f"Recovery #{recovery.id}: {recovery.summary} {recovery.error_message or ''}",
+            "high",
+            dedupe_key=f"Recovery #{recovery.id}",
+        )
+    db.refresh(recovery)
+    return recovery
+
+
+def recover_full_system(db: Session, admin_id: int) -> dict:
+    """Full system recovery covering database, files, and ML artifacts."""
+    return full_system_recovery(db, admin_id)
+
+
 def manual_recover_file(db: Session, file_id: int, admin_id: int) -> SecurityRecoveryEvent:
     file_entry = db.query(SecurityMonitoredFile).filter(SecurityMonitoredFile.id == file_id).first()
     if not file_entry:

@@ -31,8 +31,16 @@ from SECURITY.security_engine import (
     retrain_ai,
     weekly_ai_behavior_data,
     create_manual_backup,
+    create_database_backup,
+    create_files_backup,
+    create_ml_backup,
+    create_full_system_backup,
     set_backup_location,
     full_system_recovery,
+    recover_database,
+    recover_files,
+    recover_ml_artifacts,
+    recover_full_system,
     manual_recover_file,
     add_monitored_folder,
     remove_monitored_folder,
@@ -253,6 +261,45 @@ def api_backup_location(payload: dict = {}, db=Depends(get_db)):
 @app.post("/v1/recover/full", dependencies=[Depends(require_api_key)])
 def api_recover_full(payload: dict = {}, db=Depends(get_db)):
     return full_system_recovery(db, payload.get("admin_id"))
+
+
+@app.post("/v1/backup/database", dependencies=[Depends(require_api_key)])
+def api_backup_database(payload: dict = {}, db=Depends(get_db)):
+    event = create_database_backup(db, payload.get("admin_id"))
+    return serialize_recovery(event)
+
+
+@app.post("/v1/backup/files", dependencies=[Depends(require_api_key)])
+def api_backup_files(payload: dict = {}, db=Depends(get_db)):
+    event = create_files_backup(db, payload.get("admin_id"))
+    return serialize_recovery(event)
+
+
+@app.post("/v1/backup/ml", dependencies=[Depends(require_api_key)])
+def api_backup_ml(payload: dict = {}, db=Depends(get_db)):
+    event = create_ml_backup(db, payload.get("admin_id"))
+    return serialize_recovery(event)
+
+
+@app.post("/v1/backup/full", dependencies=[Depends(require_api_key)])
+def api_backup_full(payload: dict = {}, db=Depends(get_db)):
+    event = create_full_system_backup(db, payload.get("admin_id"))
+    return serialize_recovery(event)
+
+
+@app.post("/v1/recover/database", dependencies=[Depends(require_api_key)])
+def api_recover_database(payload: dict = {}, db=Depends(get_db)):
+    return serialize_recovery(recover_database(db, payload.get("admin_id")))
+
+
+@app.post("/v1/recover/files", dependencies=[Depends(require_api_key)])
+def api_recover_files(payload: dict = {}, db=Depends(get_db)):
+    return recover_files(db, payload.get("admin_id"))
+
+
+@app.post("/v1/recover/ml", dependencies=[Depends(require_api_key)])
+def api_recover_ml(payload: dict = {}, db=Depends(get_db)):
+    return serialize_recovery(recover_ml_artifacts(db, payload.get("admin_id")))
 
 
 @app.post("/v1/files/recover", dependencies=[Depends(require_api_key)])
