@@ -1662,6 +1662,11 @@ def sync_runtime_env_settings(db: Session, updated_by: str = "environment") -> d
         current = db.query(SecuritySetting).filter(SecuritySetting.key == key).first()
         if current and str(current.value) == value:
             continue
+        # Only overwrite settings that were last updated by "environment" or
+        # that don't exist yet. This prevents multi-worker race conditions
+        # where one worker's stale os.environ overwrites a user toggle.
+        if current and (current.updated_by or "") != "environment":
+            continue
         if current:
             current.value = value
             current.updated_by = updated_by
