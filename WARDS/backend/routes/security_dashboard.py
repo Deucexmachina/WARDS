@@ -925,8 +925,10 @@ def set_monitoring(payload: MonitoringToggleRequest, request: Request, db: Sessi
     previous = (get_setting(db, "monitoring_enabled", "true") or "true").lower() == "true"
     if payload.enabled and not previous:
         event = create_manual_backup(db, admin.id, label="monitoring_resume")
-        if event.status != "success":
-            raise HTTPException(status_code=500, detail=event.error_message or "Unable to refresh backup before enabling automatic scans.")
+        status = event.status if hasattr(event, "status") else event.get("status")
+        error = event.error_message if hasattr(event, "error_message") else event.get("error_message")
+        if status != "success":
+            raise HTTPException(status_code=500, detail=error or "Unable to refresh backup before enabling automatic scans.")
     set_setting(db, "monitoring_enabled", "true" if payload.enabled else "false", admin.username)
     update_backend_env({"SECURITY_MONITORING_ENABLED": "true" if payload.enabled else "false"})
     db.add(ActivityLog(
