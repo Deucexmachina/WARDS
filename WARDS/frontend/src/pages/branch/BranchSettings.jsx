@@ -296,6 +296,7 @@ const BranchSettings = () => {
   const [mfaError, setMfaError] = useState('');
   const [settingUpMfa, setSettingUpMfa] = useState(false);
   const [showMfaConfirmModal, setShowMfaConfirmModal] = useState(false);
+  const [overrideErrors, setOverrideErrors] = useState([]);
   const initialServicesSeeded = useRef(false);
   const navSaveRef = useRef(() => {});
   const { registerDirty } = useUnsavedChanges();
@@ -420,6 +421,18 @@ const BranchSettings = () => {
 
   const removeOverride = (index) => {
     setSchedule((current) => ({ ...current, date_overrides: current.date_overrides.filter((_, i) => i !== index) }));
+    setOverrideErrors((current) => current.filter((i) => i !== index).map((i) => (i > index ? i - 1 : i)));
+  };
+
+  const validateOverrides = () => {
+    const invalidIndices = [];
+    schedule.date_overrides.forEach((override, index) => {
+      if (!override.date || !override.status) {
+        invalidIndices.push(index);
+      }
+    });
+    setOverrideErrors(invalidIndices);
+    return invalidIndices.length === 0;
   };
 
   const buildPayload = () => ({ ...schedule, reason: reason.trim() || null });
@@ -437,6 +450,10 @@ const BranchSettings = () => {
   });
 
   const handleSave = async () => {
+    if (!validateOverrides()) {
+      setError('Please fill in all required Calendar Override fields (Date and Status).');
+      return;
+    }
     try {
       setSaving(true);
       setError('');
@@ -458,6 +475,14 @@ const BranchSettings = () => {
   };
 
   const handlePublish = async () => {
+    if (!validateOverrides()) {
+      setError('Please fill in all required Calendar Override fields (Date and Status).');
+      showSystemErrorMessage({
+        title: 'Invalid Calendar Overrides',
+        message: 'Some Calendar Overrides are missing required fields. Please fill in the Date and Status for every override before publishing.',
+      });
+      return;
+    }
     try {
       setPublishing(true);
       setError('');
@@ -947,11 +972,11 @@ const BranchSettings = () => {
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[170px_220px_1fr]">
                     <div>
                       <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">Date</label>
-                      <CustomDatePicker min={todayDate} value={override.date} disabled={!isBranchAdmin} onChange={(event) => updateOverride(index, 'date', event.target.value)} />
+                      <CustomDatePicker min={todayDate} value={override.date} disabled={!isBranchAdmin} onChange={(event) => { setOverrideErrors((current) => current.filter((i) => i !== index)); updateOverride(index, 'date', event.target.value); }} className={overrideErrors.includes(index) && !override.date ? 'border-red-500 ring-1 ring-red-500' : ''} />
                     </div>
                     <div>
                       <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">Status</label>
-                      <CustomSelect value={override.status} disabled={!isBranchAdmin} onChange={(value) => updateOverride(index, 'status', value)} options={STATUS_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label }))} placeholder="Select status" />
+                      <CustomSelect value={override.status} disabled={!isBranchAdmin} onChange={(value) => { setOverrideErrors((current) => current.filter((i) => i !== index)); updateOverride(index, 'status', value); }} options={STATUS_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label }))} placeholder="Select status" className={overrideErrors.includes(index) && !override.status ? 'border-red-500 ring-1 ring-red-500' : ''} />
                     </div>
                     <div>
                       <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">Label / Event Name</label>
