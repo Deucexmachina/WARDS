@@ -216,7 +216,7 @@ const showSystemErrorMessage = ({ title, message }) => {
 /*  Shared mini-components that match the app pattern  */
 /* ─────────────────────────────────────────────────── */
 const SectionCard = ({ title, subtitle, headerRight, children }) => (
-  <div className="overflow-hidden rounded-xl bg-white shadow">
+  <div className="rounded-xl bg-white shadow">
     <div className="bg-primary px-6 py-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
