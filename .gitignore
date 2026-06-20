@@ -15,6 +15,7 @@
 **/.env
 **/.env.*
 !**/.env.example
+COMMANDS.md
 
 # Local databases and generated files
 **/*.db
