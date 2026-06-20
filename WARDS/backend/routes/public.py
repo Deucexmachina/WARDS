@@ -28,7 +28,7 @@ from utils.branch_appointment_settings import (
     get_window_capacity_snapshot,
     validate_branch_appointment_datetime,
 )
-from utils.branch_window_config import get_branch_service_options, get_branch_window_metadata, infer_service_window
+from utils.branch_window_config import get_branch_service_options, get_branch_window_metadata, infer_service_window, STANDARD_SERVICE_SEQUENCE
 from utils.security_validation import normalize_citizen_full_name, normalize_email, normalize_ph_contact_number
 from utils.branch_system_settings import get_branch_setting_value
 from utils.system_settings import SYSTEM_DISABLED_MESSAGE, BRANCH_QUEUE_DISABLED_MESSAGE, get_setting_value
@@ -252,6 +252,8 @@ def find_existing_active_queue(
 
 def get_enabled_service_names(db: Session, branch_id: int | None = None) -> set[str]:
     configured_services = get_branch_setting_value(db, "enabledServices", branch_id) if branch_id else (get_setting_value(db, "enabledServices") or [])
+    if not configured_services:
+        return set(STANDARD_SERVICE_SEQUENCE)
     return {infer_service_window(name) for name in configured_services}
 
 
