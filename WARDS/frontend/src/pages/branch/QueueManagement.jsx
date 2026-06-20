@@ -904,7 +904,18 @@ const WindowMonitoringSection = ({
                                             {queue.service_type || 'N/A'}
                                           </span>
                                         </div>
-                                        <p className="text-xs text-slate-500">{queue.taxpayer_name || 'Walk-in'}</p>
+                                        <div className="flex items-center gap-2">
+                                          <p className="text-xs text-slate-500">{queue.taxpayer_name || 'Walk-in'}</p>
+                                          {queueTypeKey === 'appointment' && (isSuperadminBranch || isBranchAdmin) && (
+                                            <button
+                                              onClick={() => onDeleteRequest(queue)}
+                                              disabled={queueUnavailable}
+                                              className="rounded-md bg-red-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-red-700 disabled:opacity-40"
+                                            >
+                                              Delete
+                                            </button>
+                                          )}
+                                        </div>
                                       </div>
                                     </div>
                                   );
