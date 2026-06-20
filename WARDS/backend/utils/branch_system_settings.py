@@ -99,22 +99,23 @@ def get_branch_settings_payload(db: Session, branch_id: int) -> dict:
     # Self-healing: if global queue is enabled but a stale branch override says disabled,
     # clear the override so the branch inherits the global state.
     if bool(global_payload.get("queueEnabled")) and not bool(payload.get("queueEnabled")):
-        stale_override = db.query(BranchSystemSetting).filter(
+        stale_overrides = db.query(BranchSystemSetting).filter(
             BranchSystemSetting.branch_id == branch_id,
             BranchSystemSetting.key == "queueEnabled",
-        ).first()
-        if stale_override:
+        ).all()
+        for stale_override in stale_overrides:
             db.delete(stale_override)
+        if stale_overrides:
             db.commit()
             payload["queueEnabled"] = True
 
     # Also clear stale empty enabledServices overrides so branch services restore
     if bool(global_payload.get("queueEnabled")) and bool(payload.get("queueEnabled")):
-        es_override = db.query(BranchSystemSetting).filter(
+        es_overrides = db.query(BranchSystemSetting).filter(
             BranchSystemSetting.branch_id == branch_id,
             BranchSystemSetting.key == "enabledServices",
-        ).first()
-        if es_override:
+        ).all()
+        for es_override in es_overrides:
             es_value = _deserialize_value(es_override.value_type, es_override.value)
             if not es_value:
                 db.delete(es_override)
