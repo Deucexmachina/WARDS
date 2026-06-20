@@ -165,7 +165,7 @@ def get_window_display_label(account: BranchStaff) -> str:
 
 
 def generate_window_username(db: Session, branch_name: str, assigned_window_number: int) -> str:
-    branch_slug = slugify_branch_name(branch_name).replace("-", "")
+    branch_slug = slugify_branch_name(branch_name).replace("-", "")[:20]
     base_username = normalize_username(f"{branch_slug}_staff{assigned_window_number}")
 
     candidate = base_username
