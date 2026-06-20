@@ -109,6 +109,9 @@ class Query:
     def limit(self, *_args, **_kwargs):
         return self
 
+    def order_by(self, *_args, **_kwargs):
+        return self
+
     def first(self):
         return self.rows[0] if self.rows else None
 
