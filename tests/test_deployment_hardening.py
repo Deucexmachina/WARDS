@@ -13,6 +13,7 @@ from jose import jwt
 from auth import USER_SECRET_KEY, create_access_token, create_refresh_token
 from auth.jwt_utils import ALGORITHM
 from middleware.https import HttpsEnforcementMiddleware
+from database.models import BranchSystemSetting, Service, SystemSetting
 from routes import public
 from utils import backup_engine
 from utils.file_validation import SafeFileType, validate_upload_file
@@ -130,11 +131,11 @@ class PublicBranchDB:
             return Query([self.branch])
         if model is public.BranchOperatingHours:
             return Query([SimpleNamespace(day_of_week="Mon", opening_time="08:00", closing_time="17:00", is_open=True)])
-        if model is public.Service:
+        if model is Service:
             return Query([])
-        if model is public.SystemSetting:
+        if model is SystemSetting:
             return Query([])
-        if model is public.BranchSystemSetting:
+        if model is BranchSystemSetting:
             return Query([])
         return Query([])
 
