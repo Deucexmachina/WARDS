@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from database.models import ActivityLog, Policy, Service, SystemSetting, SystemSettingAudit
+from database.models import ActivityLog, BranchSystemSetting, Policy, Service, SystemSetting, SystemSettingAudit
 from utils.field_crypto import apply_system_setting_security, service_value, system_setting_value
 
 
@@ -252,6 +252,10 @@ def update_system_settings(db: Session, payload: dict, changed_by: str, reason: 
                 ]
             )
             normalized_payload["enabledServices"] = active_service_names
+        # Also clear stale branch-level queueEnabled overrides so branches can re-open
+        db.query(BranchSystemSetting).filter(
+            BranchSystemSetting.key == "queueEnabled"
+        ).delete(synchronize_session=False)
 
     updated_settings = {}
     change_entries = []
