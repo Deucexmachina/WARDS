@@ -385,6 +385,16 @@ async def get_branch_details(
         "location": get_decrypted_or_raw(branch, "location") or branch.location,
     }
 
+    # Always expose available services and queue status so citizens can register
+    enabled_branch_services = get_branch_configured_service_names(db, branch_id)
+    services = [
+        service
+        for service in get_branch_service_options(db, branch_id)
+        if (service.get("code") or infer_service_window(service.get("name"))).strip().upper() in enabled_branch_services
+    ]
+    result["services"] = services
+    result["queue_enabled"] = bool(get_branch_setting_value(db, "queueEnabled", branch_id))
+
     if current_user:
         hours = db.query(BranchOperatingHours).filter(
             BranchOperatingHours.branch_id == branch_id
@@ -396,13 +406,6 @@ async def get_branch_details(
             ((Announcement.branch_id == None) | (Announcement.branch_id == branch_id))
         ).order_by(Announcement.publish_date.desc()).limit(5).all()
 
-        enabled_branch_services = get_branch_configured_service_names(db, branch_id)
-        services = [
-            service
-            for service in get_branch_service_options(db, branch_id)
-            if (service.get("code") or infer_service_window(service.get("name"))).strip().upper() in enabled_branch_services
-        ]
-
         result["counters"] = branch.counters
         result["status"] = branch.status
         result["operating_hours"] = [
@@ -413,9 +416,7 @@ async def get_branch_details(
                 "is_open": h.is_open
             } for h in hours
         ]
-        result["queue_enabled"] = bool(get_branch_setting_value(db, "queueEnabled", branch_id))
         result["announcements"] = [serialize_public_announcement(a) for a in announcements]
-        result["services"] = services
 
     return result
 

@@ -108,6 +108,19 @@ def get_branch_settings_payload(db: Session, branch_id: int) -> dict:
             db.commit()
             payload["queueEnabled"] = True
 
+    # Also clear stale empty enabledServices overrides so branch services restore
+    if bool(global_payload.get("queueEnabled")) and bool(payload.get("queueEnabled")):
+        es_override = db.query(BranchSystemSetting).filter(
+            BranchSystemSetting.branch_id == branch_id,
+            BranchSystemSetting.key == "enabledServices",
+        ).first()
+        if es_override:
+            es_value = _deserialize_value(es_override.value_type, es_override.value)
+            if not es_value:
+                db.delete(es_override)
+                db.commit()
+                payload.pop("enabledServices", None)
+
     payload["queueEnabled"] = bool(global_payload.get("queueEnabled")) and bool(payload.get("queueEnabled"))
     payload["maintenanceMode"] = bool(global_payload.get("maintenanceMode")) or bool(payload.get("maintenanceMode"))
     payload["paymentGatewayEnabled"] = bool(global_payload.get("paymentGatewayEnabled")) and bool(payload.get("paymentGatewayEnabled"))
