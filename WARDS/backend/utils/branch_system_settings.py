@@ -96,6 +96,18 @@ def get_branch_settings_payload(db: Session, branch_id: int) -> dict:
     for row in _get_branch_override_rows(db, branch_id):
         payload[row.key] = _deserialize_value(row.value_type, row.value)
 
+    # Self-healing: if global queue is enabled but a stale branch override says disabled,
+    # clear the override so the branch inherits the global state.
+    if bool(global_payload.get("queueEnabled")) and not bool(payload.get("queueEnabled")):
+        stale_override = db.query(BranchSystemSetting).filter(
+            BranchSystemSetting.branch_id == branch_id,
+            BranchSystemSetting.key == "queueEnabled",
+        ).first()
+        if stale_override:
+            db.delete(stale_override)
+            db.commit()
+            payload["queueEnabled"] = True
+
     payload["queueEnabled"] = bool(global_payload.get("queueEnabled")) and bool(payload.get("queueEnabled"))
     payload["maintenanceMode"] = bool(global_payload.get("maintenanceMode")) or bool(payload.get("maintenanceMode"))
     payload["paymentGatewayEnabled"] = bool(global_payload.get("paymentGatewayEnabled")) and bool(payload.get("paymentGatewayEnabled"))
