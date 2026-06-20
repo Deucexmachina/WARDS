@@ -491,8 +491,6 @@ def _build_branch_access_html(
         <div style="background:#fff8e8;border:1px solid #f4d58d;border-radius:14px;padding:18px 20px;margin:20px 0;">
           <h2 style="margin:0 0 12px;font-size:17px;color:#7c4a03;">Important Notes</h2>
           <ul style="padding-left:18px;margin:0;color:#5b6471;font-size:14px;line-height:1.7;">
-            <li>This project is not deployed yet, so the branch dashboard link currently points to localhost.</li>
-            <li>Open the link on the same local machine where WARDS is running.</li>
             <li>After your first sign-in, please set up MFA in Microsoft Authenticator when prompted.</li>
           </ul>
         </div>
