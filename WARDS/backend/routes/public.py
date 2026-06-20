@@ -348,10 +348,15 @@ async def get_all_public_branches(
     for branch in branches:
         branch_name = get_decrypted_or_raw(branch, "name") or branch.name
         branch_location = get_decrypted_or_raw(branch, "location") or branch.location
+        waiting = db.query(Queue).filter(
+            and_(Queue.branch_id == branch.id, hash_aware_match(Queue, "status", "Waiting"))
+        ).count()
         entry = {
             "id": branch.id,
             "name": branch_name,
             "location": branch_location,
+            "current_waiting": waiting,
+            "queue_level": "low" if waiting < 5 else "moderate" if waiting < 15 else "high",
         }
         if current_user:
             hours = db.query(BranchOperatingHours).filter(
