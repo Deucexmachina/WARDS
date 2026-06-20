@@ -1717,13 +1717,9 @@ async def verify_branch_email(
     db: Session = Depends(get_db),
 ):
     """Verify a branch admin email via invite token."""
-    invite = (
-        db.query(Invite)
-        .filter(Invite.token == token, Invite.used == False)
-        .first()
-    )
+    invite = find_invite_by_token(db, Invite, token)
 
-    if not invite:
+    if not invite or invite.used:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired verification token.",
