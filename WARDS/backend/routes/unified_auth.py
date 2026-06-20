@@ -76,6 +76,8 @@ from auth import (
     require_window_staff,
     revoke_token,
     verify_account_password,
+    verify_password,
+    hash_password,
     delete_mfa_secret,
 )
 
