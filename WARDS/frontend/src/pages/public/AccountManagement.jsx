@@ -111,6 +111,8 @@ const AccountManagement = () => {
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [successModalMessage, setSuccessModalMessage] = useState('');
 
   const [mfaEnabled, setMfaEnabled] = useState(false);
   const [showMfaSetup, setShowMfaSetup] = useState(false);
@@ -246,11 +248,14 @@ const AccountManagement = () => {
       setMfaEnabled(true);
       setShowMfaSetup(false);
       setMfaSetupData(null);
-      setMfaMessage(
+      setSuccessModalMessage(
         language === 'en'
           ? 'MFA enabled successfully. Future logins will require your authenticator code.'
           : 'Tagumpay na na-enable ang MFA. Kakailanganin ang iyong authenticator code sa susunod na login.'
       );
+      setShowSuccessModal(true);
+      setMfaMessage('');
+      setMessage('');
       setMfaPassword('');
       setMfaTotpCode('');
     } catch (err) {
@@ -399,7 +404,10 @@ const AccountManagement = () => {
         ...(currentStoredUser || {}),
         ...buildStoredPublicProfile(nextProfile),
       });
-      setMessage(response.data?.message || 'Profile updated successfully.');
+      setSuccessModalMessage(response.data?.message || 'Profile updated successfully.');
+      setShowSuccessModal(true);
+      setMessage('');
+      setMfaMessage('');
       setError('');
       setIsProfileLocked(true);
       setShowProfileConfirm(false);
@@ -460,7 +468,10 @@ const AccountManagement = () => {
       const response = await taxpayerAccountAPI.changePassword(passwordForm);
       setPasswordForm(DEFAULT_PASSWORD_FORM);
       setShowPasswordModal(false);
-      setMessage(response.data?.message || 'Password changed successfully.');
+      setSuccessModalMessage(response.data?.message || 'Password changed successfully.');
+      setShowSuccessModal(true);
+      setMessage('');
+      setMfaMessage('');
       setError('');
     } catch (changeError) {
       setPasswordError(changeError.response?.data?.detail || 'Failed to change password.');
@@ -503,7 +514,10 @@ const AccountManagement = () => {
         ...DEFAULT_IDENTIFIER_FORM,
         taxpayer_type: profile.taxpayer_type,
       });
-      setMessage(response.data?.message || 'Identifier submitted successfully.');
+      setSuccessModalMessage(response.data?.message || 'Identifier submitted successfully.');
+      setShowSuccessModal(true);
+      setMessage('');
+      setMfaMessage('');
       setError('');
       await loadAccount();
     } catch (submitError) {
@@ -983,6 +997,25 @@ const AccountManagement = () => {
               </button>
             </div>
           </form>
+        </div>
+      ) : null}
+
+      {showSuccessModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
+          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl text-center">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+              <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+            </div>
+            <h3 className="text-lg font-bold text-slate-800">Success</h3>
+            <p className="mt-2 text-sm text-slate-600">{successModalMessage}</p>
+            <button
+              type="button"
+              onClick={() => setShowSuccessModal(false)}
+              className="mt-5 w-full rounded-2xl bg-[#0f5b83] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#0c4a6a]"
+            >
+              OK
+            </button>
+          </div>
         </div>
       ) : null}
 
