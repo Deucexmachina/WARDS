@@ -6,6 +6,8 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import threading
+import time
 from pathlib import Path
 
 # Resolve repo root (two levels up from SECURITY/)
@@ -69,6 +71,9 @@ from SECURITY.security_engine import (
     mark_admin_change,
     now_utc,
     json_dumps,
+    activate_database_runtime_monitoring,
+    seed_settings,
+    drop_database_audit_triggers,
 )
 from SECURITY.security_models import (
     SecurityMonitoredFile,
@@ -258,6 +263,124 @@ def _resolve_admin_id(db, admin_id):
         return db.query(Admin.id).filter(Admin.id == admin_id).scalar()
     except Exception:
         return None
+
+
+def start_security_monitor_if_enabled():
+    enabled = (os.getenv("SECURITY_MONITORING_ENABLED") or "false").strip().lower() == "true"
+    deployed = (os.getenv("SECURITY_DEPLOYMENT_MODE") or "development").strip().lower() == "deployed"
+    if not deployed or not enabled:
+        print("[SECURITY MONITOR] automatic monitoring disabled; deployed mode and monitoring flag must both be enabled")
+        return
+
+    default_interval = max(5, int(os.getenv("SECURITY_SCAN_INTERVAL_SECONDS", "30")))
+    adaptive_enabled = (os.getenv("SECURITY_ADAPTIVE_INTERVAL_ENABLED") or "false").strip().lower() == "true"
+
+    def monitor_loop():
+        from SECURITY.security_engine import (
+            activate_database_runtime_monitoring,
+            get_setting,
+            now_utc,
+            scan_all_files,
+            seed_settings,
+            set_setting,
+        )
+
+        while True:
+            retry_delay = False
+            startup_db = SessionLocal()
+            try:
+                seed_settings(startup_db)
+                set_setting(startup_db, "startup_baseline_status", "in_progress", "system")
+                print("[SECURITY MONITOR] activating database runtime monitoring")
+                activate_database_runtime_monitoring(startup_db, reset_baseline=True)
+                print("[SECURITY MONITOR] refreshing startup baseline backup after runtime activation")
+                event = create_manual_backup(startup_db, initiated_by=None, label="startup_baseline")
+                if event.status != "success":
+                    raise RuntimeError(event.error_message or "Startup baseline backup failed")
+                set_setting(startup_db, "monitoring_enabled", "true", "system_startup")
+                set_setting(startup_db, "startup_baseline_status", "complete", "system")
+                print("[SECURITY MONITOR] startup baseline backup refreshed")
+                break
+            except Exception as exc:
+                try:
+                    set_setting(startup_db, "startup_baseline_status", "failed", "system")
+                except Exception:
+                    pass
+                print(f"[SECURITY MONITOR] startup baseline refresh failed: {exc}")
+                retry_delay = True
+            finally:
+                startup_db.close()
+            if retry_delay:
+                time.sleep(default_interval)
+            else:
+                break
+
+        first_scan = True
+        consecutive_clean = 0
+        while True:
+            db = SessionLocal()
+            interval = default_interval
+            try:
+                monitoring_enabled = (get_setting(db, "monitoring_enabled", "true") or "true").lower() == "true"
+                configured_interval = max(5, int(get_setting(db, "scan_interval_seconds", str(default_interval))))
+                if monitoring_enabled:
+                    detections = scan_all_files(db, context={"background_monitor": True})
+                    set_setting(db, "last_scan_at", now_utc().isoformat(), "interval_scanner")
+                    set_setting(db, "last_interval_scan_status", "success", "interval_scanner")
+                    if first_scan:
+                        print(f"[SECURITY MONITOR] first automatic scan complete; {len(detections)} change(s) found")
+                    if adaptive_enabled:
+                        if detections:
+                            consecutive_clean = 0
+                            interval = min(30, configured_interval)
+                        else:
+                            consecutive_clean += 1
+                            if consecutive_clean >= 5:
+                                interval = min(configured_interval * (2 ** min(consecutive_clean - 4, 4)), 300)
+                            else:
+                                interval = configured_interval
+                    else:
+                        interval = configured_interval
+                else:
+                    interval = configured_interval
+                    set_setting(db, "last_interval_scan_status", "monitoring_disabled", "interval_scanner")
+                first_scan = False
+            except Exception as exc:
+                print(f"[SECURITY MONITOR] scan failed: {exc}")
+                try:
+                    set_setting(db, "last_interval_scan_status", f"failed: {exc}", "interval_scanner")
+                except Exception:
+                    pass
+            finally:
+                db.close()
+            time.sleep(max(5, int(interval)))
+
+    thread = threading.Thread(target=monitor_loop, daemon=True, name="wards-security-monitor")
+    thread.start()
+    print(f"[SECURITY MONITOR] ready; default scan interval is {default_interval} seconds")
+
+
+@app.on_event("startup")
+def on_startup():
+    start_security_monitor_if_enabled()
+
+
+@app.on_event("shutdown")
+def on_shutdown():
+    enabled = (os.getenv("SECURITY_MONITORING_ENABLED") or "false").strip().lower() == "true"
+    deployed = (os.getenv("SECURITY_DEPLOYMENT_MODE") or "development").strip().lower() == "deployed"
+    if not deployed or not enabled:
+        return
+    try:
+        db = SessionLocal()
+        try:
+            drop_database_audit_triggers(db)
+            set_setting(db, "database_runtime_monitoring", "stopped", "system_shutdown")
+            print("[SECURITY MONITOR] database audit triggers stopped")
+        finally:
+            db.close()
+    except Exception as exc:
+        print(f"[SECURITY MONITOR] database audit trigger shutdown skipped: {exc}")
 
 
 # ---------------------------------------------------------------------------
