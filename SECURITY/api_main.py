@@ -15,7 +15,8 @@ MASTER_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(MASTER_ROOT))
 sys.path.insert(0, str(MASTER_ROOT / "WARDS" / "backend"))
 
-from fastapi import FastAPI, HTTPException, Header, Depends, JSONResponse
+from fastapi import FastAPI, HTTPException, Header, Depends
+from starlette.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import inspect
 from typing import Any
