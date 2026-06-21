@@ -5348,11 +5348,28 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
         )
 
         if not entry:
-            # Remove stale local duplicate so VM1 file doesn't appear as a separate missing entry
-            db.query(SecurityMonitoredFile).filter(
-                SecurityMonitoredFile.relative_path == rel_path,
-                SecurityMonitoredFile.folder_root != folder_root,
-            ).delete(synchronize_session=False)
+            # Migrate any stale local duplicate to the VM1 folder so it doesn't show as missing
+            stale = (
+                db.query(SecurityMonitoredFile)
+                .filter(SecurityMonitoredFile.relative_path == rel_path)
+                .filter(SecurityMonitoredFile.folder_root != folder_root)
+                .first()
+            )
+            if stale:
+                stale.folder_root = folder_root
+                stale.file_path = f"vm1://{rel_path}"
+                stale.baseline_hash = current_hash
+                stale.current_hash = current_hash
+                stale.size_bytes = size_bytes
+                stale.status = "clean"
+                stale.last_checked = now_utc()
+                db.add(stale)
+                db.commit()
+                db.refresh(stale)
+                registered += 1
+                _store_vm1_snapshot(rel_path, f.get("content_b64"))
+                continue
+
             entry = SecurityMonitoredFile(
                 file_path=f"vm1://{rel_path}",
                 relative_path=rel_path,
