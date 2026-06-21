@@ -102,7 +102,6 @@ DEFAULT_EXCLUDED_DIRS = {
     "dist",
     "build",
     "output",
-    "uploads",
     "SECURITY",
     "QUARANTINE",
     "DEFACEMENT",
@@ -2788,6 +2787,14 @@ def restore_from_backup(db: Session, file_entry: SecurityMonitoredFile, detectio
         db.commit()
         return None
 
+    if detection_id:
+        existing = db.query(SecurityRecoveryEvent).filter(
+            SecurityRecoveryEvent.file_id == file_entry.id,
+            SecurityRecoveryEvent.detection_event_id == detection_id,
+        ).first()
+        if existing:
+            return existing
+
     recovery = SecurityRecoveryEvent(
         detection_event_id=detection_id,
         file_id=file_entry.id,
@@ -3346,10 +3353,20 @@ def scan_database_entry(db: Session, file_entry: SecurityMonitoredFile, context:
     return None
 
 
+def _has_open_incident(db: Session, file_entry: SecurityMonitoredFile, change_type: str) -> bool:
+    return db.query(SecurityIncident).join(SecurityDetectionEvent).filter(
+        SecurityDetectionEvent.file_id == file_entry.id,
+        SecurityDetectionEvent.change_type == change_type,
+        SecurityIncident.status.in_(["open", "investigating"]),
+    ).first() is not None
+
+
 def scan_single_file(db: Session, file_entry: SecurityMonitoredFile, context: dict | None = None, commit_clean: bool = True, precomputed_hash: str | None = None) -> SecurityDetectionEvent | None:
     context = context or {}
     if is_database_entry(file_entry):
         return scan_database_entry(db, file_entry, context=context, commit_clean=commit_clean)
+    if is_vm1_file(file_entry):
+        return None
     path = portable_monitored_path(file_entry)
     old_hash = file_entry.current_hash
     backup_root = latest_backup_root(db)
@@ -3359,6 +3376,12 @@ def scan_single_file(db: Session, file_entry: SecurityMonitoredFile, context: di
     if not path.exists():
         if file_entry.status in {"verified_deleted", "verified_renamed"}:
             file_entry.current_hash = None
+            file_entry.last_checked = now_utc()
+            db.add(file_entry)
+            if commit_clean:
+                db.commit()
+            return None
+        if file_entry.status == "missing" and _has_open_incident(db, file_entry, "file_deleted"):
             file_entry.last_checked = now_utc()
             db.add(file_entry)
             if commit_clean:
@@ -3381,6 +3404,12 @@ def scan_single_file(db: Session, file_entry: SecurityMonitoredFile, context: di
     file_entry.last_checked = now_utc()
 
     if current_hash != file_entry.baseline_hash:
+        if _has_open_incident(db, file_entry, "content_modified"):
+            file_entry.status = "modified"
+            db.add(file_entry)
+            if commit_clean:
+                db.commit()
+            return None
         file_entry.status = "modified"
         db.add(file_entry)
         db.commit()
@@ -4240,6 +4269,19 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
     incident.response_action = "resolved_clean_backup_retained"
     cleanup_quarantine_paths(json_loads(incident.quarantine_paths_json, []))
     db.add(incident)
+    # Resolve any other open incidents for the same file to prevent duplicates
+    if detection:
+        for other in db.query(SecurityIncident).join(SecurityDetectionEvent).filter(
+            SecurityDetectionEvent.file_id == detection.file_id,
+            SecurityIncident.id != incident.id,
+            SecurityIncident.status.in_(["open", "investigating"]),
+        ).all():
+            other.status = "resolved"
+            other.resolved_at = now_utc()
+            other.resolved_by = _valid_admin_id(db, admin_id)
+            other.response_action = "resolved_clean_backup_retained"
+            cleanup_quarantine_paths(json_loads(other.quarantine_paths_json, []))
+            db.add(other)
     db.commit()
     db.refresh(incident)
     if create_event:
@@ -4329,6 +4371,18 @@ def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_ba
     incident.resolved_at = now_utc()
     incident.resolved_by = _valid_admin_id(db, admin_id)
     db.add(incident)
+    # Mark any other open incidents for the same file as false_positive to prevent duplicates
+    if detection:
+        for other in db.query(SecurityIncident).join(SecurityDetectionEvent).filter(
+            SecurityDetectionEvent.file_id == detection.file_id,
+            SecurityIncident.id != incident.id,
+            SecurityIncident.status.in_(["open", "investigating"]),
+        ).all():
+            other.status = "false_positive"
+            other.resolved_at = now_utc()
+            other.resolved_by = _valid_admin_id(db, admin_id)
+            other.response_action = incident.response_action
+            db.add(other)
     db.commit()
     backup_refreshed = False
     backup_refresh_failed = False

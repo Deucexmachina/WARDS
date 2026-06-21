@@ -15,7 +15,7 @@ MASTER_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(MASTER_ROOT))
 sys.path.insert(0, str(MASTER_ROOT / "WARDS" / "backend"))
 
-from fastapi import FastAPI, HTTPException, Header, Depends
+from fastapi import FastAPI, HTTPException, Header, Depends, JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import inspect
 from typing import Any
@@ -74,6 +74,7 @@ from SECURITY.security_engine import (
     activate_database_runtime_monitoring,
     seed_settings,
     drop_database_audit_triggers,
+    MissingFileConfirmationRequired,
 )
 from SECURITY.security_models import (
     SecurityMonitoredFile,
@@ -89,6 +90,14 @@ if not API_KEY or API_KEY in ("change-me", ""):
 
 app = FastAPI(title="WARDS Security API", version="1.0.0")
 Base.metadata.create_all(bind=engine)
+
+
+@app.exception_handler(MissingFileConfirmationRequired)
+async def missing_file_confirmation_handler(request, exc):
+    return JSONResponse(
+        status_code=409,
+        content={"detail": exc.details if hasattr(exc, "details") else str(exc)},
+    )
 
 
 def require_api_key(x_api_key: str = Header(..., alias="X-API-Key")):

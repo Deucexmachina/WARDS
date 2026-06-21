@@ -124,7 +124,7 @@ const MiniChart = ({ data, empty = 'No data yet.' }) => {
   return (
     <div className="space-y-3">
       {entries.map(([label, value], index) => (
-        <div key={label} className="grid grid-cols-[8rem_1fr_2rem] items-center gap-3 text-sm">
+        <div key={label} className="grid grid-cols-[5rem_1fr_2rem] items-center gap-3 text-sm sm:grid-cols-[8rem_1fr_2rem]">
           <span className="truncate font-semibold capitalize text-slate-700">{label.replaceAll('_', ' ')}</span>
           <div className="h-3 overflow-hidden rounded-full bg-slate-100">
             <div className={['h-full rounded-full bg-green-500', 'h-full rounded-full bg-blue-500', 'h-full rounded-full bg-amber-500', 'h-full rounded-full bg-red-500', 'h-full rounded-full bg-purple-500'][index % 5]} style={{ width: `${(Number(value) / max) * 100}%` }} />
@@ -1010,7 +1010,7 @@ const BackupRecovery = () => {
         </div>
       </nav>
 
-      <aside className="fixed left-0 top-16 h-[calc(100vh-4rem)] w-72 overflow-y-auto border-r border-slate-200 bg-white p-4 shadow-sm">
+      <aside className="fixed left-0 top-16 hidden h-[calc(100vh-4rem)] w-72 overflow-y-auto border-r border-slate-200 bg-white p-4 shadow-sm md:block">
         <div className="mb-5 rounded-xl bg-purple-100 p-4 text-center text-purple-800">
           <p className="text-sm font-bold">{adminLabel}</p>
         </div>
@@ -1030,9 +1030,26 @@ const BackupRecovery = () => {
         </div>
       </aside>
 
-      <main className="ml-72 pt-16">
-        <div className="space-y-6 p-8">
-          <section className="rounded-[2rem] border border-slate-300 bg-white px-8 py-7 text-slate-900 shadow-2xl shadow-slate-200/60">
+      <div className="sticky top-16 z-30 block border-b border-slate-200 bg-white px-4 py-2 md:hidden">
+        <div className="flex gap-2 overflow-x-auto">
+          {tabs.map((tab) => (
+            <button
+              key={tab}
+              onClick={() => changeTab(tab)}
+              className={`shrink-0 rounded-lg px-3 py-2 text-xs font-semibold transition ${activeTab === tab ? 'bg-primary text-white' : 'bg-slate-100 text-slate-700'}`}
+            >
+              {tab}
+              {notificationCounts[tab] > 0 && (
+                <span className="ml-1 rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">{notificationCounts[tab]}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <main className="ml-0 pt-16 md:ml-72">
+        <div className="space-y-6 p-4 md:p-8">
+          <section className="rounded-[2rem] border border-slate-300 bg-white px-4 py-5 text-slate-900 shadow-2xl shadow-slate-200/60 md:px-8 md:py-7">
             <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
               <div>
                 <p className="max-w-3xl text-sm leading-6 text-slate-600">
@@ -1115,28 +1132,32 @@ const BackupRecovery = () => {
                 />
               )}
             >
-              <div className="overflow-x-auto md:overflow-hidden">
-                <table className="w-full text-left text-sm min-w-[600px]">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm min-w-[700px]">
                   <thead className="border-b text-xs uppercase tracking-[0.16em] text-slate-500">
                     <tr>
-                      <th className="py-3">File</th>
-                      <th><SortHeader label="Folder" column="folder" sort={fileSort} setSort={setFileSort} /></th>
-                      <th><SortHeader label="Status" column="status" sort={fileSort} setSort={setFileSort} /></th>
-                      <th><SortHeader label="Type" column="type" sort={fileSort} setSort={setFileSort} /></th>
-                      <th><SortHeader label="Size" column="size" sort={fileSort} setSort={setFileSort} /></th>
-                      <th><SortHeader label="Last Checked" column="last_checked" sort={fileSort} setSort={setFileSort} /></th>
-                      <th>Actions</th>
+                      <th className="min-w-[240px] py-3 pr-4">File</th>
+                      <th className="min-w-[80px] pr-4"><SortHeader label="Folder" column="folder" sort={fileSort} setSort={setFileSort} /></th>
+                      <th className="min-w-[100px] pr-4"><SortHeader label="Status" column="status" sort={fileSort} setSort={setFileSort} /></th>
+                      <th className="min-w-[60px] pr-4"><SortHeader label="Type" column="type" sort={fileSort} setSort={setFileSort} /></th>
+                      <th className="min-w-[80px] pr-4"><SortHeader label="Size" column="size" sort={fileSort} setSort={setFileSort} /></th>
+                      <th className="min-w-[160px] pr-4"><SortHeader label="Last Checked" column="last_checked" sort={fileSort} setSort={setFileSort} /></th>
+                      <th className="min-w-[140px]">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {visibleFiles.slice((filePage - 1) * FILE_PAGE_SIZE, filePage * FILE_PAGE_SIZE).map((file) => (
                       <tr key={file.id}>
-                        <td className="max-w-md py-3 font-semibold text-slate-800">{file.relative_path}</td>
-                        <td>{file.folder_root}</td>
-                        <td><Badge>{file.status}</Badge></td>
-                        <td>{file.file_type}</td>
-                        <td>{Number(file.size_bytes || 0).toLocaleString()} B</td>
-                        <td>{file.last_checked ? new Date(file.last_checked).toLocaleString() : 'n/a'}</td>
+                        <td className="max-w-xs py-3 pr-4 font-semibold text-slate-800">
+                          <span className="block overflow-hidden text-ellipsis whitespace-nowrap" title={file.relative_path}>{file.relative_path}</span>
+                        </td>
+                        <td className="pr-4">
+                          <span className="block overflow-hidden text-ellipsis whitespace-nowrap" title={file.folder_root}>{file.folder_root}</span>
+                        </td>
+                        <td className="pr-4"><Badge>{file.status}</Badge></td>
+                        <td className="pr-4">{file.file_type}</td>
+                        <td className="pr-4">{Number(file.size_bytes || 0).toLocaleString()} B</td>
+                        <td className="pr-4">{file.last_checked ? new Date(file.last_checked).toLocaleString() : 'n/a'}</td>
                         <td className="flex gap-2 py-2">
                           <button disabled={busy} className={`rounded-lg bg-slate-100 px-3 py-2 font-semibold text-slate-700 hover:bg-slate-200${disabledButtonClass}`} onClick={() => runAction(() => api.post(`/security/files/${file.id}/scan`), (result) => result?.data?.detection ? `Changes found in ${file.relative_path}. Detection log created.` : `No changes found in ${file.relative_path}.`, `Scanning ${file.relative_path}...`)}>Scan</button>
                           <button disabled={busy} className={`rounded-lg bg-primary px-3 py-2 font-semibold text-white hover:bg-blue-900${disabledButtonClass}`} onClick={() => askConfirm('Recover this file from backup?', `This will restore ${file.relative_path} from the trusted local backup. There may be file or path mismatches if the file was moved, renamed, or backed up before recent structural changes. A full system backup is still recommended before relying on individual file recovery.`, () => api.post(`/security/files/${file.id}/recover`), 'File recovery complete.', 'Recover file')}>Recover</button>
@@ -1408,38 +1429,41 @@ const BackupRecovery = () => {
                     <button disabled={busy} className={`rounded-xl bg-primary px-4 py-3 font-semibold text-white${disabledButtonClass}`} onClick={() => openFolderPicker('add-monitor', 'Add monitored folder', controls.monitoredFolder)}>Add monitored folder</button>
                     <button disabled={busy} className={`rounded-xl bg-red-50 px-4 py-3 font-semibold text-red-700${disabledButtonClass}`} onClick={() => openFolderPicker('remove-monitor', 'Remove monitored folder', controls.monitoredFolder)}>Remove monitored folder</button>
                   </div>
-                  <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-3">
-                    <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-600">VM1 monitored folders (remote app server)</p>
-                    <div className="mt-2 flex gap-2">
+                  <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-4">
+                    <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-700">VM1 monitored folders (remote app server)</p>
+                    <p className="mt-1 text-xs text-blue-600">Type an absolute path on VM1. Remote folder browsing is not available yet.</p>
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                       <input
                         type="text"
                         className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                        placeholder="/opt/wards/app/WARDS/extra (absolute path on VM1)"
+                        placeholder="/WARDS/extra"
                         value={controls.vm1MonitoredFolder || ''}
                         onChange={(e) => setControls((c) => ({ ...c, vm1MonitoredFolder: e.target.value }))}
                       />
-                      <button
-                        disabled={busy || !controls.vm1MonitoredFolder}
-                        className={`rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white${disabledButtonClass}`}
-                        onClick={() => askConfirm(
-                          'Add VM1 monitored folder?',
-                          `WARDS will add ${controls.vm1MonitoredFolder} to VM1 file monitoring. The path must exist on VM1.`,
-                          () => api.post('/security/folders', { path: controls.vm1MonitoredFolder, vm_target: 'vm1' }),
-                          'VM1 monitored folder added.',
-                          'Add VM1 folder'
-                        )}
-                      >Add</button>
-                      <button
-                        disabled={busy || !controls.vm1MonitoredFolder}
-                        className={`rounded-xl bg-red-50 px-4 py-2 text-sm font-semibold text-red-700${disabledButtonClass}`}
-                        onClick={() => askConfirm(
-                          'Remove VM1 monitored folder?',
-                          `WARDS will remove ${controls.vm1MonitoredFolder} from VM1 monitoring.`,
-                          () => api.post('/security/folders/remove', { path: controls.vm1MonitoredFolder, vm_target: 'vm1' }),
-                          'VM1 monitored folder removed.',
-                          'Remove VM1 folder'
-                        )}
-                      >Remove</button>
+                      <div className="flex gap-2">
+                        <button
+                          disabled={busy || !controls.vm1MonitoredFolder}
+                          className={`rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white${disabledButtonClass}`}
+                          onClick={() => askConfirm(
+                            'Add VM1 monitored folder?',
+                            `WARDS will add ${controls.vm1MonitoredFolder} to VM1 file monitoring. The path must exist on VM1.`,
+                            () => api.post('/security/folders', { path: controls.vm1MonitoredFolder, vm_target: 'vm1' }),
+                            'VM1 monitored folder added.',
+                            'Add VM1 folder'
+                          )}
+                        >Add</button>
+                        <button
+                          disabled={busy || !controls.vm1MonitoredFolder}
+                          className={`rounded-xl bg-red-50 px-4 py-2 text-sm font-semibold text-red-700${disabledButtonClass}`}
+                          onClick={() => askConfirm(
+                            'Remove VM1 monitored folder?',
+                            `WARDS will remove ${controls.vm1MonitoredFolder} from VM1 monitoring.`,
+                            () => api.post('/security/folders/remove', { path: controls.vm1MonitoredFolder, vm_target: 'vm1' }),
+                            'VM1 monitored folder removed.',
+                            'Remove VM1 folder'
+                          )}
+                        >Remove</button>
+                      </div>
                     </div>
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
