@@ -98,7 +98,9 @@ def _send_via_sendgrid(message: EmailMessage) -> dict:
 
     attachments = []
     if message.is_multipart():
-        for part in message.iter_parts():
+        for part in message.walk():
+            if part is message:
+                continue
             ctype = part.get_content_type()
             if ctype == "text/plain":
                 payload["content"].append({"type": "text/plain", "value": part.get_content()})
@@ -162,7 +164,9 @@ def _send_via_brevo(message: EmailMessage) -> dict:
 
     attachments = []
     if message.is_multipart():
-        for part in message.iter_parts():
+        for part in message.walk():
+            if part is message:
+                continue
             ctype = part.get_content_type()
             if ctype == "text/plain":
                 payload["textContent"] = part.get_content()
