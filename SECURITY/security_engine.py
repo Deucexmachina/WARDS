@@ -3270,6 +3270,11 @@ def create_incident(db: Session, detection: SecurityDetectionEvent, classificati
             .all()
         ]
         send_security_incident_alert_email(recipients, serialize_incident(incident), serialize_detection(detection), recoveries)
+    except RuntimeError as exc:
+        if "ADMIN_SECRET_KEY" in str(exc) or "SECRET_KEY" in str(exc):
+            logger.warning("Skipping incident alert email: required env key missing (%s)", exc)
+        else:
+            logger.exception("Failed to dispatch incident alert email for detection %s", detection.id)
     except Exception:
         logger.exception("Failed to dispatch incident alert email for detection %s", detection.id)
     return incident
@@ -5343,6 +5348,11 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
         )
 
         if not entry:
+            # Remove stale local duplicate so VM1 file doesn't appear as a separate missing entry
+            db.query(SecurityMonitoredFile).filter(
+                SecurityMonitoredFile.relative_path == rel_path,
+                SecurityMonitoredFile.folder_root != folder_root,
+            ).delete(synchronize_session=False)
             entry = SecurityMonitoredFile(
                 file_path=f"vm1://{rel_path}",
                 relative_path=rel_path,
@@ -5366,15 +5376,27 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
         entry.last_checked = now_utc()
 
         if current_hash != entry.baseline_hash:
-            entry.status = "modified"
-            changed += 1
-            db.add(entry)
-            db.commit()
-            detection = _record_vm1_detection(db, entry, "vm1_content_modified", current_hash)
-            if detection:
-                detections.append(detection)
+            # Skip creating duplicate detection if open incident already exists
+            has_open = db.query(SecurityIncident).join(SecurityDetectionEvent).filter(
+                SecurityDetectionEvent.file_id == entry.id,
+                SecurityDetectionEvent.change_type == "vm1_content_modified",
+                SecurityIncident.status.in_(["open", "investigating"]),
+            ).first() is not None
+            if not has_open:
+                entry.status = "modified"
+                changed += 1
+                db.add(entry)
+                db.commit()
+                detection = _record_vm1_detection(db, entry, "vm1_content_modified", current_hash)
+                if detection:
+                    detections.append(detection)
+            else:
+                entry.status = "modified"
+                db.add(entry)
         else:
             entry.status = "clean"
+            # Keep baseline in sync so future changes don't re-trigger old deltas
+            entry.baseline_hash = current_hash
             db.add(entry)
 
     db.commit()

@@ -27,6 +27,7 @@ services:
       WAZUH_ENABLED: ${WAZUH_ENABLED:-false}
       SECURITY_SCAN_INTERVAL_SECONDS: ${SECURITY_SCAN_INTERVAL_SECONDS:-30}
       VM2_APP_DIR: /app/repo
+      ADMIN_SECRET_KEY: ${ADMIN_SECRET_KEY:-change-me-admin-secret}
       LOG_INTEGRITY_SECRET: ${LOG_INTEGRITY_SECRET:-change-me-log-integrity-secret}
       DATA_HASH_SECRET: ${DATA_HASH_SECRET:-change-me-data-hash-secret}
       BACKUP_INTEGRITY_SECRET: ${BACKUP_INTEGRITY_SECRET:-change-me-backup-integrity-secret}

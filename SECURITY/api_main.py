@@ -764,3 +764,18 @@ def api_internal_deploy_status():
     except Exception:
         pass
     return {"vm": "vm2", "commit": commit, "deploy_dir": app_dir}
+
+
+@app.post("/v1/admin/clear-all-logs", dependencies=[Depends(require_api_key)])
+def api_clear_all_logs(db=Depends(get_db)):
+    """Admin-only: wipe every detection, recovery, and incident row."""
+    deleted_incidents = db.query(SecurityIncident).delete()
+    deleted_detections = db.query(SecurityDetectionEvent).delete()
+    deleted_recoveries = db.query(SecurityRecoveryEvent).delete()
+    db.commit()
+    return {
+        "status": "cleared",
+        "incidents_deleted": deleted_incidents,
+        "detections_deleted": deleted_detections,
+        "recoveries_deleted": deleted_recoveries,
+    }
