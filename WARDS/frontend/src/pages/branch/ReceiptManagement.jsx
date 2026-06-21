@@ -1913,7 +1913,7 @@ const handleCancelScan = () => {
           <h2 className="text-xl font-bold text-gray-900 mb-4">Upload Receipt Image</h2>
           <div className="mb-4">
             <label className="block text-sm font-semibold text-gray-700 mb-1">Receipt Category</label>
-            <CustomSelect value={selectedCategory} onChange={(value) => setSelectedCategory(value)} disabled={uploading || saving} options={[{ value: 'RPT', label: 'RPT' }, { value: 'BUSINESS', label: 'Business Tax' }, { value: 'MISC', label: 'Miscellaneous' }, { value: 'CTC', label: 'CTC' }, { value: 'PTR', label: 'PTR' }, { value: 'MARKET', label: 'MARKET' }]} placeholder="Select category" />
+            <CustomSelect value={selectedCategory} onChange={(value) => setSelectedCategory(value)} disabled={uploading || saving} options={[{ value: 'RPT', label: 'Real Property Tax' }, { value: 'BUSINESS', label: 'Business Tax' }, { value: 'MISC', label: 'Miscellaneous' }, { value: 'CTC', label: 'Community Tax Certificate' }, { value: 'PTR', label: 'Professional Tax Receipt' }, { value: 'MARKET', label: 'Market' }]} placeholder="Select category" />
           </div>
           <input
             type="file"
