@@ -766,7 +766,7 @@ def stored_path_value(path: Path | str | None, base_root: Path = MASTER_ROOT) ->
 
 
 def is_vm1_file(file_entry: SecurityMonitoredFile) -> bool:
-    folder = str(file_entry.folder_root or "")
+    folder = str(getattr(file_entry, "folder_root", None) or "")
     return folder.startswith(VM1_FOLDER_ROOT_PREFIX) or folder.startswith("CUSTOM_")
 
 
