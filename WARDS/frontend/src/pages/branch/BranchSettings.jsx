@@ -588,51 +588,14 @@ const BranchSettings = () => {
     [systemSettings?.enabledServices, publishedSystemSettings?.enabledServices],
   );
 
-  const branchWindowAccounts = useMemo(
-    () => (Array.isArray(branchUser?.window_accounts) ? branchUser.window_accounts : []),
-    [branchUser],
-  );
-
-  const branchQueueWindows = useMemo(() => {
-    const windowCount = branchUser?.branch_window_count || 0;
-    if (!windowCount) return [];
-    const enabledServices = new Set((systemSettings?.enabledServices || []).map(normalizeServiceWindowCode).filter(Boolean));
-    const windowAssignments = new Map();
-    branchWindowAccounts.forEach((account) => {
-      const windowNum = account?.assigned_window_number;
-      if (!windowNum || windowNum < 1 || windowNum > windowCount) return;
-      const serviceName = normalizeServiceWindowCode(account?.service_window || account?.service_window_label || '');
-      if (!serviceName) return;
-      windowAssignments.set(windowNum, serviceName);
-    });
-    return Array.from({ length: windowCount }, (_, i) => {
-      const windowNum = i + 1;
-      const serviceName = windowAssignments.get(windowNum) || null;
-      return {
-        windowNumber: windowNum,
-        serviceName,
-        serviceLabel: serviceName ? getServiceWindowLabel(serviceName) : 'Unassigned',
-        enabled: Boolean(systemSettings?.queueEnabled) && serviceName && enabledServices.has(serviceName),
-      };
-    });
-  }, [branchWindowAccounts, branchUser, systemSettings]);
 
   useEffect(() => {
     if (initialServicesSeeded.current) return;
     if (!systemSettings?.queueEnabled) { initialServicesSeeded.current = true; return; }
-    const windowCount = branchUser?.branch_window_count || 0;
-    if (!windowCount) return;
-    const windowAssignments = new Map();
-    branchWindowAccounts.forEach((account) => {
-      const windowNum = account?.assigned_window_number;
-      if (!windowNum || windowNum < 1 || windowNum > windowCount) return;
-      const serviceName = normalizeServiceWindowCode(account?.service_window || account?.service_window_label || '');
-      if (!serviceName) return;
-      windowAssignments.set(windowNum, serviceName);
-    });
-    const visibleServiceNames = Array.from({ length: windowCount }, (_, i) => windowAssignments.get(i + 1)).filter(Boolean);
-    const currentEnabledServices = (systemSettings.enabledServices || []).map(normalizeServiceWindowCode).filter(Boolean);
-    const missingServices = visibleServiceNames.filter((s) => !currentEnabledServices.includes(s));
+    const availableServices = (systemSettings?.serviceOptions || []).map(normalizeServiceWindowCode).filter(Boolean);
+    if (!availableServices.length) { initialServicesSeeded.current = true; return; }
+    const currentEnabledServices = (systemSettings?.enabledServices || []).map(normalizeServiceWindowCode).filter(Boolean);
+    const missingServices = availableServices.filter((s) => !currentEnabledServices.includes(s));
     initialServicesSeeded.current = true;
     if (!missingServices.length) return;
     setSystemSettings((current) => {
@@ -642,7 +605,7 @@ const BranchSettings = () => {
       ].map(normalizeServiceWindowCode).filter(Boolean))).sort();
       return { ...current, enabledServices: nextEnabledServices };
     });
-  }, [branchWindowAccounts, branchUser, systemSettings?.queueEnabled, systemSettings?.enabledServices]);
+  }, [systemSettings?.queueEnabled, systemSettings?.enabledServices, systemSettings?.serviceOptions]);
 
   const latestPublishedHistoryId = useMemo(
     () => historyState.items.find((item) => item.action === 'published')?.id || null,
@@ -658,17 +621,8 @@ const BranchSettings = () => {
     setSystemSettings((current) => {
       if (fieldName === 'queueEnabled') {
         const nextQueueEnabled = Boolean(value);
-        const windowCount = branchUser?.branch_window_count || 0;
-        const windowAssignments = new Map();
-        branchWindowAccounts.forEach((account) => {
-          const windowNum = account?.assigned_window_number;
-          if (!windowNum || windowNum < 1 || windowNum > windowCount) return;
-          const serviceName = normalizeServiceWindowCode(account?.service_window || account?.service_window_label || '');
-          if (!serviceName) return;
-          windowAssignments.set(windowNum, serviceName);
-        });
         const nextEnabledServices = nextQueueEnabled
-          ? Array.from({ length: windowCount }, (_, i) => windowAssignments.get(i + 1)).filter(Boolean)
+          ? (current.serviceOptions || []).map(normalizeServiceWindowCode).filter(Boolean)
           : current.enabledServices;
         return { ...current, queueEnabled: nextQueueEnabled, enabledServices: nextEnabledServices };
       }
@@ -798,15 +752,15 @@ const BranchSettings = () => {
           {/* Services */}
           <SectionCard
             title="Services"
-            subtitle="Shared public-service availability from Main Admin. These settings determine which branch staff services stay active."
+            subtitle="Toggle which services are available for public queueing at this branch."
           >
             <div className="p-5 space-y-4">
-              {/* Queue enable + window grid */}
+              {/* Queue enable + service grid */}
               <div>
                 <div className="mb-3 flex items-center justify-between">
                   <div>
-                    <p className="font-semibold text-gray-800">Service Window Availability</p>
-                    <p className="mt-0.5 text-sm text-gray-500">Toggle individual windows for this branch.</p>
+                    <p className="font-semibold text-gray-800">Available Services</p>
+                    <p className="mt-0.5 text-sm text-gray-500">Toggle individual services on or off for this branch.</p>
                   </div>
                   <CheckboxToggle
                     checked={Boolean(systemSettings.queueEnabled)}
@@ -822,29 +776,39 @@ const BranchSettings = () => {
                   </div>
                 )}
 
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                  {branchQueueWindows.map((window) => (
-                    <button
-                      key={window.windowNumber}
-                      type="button"
-                      onClick={() => window.serviceName && toggleBranchService(window.serviceName)}
-                      disabled={!isBranchAdmin || !systemSettings.queueEnabled || !window.serviceName}
-                      className={`flex items-center justify-between rounded-lg border px-3 py-2.5 text-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                        window.enabled
-                          ? 'border-green-200 bg-green-50 hover:bg-green-100'
-                          : 'border-gray-200 bg-gray-50 hover:bg-gray-100'
-                      }`}
-                    >
-                      <div className="text-left">
-                        <p className="font-semibold text-gray-800">Window {window.windowNumber}</p>
-                        <p className="text-xs text-gray-500">{window.serviceLabel}</p>
-                      </div>
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${window.enabled ? 'bg-green-600 text-white' : 'bg-gray-300 text-gray-600'}`}>
-                        {window.enabled ? 'On' : 'Off'}
-                      </span>
-                    </button>
-                  ))}
-                </div>
+                {systemSettings.queueEnabled && (
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                    {Array.from(new Set(systemSettings?.serviceOptions || [])).filter(Boolean).map((serviceCode) => {
+                      const isEnabled = systemSettings.enabledServices.includes(serviceCode);
+                      return (
+                        <button
+                          key={serviceCode}
+                          type="button"
+                          onClick={() => toggleBranchService(serviceCode)}
+                          disabled={!isBranchAdmin}
+                          className={`flex items-center justify-between rounded-lg border px-3 py-2.5 text-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                            isEnabled
+                              ? 'border-green-200 bg-green-50 hover:bg-green-100'
+                              : 'border-gray-200 bg-gray-50 hover:bg-gray-100'
+                          }`}
+                        >
+                          <div className="text-left">
+                            <p className="font-semibold text-gray-800">{getServiceWindowLabel(serviceCode)}</p>
+                          </div>
+                          <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${isEnabled ? 'bg-green-600 text-white' : 'bg-gray-300 text-gray-600'}`}>
+                            {isEnabled ? 'On' : 'Off'}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {systemSettings.queueEnabled && !Array.from(new Set(systemSettings?.serviceOptions || [])).filter(Boolean).length && (
+                  <div className="rounded border-l-4 border-yellow-400 bg-yellow-50 p-3 text-sm text-yellow-800">
+                    No services are configured for this branch. Please ask a Main Admin to assign service windows to branch staff accounts.
+                  </div>
+                )}
               </div>
 
               <div className="divide-y divide-gray-100 rounded-xl border border-gray-200">
