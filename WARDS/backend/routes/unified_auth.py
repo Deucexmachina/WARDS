@@ -625,9 +625,12 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
         )
 
     if portal == "public" and not getattr(account, "is_verified", True):
-        raise HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Please verify your email before logging in.",
+            content={
+                "detail": "Please verify your email before logging in.",
+                "requires_email_verification": True,
+            },
             headers={"x-requires-email-verification": "true"},
         )
 

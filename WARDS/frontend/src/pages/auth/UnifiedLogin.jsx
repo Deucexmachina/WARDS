@@ -480,9 +480,9 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
     } catch (err) {
       const portal = getSubmissionPortal() || 'default';
       const detail = normalizeLoginErrorMessage(err.response?.data?.detail || 'Login failed. Please try again.');
-      const requiresEmailVerification = err.response?.headers?.['x-requires-email-verification'] === 'true';
+      const requiresEmailVerification = err.response?.data?.requires_email_verification === true;
 
-      if (requiresEmailVerification && portal === 'public') {
+      if (requiresEmailVerification) {
         const normalizedEmail = identifier.trim();
         sessionStorage.setItem(
           'pendingCitizenVerification',

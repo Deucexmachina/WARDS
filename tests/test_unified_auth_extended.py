@@ -225,7 +225,9 @@ def test_public_login_unverified_requires_email_verification():
             json={"identifier": account.email, "password": "CorrectPass1!"},
         )
         assert response.status_code == 403
-        assert response.json()["detail"] == "Please verify your email before logging in."
+        data = response.json()
+        assert data["detail"] == "Please verify your email before logging in."
+        assert data["requires_email_verification"] is True
         assert response.headers.get("x-requires-email-verification") == "true"
     finally:
         unified_auth.find_account_for_portal = original_find
