@@ -317,6 +317,9 @@ def start_security_monitor_if_enabled():
 
         first_scan = True
         consecutive_clean = 0
+        last_vm1_check = 0
+        vm1_check_interval = max(15, int(os.getenv("VM1_HEARTBEAT_CHECK_INTERVAL", "30")))
+
         while True:
             db = SessionLocal()
             interval = default_interval
@@ -353,6 +356,21 @@ def start_security_monitor_if_enabled():
                     pass
             finally:
                 db.close()
+
+            # VM1 heartbeat timeout check
+            if time.time() - last_vm1_check >= vm1_check_interval:
+                vm1_db = SessionLocal()
+                try:
+                    from SECURITY.security_engine import check_vm1_heartbeat_timeout
+                    detection = check_vm1_heartbeat_timeout(vm1_db)
+                    if detection:
+                        print(f"[SECURITY MONITOR] VM1 heartbeat timeout detected; detection #{detection.id}")
+                except Exception as exc:
+                    print(f"[SECURITY MONITOR] VM1 heartbeat check failed: {exc}")
+                finally:
+                    vm1_db.close()
+                last_vm1_check = time.time()
+
             time.sleep(max(5, int(interval)))
 
     thread = threading.Thread(target=monitor_loop, daemon=True, name="wards-security-monitor")
@@ -381,6 +399,48 @@ def on_shutdown():
             db.close()
     except Exception as exc:
         print(f"[SECURITY MONITOR] database audit trigger shutdown skipped: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# VM1 Remote Reporter Endpoints
+# ---------------------------------------------------------------------------
+@app.post("/v1/vm1/files/register", dependencies=[Depends(require_api_key)])
+def api_vm1_files_register(payload: dict = {}, db=Depends(get_db)):
+    from SECURITY.security_engine import process_vm1_file_manifest
+    return process_vm1_file_manifest(db, payload.get("files", []))
+
+
+@app.post("/v1/vm1/heartbeat", dependencies=[Depends(require_api_key)])
+def api_vm1_heartbeat(payload: dict = {}, db=Depends(get_db)):
+    from SECURITY.security_engine import set_setting, now_utc
+    set_setting(db, "vm1_last_heartbeat_at", now_utc().isoformat(), "vm1_reporter")
+    set_setting(db, "vm1_last_heartbeat_status", "success", "vm1_reporter")
+    return {"status": "ok"}
+
+
+@app.get("/v1/vm1/restore-command", dependencies=[Depends(require_api_key)])
+def api_vm1_restore_command(db=Depends(get_db)):
+    from SECURITY.security_engine import get_pending_vm1_restore_commands
+    return {"commands": get_pending_vm1_restore_commands(db)}
+
+
+@app.post("/v1/vm1/restore-ack", dependencies=[Depends(require_api_key)])
+def api_vm1_restore_ack(payload: dict = {}, db=Depends(get_db)):
+    from SECURITY.security_engine import acknowledge_vm1_restore_command
+    success = acknowledge_vm1_restore_command(db, payload.get("command_id"), payload.get("success", False))
+    return {"status": "ok" if success else "error"}
+
+
+@app.get("/v1/vm1/config", dependencies=[Depends(require_api_key)])
+def api_vm1_config(db=Depends(get_db)):
+    from SECURITY.security_engine import get_setting, load_vm1_monitored_folders
+    interval = max(5, int(get_setting(db, "scan_interval_seconds", "30")))
+    custom_folders = [str(p) for p in load_vm1_monitored_folders(db)]
+    return {
+        "scan_interval_seconds": interval,
+        "vm1_custom_folders": custom_folders,
+        "monitoring_enabled": (get_setting(db, "monitoring_enabled", "true") or "true").lower() == "true",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -457,12 +517,12 @@ def api_file_recover(payload: dict = {}, db=Depends(get_db)):
 # ---------------------------------------------------------------------------
 @app.post("/v1/folders", dependencies=[Depends(require_api_key)])
 def api_add_folder(payload: dict = {}, db=Depends(get_db)):
-    return add_monitored_folder(db, payload["path"], initiated_by=payload.get("initiated_by"))
+    return add_monitored_folder(db, payload["path"], initiated_by=payload.get("initiated_by"), vm_target=payload.get("vm_target"))
 
 
 @app.post("/v1/folders/remove", dependencies=[Depends(require_api_key)])
 def api_remove_folder(payload: dict = {}, db=Depends(get_db)):
-    return remove_monitored_folder(db, payload["path"], initiated_by=payload.get("initiated_by"))
+    return remove_monitored_folder(db, payload["path"], initiated_by=payload.get("initiated_by"), vm_target=payload.get("vm_target"))
 
 
 # ---------------------------------------------------------------------------

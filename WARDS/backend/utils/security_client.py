@@ -311,18 +311,18 @@ def manual_recover_file(db, file_id, admin_id):
 # ---------------------------------------------------------------------------
 # Folder management proxies
 # ---------------------------------------------------------------------------
-def add_monitored_folder(db, path, initiated_by=None):
+def add_monitored_folder(db, path, initiated_by=None, vm_target=None):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import add_monitored_folder as _local
-        return _local(db, path, initiated_by=initiated_by)
-    return _sync_post("/v1/folders", {"path": path, "initiated_by": initiated_by})
+        return _local(db, path, initiated_by=initiated_by, vm_target=vm_target)
+    return _sync_post("/v1/folders", {"path": path, "initiated_by": initiated_by, "vm_target": vm_target})
 
 
-def remove_monitored_folder(db, path, initiated_by=None):
+def remove_monitored_folder(db, path, initiated_by=None, vm_target=None):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import remove_monitored_folder as _local
-        return _local(db, path, initiated_by=initiated_by)
-    return _sync_post("/v1/folders/remove", {"path": path, "initiated_by": initiated_by})
+        return _local(db, path, initiated_by=initiated_by, vm_target=vm_target)
+    return _sync_post("/v1/folders/remove", {"path": path, "initiated_by": initiated_by, "vm_target": vm_target})
 
 
 # ---------------------------------------------------------------------------

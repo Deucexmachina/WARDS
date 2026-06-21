@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import difflib
+import base64
 import hashlib
 import hmac
 import json
@@ -39,6 +40,7 @@ MASTER_ROOT = Path(__file__).resolve().parents[1]
 logger = logging.getLogger(__name__)
 SECURITY_ROOT = MASTER_ROOT / "SECURITY"
 QUARANTINE_ROOT = MASTER_ROOT / "QUARANTINE"
+VM1_SNAPSHOT_ROOT = Path(os.getenv("VM1_SNAPSHOT_ROOT", str(SECURITY_ROOT / "vm1_snapshots")))
 DEFAULT_BACKUP_ROOT = SECURITY_ROOT / "local_backups"
 MODEL_STATE_PATH = SECURITY_ROOT / "ml" / "isolation_forest_state.json"
 MODEL_METADATA_PATH = SECURITY_ROOT / "ml" / "isolation_forest_metadata.json"
@@ -59,8 +61,10 @@ WAZUH_HELPER_LOG_PATH = SECURITY_ROOT / "wazuh" / "wazuh_helper.log"
 MODEL_RELATIVE_BACKUP_DIR = "SECURITY/ml"
 SHARED_MONITORED_FOLDERS_PATH = SECURITY_ROOT / "monitoring" / "monitored_folders.json"
 LOCAL_MONITORED_FOLDERS_SETTING = "custom_monitored_folders"
+VM1_CUSTOM_MONITORED_FOLDERS_SETTING = "vm1_custom_monitored_folders"
 MONITORING_REMOVED_STATUS = "monitoring_removed"
 EXTERNAL_MONITOR_PREFIX = "EXTERNAL"
+VM1_FOLDER_ROOT_PREFIX = "VM1_"
 
 DATABASE_EXCLUDED_TABLES = {
     "activity_logs",
@@ -762,6 +766,11 @@ def stored_path_value(path: Path | str | None, base_root: Path = MASTER_ROOT) ->
         return str(resolved)
 
 
+def is_vm1_file(file_entry: SecurityMonitoredFile) -> bool:
+    folder = str(file_entry.folder_root or "")
+    return folder.startswith(VM1_FOLDER_ROOT_PREFIX) or folder.startswith("CUSTOM_")
+
+
 def portable_monitored_path(file_entry: SecurityMonitoredFile) -> Path:
     original = Path(file_entry.file_path)
     relative = str(file_entry.relative_path or "").replace("\\", "/")
@@ -879,6 +888,32 @@ def load_local_monitored_folders(db: Session) -> list[Path]:
 def save_local_monitored_folders(db: Session, paths: list[Path], updated_by: str) -> None:
     values = sorted({stored_path_value(path) or str(path.resolve()) for path in paths})
     set_setting(db, LOCAL_MONITORED_FOLDERS_SETTING, json_dumps(values), updated_by)
+
+
+def load_vm1_monitored_folders(db: Session) -> list[Path]:
+    raw = get_setting(db, VM1_CUSTOM_MONITORED_FOLDERS_SETTING, "[]")
+    try:
+        items = json_loads(raw, [])
+    except Exception:
+        items = []
+    folders: list[Path] = []
+    seen: set[str] = set()
+    for item in items:
+        try:
+            path = Path(item)
+        except Exception:
+            continue
+        key = normalized_path_key(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        folders.append(path)
+    return folders
+
+
+def save_vm1_monitored_folders(db: Session, paths: list[Path], updated_by: str) -> None:
+    values = sorted({str(path) for path in paths})
+    set_setting(db, VM1_CUSTOM_MONITORED_FOLDERS_SETTING, json_dumps(values), updated_by)
 
 
 def configured_custom_monitored_folders(db: Session) -> list[Path]:
@@ -1699,6 +1734,7 @@ def seed_settings(db: Session) -> None:
         "backup_location": stored_path_value(DEFAULT_BACKUP_ROOT) or str(DEFAULT_BACKUP_ROOT),
         "latest_backup_path": "",
         LOCAL_MONITORED_FOLDERS_SETTING: "[]",
+        VM1_CUSTOM_MONITORED_FOLDERS_SETTING: " []",
         "last_scan_at": "",
         "backup_schedule": json_dumps({"enabled": False, "frequency": "weekly", "next_run": ""}),
         "ai_retrain_schedule": json_dumps({"day": "Sunday", "time": "23:00", "next_run": next_weekday("Sunday", "23:00")}),
@@ -3468,7 +3504,7 @@ def scan_all_files(db: Session, context: dict | None = None) -> list[SecurityDet
 
     entries_to_hash = []
     for file_entry in file_entries:
-        if is_database_entry(file_entry):
+        if is_database_entry(file_entry) or is_vm1_file(file_entry):
             continue
         p = portable_monitored_path(file_entry)
         if p.exists():
@@ -3490,6 +3526,8 @@ def scan_all_files(db: Session, context: dict | None = None) -> list[SecurityDet
                 precomputed_hashes[entry_id] = file_hash
 
     for file_entry in file_entries:
+        if is_vm1_file(file_entry):
+            continue
         if is_database_entry(file_entry) and database_entry and file_entry.id != database_entry.id:
             file_entry.status = "clean"
             file_entry.last_checked = now_utc()
@@ -4078,9 +4116,9 @@ def incident_missing_file_details(db: Session, incident: SecurityIncident, actio
     file_entry = db.query(SecurityMonitoredFile).filter(SecurityMonitoredFile.id == detection.file_id).first() if detection else None
     missing_files = []
     missing_quarantine = []
-    if action == "false_positive" and file_entry and not is_database_entry(file_entry):
+    if action == "false_positive" and file_entry and not is_database_entry(file_entry) and not is_vm1_file(file_entry):
         target = portable_monitored_path(file_entry)
-        if not target.exists():
+        if target is None or not target.exists():
             missing_files.append(file_entry.relative_path or file_entry.file_path)
     quarantine_paths = json_loads(incident.quarantine_paths_json, [])
     if action == "false_positive" and not quarantine_paths:
@@ -4153,40 +4191,49 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
     if file_entry and not is_database_entry(file_entry):
         target = portable_monitored_path(file_entry)
         restored_from_backup = False
-        if (not target.exists() or not target.is_file()) and file_entry.relative_path:
-            backup_root = latest_backup_root(db)
-            backup_source = backup_file_path(backup_root, file_entry.relative_path) if backup_root else None
-            if backup_source and backup_source.exists() and backup_source.is_file():
-                started = time.time()
-                if create_event:
-                    recovery = SecurityRecoveryEvent(
-                        detection_event_id=incident.detection_event_id,
-                        file_id=file_entry.id,
-                        recovery_type="automatic",
-                        initiated_by=_valid_admin_id(db, admin_id),
-                        status="success",
-                        backup_path=str(backup_source),
-                        summary=f"Resolved incident restored missing trusted file for {file_entry.relative_path}.",
-                    )
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(backup_source, target)
-                if create_event:
-                    recovery.completed_at = now_utc()
-                    recovery.recovery_duration_ms = int((time.time() - started) * 1000)
-                    db.add(recovery)
-                restored_from_backup = True
-        if target.exists() and target.is_file():
-            current_hash = sha256_file(target)
-            file_entry.current_hash = current_hash
-            if restored_from_backup:
-                file_entry.baseline_hash = current_hash
-            file_entry.status = "clean" if current_hash == file_entry.baseline_hash else "modified"
-            file_entry.size_bytes = target.stat().st_size
+        if is_vm1_file(file_entry):
+            # VM1 file: trust current reported state, update baseline, queue restore command
+            file_entry.baseline_hash = file_entry.current_hash
+            file_entry.status = "clean"
+            file_entry.last_checked = now_utc()
+            db.add(file_entry)
+            if detection:
+                _create_vm1_restore_command(db, file_entry, detection.id)
         else:
-            file_entry.current_hash = None
-            file_entry.status = "clean" if confirm_missing_files else "missing"
-        file_entry.last_checked = now_utc()
-        db.add(file_entry)
+            if (not target.exists() or not target.is_file()) and file_entry.relative_path:
+                backup_root = latest_backup_root(db)
+                backup_source = backup_file_path(backup_root, file_entry.relative_path) if backup_root else None
+                if backup_source and backup_source.exists() and backup_source.is_file():
+                    started = time.time()
+                    if create_event:
+                        recovery = SecurityRecoveryEvent(
+                            detection_event_id=incident.detection_event_id,
+                            file_id=file_entry.id,
+                            recovery_type="automatic",
+                            initiated_by=_valid_admin_id(db, admin_id),
+                            status="success",
+                            backup_path=str(backup_source),
+                            summary=f"Resolved incident restored missing trusted file for {file_entry.relative_path}.",
+                        )
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(backup_source, target)
+                    if create_event:
+                        recovery.completed_at = now_utc()
+                        recovery.recovery_duration_ms = int((time.time() - started) * 1000)
+                        db.add(recovery)
+                    restored_from_backup = True
+            if target.exists() and target.is_file():
+                current_hash = sha256_file(target)
+                file_entry.current_hash = current_hash
+                if restored_from_backup:
+                    file_entry.baseline_hash = current_hash
+                file_entry.status = "clean" if current_hash == file_entry.baseline_hash else "modified"
+                file_entry.size_bytes = target.stat().st_size
+            else:
+                file_entry.current_hash = None
+                file_entry.status = "clean" if confirm_missing_files else "missing"
+            file_entry.last_checked = now_utc()
+            db.add(file_entry)
     incident.status = "resolved"
     incident.resolved_at = now_utc()
     incident.resolved_by = _valid_admin_id(db, admin_id)
@@ -4223,16 +4270,44 @@ def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_ba
         raise ValueError("Incident has no quarantined copy to restore")
     false_positive_recovery = None
     if has_quarantine_copy:
-        false_positive_recovery = restore_quarantined_copy_to_original(
-            db,
-            file_entry,
-            str(safe_source),
-            admin_id,
-            incident.detection_event_id,
-            create_event=create_event,
-        )
-        if false_positive_recovery and false_positive_recovery.status != "reverted":
-            raise RuntimeError(false_positive_recovery.error_message or "Unable to restore the quarantined file")
+        if is_vm1_file(file_entry):
+            # VM1 file: copy quarantined snapshot back to VM1_SNAPSHOT_ROOT and queue restore command
+            snapshot_target = VM1_SNAPSHOT_ROOT / file_entry.relative_path
+            snapshot_target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(safe_source, snapshot_target)
+            quarantine_hash = sha256_file(snapshot_target)
+            file_entry.baseline_hash = quarantine_hash
+            file_entry.current_hash = quarantine_hash
+            file_entry.status = "clean"
+            file_entry.last_checked = now_utc()
+            db.add(file_entry)
+            _create_vm1_restore_command(db, file_entry, incident.detection_event_id)
+            started = time.time()
+            if create_event:
+                false_positive_recovery = SecurityRecoveryEvent(
+                    detection_event_id=incident.detection_event_id,
+                    file_id=file_entry.id,
+                    recovery_type="automatic",
+                    initiated_by=_valid_admin_id(db, admin_id),
+                    status="success",
+                    quarantine_path=str(safe_source),
+                    summary=f"False positive: quarantined VM1 snapshot restored for {file_entry.relative_path}.",
+                    completed_at=now_utc(),
+                    recovery_duration_ms=int((time.time() - started) * 1000),
+                )
+                db.add(false_positive_recovery)
+                db.commit()
+        else:
+            false_positive_recovery = restore_quarantined_copy_to_original(
+                db,
+                file_entry,
+                str(safe_source),
+                admin_id,
+                incident.detection_event_id,
+                create_event=create_event,
+            )
+            if false_positive_recovery and false_positive_recovery.status != "reverted":
+                raise RuntimeError(false_positive_recovery.error_message or "Unable to restore the quarantined file")
     if detection:
         detection.is_legitimate = True
         detection.ai_prediction = "normal"
@@ -4821,10 +4896,33 @@ def monitored_file_has_history(db: Session, file_id: int) -> bool:
     return bool(recovery)
 
 
-def add_monitored_folder(db: Session, folder_path: str, initiated_by: int | None = None) -> dict:
+def add_monitored_folder(db: Session, folder_path: str, initiated_by: int | None = None, vm_target: str | None = None) -> dict:
     root = Path(folder_path).expanduser().resolve()
     if not root.is_absolute():
         raise ValueError("Monitored folder must use an absolute filesystem path.")
+
+    is_vm1 = str(vm_target or "").lower() == "vm1"
+    if is_vm1:
+        # VM1 folders are stored as raw paths; existence is checked by VM1's reporter
+        existing = load_vm1_monitored_folders(db)
+        if normalized_path_key(root) in {normalized_path_key(p) for p in existing}:
+            raise ValueError("Folder is already monitored on VM1.")
+        existing.append(root)
+        save_vm1_monitored_folders(db, existing, updated_by=str(initiated_by) if initiated_by else "system")
+        logger.info("Added VM1 monitored folder '%s'.", root)
+        return {
+            "added_files": 0,
+            "backup_files_added": 0,
+            "folder": str(root),
+            "folder_scope": "vm1",
+            "folder_storage": str(root),
+            "wazuh_config_updated": False,
+            "wazuh_reloaded": False,
+            "wazuh_used_elevation": False,
+            "wazuh_config_path": None,
+            "backup_refreshed": False,
+        }
+
     if not root.exists() or not root.is_dir():
         raise ValueError("Folder does not exist")
     if monitored_entries_for_folder(db, root):
@@ -4852,10 +4950,32 @@ def add_monitored_folder(db: Session, folder_path: str, initiated_by: int | None
     }
 
 
-def remove_monitored_folder(db: Session, folder_path: str, initiated_by: int | None = None) -> dict:
+def remove_monitored_folder(db: Session, folder_path: str, initiated_by: int | None = None, vm_target: str | None = None) -> dict:
     root = Path(folder_path).expanduser().resolve()
     if not root.is_absolute():
         raise ValueError("Monitored folder must use an absolute filesystem path.")
+
+    is_vm1 = str(vm_target or "").lower() == "vm1"
+    if is_vm1:
+        existing = load_vm1_monitored_folders(db)
+        if normalized_path_key(root) not in {normalized_path_key(p) for p in existing}:
+            raise ValueError("Folder is not currently monitored on VM1.")
+        updated = [p for p in existing if normalized_path_key(p) != normalized_path_key(root)]
+        save_vm1_monitored_folders(db, updated, updated_by=str(initiated_by) if initiated_by else "system")
+        logger.info("Removed VM1 monitored folder '%s'.", root)
+        return {
+            "removed_files": 0,
+            "removed_backups": 0,
+            "retired_records": 0,
+            "folder": str(root),
+            "folder_scope": "vm1",
+            "wazuh_config_updated": False,
+            "wazuh_reloaded": False,
+            "wazuh_used_elevation": False,
+            "wazuh_config_path": None,
+            "backup_refreshed": False,
+        }
+
     if not root.exists() or not root.is_dir():
         raise ValueError("Folder does not exist")
 
@@ -4870,7 +4990,7 @@ def remove_monitored_folder(db: Session, folder_path: str, initiated_by: int | N
     scope = remove_configured_monitored_folder(db, root, updated_by=str(initiated_by) if initiated_by else "system")
     for entry in entries:
         entry_path = portable_monitored_path(entry)
-        if not path_is_inside(entry_path, root):
+        if entry_path is None or not path_is_inside(entry_path, root):
             continue
         for backup_root in backup_roots:
             backup_path = backup_file_path(backup_root, entry.relative_path)
@@ -5011,3 +5131,281 @@ def serialize_incident(item: SecurityIncident) -> dict:
         "created_at": item.created_at.isoformat() if item.created_at else None,
         "integrity_valid": verify_record_integrity(item),
     }
+
+
+# ---------------------------------------------------------------------------
+# VM1 File Integrity Monitoring (remote reporter integration)
+# ---------------------------------------------------------------------------
+
+def _store_vm1_snapshot(rel_path: str, content_b64: str | None):
+    if not content_b64:
+        return
+    target = VM1_SNAPSHOT_ROOT / rel_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        data = base64.b64decode(content_b64)
+        with open(target, "wb") as f:
+            f.write(data)
+    except Exception:
+        pass
+
+
+def _quarantine_vm1_snapshot(entry: SecurityMonitoredFile, detection_id: int) -> str | None:
+    snapshot = VM1_SNAPSHOT_ROOT / entry.relative_path
+    if not snapshot.exists():
+        return None
+    rel_safe = safe_rel(snapshot) if snapshot.exists() else entry.relative_path.replace("/", "_")
+    target = QUARANTINE_ROOT / f"detection_{detection_id}" / f"vm1_{rel_safe}"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.copy2(snapshot, target)
+        return stored_path_value(target) or str(target)
+    except Exception:
+        return None
+
+
+def _create_vm1_restore_command(db: Session, entry: SecurityMonitoredFile, detection_id: int):
+    snapshot = VM1_SNAPSHOT_ROOT / entry.relative_path
+    content_b64 = None
+    if snapshot.exists():
+        try:
+            content_b64 = base64.b64encode(snapshot.read_bytes()).decode()
+        except Exception:
+            pass
+
+    cmd = {
+        "command_id": f"rest_{detection_id}_{int(time.time())}",
+        "detection_id": detection_id,
+        "relative_path": entry.relative_path,
+        "expected_hash": entry.baseline_hash,
+        "restore_content_b64": content_b64,
+        "created_at": now_utc().isoformat(),
+    }
+    existing = json_loads(get_setting(db, "vm1_restore_commands", "[]"), [])
+    existing.append(cmd)
+    set_setting(db, "vm1_restore_commands", json_dumps(existing), "vm2_monitor")
+    return cmd
+
+
+def get_pending_vm1_restore_commands(db: Session) -> list[dict]:
+    raw = get_setting(db, "vm1_restore_commands", "[]")
+    commands = json_loads(raw, [])
+    acked_raw = get_setting(db, "vm1_restore_acks", "[]")
+    acked = json_loads(acked_raw, [])
+    acked_ids = {a.get("command_id") for a in acked}
+    pending = [c for c in commands if c.get("command_id") not in acked_ids]
+    return pending
+
+
+def acknowledge_vm1_restore_command(db: Session, command_id: str, success: bool) -> bool:
+    acks = json_loads(get_setting(db, "vm1_restore_acks", "[]"), [])
+    acks.append({
+        "command_id": command_id,
+        "success": success,
+        "timestamp": now_utc().isoformat(),
+    })
+    set_setting(db, "vm1_restore_acks", json_dumps(acks), "vm1_reporter")
+    return True
+
+
+def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type: str, new_hash: str | None) -> SecurityDetectionEvent | None:
+    old_hash = entry.baseline_hash
+    context = {
+        "host_vm": "vm1",
+        "background_monitor": True,
+        "source_ip": "vm1_internal",
+    }
+    prediction = ai_predict(Path(entry.relative_path), "", "", context)
+    flags = content_flags("", context)
+    classification = classify(change_type, prediction, flags, context)
+    is_legitimate = False
+    context.setdefault("admin_session_valid", False)
+    context.setdefault("method_legitimate", False)
+    changed = diff_lines("", "")
+    trigger_summary = build_trigger_summary(change_type, flags, changed, is_legitimate, "vm1_internal")
+
+    detection = SecurityDetectionEvent(
+        file_id=entry.id,
+        target_type="vm1_file",
+        target_name=entry.relative_path,
+        actor="vm1_reporter",
+        change_type=change_type,
+        old_hash=old_hash,
+        new_hash=new_hash,
+        is_legitimate=is_legitimate,
+        admin_id=None,
+        ai_score=prediction.score,
+        ai_prediction=prediction.prediction,
+        confidence=prediction.confidence,
+        severity_level=classification["severity_level"],
+        cvss_score=classification["cvss_score"],
+        nist_category=classification["nist_category"],
+        enisa_threat_type=classification["enisa_threat_type"],
+        trigger_summary=trigger_summary,
+        accuracy_basis=prediction.basis,
+        behavior_flags_json=json_dumps([BEHAVIOR_LABELS.get(flag, flag) for flag in flags]),
+        changed_lines_json=json_dumps(changed),
+        context_json=json_dumps(context),
+    )
+    db.add(detection)
+    db.commit()
+    db.refresh(detection)
+
+    if should_create_incident(change_type, prediction, flags, classification):
+        quarantine_path = _quarantine_vm1_snapshot(entry, detection.id)
+        incident = create_incident(db, detection, classification, flags, changed, quarantine_path)
+        _create_vm1_restore_command(db, entry, detection.id)
+        incident.response_action = "vm1_restore_pending"
+        db.add(incident)
+        db.commit()
+        create_incident_system_alert(db, incident, detection, None)
+    elif not is_legitimate:
+        create_system_alert(
+            db,
+            "detection_logged",
+            f"VM1 Detection #{detection.id}: {detection.trigger_summary}",
+            detection.severity_level or "low",
+            dedupe_key=f"VM1 Detection #{detection.id}",
+        )
+    return detection
+
+
+def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
+    detections = []
+    changed = 0
+    registered = 0
+
+    for f in files:
+        rel_path = f["relative_path"]
+        folder_root = f["folder_root"]
+        current_hash = f["current_hash"]
+        size_bytes = f["size_bytes"]
+
+        entry = (
+            db.query(SecurityMonitoredFile)
+            .filter(SecurityMonitoredFile.relative_path == rel_path)
+            .filter(SecurityMonitoredFile.folder_root == folder_root)
+            .first()
+        )
+
+        if not entry:
+            entry = SecurityMonitoredFile(
+                file_path=f"vm1://{rel_path}",
+                relative_path=rel_path,
+                folder_root=folder_root,
+                baseline_hash=current_hash,
+                current_hash=current_hash,
+                status="clean",
+                file_type=file_type(Path(rel_path)),
+                size_bytes=size_bytes,
+                last_checked=now_utc(),
+            )
+            db.add(entry)
+            db.commit()
+            db.refresh(entry)
+            registered += 1
+            _store_vm1_snapshot(rel_path, f.get("content_b64"))
+            continue
+
+        entry.current_hash = current_hash
+        entry.size_bytes = size_bytes
+        entry.last_checked = now_utc()
+
+        if current_hash != entry.baseline_hash:
+            entry.status = "modified"
+            changed += 1
+            db.add(entry)
+            db.commit()
+            detection = _record_vm1_detection(db, entry, "vm1_content_modified", current_hash)
+            if detection:
+                detections.append(detection)
+        else:
+            entry.status = "clean"
+            db.add(entry)
+
+    db.commit()
+    set_setting(db, "vm1_last_heartbeat_at", now_utc().isoformat(), "vm1_reporter")
+    set_setting(db, "vm1_last_heartbeat_status", "success", "vm1_reporter")
+    return {
+        "registered": registered,
+        "changed": changed,
+        "detections": len(detections),
+        "detection_ids": [d.id for d in detections],
+    }
+
+
+def check_vm1_heartbeat_timeout(db: Session) -> SecurityDetectionEvent | None:
+    last_str = get_setting(db, "vm1_last_heartbeat_at", "")
+    if not last_str:
+        return None
+
+    try:
+        last = datetime.fromisoformat(last_str)
+    except Exception:
+        return None
+
+    timeout_seconds = int(os.getenv("VM1_HEARTBEAT_TIMEOUT_SECONDS", "60"))
+    if (now_utc() - last).total_seconds() < timeout_seconds:
+        return None
+
+    # Avoid duplicate silent-host detections within a short window
+    last_detected = get_setting(db, "vm1_last_silent_detection_at", "")
+    if last_detected:
+        try:
+            if (now_utc() - datetime.fromisoformat(last_detected)).total_seconds() < max(timeout_seconds, 300):
+                return None
+        except Exception:
+            pass
+
+    context = {
+        "host_vm": "vm1",
+        "background_monitor": True,
+        "source_ip": "vm1_internal",
+    }
+    detection = SecurityDetectionEvent(
+        target_type="vm1_host",
+        target_name="vm1_host_silent",
+        actor="vm1_reporter",
+        change_type="vm1_host_silent",
+        old_hash=None,
+        new_hash=None,
+        is_legitimate=False,
+        admin_id=None,
+        ai_score=0.95,
+        ai_prediction="anomaly",
+        confidence=0.95,
+        severity_level="critical",
+        cvss_score=9.0,
+        nist_category="CAT 1 - Unauthorized Access",
+        enisa_threat_type="Compromised System",
+        trigger_summary="VM1 security reporter heartbeat timeout. Host may be compromised, reporter killed, or network partitioned.",
+        accuracy_basis="Heartbeat timeout exceeded threshold.",
+        behavior_flags_json=json_dumps(["Host Unresponsive"]),
+        changed_lines_json=json_dumps({}),
+        context_json=json_dumps(context),
+    )
+    db.add(detection)
+    db.commit()
+    db.refresh(detection)
+
+    incident = create_incident(
+        db, detection,
+        {
+            "incident_type": "vm1_host_compromised",
+            "severity_level": "critical",
+            "cvss_score": 9.0,
+            "cvss_vector": "AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+            "nist_category": "CAT 1 - Unauthorized Access",
+            "enisa_threat_type": "Compromised System",
+        },
+        ["Host Unresponsive"],
+        {},
+        None,
+    )
+    incident.response_action = "escalated"
+    db.add(incident)
+    db.commit()
+    create_incident_system_alert(db, incident, detection, None)
+    set_setting(db, "vm1_last_silent_detection_at", now_utc().isoformat(), "vm2_monitor")
+    set_setting(db, "vm1_last_heartbeat_status", "timeout_detected", "vm2_monitor")
+    return detection

@@ -69,6 +69,29 @@ services:
     depends_on:
       - backend
 
+  vm1-reporter:
+    image: python:3.11-slim
+    restart: unless-stopped
+    env_file:
+      - ./WARDS/backend/.env
+    environment:
+      VM1_WARDS_DIR: /WARDS
+      VM1_OCR_DIR: /OCR
+      VM1_REPORT_INTERVAL: "30"
+      VM1_HEARTBEAT_INTERVAL: "10"
+      VM1_RESTORE_POLL_INTERVAL: "15"
+      VM1_MAX_SNAPSHOT_BYTES: "102400"
+    volumes:
+      - ./WARDS:/WARDS:ro
+      - ./OCR:/OCR:ro
+      - ./scripts/vm1_security_reporter.py:/app/vm1_security_reporter.py:ro
+      - vm1_snapshots:/app/.vm1_snapshots
+    command: >
+      sh -c "pip install --no-cache-dir requests && python3 /app/vm1_security_reporter.py"
+    depends_on:
+      - backend
+
 volumes:
   wards_mysql_data:
   wards_redis_data:
+  vm1_snapshots:

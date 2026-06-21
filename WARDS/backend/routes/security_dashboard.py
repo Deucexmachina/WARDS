@@ -191,6 +191,7 @@ class ScheduleBackupRequest(BaseModel):
 
 class AddFolderRequest(BaseModel):
     path: str
+    vm_target: str | None = None
 
 
 class AiScheduleRequest(BaseModel):
@@ -806,7 +807,7 @@ def backup_location(payload: BackupLocationRequest, db: Session = Depends(get_db
 @router.post("/folders")
 def add_folder(payload: AddFolderRequest, db: Session = Depends(get_db), admin=Depends(current_admin)):
     try:
-        return add_monitored_folder(db, payload.path, initiated_by=admin.id)
+        return add_monitored_folder(db, payload.path, initiated_by=admin.id, vm_target=payload.vm_target)
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
     except ValueError as exc:
@@ -818,7 +819,7 @@ def add_folder(payload: AddFolderRequest, db: Session = Depends(get_db), admin=D
 @router.post("/folders/remove")
 def remove_folder(payload: AddFolderRequest, db: Session = Depends(get_db), admin=Depends(current_admin)):
     try:
-        return remove_monitored_folder(db, payload.path, initiated_by=admin.id)
+        return remove_monitored_folder(db, payload.path, initiated_by=admin.id, vm_target=payload.vm_target)
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
     except ValueError as exc:
