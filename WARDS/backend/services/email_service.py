@@ -104,6 +104,8 @@ def _send_via_sendgrid(message: EmailMessage) -> dict:
                 payload["content"].append({"type": "text/plain", "value": part.get_content()})
             elif ctype == "text/html":
                 payload["content"].append({"type": "text/html", "value": part.get_content()})
+            elif part.get_content_maintype() == "multipart":
+                continue
             else:
                 raw = part.get_payload(decode=True)
                 if raw:
@@ -166,6 +168,8 @@ def _send_via_brevo(message: EmailMessage) -> dict:
                 payload["textContent"] = part.get_content()
             elif ctype == "text/html":
                 payload["htmlContent"] = part.get_content()
+            elif part.get_content_maintype() == "multipart":
+                continue
             else:
                 raw = part.get_payload(decode=True)
                 if raw:
