@@ -677,7 +677,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
                 record_failed_attempt(portal, credentials.identifier)
                 return JSONResponse(
                     status_code=status.HTTP_401_UNAUTHORIZED,
-                    content={"detail": "Invalid credentials or account status."},
+                    content={"detail": "Invalid authenticator code. Please try again."},
                 )
 
     reset_failed_attempts(portal, credentials.identifier)
