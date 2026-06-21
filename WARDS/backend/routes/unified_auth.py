@@ -14,7 +14,7 @@ import requests
 import base64
 import io
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from jose import JWTError, jwt
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.exc import IntegrityError
@@ -27,6 +27,7 @@ from slowapi.errors import RateLimitExceeded
 from database.models import ActivityLog, Admin, BranchStaff, CitizenUser, EmailOTP, Invite, MFASecret, get_db
 from utils.redis_client import get_redis_client
 from services.email_service import (
+    _safe_html,
     send_account_change_notification_email,
     send_citizen_verification_email,
     send_login_notification_email,
@@ -1714,24 +1715,81 @@ async def reset_staff_mfa(
     return {"message": f"MFA reset for {target.username}"}
 
 
+def _build_branch_verification_page(*, success: bool, title: str, message: str, detail: str | None = None) -> str:
+    """Build a styled HTML page for branch email verification outcomes."""
+    frontend_base = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000").rstrip("/")
+    login_url = f"{frontend_base}/branch-login"
+    accent_color = "#166534" if success else "#dc2626"
+    icon_svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>'
+        if success
+        else '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>'
+    )
+    detail_html = f'<p style="margin:16px 0 0;font-size:14px;line-height:1.6;color:#5b6471;">{detail}</p>' if detail else ""
+    cta_html = (
+        f'<a href="{_safe_html(login_url)}" style="display:inline-block;margin-top:28px;padding:14px 32px;background:#0f2744;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;border-radius:12px;box-shadow:0 8px 20px rgba(15,39,68,.25);transition:transform .15s,box-shadow .15s;">Go to Branch Login</a>'
+        if success
+        else f'<a href="{_safe_html(login_url)}" style="display:inline-block;margin-top:28px;padding:14px 32px;background:#0f2744;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;border-radius:12px;box-shadow:0 8px 20px rgba(15,39,68,.25);transition:transform .15s,box-shadow .15s;">Back to Branch Login</a>'
+    )
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{_safe_html(title)} | WARDS</title>
+<style>
+  @media (prefers-reduced-motion: reduce) {{ * {{ animation:none !important; transition:none !important; }} }}
+  body {{ margin:0; padding:0; background:#f3f6fb; font-family:Arial,Helvetica,sans-serif; color:#1f2937; display:flex; align-items:center; justify-content:center; min-height:100vh; }}
+  .card {{ background:#ffffff; border-radius:24px; padding:48px 40px 44px; max-width:440px; width:90%; text-align:center; box-shadow:0 18px 40px rgba(15,39,68,.10); border:1px solid #dbe3ef; animation:fadeUp .6s ease both; }}
+  .icon {{ color:{accent_color}; margin-bottom:20px; display:inline-flex; align-items:center; justify-content:center; width:80px; height:80px; border-radius:50%; background:{'#f0fdf4' if success else '#fef2f2'}; }}
+  h1 {{ margin:0 0 12px; font-size:22px; font-weight:700; color:#0f2744; line-height:1.3; }}
+  p.lead {{ margin:0; font-size:15px; line-height:1.7; color:#546273; }}
+  a:hover {{ transform:translateY(-1px); box-shadow:0 12px 28px rgba(15,39,68,.30); }}
+  .footer {{ margin-top:32px; font-size:12px; color:#9aa4b2; }}
+  @keyframes fadeUp {{ from {{ opacity:0; transform:translateY(16px); }} to {{ opacity:1; transform:translateY(0); }} }}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">{icon_svg}</div>
+    <h1>{_safe_html(title)}</h1>
+    <p class="lead">{_safe_html(message)}</p>
+    {detail_html}
+    {cta_html}
+    <div class="footer">City Treasurer's Office &mdash; WARDS Branch Portal</div>
+  </div>
+</body>
+</html>"""
+
+
 @router.get("/branch/verify-email")
 async def verify_branch_email(
     token: str = Query(..., description="Invite verification token"),
     db: Session = Depends(get_db),
 ):
-    """Verify a branch admin email via invite token."""
+    """Verify a branch admin email via invite token and return a styled HTML page."""
     invite = find_invite_by_token(db, Invite, token)
 
     if not invite or invite.used:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired verification token.",
+        return HTMLResponse(
+            content=_build_branch_verification_page(
+                success=False,
+                title="Verification Failed",
+                message="This verification link is invalid or has already been used.",
+                detail="Please request a new verification email from your administrator.",
+            ),
+            status_code=400,
         )
 
     if invite.expires_at and invite.expires_at < datetime.utcnow():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Verification token has expired.",
+        return HTMLResponse(
+            content=_build_branch_verification_page(
+                success=False,
+                title="Link Expired",
+                message="This verification link has expired.",
+                detail="Please ask your administrator to resend the branch verification email.",
+            ),
+            status_code=400,
         )
 
     invite.used = True
@@ -1756,10 +1814,14 @@ async def verify_branch_email(
     ))
     db.commit()
 
-    return {
-        "message": "Email verified successfully. You may now log in.",
-        "verified": True,
-    }
+    return HTMLResponse(
+        content=_build_branch_verification_page(
+            success=True,
+            title="Email Verified",
+            message="Your branch admin email has been verified successfully. You may now log in.",
+        ),
+        status_code=200,
+    )
 
 
 # ---------------------------------------------------------------------------
