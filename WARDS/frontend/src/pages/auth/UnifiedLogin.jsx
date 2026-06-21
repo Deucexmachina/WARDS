@@ -480,7 +480,8 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
     } catch (err) {
       const portal = getSubmissionPortal() || 'default';
       const detail = normalizeLoginErrorMessage(err.response?.data?.detail || 'Login failed. Please try again.');
-      const requiresEmailVerification = err.response?.data?.requires_email_verification === true;
+      const requiresEmailVerification = err.response?.data?.requires_email_verification === true
+        || err.response?.headers?.['x-requires-email-verification'] === 'true';
 
       if (requiresEmailVerification) {
         const normalizedEmail = identifier.trim();
