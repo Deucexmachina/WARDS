@@ -642,15 +642,15 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
 
     if requires_captcha(portal, credentials.identifier):
         if not credentials.recaptcha_token:
-            raise HTTPException(
+            return JSONResponse(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid credentials or account status.",
+                content={"detail": "Please complete the security check.", "requires_captcha": True},
             )
 
         if not verify_recaptcha(credentials.recaptcha_token, client_ip):
-            raise HTTPException(
+            return JSONResponse(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid credentials or account status.",
+                content={"detail": "Security verification failed. Please try again."},
             )
 
     if portal in {"public", "admin", "branch"}:

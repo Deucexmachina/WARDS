@@ -482,6 +482,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
       const detail = normalizeLoginErrorMessage(err.response?.data?.detail || 'Login failed. Please try again.');
       const requiresEmailVerification = err.response?.data?.requires_email_verification === true
         || err.response?.headers?.['x-requires-email-verification'] === 'true';
+      const requiresCaptchaFromServer = err.response?.data?.requires_captcha === true;
 
       if (requiresEmailVerification) {
         const normalizedEmail = identifier.trim();
@@ -503,6 +504,12 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
             resendAvailableInSeconds: 0,
           },
         });
+        return;
+      }
+
+      if (requiresCaptchaFromServer) {
+        setRequiresCaptcha(true);
+        setError('Please complete the security check to continue.');
         return;
       }
 
