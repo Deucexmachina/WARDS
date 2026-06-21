@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from database.models import ActivityLog, Policy, Service, SystemSetting, SystemSettingAudit
+from database.models import ActivityLog, BranchSystemSetting, Policy, Service, SystemSetting, SystemSettingAudit
 from utils.field_crypto import apply_system_setting_security, service_value, system_setting_value
 
 
@@ -191,7 +191,9 @@ def get_settings_payload(db: Session) -> dict:
             system_setting_value(setting, "value") or setting.value,
         )
 
-    if "enabledServices" not in payload:
+    if "enabledServices" not in payload or (
+        not payload.get("enabledServices") and payload.get("queueEnabled")
+    ):
         payload["enabledServices"] = sorted(
             [
                 service_value(service, "name")
@@ -238,6 +240,22 @@ def update_system_settings(db: Session, payload: dict, changed_by: str, reason: 
     normalized_payload = dict(payload)
     if normalized_payload.get("queueEnabled") is False:
         normalized_payload["enabledServices"] = []
+    elif normalized_payload.get("queueEnabled") is True:
+        # When re-enabling queue, restore enabledServices from active services if empty or missing
+        current_enabled = normalized_payload.get("enabledServices")
+        if not current_enabled:
+            active_service_names = sorted(
+                [
+                    service_value(service, "name")
+                    for service in db.query(Service).filter(Service.is_active.is_(True)).all()
+                    if service_value(service, "name")
+                ]
+            )
+            normalized_payload["enabledServices"] = active_service_names
+        # Also clear stale branch-level queueEnabled overrides so branches can re-open
+        db.query(BranchSystemSetting).filter(
+            BranchSystemSetting.key == "queueEnabled"
+        ).delete(synchronize_session=False)
 
     updated_settings = {}
     change_entries = []

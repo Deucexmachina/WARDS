@@ -1,11 +1,13 @@
+import base64
 import os
 import smtplib
 from email.message import EmailMessage
 from datetime import datetime, timedelta
 from pathlib import Path
-from email.utils import make_msgid
+from email.utils import make_msgid, parseaddr
 from datetime import timezone
 from html import escape as html_escape
+import requests
 try:
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 except ImportError:
@@ -66,13 +68,142 @@ def _env_flag(name: str, default: str = "true") -> bool:
 
 def smtp_is_configured() -> bool:
     return bool(
-        os.getenv("SMTP_HOST")
-        and os.getenv("SMTP_PORT")
-        and os.getenv("SMTP_FROM_EMAIL")
+        os.getenv("SENDGRID_API_KEY")
+        or os.getenv("BREVO_API_KEY")
+        or (
+            os.getenv("SMTP_HOST")
+            and os.getenv("SMTP_PORT")
+            and os.getenv("SMTP_FROM_EMAIL")
+        )
     )
 
 
+def _send_via_sendgrid(message: EmailMessage) -> dict:
+    api_key = os.getenv("SENDGRID_API_KEY")
+    if not api_key:
+        raise RuntimeError("SENDGRID_API_KEY is not set")
+
+    from_name, from_email = parseaddr(str(message["From"]))
+    _, to_email = parseaddr(str(message["To"]))
+
+    payload = {
+        "personalizations": [{"to": [{"email": to_email}]}],
+        "from": {
+            "email": from_email,
+            "name": from_name or os.getenv("SMTP_FROM_NAME", "WARDS Admin"),
+        },
+        "subject": str(message["Subject"]),
+        "content": [],
+    }
+
+    attachments = []
+    if message.is_multipart():
+        for part in message.iter_parts():
+            ctype = part.get_content_type()
+            if ctype == "text/plain":
+                payload["content"].append({"type": "text/plain", "value": part.get_content()})
+            elif ctype == "text/html":
+                payload["content"].append({"type": "text/html", "value": part.get_content()})
+            else:
+                raw = part.get_payload(decode=True)
+                if raw:
+                    att = {
+                        "content": base64.b64encode(raw).decode("ascii"),
+                        "filename": part.get_filename() or "attachment",
+                        "type": ctype,
+                        "disposition": part.get_content_disposition() or "attachment",
+                    }
+                    cid = part.get("Content-ID")
+                    if cid:
+                        att["content_id"] = cid.strip("<>")
+                    attachments.append(att)
+    else:
+        ctype = message.get_content_type()
+        if ctype == "text/plain":
+            payload["content"].append({"type": "text/plain", "value": message.get_content()})
+        elif ctype == "text/html":
+            payload["content"].append({"type": "text/html", "value": message.get_content()})
+
+    if attachments:
+        payload["attachments"] = attachments
+
+    response = requests.post(
+        "https://api.sendgrid.com/v3/mail/send",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=20,
+    )
+    response.raise_for_status()
+
+    return {"sent": True, "status": "sent"}
+
+
+def _send_via_brevo(message: EmailMessage) -> dict:
+    api_key = os.getenv("BREVO_API_KEY")
+    if not api_key:
+        raise RuntimeError("BREVO_API_KEY is not set")
+
+    from_name, from_email = parseaddr(str(message["From"]))
+    _, to_email = parseaddr(str(message["To"]))
+
+    payload = {
+        "sender": {
+            "name": from_name or os.getenv("SMTP_FROM_NAME", "WARDS Admin"),
+            "email": from_email,
+        },
+        "to": [{"email": to_email}],
+        "subject": str(message["Subject"]),
+    }
+
+    attachments = []
+    if message.is_multipart():
+        for part in message.iter_parts():
+            ctype = part.get_content_type()
+            if ctype == "text/plain":
+                payload["textContent"] = part.get_content()
+            elif ctype == "text/html":
+                payload["htmlContent"] = part.get_content()
+            else:
+                raw = part.get_payload(decode=True)
+                if raw:
+                    att = {
+                        "name": part.get_filename() or "attachment",
+                        "content": base64.b64encode(raw).decode("ascii"),
+                    }
+                    attachments.append(att)
+    else:
+        ctype = message.get_content_type()
+        if ctype == "text/plain":
+            payload["textContent"] = message.get_content()
+        elif ctype == "text/html":
+            payload["htmlContent"] = message.get_content()
+
+    if attachments:
+        payload["attachment"] = attachments
+
+    response = requests.post(
+        "https://api.brevo.com/v3/smtp/email",
+        headers={
+            "api-key": api_key,
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=20,
+    )
+    response.raise_for_status()
+
+    return {"sent": True, "status": "sent"}
+
+
 def _send_email_message(message: EmailMessage) -> dict:
+    if os.getenv("SENDGRID_API_KEY"):
+        return _send_via_sendgrid(message)
+    if os.getenv("BREVO_API_KEY"):
+        return _send_via_brevo(message)
+
     smtp_host = os.getenv("SMTP_HOST")
     smtp_port = int(os.getenv("SMTP_PORT", "587"))
     smtp_username = os.getenv("SMTP_USERNAME")
@@ -360,8 +491,6 @@ def _build_branch_access_html(
         <div style="background:#fff8e8;border:1px solid #f4d58d;border-radius:14px;padding:18px 20px;margin:20px 0;">
           <h2 style="margin:0 0 12px;font-size:17px;color:#7c4a03;">Important Notes</h2>
           <ul style="padding-left:18px;margin:0;color:#5b6471;font-size:14px;line-height:1.7;">
-            <li>This project is not deployed yet, so the branch dashboard link currently points to localhost.</li>
-            <li>Open the link on the same local machine where WARDS is running.</li>
             <li>After your first sign-in, please set up MFA in Microsoft Authenticator when prompted.</li>
           </ul>
         </div>

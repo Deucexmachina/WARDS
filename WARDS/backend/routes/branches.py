@@ -165,7 +165,7 @@ def get_window_display_label(account: BranchStaff) -> str:
 
 
 def generate_window_username(db: Session, branch_name: str, assigned_window_number: int) -> str:
-    branch_slug = slugify_branch_name(branch_name).replace("-", "")
+    branch_slug = slugify_branch_name(branch_name).replace("-", "")[:20]
     base_username = normalize_username(f"{branch_slug}_staff{assigned_window_number}")
 
     candidate = base_username
@@ -540,7 +540,7 @@ async def create_branch(
     if branch.admin_username and branch.admin_email and branch.admin_password:
         verification_url = None
         if admin_invite:
-            verification_url = f"{os.getenv('BACKEND_BASE_URL', 'http://localhost:8000').rstrip('/')}/api/branch/auth/verify-email?token={get_decrypted_or_raw(admin_invite, 'token') or admin_invite.token}"
+            verification_url = f"{os.getenv('BACKEND_BASE_URL', 'http://localhost:8000').rstrip('/')}/api/auth/unified/branch/verify-email?token={get_decrypted_or_raw(admin_invite, 'token') or admin_invite.token}"
 
         email_delivery = send_branch_access_email(
             recipient_email=branch.admin_email,
@@ -925,7 +925,7 @@ async def resend_branch_verification(
         db.flush()
         apply_invite_security(invite)
 
-    verification_url = f"{os.getenv('BACKEND_BASE_URL', 'http://localhost:8000').rstrip('/')}/api/branch/auth/verify-email?token={get_decrypted_or_raw(invite, 'token') or invite.token}"
+    verification_url = f"{os.getenv('BACKEND_BASE_URL', 'http://localhost:8000').rstrip('/')}/api/auth/unified/branch/verify-email?token={get_decrypted_or_raw(invite, 'token') or invite.token}"
     email_delivery = send_branch_access_email(
         recipient_email=branch_admin.email,
         branch_name=get_decrypted_or_raw(branch, "name") or branch.name,

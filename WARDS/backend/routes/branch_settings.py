@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from database.models import Branch, BranchStaff, Service, get_db
@@ -36,6 +36,16 @@ class AppointmentSchedulePayload(BaseModel):
     date_overrides: list[dict]
     time_settings: dict
     reason: str | None = None
+
+    @field_validator("date_overrides")
+    @classmethod
+    def validate_date_overrides(cls, v: list[dict]) -> list[dict]:
+        for idx, override in enumerate(v):
+            if not override.get("date"):
+                raise ValueError(f"Calendar override #{idx + 1} is missing a date.")
+            if not override.get("status"):
+                raise ValueError(f"Calendar override #{idx + 1} is missing a status.")
+        return v
 
 
 class BranchSystemSettingsPayload(BaseModel):

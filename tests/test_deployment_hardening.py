@@ -13,6 +13,7 @@ from jose import jwt
 from auth import USER_SECRET_KEY, create_access_token, create_refresh_token
 from auth.jwt_utils import ALGORITHM
 from middleware.https import HttpsEnforcementMiddleware
+from database.models import BranchSystemSetting, Service, SystemSetting
 from routes import public
 from utils import backup_engine
 from utils.file_validation import SafeFileType, validate_upload_file
@@ -108,6 +109,9 @@ class Query:
     def limit(self, *_args, **_kwargs):
         return self
 
+    def order_by(self, *_args, **_kwargs):
+        return self
+
     def first(self):
         return self.rows[0] if self.rows else None
 
@@ -119,11 +123,23 @@ class PublicBranchDB:
     def __init__(self, branch):
         self.branch = branch
 
+    def add(self, _obj):
+        pass
+
+    def commit(self):
+        pass
+
     def query(self, model):
         if model is public.Branch:
             return Query([self.branch])
         if model is public.BranchOperatingHours:
             return Query([SimpleNamespace(day_of_week="Mon", opening_time="08:00", closing_time="17:00", is_open=True)])
+        if model is Service:
+            return Query([])
+        if model is SystemSetting:
+            return Query([])
+        if model is BranchSystemSetting:
+            return Query([])
         return Query([])
 
 
@@ -133,7 +149,11 @@ def test_public_branch_details_are_minimal_for_anonymous_user():
         public.get_branch_details(branch_id=1, db=PublicBranchDB(branch), current_user=None)
     )
 
-    assert result == {"id": 1, "name": "Galas", "location": "Quezon City"}
+    assert result["id"] == 1
+    assert result["name"] == "Galas"
+    assert result["location"] == "Quezon City"
+    assert "services" in result
+    assert "queue_enabled" in result
     assert "operating_hours" not in result
     assert "counters" not in result
 

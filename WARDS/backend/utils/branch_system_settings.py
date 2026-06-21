@@ -96,6 +96,33 @@ def get_branch_settings_payload(db: Session, branch_id: int) -> dict:
     for row in _get_branch_override_rows(db, branch_id):
         payload[row.key] = _deserialize_value(row.value_type, row.value)
 
+    # Self-healing: whenever global queue is enabled, remove ALL branch-level
+    # queueEnabled overrides so the branch inherits the global state. Stale or
+    # duplicate overrides have repeatedly caused branches to appear disabled.
+    if bool(global_payload.get("queueEnabled")):
+        stale_overrides = db.query(BranchSystemSetting).filter(
+            BranchSystemSetting.branch_id == branch_id,
+            BranchSystemSetting.key == "queueEnabled",
+        ).all()
+        for stale_override in stale_overrides:
+            db.delete(stale_override)
+        if stale_overrides:
+            db.commit()
+        payload["queueEnabled"] = True
+
+    # Also clear stale empty enabledServices overrides so branch services restore
+    if bool(global_payload.get("queueEnabled")) and bool(payload.get("queueEnabled")):
+        es_overrides = db.query(BranchSystemSetting).filter(
+            BranchSystemSetting.branch_id == branch_id,
+            BranchSystemSetting.key == "enabledServices",
+        ).all()
+        for es_override in es_overrides:
+            es_value = _deserialize_value(es_override.value_type, es_override.value)
+            if not es_value:
+                db.delete(es_override)
+                db.commit()
+                payload.pop("enabledServices", None)
+
     payload["queueEnabled"] = bool(global_payload.get("queueEnabled")) and bool(payload.get("queueEnabled"))
     payload["maintenanceMode"] = bool(global_payload.get("maintenanceMode")) or bool(payload.get("maintenanceMode"))
     payload["paymentGatewayEnabled"] = bool(global_payload.get("paymentGatewayEnabled")) and bool(payload.get("paymentGatewayEnabled"))

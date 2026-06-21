@@ -28,7 +28,7 @@ from utils.branch_appointment_settings import (
     get_window_capacity_snapshot,
     validate_branch_appointment_datetime,
 )
-from utils.branch_window_config import get_branch_service_options, get_branch_window_metadata, infer_service_window
+from utils.branch_window_config import get_branch_service_options, get_branch_window_metadata, infer_service_window, STANDARD_SERVICE_SEQUENCE
 from utils.security_validation import normalize_citizen_full_name, normalize_email, normalize_ph_contact_number
 from utils.branch_system_settings import get_branch_setting_value
 from utils.system_settings import SYSTEM_DISABLED_MESSAGE, BRANCH_QUEUE_DISABLED_MESSAGE, get_setting_value
@@ -252,6 +252,8 @@ def find_existing_active_queue(
 
 def get_enabled_service_names(db: Session, branch_id: int | None = None) -> set[str]:
     configured_services = get_branch_setting_value(db, "enabledServices", branch_id) if branch_id else (get_setting_value(db, "enabledServices") or [])
+    if not configured_services:
+        return set(STANDARD_SERVICE_SEQUENCE)
     return {infer_service_window(name) for name in configured_services}
 
 
@@ -346,10 +348,15 @@ async def get_all_public_branches(
     for branch in branches:
         branch_name = get_decrypted_or_raw(branch, "name") or branch.name
         branch_location = get_decrypted_or_raw(branch, "location") or branch.location
+        waiting = db.query(Queue).filter(
+            and_(Queue.branch_id == branch.id, hash_aware_match(Queue, "status", "Waiting"))
+        ).count()
         entry = {
             "id": branch.id,
             "name": branch_name,
             "location": branch_location,
+            "current_waiting": waiting,
+            "queue_level": "low" if waiting < 5 else "moderate" if waiting < 15 else "high",
         }
         if current_user:
             hours = db.query(BranchOperatingHours).filter(
@@ -385,6 +392,16 @@ async def get_branch_details(
         "location": get_decrypted_or_raw(branch, "location") or branch.location,
     }
 
+    # Always expose available services and queue status so citizens can register
+    enabled_branch_services = get_branch_configured_service_names(db, branch_id)
+    services = [
+        service
+        for service in get_branch_service_options(db, branch_id)
+        if (service.get("code") or infer_service_window(service.get("name"))).strip().upper() in enabled_branch_services
+    ]
+    result["services"] = services
+    result["queue_enabled"] = bool(get_branch_setting_value(db, "queueEnabled", branch_id))
+
     if current_user:
         hours = db.query(BranchOperatingHours).filter(
             BranchOperatingHours.branch_id == branch_id
@@ -396,13 +413,6 @@ async def get_branch_details(
             ((Announcement.branch_id == None) | (Announcement.branch_id == branch_id))
         ).order_by(Announcement.publish_date.desc()).limit(5).all()
 
-        enabled_branch_services = get_branch_configured_service_names(db, branch_id)
-        services = [
-            service
-            for service in get_branch_service_options(db, branch_id)
-            if (service.get("code") or infer_service_window(service.get("name"))).strip().upper() in enabled_branch_services
-        ]
-
         result["counters"] = branch.counters
         result["status"] = branch.status
         result["operating_hours"] = [
@@ -413,9 +423,7 @@ async def get_branch_details(
                 "is_open": h.is_open
             } for h in hours
         ]
-        result["queue_enabled"] = bool(get_branch_setting_value(db, "queueEnabled", branch_id))
         result["announcements"] = [serialize_public_announcement(a) for a in announcements]
-        result["services"] = services
 
     return result
 
