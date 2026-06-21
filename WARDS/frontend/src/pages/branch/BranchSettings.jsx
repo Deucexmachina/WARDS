@@ -1053,8 +1053,8 @@ const BranchSettings = () => {
           </div>
 
           {/* Publish */}
-          <div className="overflow-hidden rounded-xl bg-white shadow">
-            <div className="bg-primary px-6 py-4">
+          <div className="rounded-xl bg-white shadow">
+            <div className="rounded-t-xl bg-primary px-6 py-4">
               <h2 className="text-lg font-bold text-white">Save &amp; Publish Configuration</h2>
               <p className="mt-1 text-sm text-blue-100">Apply branch changes immediately</p>
             </div>
