@@ -49,6 +49,7 @@ services:
     volumes:
       - ./WARDS:/WARDS
       - ./OCR:/OCR
+      - ./WARDS/backend/uploads:/app/uploads
       # TEMPORARY (Phase 2-6): read-only SECURITY mount during 2-VM transition.
       # security_dashboard.py still imports SECURITY.security_models for ORM queries.
       # Remove this mount once dashboard routes fully proxy to VM 2 (future Phase 8).
