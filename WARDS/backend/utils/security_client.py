@@ -29,6 +29,15 @@ async def _post(path: str, json_data: dict | None = None) -> Any:
         raise RuntimeError("SECURITY_API_URL is not configured")
     async with httpx.AsyncClient(timeout=TIMEOUT, verify=False) as client:
         r = await client.post(f"{SECURITY_API_URL}{path}", headers=_headers(), json=json_data)
+        if r.status_code == 409:
+            from SECURITY.security_engine import MissingFileConfirmationRequired
+            try:
+                detail = r.json()
+                if not isinstance(detail, dict):
+                    detail = {"message": str(detail)}
+            except Exception:
+                detail = {"message": r.text or "Confirmation required"}
+            raise MissingFileConfirmationRequired(detail)
         r.raise_for_status()
         return r.json()
 

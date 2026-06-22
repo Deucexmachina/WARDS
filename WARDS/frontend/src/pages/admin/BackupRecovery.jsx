@@ -968,9 +968,12 @@ const BackupRecovery = () => {
       .sort((left, right) => {
         const leftValue = valueFor(left);
         const rightValue = valueFor(right);
-        const result = typeof leftValue === 'number'
+        let result = typeof leftValue === 'number'
           ? leftValue - rightValue
           : String(leftValue).localeCompare(String(rightValue));
+        if (result === 0) {
+          result = String(left.relative_path || '').localeCompare(String(right.relative_path || ''));
+        }
         return fileSort.direction === 'asc' ? result : -result;
       });
   }, [files, fileKeyword, fileSort]);

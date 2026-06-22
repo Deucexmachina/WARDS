@@ -1854,6 +1854,13 @@ def latest_backup_root(db: Session) -> Path | None:
     return None
 
 
+def all_backup_roots(db: Session) -> list[Path]:
+    location = writable_backup_location(db)
+    if not location.exists():
+        return []
+    return sorted([item for item in location.iterdir() if item.is_dir()], reverse=True)
+
+
 def backup_file_path(backup_root: Path, relative_path: str) -> Path:
     return backup_root / relative_path.replace("/", os.sep)
 
@@ -2767,14 +2774,18 @@ def restore_from_backup(db: Session, file_entry: SecurityMonitoredFile, detectio
     if is_database_entry(file_entry):
         return restore_database_from_backup(db, file_entry, detection_id, recovery_type, initiated_by, quarantine_path, create_event=create_event)
 
+    def _find_backup_source():
+        for root in all_backup_roots(db):
+            source = backup_file_path(root, file_entry.relative_path)
+            if source.exists():
+                return source, root
+        return None, None
+
     if not create_event:
-        backup_root = latest_backup_root(db)
-        if not backup_root:
+        source, backup_root = _find_backup_source()
+        if not source:
             raise RuntimeError("No local backup exists. Create a manual backup first.")
-        source = backup_file_path(backup_root, file_entry.relative_path)
         target = portable_monitored_path(file_entry)
-        if not source.exists():
-            raise FileNotFoundError(f"Backup copy not found for {file_entry.relative_path}")
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
         restored_hash = sha256_file(target)
@@ -2809,13 +2820,10 @@ def restore_from_backup(db: Session, file_entry: SecurityMonitoredFile, detectio
 
     started = time.time()
     try:
-        backup_root = latest_backup_root(db)
-        if not backup_root:
+        source, backup_root = _find_backup_source()
+        if not source:
             raise RuntimeError("No local backup exists. Create a manual backup first.")
-        source = backup_file_path(backup_root, file_entry.relative_path)
         target = portable_monitored_path(file_entry)
-        if not source.exists():
-            raise FileNotFoundError(f"Backup copy not found for {file_entry.relative_path}")
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
         restored_hash = sha256_file(target)
@@ -2828,7 +2836,7 @@ def restore_from_backup(db: Session, file_entry: SecurityMonitoredFile, detectio
         recovery.backup_path = stored_path_value(source) or str(source)
         recovery.completed_at = now_utc()
         recovery.recovery_duration_ms = int((time.time() - started) * 1000)
-        recovery.summary = f"Restored {file_entry.relative_path} from local backup."
+        recovery.summary = f"Restored {file_entry.relative_path} from {backup_root.name}."
         db.add(file_entry)
         db.add(recovery)
         db.commit()
