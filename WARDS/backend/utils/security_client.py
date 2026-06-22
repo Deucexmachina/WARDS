@@ -32,7 +32,8 @@ async def _post(path: str, json_data: dict | None = None) -> Any:
         if r.status_code == 409:
             from SECURITY.security_engine import MissingFileConfirmationRequired
             try:
-                detail = r.json()
+                body = r.json()
+                detail = body.get("detail") if isinstance(body, dict) else body
                 if not isinstance(detail, dict):
                     detail = {"message": str(detail)}
             except Exception:

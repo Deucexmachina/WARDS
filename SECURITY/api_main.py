@@ -162,7 +162,7 @@ def api_scan_file(payload: ScanFileRequest, db=Depends(get_db)):
 @app.post("/v1/scan/all", dependencies=[Depends(require_api_key)])
 def api_scan_all(payload: dict = {}, db=Depends(get_db)):
     # scan_all_files expects a list of file entries; we scan all active monitored files
-    register_initial_files(db)
+    register_initial_files(db, refresh_existing=False, incremental=False)
     from SECURITY.security_engine import active_monitored_files_query
     files = active_monitored_files_query(db).all()
     detections = []

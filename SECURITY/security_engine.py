@@ -973,7 +973,7 @@ def merge_monitored_file_entry(db: Session, source: SecurityMonitoredFile, targe
         target.baseline_hash = source.baseline_hash
     if not target.current_hash and source.current_hash:
         target.current_hash = source.current_hash
-    if target.status in {None, "", "missing", "verified_deleted", "verified_renamed"} and source.status:
+    if not target.status and source.status:
         target.status = source.status
     if not target.file_type and source.file_type:
         target.file_type = source.file_type
@@ -1855,10 +1855,20 @@ def latest_backup_root(db: Session) -> Path | None:
 
 
 def all_backup_roots(db: Session) -> list[Path]:
-    location = writable_backup_location(db)
-    if not location.exists():
-        return []
-    return sorted([item for item in location.iterdir() if item.is_dir()], reverse=True)
+    locations_to_check = []
+    configured = resolve_stored_path(get_setting(db, "backup_location", ""))
+    if configured:
+        locations_to_check.append(configured.resolve(strict=False))
+    fallback = DEFAULT_BACKUP_ROOT.resolve()
+    if fallback not in locations_to_check:
+        locations_to_check.append(fallback)
+    backups: list[Path] = []
+    for location in locations_to_check:
+        if location.exists() and location.is_dir():
+            backups.extend([item for item in location.iterdir() if item.is_dir()])
+    result = sorted(set(backups), reverse=True)
+    logger.info("all_backup_roots found %s backup(s) in %s", len(result), [str(p) for p in locations_to_check])
+    return result
 
 
 def backup_file_path(backup_root: Path, relative_path: str) -> Path:
@@ -3437,6 +3447,14 @@ def scan_single_file(db: Session, file_entry: SecurityMonitoredFile, context: di
 
 
 def record_detection(db: Session, file_entry: SecurityMonitoredFile, change_type: str, old_hash: str | None, new_hash: str | None, old_content: str, new_content: str, context: dict | None = None) -> SecurityDetectionEvent:
+    # Safety-net: skip if an open incident already exists for this file and change type
+    existing_incident = db.query(SecurityIncident).join(SecurityDetectionEvent).filter(
+        SecurityDetectionEvent.file_id == file_entry.id,
+        SecurityDetectionEvent.change_type == change_type,
+        SecurityIncident.status.in_(["open", "investigating"]),
+    ).first()
+    if existing_incident:
+        return None
     context = enrich_security_context(db, context or {})
     source_ip = context.get("source_ip") or context.get("client_ip") or context.get("ip_address") or "unknown"
     context.setdefault("source_ip", source_ip)
@@ -4007,11 +4025,38 @@ def recover_database(db: Session, admin_id: int) -> SecurityRecoveryEvent:
     return restore_database_from_backup(db, db_entry, None, "database_recovery", admin_id)
 
 
-def recover_files(db: Session, admin_id: int) -> dict:
-    """Restore all monitored files (not database or ML) from the latest backup."""
+def _restore_full_backup(backup_root: Path, db: Session) -> tuple[int, int]:
+    """Copy every file from a backup root back to its original location."""
     restored = 0
     failed = 0
+    for source in backup_root.rglob("*"):
+        if not source.is_file():
+            continue
+        try:
+            relative = str(source.relative_to(backup_root)).replace("\\", "/")
+            target = MASTER_ROOT / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+            restored += 1
+        except Exception:
+            failed += 1
+    return restored, failed
+
+
+def recover_files(db: Session, admin_id: int) -> dict:
+    """Restore all monitored files from the latest backup, then patch missing files from older backups."""
     started = time.time()
+    roots = all_backup_roots(db)
+    if not roots:
+        raise RuntimeError("No local backup exists. Create a manual backup first.")
+
+    latest = roots[0]
+    logger.info("Recovering files: restoring full latest backup from %s", latest)
+    full_restored, full_failed = _restore_full_backup(latest, db)
+
+    # Patch any files still missing (not in latest backup) from older backups
+    patched = 0
+    patch_failed = 0
     for file_entry in (
         db.query(SecurityMonitoredFile)
         .filter(SecurityMonitoredFile.status != "monitoring_removed")
@@ -4020,26 +4065,56 @@ def recover_files(db: Session, admin_id: int) -> dict:
     ):
         if is_database_entry(file_entry):
             continue
-        try:
-            restore_from_backup(db, file_entry, None, "files_recovery", admin_id, create_event=False)
-            restored += 1
-        except Exception:
-            failed += 1
+        path = portable_monitored_path(file_entry)
+        if path.exists():
+            # Update DB entry to reflect restored state
+            file_entry.current_hash = sha256_file(path)
+            file_entry.baseline_hash = file_entry.current_hash
+            file_entry.status = "recovered"
+            file_entry.size_bytes = path.stat().st_size
+            file_entry.last_checked = now_utc()
+            db.add(file_entry)
+            continue
+        # File still missing after latest backup restore; search older backups
+        recovered = False
+        for older in roots[1:]:
+            source = backup_file_path(older, file_entry.relative_path)
+            if source.exists():
+                try:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source, path)
+                    file_entry.current_hash = sha256_file(path)
+                    file_entry.baseline_hash = file_entry.current_hash
+                    file_entry.status = "recovered"
+                    file_entry.size_bytes = path.stat().st_size
+                    file_entry.last_checked = now_utc()
+                    db.add(file_entry)
+                    recovered = True
+                    patched += 1
+                    break
+                except Exception:
+                    pass
+        if not recovered:
+            patch_failed += 1
+
+    db.commit()
+    total_restored = full_restored + patched
+    total_failed = full_failed + patch_failed
     recovery = SecurityRecoveryEvent(
         recovery_type="files_recovery",
         initiated_by=admin_id,
-        status="success" if failed == 0 else "failed",
+        status="success" if total_failed == 0 else "failed",
         completed_at=now_utc(),
         recovery_duration_ms=int((time.time() - started) * 1000),
-        summary=f"Restored {restored} file(s) from backup; {failed} failed.",
+        summary=f"Full backup restored {full_restored} file(s); patched {patched} from older backup(s); {total_failed} failed.",
     )
     db.add(recovery)
     db.commit()
     db.refresh(recovery)
     create_system_alert(db, "recovery_completed", f"Recovery #{recovery.id}: {recovery.summary}", "low", dedupe_key=f"Recovery #{recovery.id}")
     return {
-        "restored": restored,
-        "failed": failed,
+        "restored": total_restored,
+        "failed": total_failed,
         "recovery_event_id": recovery.id,
     }
 
