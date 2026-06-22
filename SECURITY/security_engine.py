@@ -766,7 +766,7 @@ def stored_path_value(path: Path | str | None, base_root: Path = MASTER_ROOT) ->
 
 def is_vm1_file(file_entry: SecurityMonitoredFile) -> bool:
     folder = str(getattr(file_entry, "folder_root", None) or "")
-    return folder.startswith(VM1_FOLDER_ROOT_PREFIX) or folder.startswith("CUSTOM_")
+    return folder.startswith(VM1_FOLDER_ROOT_PREFIX)
 
 
 def portable_monitored_path(file_entry: SecurityMonitoredFile) -> Path:
@@ -1624,12 +1624,15 @@ def register_monitored_folder_entries(
         processed += 1
         current_hash = sha256_file(path)
         relative = monitored_relative_path(path, root)
-        matches = (
-            db.query(SecurityMonitoredFile)
-            .filter(or_(SecurityMonitoredFile.file_path == str(path), SecurityMonitoredFile.relative_path == relative))
-            .order_by(SecurityMonitoredFile.id.asc())
-            .all()
-        )
+        matches = [
+            item for item in (
+                db.query(SecurityMonitoredFile)
+                .filter(or_(SecurityMonitoredFile.file_path == str(path), SecurityMonitoredFile.relative_path == relative))
+                .order_by(SecurityMonitoredFile.id.asc())
+                .all()
+            )
+            if not is_vm1_file(item)
+        ]
         existing = None
         if matches:
             path_key = normalized_path_key(path)
@@ -3704,6 +3707,35 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
                 path = checksum_path
                 relative = DATABASE_CHECKSUM_RELATIVE_PATH
             else:
+                if is_vm1_file(entry):
+                    snapshot = VM1_SNAPSHOT_ROOT / (entry.relative_path or "")
+                    if snapshot.exists() and snapshot.is_file():
+                        target = backup_file_path(backup_root, relative)
+                        file_hash = sha256_file(snapshot)
+                        previous_source = backup_file_path(previous_backup_root, relative) if previous_backup_root else None
+                        previous_matches = bool(
+                            previous_source and previous_source.exists()
+                            and str(previous_manifest.get(relative, {}).get("sha256") or "") == file_hash
+                        )
+                        copy_into_backup(
+                            snapshot,
+                            target,
+                            previous_source=previous_source,
+                            can_reuse_previous=previous_matches,
+                        )
+                        manifest_files.append({
+                            "path": relative,
+                            "size_bytes": snapshot.stat().st_size,
+                            "sha256": file_hash,
+                        })
+                    entry.baseline_hash = entry.current_hash or entry.baseline_hash
+                    entry.current_hash = entry.baseline_hash
+                    entry.status = "clean"
+                    entry.file_type = file_type(snapshot) if snapshot.exists() else entry.file_type
+                    entry.size_bytes = snapshot.stat().st_size if snapshot.exists() else entry.size_bytes
+                    entry.last_checked = now_utc()
+                    db.add(entry)
+                    continue
                 if not path.exists() or not path.is_file():
                     continue
                 target = backup_file_path(backup_root, relative)
@@ -3960,6 +3992,35 @@ def create_files_backup(
                 continue
             path = portable_monitored_path(entry)
             relative = entry.relative_path or safe_rel(path)
+            if is_vm1_file(entry):
+                snapshot = VM1_SNAPSHOT_ROOT / (entry.relative_path or "")
+                if snapshot.exists() and snapshot.is_file():
+                    target = backup_file_path(backup_root, relative)
+                    file_hash = sha256_file(snapshot)
+                    previous_source = backup_file_path(previous_backup_root, relative) if previous_backup_root else None
+                    previous_matches = bool(
+                        previous_source and previous_source.exists()
+                        and str(previous_manifest.get(relative, {}).get("sha256") or "") == file_hash
+                    )
+                    copy_into_backup(
+                        snapshot,
+                        target,
+                        previous_source=previous_source,
+                        can_reuse_previous=previous_matches,
+                    )
+                    manifest_files.append({
+                        "path": relative,
+                        "size_bytes": snapshot.stat().st_size,
+                        "sha256": file_hash,
+                    })
+                entry.baseline_hash = entry.current_hash or entry.baseline_hash
+                entry.current_hash = entry.baseline_hash
+                entry.status = "clean"
+                entry.file_type = file_type(snapshot) if snapshot.exists() else entry.file_type
+                entry.size_bytes = snapshot.stat().st_size if snapshot.exists() else entry.size_bytes
+                entry.last_checked = now_utc()
+                db.add(entry)
+                continue
             if not path.exists() or not path.is_file():
                 continue
             target = backup_file_path(backup_root, relative)
@@ -5314,7 +5375,7 @@ def serialize_incident(item: SecurityIncident) -> dict:
 # ---------------------------------------------------------------------------
 
 def _store_vm1_snapshot(rel_path: str, content_b64: str | None):
-    if not content_b64:
+    if content_b64 is None:
         return
     target = VM1_SNAPSHOT_ROOT / rel_path
     target.parent.mkdir(parents=True, exist_ok=True)
