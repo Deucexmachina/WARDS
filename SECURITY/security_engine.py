@@ -3301,9 +3301,9 @@ def create_incident(db: Session, detection: SecurityDetectionEvent, classificati
             .all()
         ]
         send_security_incident_alert_email(recipients, serialize_incident(incident), serialize_detection(detection), recoveries)
-    except RuntimeError as exc:
-        if "ADMIN_SECRET_KEY" in str(exc) or "SECRET_KEY" in str(exc):
-            logger.warning("Skipping incident alert email: required env key missing (%s)", exc)
+    except (RuntimeError, ImportError) as exc:
+        if any(k in str(exc) for k in ("ADMIN_SECRET_KEY", "SECRET_KEY", "DATA_ENCRYPTION_SECRET", "Missing required environment")):
+            logger.warning("Skipping incident alert email: required env/config missing (%s)", exc)
         else:
             logger.exception("Failed to dispatch incident alert email for detection %s", detection.id)
     except Exception:
@@ -5341,11 +5341,13 @@ def _create_vm1_restore_command(db: Session, entry: SecurityMonitoredFile, detec
         "detection_id": detection_id,
         "relative_path": entry.relative_path,
         "expected_hash": entry.baseline_hash,
-        "restore_content_b64": content_b64,
         "created_at": now_utc().isoformat(),
     }
     existing = json_loads(get_setting(db, "vm1_restore_commands", "[]"), [])
     existing.append(cmd)
+    # Keep only the most recent 50 pending commands to prevent the setting from growing too large
+    if len(existing) > 50:
+        existing = existing[-50:]
     set_setting(db, "vm1_restore_commands", json_dumps(existing), "vm2_monitor")
     return cmd
 
