@@ -4330,19 +4330,23 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
         target = portable_monitored_path(file_entry)
         restored_from_backup = False
         if is_vm1_file(file_entry):
-            # VM1 file: trust current reported state, update baseline, queue restore command
-            if file_entry.current_hash:
-                file_entry.baseline_hash = file_entry.current_hash
-            file_entry.status = "clean"
-            file_entry.last_checked = now_utc()
-            db.add(file_entry)
-            if detection:
-                _create_vm1_restore_command(db, file_entry, detection.id)
+            # VM1 file handling
+            if incident.status == "resolved" and incident.response_action == "auto_recovered":
+                # Already auto-recovered; just ensure quarantine is cleaned up
+                cleanup_quarantine_paths(json_loads(incident.quarantine_paths_json, []))
+            else:
+                # Manual resolve: queue restore command, do NOT corrupt baseline_hash
+                file_entry.status = "clean"
+                file_entry.last_checked = now_utc()
+                db.add(file_entry)
+                if detection:
+                    _create_vm1_restore_command(db, file_entry, detection.id)
         else:
-            if (not target.exists() or not target.is_file()) and file_entry.relative_path:
-                backup_root = latest_backup_root(db)
-                backup_source = backup_file_path(backup_root, file_entry.relative_path) if backup_root else None
-                if backup_source and backup_source.exists() and backup_source.is_file():
+            # Local file: restore from backup if missing or modified
+            backup_root = latest_backup_root(db)
+            backup_source = backup_file_path(backup_root, file_entry.relative_path) if backup_root and file_entry.relative_path else None
+            if backup_source and backup_source.exists() and backup_source.is_file():
+                if not target.exists() or not target.is_file() or sha256_file(target) != file_entry.baseline_hash:
                     started = time.time()
                     if create_event:
                         recovery = SecurityRecoveryEvent(
@@ -4352,7 +4356,7 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                             initiated_by=_valid_admin_id(db, admin_id),
                             status="success",
                             backup_path=str(backup_source),
-                            summary=f"Resolved incident restored missing trusted file for {file_entry.relative_path}.",
+                            summary=f"Resolved incident restored trusted file for {file_entry.relative_path}.",
                         )
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(backup_source, target)
@@ -4423,32 +4427,31 @@ def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_ba
     false_positive_recovery = None
     if has_quarantine_copy:
         if is_vm1_file(file_entry):
-            # VM1 file: copy quarantined snapshot back to VM1_SNAPSHOT_ROOT and queue restore command
-            snapshot_target = VM1_SNAPSHOT_ROOT / file_entry.relative_path
-            snapshot_target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(safe_source, snapshot_target)
-            quarantine_hash = sha256_file(snapshot_target)
-            file_entry.baseline_hash = quarantine_hash
-            file_entry.current_hash = quarantine_hash
+            # VM1 false+: accept the defaced state as legitimate
+            # The snapshot in VM1_SNAPSHOT_ROOT already holds the defaced content
+            # (it was stored during detection before quarantine captured the original).
+            defaced_hash = detection.new_hash if detection else file_entry.current_hash
+            file_entry.baseline_hash = defaced_hash
+            file_entry.current_hash = defaced_hash
             file_entry.status = "clean"
             file_entry.last_checked = now_utc()
             db.add(file_entry)
-            _create_vm1_restore_command(db, file_entry, incident.detection_event_id)
-            started = time.time()
-            if create_event:
-                false_positive_recovery = SecurityRecoveryEvent(
-                    detection_event_id=incident.detection_event_id,
-                    file_id=file_entry.id,
-                    recovery_type="automatic",
-                    initiated_by=_valid_admin_id(db, admin_id),
-                    status="success",
-                    quarantine_path=str(safe_source),
-                    summary=f"False positive: quarantined VM1 snapshot restored for {file_entry.relative_path}.",
-                    completed_at=now_utc(),
-                    recovery_duration_ms=int((time.time() - started) * 1000),
-                )
-                db.add(false_positive_recovery)
-                db.commit()
+            if incident.response_action == "auto_recovered":
+                # Auto-recovery already ran; push the defaced snapshot back to VM1
+                _create_vm1_restore_command(db, file_entry, incident.detection_event_id)
+                if create_event:
+                    false_positive_recovery = SecurityRecoveryEvent(
+                        detection_event_id=incident.detection_event_id,
+                        file_id=file_entry.id,
+                        recovery_type="reverted",
+                        initiated_by=_valid_admin_id(db, admin_id),
+                        status="success",
+                        quarantine_path=str(safe_source),
+                        summary=f"False positive: auto-recovery reverted for {file_entry.relative_path}.",
+                        completed_at=now_utc(),
+                    )
+                    db.add(false_positive_recovery)
+                    db.commit()
         else:
             false_positive_recovery = restore_quarantined_copy_to_original(
                 db,
@@ -5353,6 +5356,11 @@ def _create_vm1_restore_command(db: Session, entry: SecurityMonitoredFile, detec
     return cmd
 
 
+def _has_pending_vm1_restore_for_file(db: Session, relative_path: str) -> bool:
+    commands = get_pending_vm1_restore_commands(db)
+    return any(c.get("relative_path") == relative_path for c in commands)
+
+
 def get_pending_vm1_restore_commands(db: Session) -> list[dict]:
     raw = get_setting(db, "vm1_restore_commands", "[]")
     commands = json_loads(raw, [])
@@ -5427,12 +5435,36 @@ def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type
 
     if should_create_incident(change_type, prediction, flags, classification):
         quarantine_path = _quarantine_vm1_snapshot(entry, detection.id)
-        incident = create_incident(db, detection, classification, flags, changed, quarantine_path)
-        _create_vm1_restore_command(db, entry, detection.id)
-        incident.response_action = "vm1_restore_pending"
-        db.add(incident)
-        db.commit()
-        create_incident_system_alert(db, incident, detection, None)
+        # Determine auto-recovery eligibility
+        suffix = Path(entry.relative_path).suffix.lower()
+        rules = context.get("ai_rules") or DEFAULT_AI_RULES
+        high_risk_exts = set(rules.get("file_type_risk", {}).get("config", {}).get("high_risk_extensions", [".html", ".jsx", ".js", ".py"]))
+        is_auto_recover = suffix in high_risk_exts or classification.get("severity_level") in {"high", "critical"}
+        if is_auto_recover:
+            # Auto-recovery: restore immediately and mark incident resolved
+            _create_vm1_restore_command(db, entry, detection.id)
+            incident = create_incident(db, detection, classification, flags, changed, quarantine_path)
+            incident.status = "resolved"
+            incident.resolved_at = now_utc()
+            incident.resolved_by = None
+            incident.response_action = "auto_recovered"
+            cleanup_quarantine_paths(json_loads(incident.quarantine_paths_json, []))
+            db.add(incident)
+            db.commit()
+            create_system_alert(
+                db,
+                "incident_resolved",
+                f"SEC-{incident.id}: Auto-recovered {entry.relative_path} (high-risk / high-severity).",
+                incident.severity_level or "low",
+                dedupe_key=f"SEC-{incident.id}",
+            )
+        else:
+            # Manual review required; do not queue restore command yet
+            incident = create_incident(db, detection, classification, flags, changed, quarantine_path)
+            incident.response_action = "vm1_restore_pending"
+            db.add(incident)
+            db.commit()
+            create_incident_system_alert(db, incident, detection, None)
     elif not is_legitimate:
         create_system_alert(
             db,
@@ -5518,7 +5550,9 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
                 SecurityDetectionEvent.change_type == "vm1_content_modified",
                 SecurityIncident.status.in_(["open", "investigating"]),
             ).first() is not None
-            if not has_open:
+            # Also suppress if a restore command is already pending for this file
+            has_pending_restore = _has_pending_vm1_restore_for_file(db, entry.relative_path)
+            if not has_open and not has_pending_restore:
                 entry.status = "modified"
                 changed += 1
                 db.add(entry)
