@@ -994,6 +994,14 @@ def migrate_portable_monitored_files(db: Session) -> int:
         if is_database_entry(entry):
             by_path[normalized_path_key(entry.file_path)] = entry
             continue
+        # VM1 files are externally managed; never rewrite their paths or folder_root
+        if is_vm1_file(entry):
+            relative_key = str(entry.relative_path or "").replace("\\", "/").lower()
+            db.add(entry)
+            by_path[normalized_path_key(entry.file_path)] = entry
+            if relative_key:
+                by_relative[relative_key] = entry
+            continue
         target_path = portable_monitored_path(entry)
         path_key = normalized_path_key(target_path)
         relative_key = str(entry.relative_path or "").replace("\\", "/").lower()
@@ -1038,7 +1046,10 @@ def dedupe_monitored_files_by_relative_path(db: Session) -> int:
     for items in groups.values():
         if len(items) <= 1:
             continue
-        canonical = next((item for item in items if Path(item.file_path or "").exists()), None) or items[0]
+        # Prefer VM1 files as canonical since they represent ground truth from VM1
+        vm1_item = next((item for item in items if is_vm1_file(item)), None)
+        local_existing = next((item for item in items if Path(item.file_path or "").exists()), None)
+        canonical = vm1_item or local_existing or items[0]
         for item in items:
             if item.id != canonical.id:
                 canonical = merge_monitored_file_entry(db, item, canonical)
@@ -2135,7 +2146,7 @@ def register_initial_files(db: Session, ensure_backup: bool = True, refresh_exis
     created = 0
     if incremental:
         for file_entry in active_monitored_files_query(db).all():
-            if is_database_entry(file_entry):
+            if is_database_entry(file_entry) or is_vm1_file(file_entry):
                 continue
             path = portable_monitored_path(file_entry)
             if path.exists():
@@ -2154,12 +2165,15 @@ def register_initial_files(db: Session, ensure_backup: bool = True, refresh_exis
     else:
         for root_name, path in iter_monitorable_files():
             relative = safe_rel(path)
-            matches = (
-                db.query(SecurityMonitoredFile)
-                .filter(or_(SecurityMonitoredFile.file_path == str(path), SecurityMonitoredFile.relative_path == relative))
-                .order_by(SecurityMonitoredFile.id.asc())
-                .all()
-            )
+            matches = [
+                item for item in (
+                    db.query(SecurityMonitoredFile)
+                    .filter(or_(SecurityMonitoredFile.file_path == str(path), SecurityMonitoredFile.relative_path == relative))
+                    .order_by(SecurityMonitoredFile.id.asc())
+                    .all()
+                )
+                if not is_vm1_file(item)
+            ]
             existing = None
             if matches:
                 path_key = normalized_path_key(path)
