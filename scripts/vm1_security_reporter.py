@@ -78,16 +78,20 @@ def _iter_root_files(root_name: str, root_path: Path):
         log(f"WARNING: root path does not exist: {root_path}")
         return
     for path in root_path.rglob("*"):
-        if path.is_file():
-            rel = str(path.relative_to(root_path)).replace("\\", "/")
-            yield {
-                "relative_path": f"{root_name}/{rel}",
-                "folder_root": f"VM1_{root_name}",
-                "file_path": str(path),
-                "size_bytes": path.stat().st_size,
-                "current_hash": sha256_file(path),
-                "content_b64": file_content_b64(path),
-            }
+        if not path.is_file():
+            continue
+        # Skip environment files — they change as part of normal operations
+        if path.name.lower() == ".env":
+            continue
+        rel = str(path.relative_to(root_path)).replace("\\", "/")
+        yield {
+            "relative_path": f"{root_name}/{rel}",
+            "folder_root": f"VM1_{root_name}",
+            "file_path": str(path),
+            "size_bytes": path.stat().st_size,
+            "current_hash": sha256_file(path),
+            "content_b64": file_content_b64(path),
+        }
 
 
 def iter_monitored_files():

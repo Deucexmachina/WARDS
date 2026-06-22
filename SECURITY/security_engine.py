@@ -5454,6 +5454,10 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
         current_hash = f["current_hash"]
         size_bytes = f["size_bytes"]
 
+        # Skip environment files — they change as part of normal operations
+        if Path(rel_path).name.lower() == ".env":
+            continue
+
         entry = (
             db.query(SecurityMonitoredFile)
             .filter(SecurityMonitoredFile.relative_path == rel_path)

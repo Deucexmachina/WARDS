@@ -853,14 +853,17 @@ def folder_browser(path: str | None = Query(None), _=Depends(current_admin)):
                     drives.append({"name": str(drive), "path": str(drive)})
         else:
             drives.append({"name": "/", "path": "/"})
+        quick_roots = [
+            {"name": "WARDS", "path": str(MASTER_ROOT / "WARDS")},
+            {"name": "OCR", "path": str(MASTER_ROOT / "OCR")},
+        ]
+        if Path("/opt/wards/app").exists():
+            quick_roots.append({"name": "App Root", "path": "/opt/wards/app"})
         return {
             "current": str(current),
             "parent": str(current.parent) if current.parent != current else None,
             "directories": sorted(directories, key=lambda item: item["name"].lower()),
-            "quick_roots": [
-                {"name": "WARDS", "path": str(MASTER_ROOT / "WARDS")},
-                {"name": "OCR", "path": str(MASTER_ROOT / "OCR")},
-            ],
+            "quick_roots": quick_roots,
             "drives": drives,
         }
     except Exception as exc:

@@ -914,11 +914,11 @@ const BackupRecovery = () => {
     }
     if (folderPicker.mode === 'add-monitor') {
       setControls((current) => ({ ...current, monitoredFolder: path }));
-      askConfirm('Add monitored folder?', `WARDS will add ${path} to file monitoring, file status, and local backups.`, () => api.post('/security/folders', { path }), 'Monitored folder added.', 'Add folder');
+      askConfirm('Add monitored folder?', `WARDS will add ${path} to VM1 file monitoring.`, () => api.post('/security/folders', { path, vm_target: 'vm1' }), 'Monitored folder added.', 'Add folder');
       return;
     }
     if (folderPicker.mode === 'remove-monitor') {
-      askConfirm('Remove monitored folder?', `WARDS will remove ${path} from monitoring, file status, and local backup copies.`, () => api.post('/security/folders/remove', { path }), 'Monitored folder removed from monitoring and local backups.', 'Remove folder');
+      askConfirm('Remove monitored folder?', `WARDS will remove ${path} from VM1 monitoring.`, () => api.post('/security/folders/remove', { path, vm_target: 'vm1' }), 'Monitored folder removed from VM1 monitoring.', 'Remove folder');
     }
   };
 
@@ -1431,43 +1431,6 @@ const BackupRecovery = () => {
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                     <button disabled={busy} className={`rounded-xl bg-primary px-4 py-3 font-semibold text-white${disabledButtonClass}`} onClick={() => openFolderPicker('add-monitor', 'Add monitored folder', controls.monitoredFolder)}>Add monitored folder</button>
                     <button disabled={busy} className={`rounded-xl bg-red-50 px-4 py-3 font-semibold text-red-700${disabledButtonClass}`} onClick={() => openFolderPicker('remove-monitor', 'Remove monitored folder', controls.monitoredFolder)}>Remove monitored folder</button>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
-                    <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">VM1 monitored folder path</p>
-                    <p className="mt-1 text-xs text-slate-500">Type an absolute path on VM1. Remote folder browsing is not available yet.</p>
-                    <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-                      <input
-                        type="text"
-                        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                        placeholder="/opt/wards/app/SIGMA"
-                        value={controls.vm1MonitoredFolder || ''}
-                        onChange={(e) => setControls((c) => ({ ...c, vm1MonitoredFolder: e.target.value }))}
-                      />
-                      <div className="flex gap-2">
-                        <button
-                          disabled={busy || !controls.vm1MonitoredFolder}
-                          className={`rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white${disabledButtonClass}`}
-                          onClick={() => askConfirm(
-                            'Add VM1 monitored folder?',
-                            `WARDS will add ${controls.vm1MonitoredFolder} to VM1 file monitoring. The path must exist on VM1.`,
-                            () => api.post('/security/folders', { path: controls.vm1MonitoredFolder, vm_target: 'vm1' }),
-                            'VM1 monitored folder added.',
-                            'Add VM1 folder'
-                          )}
-                        >Add VM1</button>
-                        <button
-                          disabled={busy || !controls.vm1MonitoredFolder}
-                          className={`rounded-xl bg-red-50 px-4 py-2 text-sm font-semibold text-red-700${disabledButtonClass}`}
-                          onClick={() => askConfirm(
-                            'Remove VM1 monitored folder?',
-                            `WARDS will remove ${controls.vm1MonitoredFolder} from VM1 monitoring.`,
-                            () => api.post('/security/folders/remove', { path: controls.vm1MonitoredFolder, vm_target: 'vm1' }),
-                            'VM1 monitored folder removed.',
-                            'Remove VM1 folder'
-                          )}
-                        >Remove VM1</button>
-                      </div>
-                    </div>
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                     <div className="mb-4 flex flex-col gap-3 rounded-xl bg-white p-3 md:flex-row md:items-center md:justify-between">

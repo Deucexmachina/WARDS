@@ -54,6 +54,7 @@ services:
       # security_dashboard.py still imports SECURITY.security_models for ORM queries.
       # Remove this mount once dashboard routes fully proxy to VM 2 (future Phase 8).
       - ./SECURITY:/SECURITY:ro
+      - .:/opt/wards/app:ro
 
   frontend:
     build:
@@ -87,6 +88,7 @@ services:
       - ./OCR:/OCR:ro
       - ./scripts/vm1_security_reporter.py:/app/vm1_security_reporter.py:ro
       - vm1_snapshots:/app/.vm1_snapshots
+      - .:/opt/wards/app:ro
     command: >
       sh -c "pip install --no-cache-dir requests && python3 /app/vm1_security_reporter.py"
     depends_on:
