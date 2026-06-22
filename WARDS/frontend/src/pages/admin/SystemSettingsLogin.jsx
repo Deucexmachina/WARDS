@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import ReCAPTCHA from 'react-google-recaptcha';
 import {
   clearSettingsSession,
   isSettingsRoleAllowed,
@@ -9,6 +10,8 @@ import {
 import { AUTH_GRADIENTS } from '../../utils/authTheme';
 
 import { API_HOST } from '../../services/api';
+
+const RECAPTCHA_SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY || '';
 
 const SystemSettingsLogin = () => {
   const [identifier, setIdentifier] = useState('');
@@ -21,6 +24,8 @@ const SystemSettingsLogin = () => {
   const [totpError, setTotpError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [recaptchaToken, setRecaptchaToken] = useState('');
+  const [requiresCaptcha, setRequiresCaptcha] = useState(false);
   const navigate = useNavigate();
   const currentAdmin = useMemo(() => JSON.parse(localStorage.getItem('adminUser') || '{}'), []);
   const isSuperadmin = currentAdmin?.internal_role === 'superadmin';
@@ -133,6 +138,7 @@ const SystemSettingsLogin = () => {
         password,
         portal: 'admin',
         totp_code: step === 'totp' ? totpCode : undefined,
+        recaptcha_token: recaptchaToken || undefined,
       });
 
       if (response.data.requires_mfa) {
@@ -167,7 +173,11 @@ const SystemSettingsLogin = () => {
       navigate('/admin/settings', { replace: true });
     } catch (err) {
       const detail = normalizeLoginErrorMessage(err.response?.data?.detail || 'Login failed. Please try again.');
-      if (String(detail).toLowerCase().includes('mfa not configured')) {
+      const requiresCaptchaFromServer = err.response?.data?.requires_captcha === true;
+      if (requiresCaptchaFromServer) {
+        setRequiresCaptcha(true);
+        setError('Please complete the security check to continue.');
+      } else if (String(detail).toLowerCase().includes('mfa not configured')) {
         setError('MFA is required. Set up Microsoft Authenticator in the main WARDS login first.');
       } else {
         setError(detail);
@@ -270,9 +280,26 @@ const SystemSettingsLogin = () => {
               ) : null}
             </div>
 
+            {requiresCaptcha && RECAPTCHA_SITE_KEY && (
+              <div className="flex justify-center">
+                <ReCAPTCHA
+                  sitekey={RECAPTCHA_SITE_KEY}
+                  onChange={(token) => {
+                    setRecaptchaToken(token || '');
+                    setError('');
+                  }}
+                  onExpired={() => setRecaptchaToken('')}
+                  onErrored={() => {
+                    setRecaptchaToken('');
+                    setError('reCAPTCHA verification failed. Please try again.');
+                  }}
+                />
+              </div>
+            )}
+
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || (requiresCaptcha && RECAPTCHA_SITE_KEY && !recaptchaToken)}
               className="w-full rounded-xl bg-blue-600 py-3 font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
             >
               {loading ? 'Checking account...' : 'Continue'}
@@ -326,7 +353,7 @@ const SystemSettingsLogin = () => {
               </button>
               <button
                 type="submit"
-                disabled={loading || totpCode.length !== 6}
+                disabled={loading || totpCode.length !== 6 || (requiresCaptcha && RECAPTCHA_SITE_KEY && !recaptchaToken)}
                 className="flex-1 rounded-xl bg-blue-600 py-3 font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
               >
                 {loading ? 'Signing in...' : 'Login'}
