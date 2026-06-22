@@ -117,7 +117,6 @@ MONITORED_SUFFIXES = {
     ".css",
     ".json",
     ".md",
-    ".env",
     ".txt",
     ".xml",
     ".yml",
@@ -3404,6 +3403,14 @@ def scan_single_file(db: Session, file_entry: SecurityMonitoredFile, context: di
         return scan_database_entry(db, file_entry, context=context, commit_clean=commit_clean)
     if is_vm1_file(file_entry):
         return None
+    # Skip environment files that change frequently and are environment-specific
+    if Path(file_entry.file_path or "").name.lower() == ".env":
+        file_entry.status = "clean"
+        file_entry.last_checked = now_utc()
+        db.add(file_entry)
+        if commit_clean:
+            db.commit()
+        return None
     path = portable_monitored_path(file_entry)
     old_hash = file_entry.current_hash
     backup_root = latest_backup_root(db)
@@ -5360,24 +5367,32 @@ def acknowledge_vm1_restore_command(db: Session, command_id: str, success: bool)
         "success": success,
         "timestamp": now_utc().isoformat(),
     })
+    # Keep only the last 100 acks to prevent the setting from growing indefinitely
+    if len(acks) > 100:
+        acks = acks[-100:]
     set_setting(db, "vm1_restore_acks", json_dumps(acks), "vm1_reporter")
+
+    # Also remove the acknowledged command from the pending list so the queue stays small
+    commands = json_loads(get_setting(db, "vm1_restore_commands", "[]"), [])
+    commands = [c for c in commands if c.get("command_id") != command_id]
+    set_setting(db, "vm1_restore_commands", json_dumps(commands), "vm1_reporter")
     return True
 
 
-def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type: str, new_hash: str | None) -> SecurityDetectionEvent | None:
+def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type: str, new_hash: str | None, old_content: str = "", new_content: str = "") -> SecurityDetectionEvent | None:
     old_hash = entry.baseline_hash
     context = {
         "host_vm": "vm1",
         "background_monitor": True,
         "source_ip": "vm1_internal",
     }
-    prediction = ai_predict(Path(entry.relative_path), "", "", context)
-    flags = content_flags("", context)
+    prediction = ai_predict(Path(entry.relative_path), old_content, new_content, context)
+    flags = content_flags(new_content, context)
     classification = classify(change_type, prediction, flags, context)
     is_legitimate = False
     context.setdefault("admin_session_valid", False)
     context.setdefault("method_legitimate", False)
-    changed = diff_lines("", "")
+    changed = diff_lines(old_content, new_content)
     trigger_summary = build_trigger_summary(change_type, flags, changed, is_legitimate, "vm1_internal")
 
     detection = SecurityDetectionEvent(
@@ -5501,7 +5516,19 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
                 changed += 1
                 db.add(entry)
                 db.commit()
-                detection = _record_vm1_detection(db, entry, "vm1_content_modified", current_hash)
+                # Read previous snapshot content for diff
+                snapshot_path = VM1_SNAPSHOT_ROOT / entry.relative_path
+                old_content = read_text(snapshot_path) if snapshot_path.exists() else ""
+                new_content = ""
+                content_b64 = f.get("content_b64")
+                if content_b64:
+                    try:
+                        new_content = base64.b64decode(content_b64).decode("utf-8", errors="replace")
+                    except Exception:
+                        pass
+                detection = _record_vm1_detection(db, entry, "vm1_content_modified", current_hash, old_content=old_content, new_content=new_content)
+                # Store the new snapshot so future changes have a baseline
+                _store_vm1_snapshot(rel_path, content_b64)
                 if detection:
                     detections.append(detection)
             else:

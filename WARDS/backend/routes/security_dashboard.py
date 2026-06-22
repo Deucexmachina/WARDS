@@ -128,8 +128,12 @@ def update_backend_env(updates: dict[str, str], env_path: Path = BACKEND_ENV_PAT
         if key not in written:
             next_lines.append(f"{key}={value}")
             os.environ[key] = value
-    env_path.parent.mkdir(parents=True, exist_ok=True)
-    env_path.write_text("\n".join(next_lines) + "\n", encoding="utf-8")
+    new_content = "\n".join(next_lines) + "\n"
+    old_content = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
+    # Only write if content actually changes to avoid triggering file-change detections
+    if new_content != old_content:
+        env_path.parent.mkdir(parents=True, exist_ok=True)
+        env_path.write_text(new_content, encoding="utf-8")
     return pending
 
 

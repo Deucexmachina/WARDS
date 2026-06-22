@@ -1432,21 +1432,21 @@ const BackupRecovery = () => {
                     <button disabled={busy} className={`rounded-xl bg-primary px-4 py-3 font-semibold text-white${disabledButtonClass}`} onClick={() => openFolderPicker('add-monitor', 'Add monitored folder', controls.monitoredFolder)}>Add monitored folder</button>
                     <button disabled={busy} className={`rounded-xl bg-red-50 px-4 py-3 font-semibold text-red-700${disabledButtonClass}`} onClick={() => openFolderPicker('remove-monitor', 'Remove monitored folder', controls.monitoredFolder)}>Remove monitored folder</button>
                   </div>
-                  <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-4">
-                    <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-700">VM1 monitored folders (remote app server)</p>
-                    <p className="mt-1 text-xs text-blue-600">Type an absolute path on VM1. Remote folder browsing is not available yet.</p>
-                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+                    <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">VM1 monitored folder path</p>
+                    <p className="mt-1 text-xs text-slate-500">Type an absolute path on VM1. Remote folder browsing is not available yet.</p>
+                    <div className="mt-2 flex flex-col gap-2 sm:flex-row">
                       <input
                         type="text"
                         className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                        placeholder="/WARDS/extra"
+                        placeholder="/opt/wards/app/SIGMA"
                         value={controls.vm1MonitoredFolder || ''}
                         onChange={(e) => setControls((c) => ({ ...c, vm1MonitoredFolder: e.target.value }))}
                       />
                       <div className="flex gap-2">
                         <button
                           disabled={busy || !controls.vm1MonitoredFolder}
-                          className={`rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white${disabledButtonClass}`}
+                          className={`rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white${disabledButtonClass}`}
                           onClick={() => askConfirm(
                             'Add VM1 monitored folder?',
                             `WARDS will add ${controls.vm1MonitoredFolder} to VM1 file monitoring. The path must exist on VM1.`,
@@ -1454,7 +1454,7 @@ const BackupRecovery = () => {
                             'VM1 monitored folder added.',
                             'Add VM1 folder'
                           )}
-                        >Add</button>
+                        >Add VM1</button>
                         <button
                           disabled={busy || !controls.vm1MonitoredFolder}
                           className={`rounded-xl bg-red-50 px-4 py-2 text-sm font-semibold text-red-700${disabledButtonClass}`}
@@ -1465,7 +1465,7 @@ const BackupRecovery = () => {
                             'VM1 monitored folder removed.',
                             'Remove VM1 folder'
                           )}
-                        >Remove</button>
+                        >Remove VM1</button>
                       </div>
                     </div>
                   </div>
@@ -1649,11 +1649,11 @@ const BackupRecovery = () => {
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                     <p className="mb-3 text-sm font-bold text-slate-900">Temporary User Restriction</p>
                     <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
-                      <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Account ID" value={restrictionInput.account_id} onChange={(e) => setRestrictionInput({ ...restrictionInput, account_id: e.target.value })} />
+                      <input className="rounded-2xl border border-slate-200 px-4 py-3 text-sm" placeholder="Account ID" value={restrictionInput.account_id} onChange={(e) => setRestrictionInput({ ...restrictionInput, account_id: e.target.value })} />
                       <CustomSelect value={restrictionInput.account_type} onChange={(value) => setRestrictionInput({ ...restrictionInput, account_type: value })} options={[{ value: 'citizen', label: 'Citizen' }, { value: 'branch', label: 'Branch Admin' }, { value: 'admin', label: 'Main Admin' }, { value: 'superadmin', label: 'Super Admin' }]} placeholder="Select account type" />
-                      <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Scope" value={restrictionInput.scope} onChange={(e) => setRestrictionInput({ ...restrictionInput, scope: e.target.value })} />
-                      <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" type="number" min="60" max="604800" value={restrictionInput.duration} onChange={(e) => setRestrictionInput({ ...restrictionInput, duration: e.target.value })} />
-                      <button disabled={busy} className={`rounded-xl bg-red-600 px-4 py-2 font-semibold text-white${disabledButtonClass}`} onClick={() => askConfirm('Temporarily restrict this account?', `WARDS will restrict ${restrictionInput.account_type}:${restrictionInput.account_id || 'the entered account'} for ${restrictionInput.duration} seconds.`, restrictUser, 'Temporary user restriction added.', 'Restrict user')}>Restrict User</button>
+                      <CustomSelect value={restrictionInput.scope} onChange={(value) => setRestrictionInput({ ...restrictionInput, scope: value })} options={[{ value: 'manual', label: 'Manual' }, { value: 'general', label: 'General' }, { value: 'search', label: 'Search' }, { value: 'registration', label: 'Registration' }, { value: 'admin_general', label: 'Admin General' }, { value: 'password_reset', label: 'Password Reset' }]} placeholder="Select scope" />
+                      <input className="rounded-2xl border border-slate-200 px-4 py-3 text-sm" type="number" min="60" max="604800" placeholder="Duration (seconds)" value={restrictionInput.duration} onChange={(e) => setRestrictionInput({ ...restrictionInput, duration: e.target.value })} />
+                      <button disabled={busy} className={`rounded-xl bg-red-600 px-4 py-3 font-semibold text-white${disabledButtonClass}`} onClick={() => askConfirm('Temporarily restrict this account?', `WARDS will restrict ${restrictionInput.account_type}:${restrictionInput.account_id || 'the entered account'} for ${restrictionInput.duration} seconds.`, restrictUser, 'Temporary user restriction added.', 'Restrict user')}>Restrict User</button>
                     </div>
                     <input className="mt-3 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Reason" value={restrictionInput.reason} onChange={(e) => setRestrictionInput({ ...restrictionInput, reason: e.target.value })} />
                   </div>
