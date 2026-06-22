@@ -97,6 +97,18 @@ async def github_webhook(request: Request):
             except Exception as e:
                 logger.error("VM2 deploy trigger failed: %s", e)
 
+            # Trigger post-deploy backup on VM2 so new files have a trusted baseline
+            try:
+                backup_resp = httpx.post(
+                    f"http://{VM2_HOST}:8443/v1/backup/full",
+                    headers={"X-API-Key": VM2_API_KEY},
+                    timeout=120.0,
+                )
+                backup_resp.raise_for_status()
+                logger.info("VM2 post-deploy backup triggered: %s", backup_resp.json())
+            except Exception as e:
+                logger.error("VM2 post-deploy backup trigger failed: %s", e)
+
         return PlainTextResponse("Deployed VM1 and VM2", status_code=200)
 
     except Exception as e:

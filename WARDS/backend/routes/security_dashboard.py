@@ -856,9 +856,18 @@ def folder_browser(path: str | None = Query(None), _=Depends(current_admin)):
         quick_roots = [
             {"name": "WARDS", "path": str(MASTER_ROOT / "WARDS")},
             {"name": "OCR", "path": str(MASTER_ROOT / "OCR")},
+            {"name": "Security Root", "path": str(MASTER_ROOT / "SECURITY")},
         ]
         if Path("/opt/wards/app").exists():
             quick_roots.append({"name": "App Root", "path": "/opt/wards/app"})
+        if Path("/opt/wards/security").exists():
+            quick_roots.append({"name": "Security App", "path": "/opt/wards/security"})
+        local_backups = MASTER_ROOT / "SECURITY" / "local_backups"
+        if local_backups.exists():
+            quick_roots.append({"name": "Local Backups", "path": str(local_backups)})
+        home_dir = Path.home()
+        if home_dir.exists() and str(home_dir) != "/":
+            quick_roots.append({"name": "Home", "path": str(home_dir)})
         return {
             "current": str(current),
             "parent": str(current.parent) if current.parent != current else None,

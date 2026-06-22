@@ -4335,12 +4335,21 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                 # Already auto-recovered; just ensure quarantine is cleaned up
                 cleanup_quarantine_paths(json_loads(incident.quarantine_paths_json, []))
             else:
-                # Manual resolve: queue restore command, do NOT corrupt baseline_hash
+                # Manual resolve: read original from quarantine, queue restore command
+                quarantine_paths = json_loads(incident.quarantine_paths_json, [])
+                quarantine_path = quarantine_paths[0] if quarantine_paths else None
+                safe_quarantine = safe_quarantine_path(quarantine_path) if quarantine_path else None
+                original_bytes = None
+                if safe_quarantine and safe_quarantine.exists():
+                    try:
+                        original_bytes = safe_quarantine.read_bytes()
+                    except Exception:
+                        pass
                 file_entry.status = "clean"
                 file_entry.last_checked = now_utc()
                 db.add(file_entry)
                 if detection:
-                    _create_vm1_restore_command(db, file_entry, detection.id)
+                    _create_vm1_restore_command(db, file_entry, detection.id, original_content_bytes=original_bytes)
         else:
             # Local file: restore from backup if missing or modified
             backup_root = latest_backup_root(db)
@@ -5331,20 +5340,24 @@ def _quarantine_vm1_snapshot(entry: SecurityMonitoredFile, detection_id: int) ->
         return None
 
 
-def _create_vm1_restore_command(db: Session, entry: SecurityMonitoredFile, detection_id: int):
-    snapshot = VM1_SNAPSHOT_ROOT / entry.relative_path
-    content_b64 = None
-    if snapshot.exists():
-        try:
-            content_b64 = base64.b64encode(snapshot.read_bytes()).decode()
-        except Exception:
-            pass
+def _create_vm1_restore_command(db: Session, entry: SecurityMonitoredFile, detection_id: int, *, original_content_bytes: bytes | None = None):
+    if original_content_bytes is not None:
+        content_b64 = base64.b64encode(original_content_bytes).decode()
+    else:
+        snapshot = VM1_SNAPSHOT_ROOT / entry.relative_path
+        content_b64 = None
+        if snapshot.exists():
+            try:
+                content_b64 = base64.b64encode(snapshot.read_bytes()).decode()
+            except Exception:
+                pass
 
     cmd = {
         "command_id": f"rest_{detection_id}_{int(time.time())}",
         "detection_id": detection_id,
         "relative_path": entry.relative_path,
         "expected_hash": entry.baseline_hash,
+        "restore_content_b64": content_b64,
         "created_at": now_utc().isoformat(),
     }
     existing = json_loads(get_setting(db, "vm1_restore_commands", "[]"), [])

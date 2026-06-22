@@ -733,6 +733,15 @@ def api_internal_deploy():
             )
             if docker.returncode == 0:
                 logger.info("Docker compose restart succeeded")
+                # Trigger post-deploy backup so new files have a trusted baseline
+                try:
+                    from database.models import SessionLocal
+                    from SECURITY.security_engine import create_full_system_backup
+                    db = SessionLocal()
+                    event = create_full_system_backup(db, initiated_by=None, label="post_deploy")
+                    logger.info("Post-deploy backup finished: %s", event.status)
+                except Exception as backup_exc:
+                    logger.warning("Post-deploy backup failed: %s", backup_exc)
                 return
             logger.warning("docker compose exited %d: %s", docker.returncode, docker.stderr)
         except FileNotFoundError:
