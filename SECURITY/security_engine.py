@@ -4331,7 +4331,8 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
         restored_from_backup = False
         if is_vm1_file(file_entry):
             # VM1 file: trust current reported state, update baseline, queue restore command
-            file_entry.baseline_hash = file_entry.current_hash
+            if file_entry.current_hash:
+                file_entry.baseline_hash = file_entry.current_hash
             file_entry.status = "clean"
             file_entry.last_checked = now_utc()
             db.add(file_entry)
