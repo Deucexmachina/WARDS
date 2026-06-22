@@ -5539,11 +5539,17 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
             _store_vm1_snapshot(rel_path, f.get("content_b64"))
             continue
 
+        previous_hash = entry.current_hash
         entry.current_hash = current_hash
         entry.size_bytes = size_bytes
         entry.last_checked = now_utc()
 
         if current_hash != entry.baseline_hash:
+            # If the file hash hasn't changed since the last scan, don't log another detection
+            if previous_hash == current_hash:
+                entry.status = "modified"
+                db.add(entry)
+                continue
             # Skip creating duplicate detection if open incident already exists
             has_open = db.query(SecurityIncident).join(SecurityDetectionEvent).filter(
                 SecurityDetectionEvent.file_id == entry.id,
