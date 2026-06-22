@@ -13,6 +13,7 @@ import threading
 import time
 import hmac
 import hashlib
+import logging
 
 from dotenv import load_dotenv
 from sqlalchemy import text, inspect, or_, event
@@ -21,6 +22,13 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 load_dotenv(Path(__file__).resolve().with_name(".env"), override=True)
+
+# Startup diagnostics for reCAPTCHA
+_recaptcha_key = os.getenv("RECAPTCHA_SECRET_KEY")
+if _recaptcha_key:
+    logging.getLogger("main").info("RECAPTCHA_SECRET_KEY loaded (length=%d, prefix=%s)", len(_recaptcha_key), _recaptcha_key[:6])
+else:
+    logging.getLogger("main").warning("RECAPTCHA_SECRET_KEY is NOT set in environment — reCAPTCHA verification will always fail.")
 
 from routes import branches, reports, announcements, memos, alerts, logs, backup, users, payments, receipts, settings, policies, privacy, rbac_routes, dashboard, public, admin_users, branch_portal, branch_settings, unified_auth, discrepancies, tax_assessment, security_dashboard, public_content, window_staff_account
 from services import ocr_routes

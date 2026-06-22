@@ -2,6 +2,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 import json
+import logging
 import os
 import random
 import secrets
@@ -87,7 +88,14 @@ router = APIRouter()
 # Rate limiting configuration
 limiter = Limiter(key_func=get_remote_address)
 
+logger = logging.getLogger(__name__)
+
 RECAPTCHA_SECRET_KEY = os.getenv("RECAPTCHA_SECRET_KEY")
+if RECAPTCHA_SECRET_KEY:
+    logger.info("RECAPTCHA_SECRET_KEY is configured (length=%d, prefix=%s)", len(RECAPTCHA_SECRET_KEY), RECAPTCHA_SECRET_KEY[:6])
+else:
+    logger.warning("RECAPTCHA_SECRET_KEY is NOT configured — reCAPTCHA verification will always fail.")
+
 PASSWORD_RESET_EXPIRES_MINUTES = 30
 
 SERVER_STARTED_AT = datetime.utcnow().isoformat()
@@ -320,10 +328,24 @@ def requires_captcha(portal: str, identifier: str) -> bool:
     key = tracking_key(portal, identifier)
     if key not in locked_accounts:
         return False
-    return locked_accounts[key]["attempts"] >= PORTAL_CONFIG[portal]["captcha_threshold"]
+    entry = locked_accounts[key]
+    lock_time = entry.get("locked_at")
+    duration = PORTAL_CONFIG[portal]["lockout_duration"]
+    if lock_time and time.time() - lock_time >= duration:
+        # Stale entry — lockout expired, clear it
+        del locked_accounts[key]
+        _save_abuse_state()
+        return False
+    return entry["attempts"] >= PORTAL_CONFIG[portal]["captcha_threshold"]
 
 
 def verify_recaptcha(token: str, client_ip: str) -> bool:
+    if not RECAPTCHA_SECRET_KEY:
+        logger.warning("verify_recaptcha called but RECAPTCHA_SECRET_KEY is missing")
+        return False
+    if not token:
+        logger.warning("verify_recaptcha called with empty token")
+        return False
     try:
         response = requests.post(
             "https://www.google.com/recaptcha/api/siteverify",
@@ -334,8 +356,21 @@ def verify_recaptcha(token: str, client_ip: str) -> bool:
             },
             timeout=5,
         )
-        return response.json().get("success", False)
+        data = response.json()
+        success = data.get("success", False)
+        if not success:
+            logger.warning(
+                "reCAPTCHA verification failed — success=%s, error-codes=%s, token_len=%d, ip=%s",
+                success,
+                data.get("error-codes", []),
+                len(token),
+                client_ip,
+            )
+        else:
+            logger.info("reCAPTCHA verification succeeded for ip=%s", client_ip)
+        return success
     except Exception as exc:
+        logger.exception("reCAPTCHA verification request failed: %s", exc)
         return False
 
 
