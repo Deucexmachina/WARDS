@@ -114,6 +114,13 @@ def test_record_detection_creates_incident_and_quarantine(monkeypatch):
             if getattr(obj, "id", None) is None:
                 obj.id = 99
 
+        def query(self, _model):
+            return SimpleNamespace(
+                join=lambda *_a, **_kw: SimpleNamespace(
+                    filter=lambda *_a, **_kw: SimpleNamespace(first=lambda: None)
+                )
+            )
+
     db = DummyDb()
     file_entry = SimpleNamespace(
         id=7,
@@ -182,6 +189,13 @@ def test_record_detection_logs_alert_when_no_incident(monkeypatch):
         def refresh(self, obj):
             if getattr(obj, "id", None) is None:
                 obj.id = 123
+
+        def query(self, _model):
+            return SimpleNamespace(
+                join=lambda *_a, **_kw: SimpleNamespace(
+                    filter=lambda *_a, **_kw: SimpleNamespace(first=lambda: None)
+                )
+            )
 
     db = DummyDb()
     file_entry = SimpleNamespace(
