@@ -33,6 +33,7 @@ services:
       PASSWORD_RESET_SECRET_KEY: ${PASSWORD_RESET_SECRET_KEY:-change-me-password-reset-secret}
       LOG_INTEGRITY_SECRET: ${LOG_INTEGRITY_SECRET:-change-me-log-integrity-secret}
       DATA_HASH_SECRET: ${DATA_HASH_SECRET:-change-me-data-hash-secret}
+      DATA_ENCRYPTION_SECRET: ${DATA_ENCRYPTION_SECRET:-change-me-data-encryption-secret}
       BACKUP_INTEGRITY_SECRET: ${BACKUP_INTEGRITY_SECRET:-change-me-backup-integrity-secret}
     ports:
       - "8443:8443"
