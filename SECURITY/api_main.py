@@ -769,9 +769,9 @@ def api_internal_deploy_status():
 @app.post("/v1/admin/clear-all-logs", dependencies=[Depends(require_api_key)])
 def api_clear_all_logs(db=Depends(get_db)):
     """Admin-only: wipe every detection, recovery, and incident row."""
-    deleted_incidents = db.query(SecurityIncident).delete()
-    deleted_detections = db.query(SecurityDetectionEvent).delete()
-    deleted_recoveries = db.query(SecurityRecoveryEvent).delete()
+    deleted_recoveries = db.query(SecurityRecoveryEvent).delete(synchronize_session=False)
+    deleted_incidents = db.query(SecurityIncident).delete(synchronize_session=False)
+    deleted_detections = db.query(SecurityDetectionEvent).delete(synchronize_session=False)
     db.commit()
     return {
         "status": "cleared",
