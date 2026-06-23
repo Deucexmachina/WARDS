@@ -172,7 +172,7 @@ async def get_dashboard_statistics(
     recent_payments = payment_query.order_by(Payment.created_at.desc()).limit(10).all()
     
     # Get recent stored alerts with per-admin read state.
-    alerts = db.query(Alert).order_by(Alert.created_at.desc()).limit(5).all()
+    alerts = db.query(Alert).order_by(Alert.created_at.desc()).all()
     viewed_alert_ids = {
         row.alert_id
         for row in db.query(AlertView).filter(

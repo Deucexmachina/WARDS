@@ -133,6 +133,7 @@ const Dashboard = () => {
   const [showDiscrepancyReplyComposer, setShowDiscrepancyReplyComposer] = useState(false);
   const [paymentToDelete, setPaymentToDelete] = useState(null);
   const [branchPageMap, setBranchPageMap] = useState({});
+  const [alertsPage, setAlertsPage] = useState(1);
 
   const getBranchPage = (branchName) => branchPageMap[branchName] || 1;
   const setBranchPage = (branchName, page) =>
@@ -796,45 +797,81 @@ const Dashboard = () => {
 
       <div className="rounded-xl bg-white p-6 shadow-lg">
         <h3 className="mb-4 text-xl font-bold text-primary">System Alerts</h3>
-        {stats?.recent_alerts?.length === 0 ? (
-          <p className="py-8 text-center text-gray-500">No active alerts</p>
-        ) : (
-          <div className="space-y-4">
-            {stats?.recent_alerts?.map((alert) => (
-              <div
-                key={alert.id}
-                className={`rounded-lg border-l-4 p-4 ${
-                  alert.severity === 'high'
-                    ? 'border-red-500 bg-red-50'
-                    : alert.severity === 'medium'
-                    ? 'border-yellow-500 bg-yellow-50'
-                    : 'border-blue-500 bg-blue-50'
-                }`}
-              >
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="font-semibold">{alert.title}</p>
-                    <p className="mt-1 text-sm text-gray-600">{alert.message}</p>
-                    <p className="mt-2 text-xs text-gray-500">
-                      {formatUtc8DateTime(alert.created_at)}
-                    </p>
-                  </div>
-                  <span
-                    className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                      alert.severity === 'high'
-                        ? 'bg-red-100 text-red-800'
-                        : alert.severity === 'medium'
-                        ? 'bg-yellow-100 text-yellow-800'
-                        : 'bg-blue-100 text-blue-800'
-                    }`}
-                  >
-                    {alert.severity}
-                  </span>
+        {(() => {
+          const ALERTS_PER_PAGE = 5;
+          const allAlerts = stats?.recent_alerts || [];
+          const totalPages = Math.ceil(allAlerts.length / ALERTS_PER_PAGE) || 1;
+          const start = (alertsPage - 1) * ALERTS_PER_PAGE;
+          const paginatedAlerts = allAlerts.slice(start, start + ALERTS_PER_PAGE);
+          return (
+            <>
+              {allAlerts.length === 0 ? (
+                <p className="py-8 text-center text-gray-500">No active alerts</p>
+              ) : (
+                <div className="space-y-4">
+                  {paginatedAlerts.map((alert) => (
+                    <div
+                      key={alert.id}
+                      className={`rounded-lg border-l-4 p-4 ${
+                        alert.severity === 'high'
+                          ? 'border-red-500 bg-red-50'
+                          : alert.severity === 'medium'
+                          ? 'border-yellow-500 bg-yellow-50'
+                          : 'border-blue-500 bg-blue-50'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <p className="font-semibold">{alert.title}</p>
+                          <p className="mt-1 text-sm text-gray-600">{alert.message}</p>
+                          <p className="mt-2 text-xs text-gray-500">
+                            {formatUtc8DateTime(alert.created_at)}
+                          </p>
+                        </div>
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                            alert.severity === 'high'
+                              ? 'bg-red-100 text-red-800'
+                              : alert.severity === 'medium'
+                              ? 'bg-yellow-100 text-yellow-800'
+                              : 'bg-blue-100 text-blue-800'
+                          }`}
+                        >
+                          {alert.severity}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
+              )}
+              {allAlerts.length > ALERTS_PER_PAGE && (
+                <div className="mt-4 flex items-center justify-between">
+                  <span className="text-xs text-gray-500">
+                    Page {alertsPage} of {totalPages}
+                  </span>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setAlertsPage((p) => Math.max(1, p - 1))}
+                      disabled={alertsPage <= 1}
+                      className="rounded-md bg-white px-3 py-1 text-xs font-semibold text-gray-700 ring-1 ring-gray-200 transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Previous
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAlertsPage((p) => Math.min(totalPages, p + 1))}
+                      disabled={alertsPage >= totalPages}
+                      className="rounded-md bg-white px-3 py-1 text-xs font-semibold text-gray-700 ring-1 ring-gray-200 transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          );
+        })()}
       </div>
 
       <div className="mt-6 rounded-xl bg-white p-6 shadow-lg">
