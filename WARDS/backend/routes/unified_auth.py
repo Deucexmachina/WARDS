@@ -777,13 +777,25 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
                     "requires_mfa": True,
                 }
 
+            totp_code = (credentials.totp_code or "").strip()
             totp = pyotp.TOTP(mfa_secret)
-            if not totp.verify(credentials.totp_code, valid_window=MFA_VALID_WINDOW_STEPS):
+            totp_ok = totp.verify(totp_code, valid_window=MFA_VALID_WINDOW_STEPS)
+            if not totp_ok:
+                # Extended-window check to detect time drift without blocking the user
+                extended_ok = totp.verify(totp_code, valid_window=5)
+                logger.warning(
+                    "[LOGIN] TOTP verification FAILED for %s (portal=%s) server_time=%s extended_window=%s",
+                    credentials.identifier,
+                    portal,
+                    datetime.utcnow().isoformat(),
+                    extended_ok,
+                )
                 record_failed_attempt(portal, credentials.identifier)
                 return JSONResponse(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     content={"detail": "Invalid authenticator code. Please try again."},
                 )
+            logger.warning("[LOGIN] TOTP verification PASSED for %s (portal=%s)", credentials.identifier, portal)
 
     reset_failed_attempts(portal, credentials.identifier)
     clear_tracking(credentials.identifier)
