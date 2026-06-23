@@ -42,6 +42,7 @@ SECURITY_ROOT = MASTER_ROOT / "SECURITY"
 QUARANTINE_ROOT = MASTER_ROOT / "QUARANTINE"
 VM1_SNAPSHOT_ROOT = Path(os.getenv("VM1_SNAPSHOT_ROOT", str(SECURITY_ROOT / "vm1_snapshots")))
 VM1_DEFACED_SNAPSHOT_ROOT = VM1_SNAPSHOT_ROOT / ".defaced"
+VM1_RESTORE_CONTENT_ROOT = VM1_SNAPSHOT_ROOT / ".restore_content"
 DEFAULT_BACKUP_ROOT = SECURITY_ROOT / "local_backups"
 MODEL_STATE_PATH = SECURITY_ROOT / "ml" / "isolation_forest_state.json"
 MODEL_METADATA_PATH = SECURITY_ROOT / "ml" / "isolation_forest_metadata.json"
@@ -5457,22 +5458,32 @@ def _quarantine_vm1_snapshot(entry: SecurityMonitoredFile, detection_id: int) ->
 
 def _create_vm1_restore_command(db: Session, entry: SecurityMonitoredFile, detection_id: int, *, original_content_bytes: bytes | None = None):
     if original_content_bytes is not None:
-        content_b64 = base64.b64encode(original_content_bytes).decode()
+        content_bytes = original_content_bytes
     else:
         snapshot = VM1_SNAPSHOT_ROOT / entry.relative_path
-        content_b64 = None
+        content_bytes = None
         if snapshot.exists():
             try:
-                content_b64 = base64.b64encode(snapshot.read_bytes()).decode()
+                content_bytes = snapshot.read_bytes()
             except Exception:
                 pass
 
+    command_id = f"rest_{detection_id}_{int(time.time())}"
+    content_file = None
+    if content_bytes:
+        try:
+            VM1_RESTORE_CONTENT_ROOT.mkdir(parents=True, exist_ok=True)
+            content_file = VM1_RESTORE_CONTENT_ROOT / f"{command_id}.b64"
+            content_file.write_bytes(base64.b64encode(content_bytes))
+        except Exception:
+            content_file = None
+
     cmd = {
-        "command_id": f"rest_{detection_id}_{int(time.time())}",
+        "command_id": command_id,
         "detection_id": detection_id,
         "relative_path": entry.relative_path,
         "expected_hash": entry.baseline_hash,
-        "restore_content_b64": content_b64,
+        "restore_content_file": str(content_file) if content_file else None,
         "created_at": now_utc().isoformat(),
     }
     existing = json_loads(get_setting(db, "vm1_restore_commands", "[]"), [])
@@ -5495,7 +5506,20 @@ def get_pending_vm1_restore_commands(db: Session) -> list[dict]:
     acked_raw = get_setting(db, "vm1_restore_acks", "[]")
     acked = json_loads(acked_raw, [])
     acked_ids = {a.get("command_id") for a in acked}
-    pending = [c for c in commands if c.get("command_id") not in acked_ids]
+    pending = []
+    for c in commands:
+        if c.get("command_id") in acked_ids:
+            continue
+        # Hydrate content from external file if present (avoids MySQL TEXT limit)
+        content_file = c.get("restore_content_file")
+        if content_file and not c.get("restore_content_b64"):
+            try:
+                path = Path(content_file)
+                if path.exists():
+                    c["restore_content_b64"] = base64.b64encode(path.read_bytes()).decode()
+            except Exception:
+                pass
+        pending.append(c)
     return pending
 
 
@@ -5513,8 +5537,18 @@ def acknowledge_vm1_restore_command(db: Session, command_id: str, success: bool)
 
     # Also remove the acknowledged command from the pending list so the queue stays small
     commands = json_loads(get_setting(db, "vm1_restore_commands", "[]"), [])
+    removed = [c for c in commands if c.get("command_id") == command_id]
     commands = [c for c in commands if c.get("command_id") != command_id]
     set_setting(db, "vm1_restore_commands", json_dumps(commands), "vm1_reporter")
+
+    # Clean up external content files to prevent disk bloat
+    for c in removed:
+        content_file = c.get("restore_content_file")
+        if content_file:
+            try:
+                Path(content_file).unlink(missing_ok=True)
+            except Exception:
+                pass
     return True
 
 
