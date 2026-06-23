@@ -242,7 +242,20 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
         }
 
         const parsed = JSON.parse(raw);
+        // Expire active lockouts
         if (parsed.lockedUntil && parsed.lockedUntil <= Date.now()) {
+          localStorage.removeItem(storageKey);
+          return { attempts: 0, lockedUntil: null };
+        }
+        // Expire stale attempt counters (older than lockout duration) so a
+        // cleared backend state doesn't keep forcing reCAPTCHA from yesterday
+        const lastAttempt = parsed.lastAttempt || 0;
+        if (lastAttempt && Date.now() - lastAttempt > LOCKOUT_DURATION_MS) {
+          localStorage.removeItem(storageKey);
+          return { attempts: 0, lockedUntil: null };
+        }
+        // Legacy entries without lastAttempt: treat as stale and clear
+        if (!lastAttempt && Number(parsed.attempts || 0) > 0) {
           localStorage.removeItem(storageKey);
           return { attempts: 0, lockedUntil: null };
         }
@@ -299,7 +312,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
     const current = readGuardState(value, portal);
     const nextAttempts = current.attempts + 1;
     const lockedUntil = nextAttempts >= LOCKOUT_THRESHOLD ? Date.now() + LOCKOUT_DURATION_MS : null;
-    const nextState = { attempts: nextAttempts, lockedUntil };
+    const nextState = { attempts: nextAttempts, lockedUntil, lastAttempt: Date.now() };
     writeGuardState(value, nextState, portal);
 
     if (nextAttempts >= CAPTCHA_THRESHOLD) {
