@@ -1294,6 +1294,12 @@ async def get_branch_dashboard(
     recent_cutoff = datetime.utcnow() - timedelta(hours=12)
     recent_queues = [queue for queue in queues if queue.created_at and queue.created_at >= recent_cutoff]
 
+    # Completed queues are archived to QueueHistory immediately upon completion
+    completed_history = db.query(QueueHistory).filter(
+        QueueHistory.branch_id == current_staff.branch_id,
+        QueueHistory.final_status == "Completed",
+    ).all()
+
     buckets = []
     for index in range(6):
         bucket_start = datetime.utcnow() - timedelta(hours=(6 - index) * 2)
@@ -1302,7 +1308,7 @@ async def get_branch_dashboard(
             "label": bucket_start.strftime("%H:%M"),
             "waiting": len([q for q in queues if queue_value(q, "status") == "Waiting" and q.created_at and bucket_start <= q.created_at < bucket_end]),
             "serving": len([q for q in queues if queue_value(q, "status") == "Serving" and q.served_at and bucket_start <= q.served_at < bucket_end]),
-            "completed": len([q for q in queues if queue_value(q, "status") == "Completed" and q.completed_at and bucket_start <= q.completed_at < bucket_end]),
+            "completed": len([h for h in completed_history if h.completed_at and bucket_start <= h.completed_at < bucket_end]),
         })
 
     log_branch_action(db, current_staff, "Branch Dashboard Viewed", "Viewed branch dashboard", request.client.host)
@@ -1320,10 +1326,10 @@ async def get_branch_dashboard(
             "waiting": len([q for q in queues if queue_value(q, "status") == "Waiting"]),
             "serving": len([q for q in queues if queue_value(q, "status") == "Serving"]),
             "skipped": len([q for q in queues if queue_value(q, "status") == "Skipped"]),
-            "completed": len([q for q in queues if queue_value(q, "status") == "Completed"]),
+            "completed": len(completed_history),
         },
         "transactions": {
-            "today_completed": len([q for q in queues if queue_value(q, "status") == "Completed" and q.completed_at and q.completed_at >= today]),
+            "today_completed": len([h for h in completed_history if h.completed_at and h.completed_at >= today]),
             "payments_pending": len([p for p in payments if get_effective_payment_status(p) == "pending"]),
             "payments_confirmed": len([p for p in payments if get_effective_payment_status(p) == "confirmed"]),
             "payments_failed": len([p for p in payments if get_effective_payment_status(p) == "failed"]),
