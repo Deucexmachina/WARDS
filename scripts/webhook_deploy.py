@@ -77,6 +77,19 @@ async def github_webhook(request: Request):
         return PlainTextResponse("Ignored non-main branch", status_code=200)
 
     try:
+        # Pause VM2 monitoring before any file changes
+        if VM2_HOST and VM2_API_KEY:
+            try:
+                httpx.post(
+                    f"http://{VM2_HOST}:8443/internal/deployment-mode",
+                    headers={"X-API-Key": VM2_API_KEY},
+                    json={"in_progress": True},
+                    timeout=10.0,
+                )
+                logger.info("VM2 deployment mode enabled")
+            except Exception as e:
+                logger.warning("Could not pause VM2 monitoring before deploy: %s", e)
+
         # Deploy VM1
         logger.info("Deploying VM1 from %s", DEPLOY_DIR)
         run_cmd(["git", "fetch", "origin", "main"], cwd=DEPLOY_DIR)
@@ -108,6 +121,18 @@ async def github_webhook(request: Request):
                 logger.info("VM2 post-deploy backup triggered: %s", backup_resp.json())
             except Exception as e:
                 logger.error("VM2 post-deploy backup trigger failed: %s", e)
+
+            # Resume VM2 monitoring after deploy + backup
+            try:
+                httpx.post(
+                    f"http://{VM2_HOST}:8443/internal/deployment-mode",
+                    headers={"X-API-Key": VM2_API_KEY},
+                    json={"in_progress": False},
+                    timeout=10.0,
+                )
+                logger.info("VM2 deployment mode cleared")
+            except Exception as e:
+                logger.warning("Could not clear VM2 deployment mode after deploy: %s", e)
 
         return PlainTextResponse("Deployed VM1 and VM2", status_code=200)
 

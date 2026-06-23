@@ -1098,6 +1098,20 @@ const BackupRecovery = () => {
                 ))}
               </div>
 
+              {dashboard?.today_summary && (
+                <div className={`rounded-2xl border p-5 ${dashboard.today_summary.high_severity > 0 ? 'border-red-200 bg-red-50 text-red-900' : dashboard.today_summary.incidents > 0 ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-green-200 bg-green-50 text-green-900'}`}>
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">{dashboard.today_summary.high_severity > 0 ? '⚠️' : dashboard.today_summary.incidents > 0 ? '📊' : '✅'}</span>
+                    <div className="flex-1">
+                      <p className="text-sm font-bold">
+                        Today's Report — {dashboard.today_summary.incidents} incident(s), {dashboard.today_summary.detections} detection(s)
+                      </p>
+                      <p className="mt-1 text-sm leading-6">{dashboard.today_summary.recommendation}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-amber-900">
                 <p className="text-sm font-bold">Scheduled backup reminder</p>
                 <p className="mt-1 text-sm">

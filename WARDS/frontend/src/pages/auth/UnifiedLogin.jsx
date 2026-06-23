@@ -10,7 +10,7 @@ import cityHall from '../../assets/branding/qc_city_hall.jpg';
 
 import { API_HOST } from '../../services/api';
 const RECAPTCHA_SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY || '';
-const CAPTCHA_THRESHOLD = 3;
+const CAPTCHA_THRESHOLD = 1;
 const LOCKOUT_THRESHOLD = 5;
 const LOCKOUT_DURATION_MS = 2 * 60 * 1000;
 
@@ -285,6 +285,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
     localStorage.removeItem(getTrackingKey(normalized, 'unknown'));
     localStorage.removeItem(getTrackingKey(normalized, 'admin'));
     localStorage.removeItem(getTrackingKey(normalized, 'branch'));
+    localStorage.removeItem(getTrackingKey(normalized, 'public'));
     localStorage.removeItem(getSharedStaffTrackingKey(normalized));
   };
 
@@ -355,7 +356,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
   useEffect(() => {
     const guardState = readGuardState(identifier);
     setRequiresCaptcha(guardState.attempts >= CAPTCHA_THRESHOLD);
-  }, [identifier, detectedPortal, searchParams]);
+  }, [identifier]);
 
   const redirectAfterLogin = (portal) => {
     const redirectTarget = sessionStorage.getItem('redirectAfterLogin');
@@ -460,18 +461,14 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
       lockDetectedPortal(response.data.portal);
 
       if (response.data.requires_mfa) {
-        const latestGuardState = readGuardState(identifier, response.data.portal);
-        if (latestGuardState.lockedUntil && latestGuardState.lockedUntil > Date.now()) {
-          setError(getLockMessage(latestGuardState.lockedUntil));
-          setRequiresCaptcha(true);
-          return;
-        }
+        clearGuardState(identifier, response.data.portal);
+        setRecaptchaToken('');
         setStep('totp');
         setRequiresCaptcha(false);
         return;
       }
 
-      clearGuardState(identifier);
+      clearGuardState(identifier, response.data.portal);
       persistSession(response.data);
       if (response.data.portal === 'public' && response.data.mfa_setup_required) {
         sessionStorage.setItem('wards:publicMfaPrompt', 'true');
@@ -561,7 +558,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
         recaptcha_token: recaptchaToken || undefined,
       });
 
-      clearGuardState(identifier);
+      clearGuardState(identifier, response.data.portal);
       persistSession(response.data);
       redirectAfterLogin(response.data.portal);
     } catch (err) {
@@ -667,7 +664,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
         recaptcha_token: recaptchaToken || undefined,
       });
 
-      clearGuardState(identifier);
+      clearGuardState(identifier, loginResponse.data.portal);
       persistSession(loginResponse.data);
       redirectAfterLogin(loginResponse.data.portal);
     } catch (err) {

@@ -1712,6 +1712,18 @@ def set_setting(db: Session, key: str, value: str, updated_by: str | None = None
     return setting
 
 
+def is_deployment_in_progress(db: Session) -> bool:
+    return (get_setting(db, "deployment_in_progress", "false") or "false").lower() == "true"
+
+
+def set_deployment_mode(db: Session, in_progress: bool, updated_by: str = "deploy") -> None:
+    set_setting(db, "deployment_in_progress", "true" if in_progress else "false", updated_by)
+    if in_progress:
+        logger.info("Security monitoring paused — deployment in progress.")
+    else:
+        logger.info("Security monitoring resumed — deployment complete.")
+
+
 def env_value(name: str, default: str) -> str:
     raw = os.getenv(name)
     return default if raw is None else str(raw).strip()
@@ -3584,6 +3596,13 @@ _last_full_registration_at = None
 def scan_all_files(db: Session, context: dict | None = None) -> list[SecurityDetectionEvent]:
     global _last_full_registration_at
     now = now_utc()
+    if is_deployment_in_progress(db):
+        logger.info("Deployment in progress — refreshing file registry without creating detections.")
+        register_initial_files(db, refresh_existing=True, incremental=False)
+        _last_full_registration_at = now
+        set_setting(db, "last_scan_at", now_utc().isoformat(), "security_scanner")
+        db.commit()
+        return []
     if _last_full_registration_at is None or (now - _last_full_registration_at) > timedelta(hours=1):
         register_initial_files(db, refresh_existing=False, incremental=False)
         _last_full_registration_at = now
@@ -4748,6 +4767,16 @@ def dashboard_payload(db: Session) -> dict:
     elif incidents:
         status = "At Risk"
     monitoring_enabled = (get_setting(db, "monitoring_enabled", "false") or "false").lower() == "true"
+
+    # Today's counts
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_incidents = db.query(SecurityIncident).filter(SecurityIncident.created_at >= today_start).count()
+    today_detections = db.query(SecurityDetectionEvent).filter(SecurityDetectionEvent.detected_at >= today_start).count()
+    today_high_severity = db.query(SecurityIncident).filter(
+        SecurityIncident.created_at >= today_start,
+        SecurityIncident.severity_level.in_(["high", "critical"]),
+    ).count()
+
     return {
         "system_status": status,
         "monitored_files": monitored_files_count,
@@ -4757,6 +4786,12 @@ def dashboard_payload(db: Session) -> dict:
         "severity_distribution": severity,
         "attack_types": attack_types,
         "behaviors": behaviors,
+        "today_summary": {
+            "incidents": today_incidents,
+            "detections": today_detections,
+            "high_severity": today_high_severity,
+            "recommendation": _today_recommendation(today_incidents, today_high_severity, status),
+        },
         "traffic_summaries": {
             "severity": summarize_chart("severity", severity),
             "attacks": summarize_chart("attacks", attack_types),
@@ -4795,10 +4830,24 @@ def summarize_chart(kind: str, data: dict) -> str:
     top_key, top_value = sorted(data.items(), key=lambda item: item[1], reverse=True)[0]
     label = str(top_key).replace("_", " ").title()
     if kind == "severity":
-        return f"{label} is currently the most common severity with {top_value} of {total} detections."
+        if label.lower() in {"high", "critical"}:
+            return f"{label} severity dominates the threat landscape ({top_value} of {total} incidents). Immediate review and hardening of affected systems is strongly recommended."
+        if label.lower() == "medium":
+            return f"{label} severity is most common ({top_value} of {total} incidents). Review patterns and consider proactive mitigations before escalation."
+        return f"{label} severity is most common ({top_value} of {total} incidents). Monitor trends and investigate any clustering."
     if kind == "attacks":
-        return f"The most frequent detected attack type is {label}, appearing in {top_value} of {total} incidents."
-    return f"The most common monitored behavior is {label}, seen {top_value} time(s) across {total} behavior flags."
+        return f"{label} is the most frequent attack vector ({top_value} of {total} incidents). Prioritize defensive controls targeting this vector — consider rule hardening, access restrictions, or staff awareness training."
+    return f"{label} is the top flagged behavior ({top_value} of {total} occurrences). Correlate with user or system activity to identify potential insider threats or compromised credentials."
+
+
+def _today_recommendation(today_incidents: int, today_high: int, status: str) -> str:
+    if status == "Compromised":
+        return f"Today's Report: {today_incidents} incident(s) detected, including {today_high} high or critical severity. The system is currently flagged as compromised. Immediate administrator intervention, incident containment, and a full security audit are required."
+    if today_high > 0:
+        return f"Today's Report: {today_incidents} incident(s) detected today with {today_high} high-severity event(s). Escalate to the security team and review affected files or user sessions immediately."
+    if today_incidents > 0:
+        return f"Today's Report: {today_incidents} incident(s) detected today. No critical severity events so far, but continuous monitoring is advised. Review low-severity flags for patterns that may signal reconnaissance or early-stage intrusion."
+    return "Today's Report: No new incidents detected today. Security posture is stable, but maintain routine monitoring and scheduled backups to preserve this state."
 
 
 def query_detections(db: Session, keyword: str | None = None, date_from: str | None = None, date_to: str | None = None, target: str | None = None, severity: str | None = None, limit: int = 200, sort: str = "newest", classification: str | None = None) -> list[SecurityDetectionEvent]:
@@ -5628,6 +5677,46 @@ def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type
 
 
 def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
+    if is_deployment_in_progress(db):
+        logger.info("Deployment in progress — skipping VM1 file change detections.")
+        # Still register or update files so the baseline is correct post-deploy
+        for f in files:
+            rel_path = f["relative_path"]
+            folder_root = f["folder_root"]
+            current_hash = f["current_hash"]
+            size_bytes = f["size_bytes"]
+            if Path(rel_path).name.lower() == ".env":
+                continue
+            entry = (
+                db.query(SecurityMonitoredFile)
+                .filter(SecurityMonitoredFile.relative_path == rel_path)
+                .filter(SecurityMonitoredFile.folder_root == folder_root)
+                .first()
+            )
+            if entry:
+                entry.current_hash = current_hash
+                entry.size_bytes = size_bytes
+                entry.last_checked = now_utc()
+                entry.status = "clean"
+                entry.baseline_hash = current_hash
+                db.add(entry)
+            else:
+                db.add(
+                    SecurityMonitoredFile(
+                        file_path=f"vm1://{rel_path}",
+                        relative_path=rel_path,
+                        folder_root=folder_root,
+                        baseline_hash=current_hash,
+                        current_hash=current_hash,
+                        status="clean",
+                        file_type=file_type(Path(rel_path)),
+                        size_bytes=size_bytes,
+                        last_checked=now_utc(),
+                    )
+                )
+        db.commit()
+        return {"detections": [], "changed": 0, "registered": len(files)}
+
     detections = []
     changed = 0
     registered = 0

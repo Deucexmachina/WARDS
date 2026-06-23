@@ -1637,7 +1637,7 @@ def start_security_monitor_if_enabled():
     adaptive_enabled = (os.getenv("SECURITY_ADAPTIVE_INTERVAL_ENABLED") or "false").strip().lower() == "true"
 
     def monitor_loop():
-        from SECURITY.security_engine import activate_database_runtime_monitoring, create_manual_backup, get_setting, now_utc, scan_all_files, seed_settings, set_setting
+        from SECURITY.security_engine import activate_database_runtime_monitoring, create_manual_backup, get_setting, now_utc, scan_all_files, seed_settings, set_setting, set_deployment_mode
 
         while True:
             retry_delay = False
@@ -1653,6 +1653,7 @@ def start_security_monitor_if_enabled():
                     raise RuntimeError(event.error_message or "Startup baseline backup failed")
                 set_setting(startup_db, "monitoring_enabled", "true", "system_startup")
                 set_setting(startup_db, "startup_baseline_status", "complete", "system")
+                set_deployment_mode(startup_db, False)
                 print("[SECURITY MONITOR] startup baseline backup refreshed")
                 break
             except Exception as exc:

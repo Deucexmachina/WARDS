@@ -695,6 +695,17 @@ def api_mark_stale(db=Depends(get_db)):
 
 
 # ---------------------------------------------------------------------------
+# Internal deployment mode toggle (called by VM1 webhook deployer)
+# ---------------------------------------------------------------------------
+@app.post("/internal/deployment-mode", dependencies=[Depends(require_api_key)])
+def api_deployment_mode(payload: dict = {}, db: Session = Depends(get_db)):
+    from SECURITY.security_engine import set_deployment_mode
+    in_progress = payload.get("in_progress", False)
+    set_deployment_mode(db, in_progress, updated_by="webhook")
+    return {"deployment_in_progress": in_progress}
+
+
+# ---------------------------------------------------------------------------
 # Internal deploy trigger (called by VM1 webhook deployer)
 # ---------------------------------------------------------------------------
 @app.post("/internal/deploy", dependencies=[Depends(require_api_key)])
@@ -706,6 +717,13 @@ def api_internal_deploy():
     import time
 
     def _deploy():
+        from database.models import SessionLocal
+        from SECURITY.security_engine import set_deployment_mode, create_full_system_backup
+
+        db = SessionLocal()
+        set_deployment_mode(db, True)
+        db.close()
+
         app_dir = os.getenv("VM2_APP_DIR", "/opt/wards/security/app")
         logger = logging.getLogger(__name__)
         if not os.path.isdir(os.path.join(app_dir, ".git")):
@@ -733,15 +751,7 @@ def api_internal_deploy():
             )
             if docker.returncode == 0:
                 logger.info("Docker compose restart succeeded")
-                # Trigger post-deploy backup so new files have a trusted baseline
-                try:
-                    from database.models import SessionLocal
-                    from SECURITY.security_engine import create_full_system_backup
-                    db = SessionLocal()
-                    event = create_full_system_backup(db, initiated_by=None, label="post_deploy")
-                    logger.info("Post-deploy backup finished: %s", event.status)
-                except Exception as backup_exc:
-                    logger.warning("Post-deploy backup failed: %s", backup_exc)
+                # Post-deploy backup + clear deployment mode handled by monitor_loop startup
                 return
             logger.warning("docker compose exited %d: %s", docker.returncode, docker.stderr)
         except FileNotFoundError:
