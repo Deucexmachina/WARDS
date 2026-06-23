@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import httpx
 import os
 import sys
 from pathlib import Path
@@ -830,6 +831,9 @@ def remove_folder(payload: AddFolderRequest, db: Session = Depends(get_db), admi
         raise HTTPException(status_code=400, detail=str(exc))
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code if exc.response else 502
+        raise HTTPException(status_code=status_code, detail=str(exc))
 
 
 @router.get("/folder-browser")

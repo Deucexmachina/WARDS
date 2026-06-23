@@ -11,8 +11,17 @@ import cityHall from '../../assets/branding/qc_city_hall.jpg';
 import { API_HOST } from '../../services/api';
 const RECAPTCHA_SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY || '';
 const CAPTCHA_THRESHOLD = 3;
-const LOCKOUT_THRESHOLD = 5;
-const LOCKOUT_DURATION_MS = 15 * 60 * 1000;
+const FIRST_STRIKE_THRESHOLD = 5;
+const STRIKE_DURATIONS_MS = [
+  0,
+  30 * 1000,        // 1st strike: 30 seconds
+  3 * 60 * 1000,    // 2nd strike: 3 minutes
+  10 * 60 * 1000,   // 3rd strike: 10 minutes
+  30 * 60 * 1000,   // 4th strike: 30 minutes
+  60 * 60 * 1000,   // 5th strike: 1 hour
+  -1,               // 6th strike: permanent
+];
+const STALE_GUARD_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 const portalCopy = {
   public: {
@@ -222,46 +231,55 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
     return states.reduce(
       (merged, state) => ({
         attempts: Math.max(merged.attempts, Number(state?.attempts || 0)),
+        strikes: Math.max(merged.strikes, Number(state?.strikes || 0)),
         lockedUntil: Math.max(merged.lockedUntil || 0, state?.lockedUntil || 0) || null,
       }),
-      { attempts: 0, lockedUntil: null },
+      { attempts: 0, strikes: 0, lockedUntil: null },
     );
   };
 
   const readGuardState = (value, portal = getActivePortal()) => {
     const normalized = value.trim().toLowerCase();
     if (!normalized) {
-      return { attempts: 0, lockedUntil: null };
+      return { attempts: 0, strikes: 0, lockedUntil: null };
     }
 
     try {
       const readStateForKey = (storageKey) => {
         const raw = localStorage.getItem(storageKey);
         if (!raw) {
-          return { attempts: 0, lockedUntil: null };
+          return { attempts: 0, strikes: 0, lockedUntil: null };
         }
 
         const parsed = JSON.parse(raw);
+        // Permanent blocks (-1) never expire
+        if (parsed.lockedUntil === -1) {
+          return {
+            attempts: Number(parsed.attempts || 0),
+            strikes: Number(parsed.strikes || 0),
+            lockedUntil: -1,
+          };
+        }
         // Expire active lockouts
         if (parsed.lockedUntil && parsed.lockedUntil <= Date.now()) {
           localStorage.removeItem(storageKey);
-          return { attempts: 0, lockedUntil: null };
+          return { attempts: 0, strikes: 0, lockedUntil: null };
         }
-        // Expire stale attempt counters (older than lockout duration) so a
-        // cleared backend state doesn't keep forcing reCAPTCHA from yesterday
+        // Expire stale attempt counters (older than stale threshold)
         const lastAttempt = parsed.lastAttempt || 0;
-        if (lastAttempt && Date.now() - lastAttempt > LOCKOUT_DURATION_MS) {
+        if (lastAttempt && Date.now() - lastAttempt > STALE_GUARD_MS) {
           localStorage.removeItem(storageKey);
-          return { attempts: 0, lockedUntil: null };
+          return { attempts: 0, strikes: 0, lockedUntil: null };
         }
         // Legacy entries without lastAttempt: treat as stale and clear
         if (!lastAttempt && Number(parsed.attempts || 0) > 0) {
           localStorage.removeItem(storageKey);
-          return { attempts: 0, lockedUntil: null };
+          return { attempts: 0, strikes: 0, lockedUntil: null };
         }
 
         return {
           attempts: Number(parsed.attempts || 0),
+          strikes: Number(parsed.strikes || 0),
           lockedUntil: parsed.lockedUntil || null,
         };
       };
@@ -269,11 +287,11 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
       const exactState = readStateForKey(getTrackingKey(normalized, portal));
       const sharedState = shouldUseSharedStaffGuard(portal)
         ? readStateForKey(getSharedStaffTrackingKey(normalized))
-        : { attempts: 0, lockedUntil: null };
+        : { attempts: 0, strikes: 0, lockedUntil: null };
 
       return mergeGuardState(exactState, sharedState);
     } catch {
-      return { attempts: 0, lockedUntil: null };
+      return { attempts: 0, strikes: 0, lockedUntil: null };
     }
   };
 
@@ -302,20 +320,53 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
     localStorage.removeItem(getSharedStaffTrackingKey(normalized));
   };
 
-  const getLockMessage = (lockedUntil) => {
+  const getLockMessage = (lockedUntil, strikes = 0) => {
+    if (lockedUntil === -1 || strikes >= 6) {
+      return 'Account is permanently locked due to repeated failed login attempts. Contact support.';
+    }
     const remainingMs = Math.max(0, lockedUntil - Date.now());
     const seconds = Math.max(1, Math.ceil(remainingMs / 1000));
-    return `Account is locked. Please try again in ${seconds} seconds.`;
+    if (seconds < 60) {
+      return `Account is locked. Please try again in ${seconds} seconds.`;
+    }
+    const minutes = Math.ceil(seconds / 60);
+    return `Account is locked. Please try again in ${minutes} minute(s).`;
   };
 
   const registerFailedAttempt = (value, portal = getActivePortal()) => {
     const current = readGuardState(value, portal);
+
+    // If currently locked and not expired, don't change anything
+    if (current.lockedUntil && current.lockedUntil !== -1 && current.lockedUntil > Date.now()) {
+      return current;
+    }
+
     const nextAttempts = current.attempts + 1;
-    const lockedUntil = nextAttempts >= LOCKOUT_THRESHOLD ? Date.now() + LOCKOUT_DURATION_MS : null;
-    const nextState = { attempts: nextAttempts, lockedUntil, lastAttempt: Date.now() };
+    let nextStrikes = current.strikes || 0;
+    let lockedUntil = null;
+
+    // Determine if a new strike should be triggered
+    if (nextStrikes === 0 && nextAttempts >= FIRST_STRIKE_THRESHOLD) {
+      nextStrikes = 1;
+      lockedUntil = Date.now() + STRIKE_DURATIONS_MS[1];
+    } else if (nextStrikes >= 1 && nextAttempts >= 1) {
+      nextStrikes += 1;
+      if (nextStrikes >= 6) {
+        lockedUntil = -1; // permanent
+      } else {
+        lockedUntil = Date.now() + STRIKE_DURATIONS_MS[nextStrikes];
+      }
+    }
+
+    const nextState = {
+      attempts: nextStrikes > 0 ? 0 : nextAttempts,
+      strikes: nextStrikes,
+      lockedUntil,
+      lastAttempt: Date.now(),
+    };
     writeGuardState(value, nextState, portal);
 
-    if (nextAttempts >= CAPTCHA_THRESHOLD) {
+    if (nextAttempts >= CAPTCHA_THRESHOLD || nextStrikes > 0) {
       setRequiresCaptcha(true);
     }
 
@@ -368,7 +419,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
 
   useEffect(() => {
     const guardState = readGuardState(identifier);
-    setRequiresCaptcha(guardState.attempts >= CAPTCHA_THRESHOLD);
+    setRequiresCaptcha(guardState.attempts >= CAPTCHA_THRESHOLD || guardState.strikes > 0);
   }, [identifier]);
 
   const redirectAfterLogin = (portal) => {
@@ -453,7 +504,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
 
     const guardState = readGuardState(identifier);
     if (guardState.lockedUntil && guardState.lockedUntil > Date.now()) {
-      setError(getLockMessage(guardState.lockedUntil));
+      setError(getLockMessage(guardState.lockedUntil, guardState.strikes));
       setRequiresCaptcha(true);
       return;
     }
@@ -525,11 +576,12 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
 
       lockDetectedPortal(portal);
       const updatedGuardState = registerFailedAttempt(identifier, portal || getActivePortal());
-      setError(updatedGuardState.lockedUntil ? getLockMessage(updatedGuardState.lockedUntil) : detail);
+      setError(updatedGuardState.lockedUntil ? getLockMessage(updatedGuardState.lockedUntil, updatedGuardState.strikes) : detail);
 
       if (
         detail.toLowerCase().includes('captcha') ||
-        updatedGuardState.attempts >= CAPTCHA_THRESHOLD
+        updatedGuardState.attempts >= CAPTCHA_THRESHOLD ||
+        updatedGuardState.strikes > 0
       ) {
         setRequiresCaptcha(true);
       }
@@ -553,7 +605,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
 
     const guardState = readGuardState(identifier);
     if (guardState.lockedUntil && guardState.lockedUntil > Date.now()) {
-      setError(getLockMessage(guardState.lockedUntil));
+      setError(getLockMessage(guardState.lockedUntil, guardState.strikes));
       setRequiresCaptcha(true);
       return;
     }
@@ -579,11 +631,12 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
       lockDetectedPortal(portal);
       const detail = normalizeLoginErrorMessage(err.response?.data?.detail || 'Invalid TOTP code. Please try again.');
       const updatedGuardState = registerFailedAttempt(identifier, portal || getActivePortal());
-      setError(updatedGuardState.lockedUntil ? getLockMessage(updatedGuardState.lockedUntil) : detail);
+      setError(updatedGuardState.lockedUntil ? getLockMessage(updatedGuardState.lockedUntil, updatedGuardState.strikes) : detail);
       setTotpCode('');
       if (
         detail.toLowerCase().includes('captcha') ||
-        updatedGuardState.attempts >= CAPTCHA_THRESHOLD
+        updatedGuardState.attempts >= CAPTCHA_THRESHOLD ||
+        updatedGuardState.strikes > 0
       ) {
         setRequiresCaptcha(true);
       }

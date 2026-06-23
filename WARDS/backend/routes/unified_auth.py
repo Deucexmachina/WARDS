@@ -105,6 +105,48 @@ RATE_LIMIT_WINDOW = 60
 MAX_REQUESTS_PER_WINDOW = 30
 MFA_VALID_WINDOW_STEPS = 2
 
+STRIKE_DURATIONS = {
+    1: 30,           # 30 seconds
+    2: 3 * 60,       # 3 minutes
+    3: 10 * 60,      # 10 minutes
+    4: 30 * 60,      # 30 minutes
+    5: 60 * 60,      # 1 hour
+    6: None,         # permanent
+}
+
+
+def _get_lockout_duration(strikes: int) -> int | None:
+    """Return lockout duration in seconds for a given strike level."""
+    return STRIKE_DURATIONS.get(min(strikes, 6), 30)
+
+
+def _add_permanent_ip_block(ip: str, reason: str) -> None:
+    """Add an IP to the permanent block list in the database."""
+    try:
+        from database.models import SessionLocal, PermanentIpBlock
+        db = SessionLocal()
+        existing = db.query(PermanentIpBlock).filter(PermanentIpBlock.ip_address == ip).first()
+        if not existing:
+            db.add(PermanentIpBlock(
+                ip_address=ip,
+                reason=reason,
+                blocked_by="auto_strike_system",
+                is_active=True,
+                abuse_count=1,
+            ))
+        else:
+            existing.is_active = True
+            existing.abuse_count = (existing.abuse_count or 0) + 1
+            existing.reason = reason
+        db.commit()
+    except Exception:
+        logger.exception("Failed to add permanent IP block for %s", ip)
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
 _ABUSE_STATE_PATH = Path(os.getenv("ABUSE_STATE_PATH", "./abuse_state.json"))
 
 
@@ -299,41 +341,86 @@ def is_account_locked(portal: str, identifier: str) -> bool:
     _refresh_abuse_state()
     key = tracking_key(portal, identifier)
     if key in locked_accounts:
-        lock_time = locked_accounts[key]["locked_at"]
-        duration = PORTAL_CONFIG[portal]["lockout_duration"]
-        if lock_time and time.time() - lock_time < duration:
+        entry = locked_accounts[key]
+        strikes = entry.get("strikes", 0)
+        if strikes >= 6:
+            return True  # Permanent block
+        lock_time = entry.get("locked_at")
+        duration = _get_lockout_duration(strikes)
+        if lock_time and duration and time.time() - lock_time < duration:
             return True
-        if lock_time and time.time() - lock_time >= duration:
-            # Lock expired — clear it so the user can try again
-            del locked_accounts[key]
+        if lock_time and duration and time.time() - lock_time >= duration:
+            # Lock expired — clear only the lock, keep strikes/attempts for next strike escalation
+            entry["locked_at"] = None
             _save_abuse_state()
     return False
 
 
-def record_failed_attempt(portal: str, identifier: str):
+def record_failed_attempt(portal: str, identifier: str, client_ip: str | None = None):
     _refresh_abuse_state()
     key = tracking_key(portal, identifier)
     if key not in locked_accounts:
-        locked_accounts[key] = {"attempts": 0, "locked_at": None}
+        locked_accounts[key] = {"attempts": 0, "strikes": 0, "locked_at": None}
 
-    locked_accounts[key]["attempts"] += 1
-    new_count = locked_accounts[key]["attempts"]
-    if new_count >= MAX_LOGIN_ATTEMPTS:
-        locked_accounts[key]["locked_at"] = time.time()
-        logger.warning(
-            "[LOGIN] LOCKED %s (portal=%s) after %s attempts (threshold=%s)",
-            identifier,
-            portal,
-            new_count,
-            MAX_LOGIN_ATTEMPTS,
-        )
+    entry = locked_accounts[key]
+    attempts = entry.get("attempts", 0)
+    strikes = entry.get("strikes", 0)
+    locked_at = entry.get("locked_at")
+
+    # If currently locked and within duration, do not increment attempts
+    if locked_at:
+        duration = _get_lockout_duration(strikes) or 0
+        if duration and time.time() - locked_at < duration:
+            return
+
+    attempts += 1
+    entry["attempts"] = attempts
+
+    # Determine if a new strike should be triggered
+    new_strike = False
+    if strikes == 0 and attempts >= MAX_LOGIN_ATTEMPTS:
+        strikes = 1
+        new_strike = True
+    elif strikes >= 1 and attempts >= 1:
+        strikes += 1
+        new_strike = True
+
+    if new_strike:
+        entry["strikes"] = strikes
+        entry["attempts"] = 0
+        entry["locked_at"] = time.time()
+        duration = _get_lockout_duration(strikes)
+        if strikes == 6 and client_ip:
+            _add_permanent_ip_block(client_ip, f"Login strike 6 for {identifier} ({portal})")
+            logger.warning(
+                "[LOGIN] PERMANENT BLOCK %s (portal=%s) strike=%s ip=%s",
+                identifier,
+                portal,
+                strikes,
+                client_ip,
+            )
+        elif duration:
+            logger.warning(
+                "[LOGIN] LOCKED %s (portal=%s) strike=%s duration=%ss",
+                identifier,
+                portal,
+                strikes,
+                duration,
+            )
+        else:
+            logger.warning(
+                "[LOGIN] LOCKED %s (portal=%s) strike=%s (permanent)",
+                identifier,
+                portal,
+                strikes,
+            )
     else:
         logger.warning(
-            "[LOGIN] failed attempt recorded for %s (portal=%s) attempts=%s threshold=%s",
+            "[LOGIN] failed attempt recorded for %s (portal=%s) attempts=%s strike=%s",
             identifier,
             portal,
-            new_count,
-            MAX_LOGIN_ATTEMPTS,
+            attempts,
+            strikes,
         )
     _save_abuse_state()
 
@@ -353,13 +440,16 @@ def requires_captcha(portal: str, identifier: str) -> bool:
         return False
     entry = locked_accounts[key]
     lock_time = entry.get("locked_at")
-    duration = PORTAL_CONFIG[portal]["lockout_duration"]
-    if lock_time and time.time() - lock_time >= duration:
-        # Stale entry — lockout expired, clear it
-        del locked_accounts[key]
+    strikes = entry.get("strikes", 0)
+    if strikes >= 6:
+        return True  # Always require captcha for permanent blocks
+    duration = _get_lockout_duration(strikes)
+    if lock_time and duration and time.time() - lock_time >= duration:
+        # Lock expired — clear only the lock so next attempt triggers next strike
+        entry["locked_at"] = None
         _save_abuse_state()
         return False
-    return entry["attempts"] >= PORTAL_CONFIG[portal]["captcha_threshold"]
+    return entry.get("attempts", 0) >= PORTAL_CONFIG[portal]["captcha_threshold"] or strikes >= 1
 
 
 def verify_recaptcha(token: str, client_ip: str) -> bool:
@@ -653,32 +743,38 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
     if not portal or not account:
         logger.warning("[LOGIN] account not found for %s", credentials.identifier)
         if is_account_locked("unknown", credentials.identifier):
-            remaining = int(
-                PORTAL_CONFIG["unknown"]["lockout_duration"] -
-                (time.time() - locked_accounts[tracking_key("unknown", credentials.identifier)]["locked_at"])
-            )
-            wait_message = f"{max(remaining, 1)} seconds" if remaining < 60 else f"{max(remaining // 60, 1)} minute(s)"
+            entry = locked_accounts[tracking_key("unknown", credentials.identifier)]
+            strikes = entry.get("strikes", 0)
+            if strikes >= 6:
+                wait_message = "permanently"
+            else:
+                duration = _get_lockout_duration(strikes) or 0
+                remaining = max(0, int(duration - (time.time() - entry["locked_at"])))
+                wait_message = f"{max(remaining, 1)} seconds" if remaining < 60 else f"{max(remaining // 60, 1)} minute(s)"
             logger.warning("[LOGIN] account locked (unknown) for %s — %s remaining", credentials.identifier, wait_message)
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Invalid credentials or account status.",
             )
 
-        record_failed_attempt("unknown", credentials.identifier)
+        record_failed_attempt("unknown", credentials.identifier, client_ip)
         return JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,
             content={"detail": "Invalid credentials or account status."},
         )
 
     if is_account_locked(portal, credentials.identifier):
-        remaining = int(
-            PORTAL_CONFIG[portal]["lockout_duration"] -
-            (time.time() - locked_accounts[tracking_key(portal, credentials.identifier)]["locked_at"])
-        )
-        if remaining >= 60:
-            wait_message = f"{max(remaining // 60, 1)} minute(s)"
+        entry = locked_accounts[tracking_key(portal, credentials.identifier)]
+        strikes = entry.get("strikes", 0)
+        if strikes >= 6:
+            wait_message = "permanently"
         else:
-            wait_message = f"{max(remaining, 1)} seconds"
+            duration = _get_lockout_duration(strikes) or 0
+            remaining = max(0, int(duration - (time.time() - entry["locked_at"])))
+            if remaining >= 60:
+                wait_message = f"{max(remaining // 60, 1)} minute(s)"
+            else:
+                wait_message = f"{max(remaining, 1)} seconds"
         logger.warning("[LOGIN] account locked (%s) for %s — %s remaining", portal, credentials.identifier, wait_message)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -688,7 +784,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
     password_valid = pwd_context.verify(credentials.password, account.hashed_password)
     logger.warning("[LOGIN] password_valid=%s for %s (portal=%s)", password_valid, credentials.identifier, portal)
     if not password_valid:
-        record_failed_attempt(portal, credentials.identifier)
+        record_failed_attempt(portal, credentials.identifier, client_ip)
         log_activity(
             db,
             "Failed Unified Login",
@@ -739,7 +835,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
     if captcha_needed:
         if not credentials.recaptcha_token:
             logger.warning("[LOGIN] captcha required but no token for %s", credentials.identifier)
-            record_failed_attempt(portal, credentials.identifier)
+            record_failed_attempt(portal, credentials.identifier, client_ip)
             return JSONResponse(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 content={"detail": "Please complete the security check.", "requires_captcha": True},
@@ -748,7 +844,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
         recaptcha_ok = verify_recaptcha(credentials.recaptcha_token, client_ip)
         logger.warning("[LOGIN] recaptcha_ok=%s for %s", recaptcha_ok, credentials.identifier)
         if not recaptcha_ok:
-            record_failed_attempt(portal, credentials.identifier)
+            record_failed_attempt(portal, credentials.identifier, client_ip)
             return JSONResponse(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 content={"detail": "Security verification failed. Please try again."},
@@ -790,7 +886,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
                     datetime.utcnow().isoformat(),
                     extended_ok,
                 )
-                record_failed_attempt(portal, credentials.identifier)
+                record_failed_attempt(portal, credentials.identifier, client_ip)
                 return JSONResponse(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     content={"detail": "Invalid authenticator code. Please try again."},
