@@ -99,7 +99,7 @@ def iter_monitored_files():
         yield from _iter_root_files(root_name, root_path)
     for custom_path in CUSTOM_FOLDERS:
         if custom_path.exists() and custom_path.is_dir():
-            root_name = f"CUSTOM_{custom_path.name}"
+            root_name = custom_path.name
             yield from _iter_root_files(root_name, custom_path)
 
 
@@ -176,7 +176,7 @@ def apply_restore_command(cmd: dict) -> bool:
 
     if target is None:
         for custom_path in CUSTOM_FOLDERS:
-            prefix = f"CUSTOM_{custom_path.name}/"
+            prefix = f"{custom_path.name}/"
             if rel_path.startswith(prefix):
                 suffix = rel_path[len(prefix):]
                 target = custom_path / suffix

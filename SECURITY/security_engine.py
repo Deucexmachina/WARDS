@@ -996,6 +996,17 @@ def migrate_portable_monitored_files(db: Session) -> int:
     by_path: dict[str, SecurityMonitoredFile] = {}
     by_relative: dict[str, SecurityMonitoredFile] = {}
     for entry in entries:
+        # Strip legacy CUSTOM_ prefix from VM1 custom folder names
+        folder_root = str(entry.folder_root or "")
+        if folder_root.startswith("CUSTOM_"):
+            entry.folder_root = folder_root[7:]
+            relative = str(entry.relative_path or "").replace("\\", "/")
+            if relative.startswith("CUSTOM_"):
+                entry.relative_path = relative[7:]
+            file_path = str(entry.file_path or "")
+            if "CUSTOM_" in file_path:
+                entry.file_path = file_path.replace("CUSTOM_", "", 1)
+            changed += 1
         if is_database_entry(entry):
             by_path[normalized_path_key(entry.file_path)] = entry
             continue
@@ -5364,42 +5375,57 @@ def remove_monitored_folder(db: Session, folder_path: str, initiated_by: int | N
             removed_from_vm1 = True
             logger.info("Removed VM1 monitored folder '%s' from VM1 list.", root)
 
-    # Clean up the regular monitored DB entries regardless of VM target
-    backup_location = resolve_stored_path(get_setting(db, "backup_location", stored_path_value(DEFAULT_BACKUP_ROOT) or str(DEFAULT_BACKUP_ROOT))) or DEFAULT_BACKUP_ROOT.resolve()
-    backup_roots = [item for item in backup_location.iterdir() if item.is_dir()] if backup_location.exists() else []
-    removed = 0
-    removed_backups = 0
-    retired = 0
+    # Remove from local/shared configuration regardless of VM target
+    scope = remove_configured_monitored_folder(db, root, updated_by=str(initiated_by) if initiated_by else "system")
+
+    # Gather all entries that belong to this folder (local + VM1)
+    folder_name = root.name
+    folder_name_upper = folder_name.upper()
+
+    # Local entries via path containment
     entries = monitored_entries_for_folder(db, root)
+    entry_ids = {e.id for e in entries}
+
+    # VM1 entries matched by folder_root (with or without legacy CUSTOM_ prefix)
+    vm1_folder_roots = {
+        folder_name,
+        folder_name_upper,
+        f"CUSTOM_{folder_name}",
+        f"CUSTOM_{folder_name_upper}",
+        f"VM1_{folder_name}",
+        f"VM1_{folder_name_upper}",
+    }
+    vm1_entries = (
+        db.query(SecurityMonitoredFile)
+        .filter(SecurityMonitoredFile.folder_root.in_(list(vm1_folder_roots)))
+        .all()
+    )
+    for ve in vm1_entries:
+        if ve.id not in entry_ids:
+            entries.append(ve)
+            entry_ids.add(ve.id)
+
     if not entries and not removed_from_vm1:
         raise ValueError("Folder is not currently monitored.")
-    scope = remove_configured_monitored_folder(db, root, updated_by=str(initiated_by) if initiated_by else "system")
+
+    removed = 0
     for entry in entries:
-        entry_path = portable_monitored_path(entry)
-        if entry_path is None or not path_is_inside(entry_path, root):
-            continue
-        for backup_root in backup_roots:
-            backup_path = backup_file_path(backup_root, entry.relative_path)
-            if backup_path.exists():
-                backup_path.unlink()
-                removed_backups += 1
-        if monitored_file_has_history(db, entry.id):
-            entry.status = MONITORING_REMOVED_STATUS
-            entry.current_hash = None
-            entry.last_checked = now_utc()
-            db.add(entry)
-            retired += 1
-        else:
-            db.delete(entry)
+        # Remove related detection events
+        db.query(SecurityDetectionEvent).filter(SecurityDetectionEvent.file_id == entry.id).delete(synchronize_session=False)
+        # Remove related recovery events
+        db.query(SecurityRecoveryEvent).filter(SecurityRecoveryEvent.file_id == entry.id).delete(synchronize_session=False)
+        # Remove the monitored file entry itself
+        db.delete(entry)
         removed += 1
+
     db.commit()
     wazuh_result = sync_wazuh_monitored_folders(db, allow_elevation=True)
     backup_event = create_manual_backup(db, initiated_by=initiated_by, label="monitored_folder_removed")
     logger.info("Removed monitored folder '%s' with %s file record(s).", root, removed)
     return {
         "removed_files": removed,
-        "removed_backup_files": removed_backups,
-        "retired_files": retired,
+        "removed_backup_files": 0,
+        "retired_files": 0,
         "folder": str(root),
         "folder_scope": "vm1" if removed_from_vm1 else scope,
         "folder_storage": shared_monitored_folder_token(root) or str(root),
@@ -5479,11 +5505,15 @@ def serialize_recovery(item: SecurityRecoveryEvent | dict) -> dict:
 
 def serialize_file(item: SecurityMonitoredFile) -> dict:
     display_status = "clean" if item.status in {"verified_deleted", "verified_renamed"} else item.status
+    folder_root = str(item.folder_root or "")
+    # Strip legacy CUSTOM_ prefix from VM1 custom folder names
+    if folder_root.startswith("CUSTOM_"):
+        folder_root = folder_root[7:]
     return {
         "id": item.id,
         "file_path": item.file_path,
         "relative_path": item.relative_path,
-        "folder_root": item.folder_root,
+        "folder_root": folder_root,
         "baseline_hash": item.baseline_hash,
         "current_hash": item.current_hash,
         "status": display_status,
@@ -5731,6 +5761,11 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
         for f in files:
             rel_path = f["relative_path"]
             folder_root = f["folder_root"]
+            # Normalize legacy CUSTOM_ prefix from older VM1 reporters
+            if folder_root.startswith("CUSTOM_"):
+                folder_root = folder_root[7:]
+                if rel_path.startswith("CUSTOM_"):
+                    rel_path = rel_path[7:]
             current_hash = f["current_hash"]
             size_bytes = f["size_bytes"]
             if Path(rel_path).name.lower() == ".env":
@@ -5772,6 +5807,11 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
     for f in files:
         rel_path = f["relative_path"]
         folder_root = f["folder_root"]
+        # Normalize legacy CUSTOM_ prefix from older VM1 reporters
+        if folder_root.startswith("CUSTOM_"):
+            folder_root = folder_root[7:]
+            if rel_path.startswith("CUSTOM_"):
+                rel_path = rel_path[7:]
         current_hash = f["current_hash"]
         size_bytes = f["size_bytes"]
 

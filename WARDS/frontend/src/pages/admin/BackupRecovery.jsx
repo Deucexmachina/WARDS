@@ -1656,7 +1656,7 @@ const BackupRecovery = () => {
                     ) : <div className="p-8 text-center text-sm text-slate-500">No account restrictions are active.</div>}
                   </div>
 
-                  {blockedIps.length > 0 && (
+                  {blockedIps.filter((item) => !item.is_permanent).length > 0 && (
                     <div className="max-h-80 overflow-x-auto rounded-xl border border-slate-200 md:overflow-auto">
                       <table className="w-full text-sm min-w-[400px]">
                         <thead className="bg-slate-50">
@@ -1667,11 +1667,11 @@ const BackupRecovery = () => {
                           </tr>
                         </thead>
                         <tbody>
-                          {blockedIps.map((item) => (
+                          {blockedIps.filter((item) => !item.is_permanent).map((item) => (
                             <tr key={item.ip} className="border-t border-slate-100">
                               <td className="px-4 py-3 font-mono text-slate-900">{item.ip}</td>
                               <td className="px-4 py-3 text-slate-700">
-                                {item.is_permanent ? 'Permanent' : (item.remaining_seconds > 0 ? `${Math.floor(item.remaining_seconds / 60)}m ${item.remaining_seconds % 60}s` : 'Expired')}
+                                {item.remaining_seconds > 0 ? `${Math.floor(item.remaining_seconds / 60)}m ${item.remaining_seconds % 60}s` : 'Expired'}
                               </td>
                               <td className="px-4 py-3 text-right">
                                 <button
