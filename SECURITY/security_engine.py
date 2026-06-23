@@ -772,7 +772,8 @@ def stored_path_value(path: Path | str | None, base_root: Path = MASTER_ROOT) ->
 
 def is_vm1_file(file_entry: SecurityMonitoredFile) -> bool:
     folder = str(getattr(file_entry, "folder_root", None) or "")
-    return folder.startswith(VM1_FOLDER_ROOT_PREFIX)
+    file_path = str(getattr(file_entry, "file_path", "") or "")
+    return folder.startswith(VM1_FOLDER_ROOT_PREFIX) or file_path.startswith("vm1://")
 
 
 def portable_monitored_path(file_entry: SecurityMonitoredFile) -> Path:
@@ -862,11 +863,14 @@ def load_shared_monitored_folders() -> list[Path]:
 
 def save_shared_monitored_folders(paths: list[Path]) -> None:
     tokens = sorted({token for token in (shared_monitored_folder_token(path) for path in paths) if token})
-    SHARED_MONITORED_FOLDERS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SHARED_MONITORED_FOLDERS_PATH.write_text(
-        json_dumps({"version": 1, "folders": tokens}),
-        encoding="utf-8",
-    )
+    try:
+        SHARED_MONITORED_FOLDERS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        SHARED_MONITORED_FOLDERS_PATH.write_text(
+            json_dumps({"version": 1, "folders": tokens}),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        logger.warning("Could not write shared monitored folders to '%s': %s", SHARED_MONITORED_FOLDERS_PATH, exc)
 
 
 def load_local_monitored_folders(db: Session) -> list[Path]:
@@ -5375,8 +5379,11 @@ def remove_monitored_folder(db: Session, folder_path: str, initiated_by: int | N
             removed_from_vm1 = True
             logger.info("Removed VM1 monitored folder '%s' from VM1 list.", root)
 
-    # Remove from local/shared configuration regardless of VM target
-    scope = remove_configured_monitored_folder(db, root, updated_by=str(initiated_by) if initiated_by else "system")
+    # VM1 folders are managed in DB settings only, not local/shared JSON
+    if is_vm1:
+        scope = "vm1"
+    else:
+        scope = remove_configured_monitored_folder(db, root, updated_by=str(initiated_by) if initiated_by else "system")
 
     # Gather all entries that belong to this folder (local + VM1)
     folder_name = root.name
