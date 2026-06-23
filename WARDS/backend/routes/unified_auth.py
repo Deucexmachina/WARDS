@@ -154,14 +154,13 @@ def _save_abuse_state() -> None:
     if r:
         try:
             pipe = r.pipeline()
+            # Delete first so fields removed locally are purged from Redis
+            pipe.delete("wards:auth:login_attempts")
             if login_attempts:
                 pipe.hset("wards:auth:login_attempts", mapping={k: json.dumps(v) for k, v in login_attempts.items()})
-            else:
-                pipe.delete("wards:auth:login_attempts")
+            pipe.delete("wards:auth:locked_accounts")
             if locked_accounts:
                 pipe.hset("wards:auth:locked_accounts", mapping={k: json.dumps(v) for k, v in locked_accounts.items()})
-            else:
-                pipe.delete("wards:auth:locked_accounts")
             pipe.execute()
         except Exception:
             pass
@@ -254,9 +253,15 @@ def _refresh_abuse_state() -> None:
     try:
         global login_attempts, locked_accounts
         raw_login = r.hgetall("wards:auth:login_attempts")
-        login_attempts = {k: json.loads(v) for k, v in raw_login.items()}
+        login_attempts = {
+            (k.decode() if isinstance(k, bytes) else k): json.loads(v.decode() if isinstance(v, bytes) else v)
+            for k, v in raw_login.items()
+        }
         raw_locked = r.hgetall("wards:auth:locked_accounts")
-        locked_accounts = {k: json.loads(v) for k, v in raw_locked.items()}
+        locked_accounts = {
+            (k.decode() if isinstance(k, bytes) else k): json.loads(v.decode() if isinstance(v, bytes) else v)
+            for k, v in raw_locked.items()
+        }
     except Exception:
         pass
 
@@ -312,8 +317,24 @@ def record_failed_attempt(portal: str, identifier: str):
         locked_accounts[key] = {"attempts": 0, "locked_at": None}
 
     locked_accounts[key]["attempts"] += 1
-    if locked_accounts[key]["attempts"] >= MAX_LOGIN_ATTEMPTS:
+    new_count = locked_accounts[key]["attempts"]
+    if new_count >= MAX_LOGIN_ATTEMPTS:
         locked_accounts[key]["locked_at"] = time.time()
+        logger.warning(
+            "[LOGIN] LOCKED %s (portal=%s) after %s attempts (threshold=%s)",
+            identifier,
+            portal,
+            new_count,
+            MAX_LOGIN_ATTEMPTS,
+        )
+    else:
+        logger.warning(
+            "[LOGIN] failed attempt recorded for %s (portal=%s) attempts=%s threshold=%s",
+            identifier,
+            portal,
+            new_count,
+            MAX_LOGIN_ATTEMPTS,
+        )
     _save_abuse_state()
 
 
@@ -619,7 +640,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
     portal, account = find_account_for_portal(db, credentials.identifier, credentials.portal)
     abuse_key = tracking_key(portal or "unknown", credentials.identifier)
     current_attempts = locked_accounts.get(abuse_key, {}).get("attempts", 0)
-    logger.info(
+    logger.warning(
         "[LOGIN] identifier=%s requested_portal=%s resolved_portal=%s account_found=%s attempts=%s ip=%s",
         credentials.identifier,
         credentials.portal,
@@ -630,7 +651,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
     )
 
     if not portal or not account:
-        logger.info("[LOGIN] account not found for %s", credentials.identifier)
+        logger.warning("[LOGIN] account not found for %s", credentials.identifier)
         if is_account_locked("unknown", credentials.identifier):
             remaining = int(
                 PORTAL_CONFIG["unknown"]["lockout_duration"] -
@@ -665,7 +686,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
         )
 
     password_valid = pwd_context.verify(credentials.password, account.hashed_password)
-    logger.info("[LOGIN] password_valid=%s for %s (portal=%s)", password_valid, credentials.identifier, portal)
+    logger.warning("[LOGIN] password_valid=%s for %s (portal=%s)", password_valid, credentials.identifier, portal)
     if not password_valid:
         record_failed_attempt(portal, credentials.identifier)
         log_activity(
@@ -709,7 +730,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
         )
 
     captcha_needed = requires_captcha(portal, credentials.identifier)
-    logger.info(
+    logger.warning(
         "[LOGIN] captcha_needed=%s token_len=%s for %s",
         captcha_needed,
         len(credentials.recaptcha_token) if credentials.recaptcha_token else 0,
@@ -725,13 +746,16 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
             )
 
         recaptcha_ok = verify_recaptcha(credentials.recaptcha_token, client_ip)
-        logger.info("[LOGIN] recaptcha_ok=%s for %s", recaptcha_ok, credentials.identifier)
+        logger.warning("[LOGIN] recaptcha_ok=%s for %s", recaptcha_ok, credentials.identifier)
         if not recaptcha_ok:
             record_failed_attempt(portal, credentials.identifier)
             return JSONResponse(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 content={"detail": "Security verification failed. Please try again."},
             )
+        # Successful reCAPTCHA clears the accumulated failed attempts so the user
+        # can log in with correct credentials without being blocked by prior failures.
+        reset_failed_attempts(portal, credentials.identifier)
 
     if portal in {"public", "admin", "branch"}:
         mfa_username = get_mfa_username(portal, account)
@@ -741,7 +765,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
             pass
         else:
             if not credentials.totp_code:
-                logger.info("[LOGIN] MFA required for %s (portal=%s)", credentials.identifier, portal)
+                logger.warning("[LOGIN] MFA required for %s (portal=%s)", credentials.identifier, portal)
                 reset_failed_attempts(portal, credentials.identifier)
                 return {
                     "access_token": "",
