@@ -2132,15 +2132,29 @@ def list_completed_backups(backup_location: Path, label: str | None = None) -> l
     return sorted(backups, key=lambda item: item.name)
 
 
+def list_all_backup_folders(backup_location: Path, label: str | None = None) -> list[Path]:
+    """List every backup folder (completed or not) for retention enforcement."""
+    if not backup_location.exists():
+        return []
+    backups = []
+    for item in backup_location.iterdir():
+        if not item.is_dir() or "_backup_" not in item.name:
+            continue
+        if label and not item.name.startswith(f"{label}_backup_"):
+            continue
+        backups.append(item)
+    return sorted(backups, key=lambda item: item.name)
+
+
 def prune_backup_type(backup_location: Path, label: str, keep: int = BACKUP_RETENTION_LIMIT) -> int:
     removed = 0
-    for old_backup in list_completed_backups(backup_location, label=label)[:-keep]:
+    for old_backup in list_all_backup_folders(backup_location, label=label)[:-keep]:
         try:
             shutil.rmtree(old_backup)
             removed += 1
-            logger.info("Removed old completed backup '%s' during FIFO retention enforcement.", old_backup)
+            logger.info("Removed old backup '%s' during FIFO retention enforcement.", old_backup)
         except Exception:
-            logger.exception("Failed to remove old completed backup '%s'.", old_backup)
+            logger.exception("Failed to remove old backup '%s'.", old_backup)
     return removed
 
 
@@ -2150,7 +2164,7 @@ def prune_all_backup_types(backup_location: Path, keep: int = BACKUP_RETENTION_L
         labels = {
             item.name.split("_backup_", 1)[0]
             for item in backup_location.iterdir()
-            if is_completed_backup_folder(item)
+            if item.is_dir() and "_backup_" in item.name
         }
         for label in labels:
             removed += prune_backup_type(backup_location, label, keep=keep)
