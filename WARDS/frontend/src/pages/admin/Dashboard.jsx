@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../../services/api';
 import { discrepancyAPI } from '../../services/api';
-import { formatUtc8DateTime, formatUtc8Time } from '../../utils/dateTime';
+import { formatUtc8DateTime, formatUtc8Date, formatUtc8Time } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
 import { CustomSelect, CustomDatePicker } from '../../components/FormControls';
@@ -726,6 +726,7 @@ const Dashboard = () => {
                         <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Taxpayer</th>
                         <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Amount</th>
                         <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Status</th>
+                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Date</th>
                         <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Time</th>
                         <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Action</th>
                       </tr>
@@ -744,6 +745,7 @@ const Dashboard = () => {
                               {getPaymentStatusLabel(payment.status)}
                             </span>
                           </td>
+                          <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-500">{formatUtc8Date(payment.created_at)}</td>
                           <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-500">{formatUtc8Time(payment.created_at)}</td>
                           <td className="whitespace-nowrap px-5 py-4">
                             {String(payment.status || '').trim().toLowerCase() === 'pending' ? (
