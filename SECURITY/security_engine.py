@@ -551,7 +551,8 @@ def dispatch_system_alert_email(
 ) -> dict | None:
     try:
         from services.email_service import send_security_incident_alert_email
-    except Exception:
+    except Exception as exc:
+        logger.warning("Security alert email service unavailable: %s", exc)
         return None
     if alert.type not in IMPORTANT_SYSTEM_ALERT_KEYS:
         return None
@@ -569,7 +570,10 @@ def dispatch_system_alert_email(
         "change_type": alert.type,
         "trigger_summary": alert.message,
     }
-    return send_security_incident_alert_email(recipients, incident_payload, detection_payload, recoveries)
+    result = send_security_incident_alert_email(recipients, incident_payload, detection_payload, recoveries)
+    if result and not result.get("sent"):
+        logger.warning("Security alert email skipped: %s", result.get("message", "unknown reason"))
+    return result
 
 
 def create_system_alert(db: Session, alert_key: str, message: str, severity: str = "low", *, title: str | None = None, dedupe_key: str | None = None) -> Alert | None:
@@ -3298,6 +3302,8 @@ def create_incident(db: Session, detection: SecurityDetectionEvent, classificati
     try:
         from services.email_service import send_security_incident_alert_email
         recipients = system_alert_email_recipients(db)
+        if not recipients:
+            logger.warning("No admin recipients found for incident alert email (detection %s)", detection.id)
         recoveries = [
             serialize_recovery(item)
             for item in db.query(SecurityRecoveryEvent)
@@ -3305,7 +3311,9 @@ def create_incident(db: Session, detection: SecurityDetectionEvent, classificati
             .order_by(SecurityRecoveryEvent.started_at.desc())
             .all()
         ]
-        send_security_incident_alert_email(recipients, serialize_incident(incident), serialize_detection(detection), recoveries)
+        result = send_security_incident_alert_email(recipients, serialize_incident(incident), serialize_detection(detection), recoveries)
+        if result and not result.get("sent"):
+            logger.warning("Incident alert email skipped for detection %s: %s", detection.id, result.get("message", "unknown reason"))
     except (RuntimeError, ImportError) as exc:
         if any(k in str(exc) for k in ("ADMIN_SECRET_KEY", "SECRET_KEY", "DATA_ENCRYPTION_SECRET", "Missing required environment")):
             logger.warning("Skipping incident alert email: required env/config missing (%s)", exc)
