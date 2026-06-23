@@ -3678,6 +3678,7 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
         backup_root.mkdir(parents=True, exist_ok=True)
         database_entry = normalize_database_monitor_entry(db, reset_baseline=False, ensure_snapshot=True)
         manifest_files: list[dict[str, object]] = []
+        backed_up_roots: set[str] = set()
         for entry in active_monitored_files_query(db).order_by(SecurityMonitoredFile.relative_path.asc()).all():
             if is_database_entry(entry) and database_entry and entry.id != database_entry.id:
                 entry.status = "clean"
@@ -3704,6 +3705,7 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
                     "size_bytes": checksum_target.stat().st_size,
                     "sha256": file_hash,
                 })
+                backed_up_roots.add("wards_db")
                 path = checksum_path
                 relative = DATABASE_CHECKSUM_RELATIVE_PATH
             else:
@@ -3728,6 +3730,9 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
                             "size_bytes": snapshot.stat().st_size,
                             "sha256": file_hash,
                         })
+                        root_name = str(entry.folder_root or "").removeprefix("VM1_")
+                        if root_name:
+                            backed_up_roots.add(root_name)
                     entry.baseline_hash = entry.current_hash or entry.baseline_hash
                     entry.current_hash = entry.baseline_hash
                     entry.status = "clean"
@@ -3753,6 +3758,8 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
                     "size_bytes": path.stat().st_size,
                     "sha256": file_hash,
                 })
+                if entry.folder_root:
+                    backed_up_roots.add(entry.folder_root)
             entry.baseline_hash = file_hash
             entry.current_hash = file_hash
             entry.status = "clean"
@@ -3773,8 +3780,9 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
         event.recovery_duration_ms = int((time.time() - started) * 1000)
         verified_deleted = removal_summary["verified_deleted"]
         verified_renamed = removal_summary["verified_renamed"]
+        root_names = sorted(backed_up_roots) or ["no monitored roots"]
         event.summary = (
-            f"Local backup completed for WARDS, OCR, and wards_db "
+            f"Local backup completed for {', '.join(root_names)} "
             f"({register_count} new target(s) registered, {verified_deleted + verified_renamed} trusted removal update(s), "
             f"{model_artifact_count} ML artifact(s), "
             f"manifest: {manifest_path.name})."
@@ -4410,7 +4418,27 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                 file_entry.last_checked = now_utc()
                 db.add(file_entry)
                 if detection:
-                    _create_vm1_restore_command(db, file_entry, detection.id, original_content_bytes=original_bytes)
+                    cmd = _create_vm1_restore_command(db, file_entry, detection.id, original_content_bytes=original_bytes)
+                    if create_event:
+                        recovery = SecurityRecoveryEvent(
+                            detection_event_id=detection.id,
+                            file_id=file_entry.id,
+                            recovery_type="vm1_restore_queued",
+                            initiated_by=_valid_admin_id(db, admin_id),
+                            status="success",
+                            quarantine_path=str(safe_quarantine) if safe_quarantine else None,
+                            summary=f"Resolved incident: restore command queued for {file_entry.relative_path}.",
+                            completed_at=now_utc(),
+                        )
+                        db.add(recovery)
+                        db.commit()
+                    # Trigger a post-resolve backup so the restored state becomes the trusted baseline
+                    try:
+                        post_resolve_backup = create_manual_backup(db, initiated_by=_valid_admin_id(db, admin_id), label="post_resolve")
+                        if post_resolve_backup.status == "success":
+                            incident.response_action = "resolved_clean_backup_refreshed"
+                    except Exception as backup_exc:
+                        logger.warning("Post-resolve backup failed: %s", backup_exc)
         else:
             # Local file: restore from backup if missing or modified
             backup_root = latest_backup_root(db)
@@ -4450,7 +4478,8 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
     incident.status = "resolved"
     incident.resolved_at = now_utc()
     incident.resolved_by = _valid_admin_id(db, admin_id)
-    incident.response_action = "resolved_clean_backup_retained"
+    if not incident.response_action or incident.response_action in {"monitoring", "vm1_restore_pending"}:
+        incident.response_action = "resolved_clean_backup_retained"
     cleanup_quarantine_paths(json_loads(incident.quarantine_paths_json, []))
     db.add(incident)
     # Resolve any other open incidents for the same file to prevent duplicates
@@ -5187,7 +5216,7 @@ def add_monitored_folder(db: Session, folder_path: str, initiated_by: int | None
     }
 
 
-def remove_monitored_folder(db: Session, folder_path: str, initiated_by: int | None = None, vm_target: str | None = None) -> dict:
+def remove_monitored_folder(db: Session, folder_path: str, initiated_by: int | None = None, vm_target: str | None = None, delete_contents: bool = False) -> dict:
     root = Path(folder_path).expanduser().resolve()
     if not root.is_absolute():
         raise ValueError("Monitored folder must use an absolute filesystem path.")
@@ -5246,6 +5275,12 @@ def remove_monitored_folder(db: Session, folder_path: str, initiated_by: int | N
     db.commit()
     wazuh_result = sync_wazuh_monitored_folders(db, allow_elevation=True)
     backup_event = create_manual_backup(db, initiated_by=initiated_by, label="monitored_folder_removed")
+    if delete_contents:
+        try:
+            shutil.rmtree(root)
+            logger.info("Deleted folder contents '%s' after removing from monitoring.", root)
+        except Exception as exc:
+            logger.warning("Failed to delete folder contents '%s': %s", root, exc)
     logger.info("Removed monitored folder '%s' with %s file record(s).", root, removed)
     return {
         "removed_files": removed,
@@ -5507,46 +5542,38 @@ def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type
     db.commit()
     db.refresh(detection)
 
-    if should_create_incident(change_type, prediction, flags, classification):
-        quarantine_path = _quarantine_vm1_snapshot(entry, detection.id)
-        # Determine auto-recovery eligibility
-        suffix = Path(entry.relative_path).suffix.lower()
-        rules = context.get("ai_rules") or DEFAULT_AI_RULES
-        high_risk_exts = set(rules.get("file_type_risk", {}).get("config", {}).get("high_risk_extensions", [".html", ".jsx", ".js", ".py"]))
-        is_auto_recover = suffix in high_risk_exts or classification.get("severity_level") in {"high", "critical"}
-        if is_auto_recover:
-            # Auto-recovery: restore immediately and mark incident resolved
-            _create_vm1_restore_command(db, entry, detection.id)
-            incident = create_incident(db, detection, classification, flags, changed, quarantine_path)
-            incident.status = "resolved"
-            incident.resolved_at = now_utc()
-            incident.resolved_by = None
-            incident.response_action = "auto_recovered"
-            cleanup_quarantine_paths(json_loads(incident.quarantine_paths_json, []))
-            db.add(incident)
-            db.commit()
-            create_system_alert(
-                db,
-                "incident_resolved",
-                f"SEC-{incident.id}: Auto-recovered {entry.relative_path} (high-risk / high-severity).",
-                incident.severity_level or "low",
-                dedupe_key=f"SEC-{incident.id}",
-            )
-        else:
-            # Manual review required; do not queue restore command yet
-            incident = create_incident(db, detection, classification, flags, changed, quarantine_path)
-            incident.response_action = "vm1_restore_pending"
-            db.add(incident)
-            db.commit()
-            create_incident_system_alert(db, incident, detection, None)
-    elif not is_legitimate:
+    # Always create a security incident for VM1 file changes; auto-recovery is controlled separately
+    quarantine_path = _quarantine_vm1_snapshot(entry, detection.id)
+    # Determine auto-recovery eligibility
+    suffix = Path(entry.relative_path).suffix.lower()
+    rules = context.get("ai_rules") or DEFAULT_AI_RULES
+    high_risk_exts = set(rules.get("file_type_risk", {}).get("config", {}).get("high_risk_extensions", [".html", ".jsx", ".js", ".py"]))
+    is_auto_recover = suffix in high_risk_exts or classification.get("severity_level") in {"high", "critical"}
+    if is_auto_recover:
+        # Auto-recovery: restore immediately and mark incident resolved
+        _create_vm1_restore_command(db, entry, detection.id)
+        incident = create_incident(db, detection, classification, flags, changed, quarantine_path)
+        incident.status = "resolved"
+        incident.resolved_at = now_utc()
+        incident.resolved_by = None
+        incident.response_action = "auto_recovered"
+        cleanup_quarantine_paths(json_loads(incident.quarantine_paths_json, []))
+        db.add(incident)
+        db.commit()
         create_system_alert(
             db,
-            "detection_logged",
-            f"VM1 Detection #{detection.id}: {detection.trigger_summary}",
-            detection.severity_level or "low",
-            dedupe_key=f"VM1 Detection #{detection.id}",
+            "incident_resolved",
+            f"SEC-{incident.id}: Auto-recovered {entry.relative_path} (high-risk / high-severity).",
+            incident.severity_level or "low",
+            dedupe_key=f"SEC-{incident.id}",
         )
+    else:
+        # Manual review required; do not queue restore command yet
+        incident = create_incident(db, detection, classification, flags, changed, quarantine_path)
+        incident.response_action = "vm1_restore_pending"
+        db.add(incident)
+        db.commit()
+        create_incident_system_alert(db, incident, detection, None)
     return detection
 
 
@@ -5624,15 +5651,19 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
                 entry.status = "modified"
                 db.add(entry)
                 continue
-            # Skip creating duplicate detection if open incident already exists
-            has_open = db.query(SecurityIncident).join(SecurityDetectionEvent).filter(
-                SecurityDetectionEvent.file_id == entry.id,
-                SecurityDetectionEvent.change_type == "vm1_content_modified",
-                SecurityIncident.status.in_(["open", "investigating"]),
-            ).first() is not None
-            # Also suppress if a restore command is already pending for this file
+            # Suppress only if a restore command is already pending for this file
             has_pending_restore = _has_pending_vm1_restore_for_file(db, entry.relative_path)
-            if not has_open and not has_pending_restore:
+            if not has_pending_restore:
+                # Resolve any existing open incidents for this file before creating a new one
+                for old_incident in db.query(SecurityIncident).join(SecurityDetectionEvent).filter(
+                    SecurityDetectionEvent.file_id == entry.id,
+                    SecurityIncident.status.in_(["open", "investigating"]),
+                ).all():
+                    old_incident.status = "resolved"
+                    old_incident.resolved_at = now_utc()
+                    old_incident.resolved_by = None
+                    old_incident.response_action = "superseded_by_new_detection"
+                    db.add(old_incident)
                 entry.status = "modified"
                 changed += 1
                 db.add(entry)

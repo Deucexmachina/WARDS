@@ -196,6 +196,7 @@ class ScheduleBackupRequest(BaseModel):
 class AddFolderRequest(BaseModel):
     path: str
     vm_target: str | None = None
+    delete_contents: bool = False
 
 
 class AiScheduleRequest(BaseModel):
@@ -823,7 +824,7 @@ def add_folder(payload: AddFolderRequest, db: Session = Depends(get_db), admin=D
 @router.post("/folders/remove")
 def remove_folder(payload: AddFolderRequest, db: Session = Depends(get_db), admin=Depends(current_admin)):
     try:
-        return remove_monitored_folder(db, payload.path, initiated_by=admin.id, vm_target=payload.vm_target)
+        return remove_monitored_folder(db, payload.path, initiated_by=admin.id, vm_target=payload.vm_target, delete_contents=payload.delete_contents)
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
     except ValueError as exc:
