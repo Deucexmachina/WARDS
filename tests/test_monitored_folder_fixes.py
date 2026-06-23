@@ -34,6 +34,30 @@ def _make_entry(**kwargs):
 # ---------------------------------------------------------------------------
 # serialize_file
 # ---------------------------------------------------------------------------
+class TestCleanFolderRoot:
+    """_clean_folder_root must strip all known legacy prefixes."""
+
+    def test_vm1_custom(self):
+        from SECURITY.security_engine import _clean_folder_root
+        assert _clean_folder_root("VM1_CUSTOM_SIGMA") == "SIGMA"
+
+    def test_custom(self):
+        from SECURITY.security_engine import _clean_folder_root
+        assert _clean_folder_root("CUSTOM_SIGMA") == "SIGMA"
+
+    def test_vm1(self):
+        from SECURITY.security_engine import _clean_folder_root
+        assert _clean_folder_root("VM1_SIGMA") == "SIGMA"
+
+    def test_no_prefix(self):
+        from SECURITY.security_engine import _clean_folder_root
+        assert _clean_folder_root("SIGMA") == "SIGMA"
+
+    def test_empty(self):
+        from SECURITY.security_engine import _clean_folder_root
+        assert _clean_folder_root("") == ""
+
+
 class TestSerializeFileStripsCustomPrefix:
     """serialize_file must strip the legacy CUSTOM_ prefix from folder_root."""
 
@@ -44,12 +68,26 @@ class TestSerializeFileStripsCustomPrefix:
         result = serialize_file(entry)
         assert result["folder_root"] == "SIGMA"
 
+    def test_strips_vm1_custom_prefix(self):
+        from SECURITY.security_engine import serialize_file
+
+        entry = _make_entry(folder_root="VM1_CUSTOM_SIGMA")
+        result = serialize_file(entry)
+        assert result["folder_root"] == "SIGMA"
+
+    def test_strips_vm1_prefix(self):
+        from SECURITY.security_engine import serialize_file
+
+        entry = _make_entry(folder_root="VM1_SIGMA")
+        result = serialize_file(entry)
+        assert result["folder_root"] == "SIGMA"
+
     def test_no_prefix_unchanged(self):
         from SECURITY.security_engine import serialize_file
 
-        entry = _make_entry(folder_root="VM1_WARDS", file_path="vm1://WARDS/app.py", relative_path="WARDS/app.py")
+        entry = _make_entry(folder_root="WARDS", file_path="/WARDS/app.py", relative_path="WARDS/app.py")
         result = serialize_file(entry)
-        assert result["folder_root"] == "VM1_WARDS"
+        assert result["folder_root"] == "WARDS"
 
 
 # ---------------------------------------------------------------------------
@@ -142,6 +180,21 @@ class TestMonitoredEntriesForFolderVm1Matching:
             file_path="vm1://VM1_SIGMA/config.txt",
             relative_path="VM1_SIGMA/config.txt",
             folder_root="VM1_SIGMA",
+        )
+        db = self._mock_db([entry])
+
+        result = monitored_entries_for_folder(db, Path("/opt/wards/app/SIGMA"))
+        assert len(result) == 1
+        assert result[0].id == 1
+
+    def test_matches_vm1_custom_prefix(self, monkeypatch):
+        """Real-world DB entries have both VM1_ and CUSTOM_ prefixes combined."""
+        from SECURITY.security_engine import monitored_entries_for_folder
+
+        entry = _make_entry(
+            file_path="vm1://CUSTOM_SIGMA/config.txt",
+            relative_path="CUSTOM_SIGMA/config.txt",
+            folder_root="VM1_CUSTOM_SIGMA",
         )
         db = self._mock_db([entry])
 

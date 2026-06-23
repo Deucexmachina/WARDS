@@ -1000,16 +1000,18 @@ def migrate_portable_monitored_files(db: Session) -> int:
     by_path: dict[str, SecurityMonitoredFile] = {}
     by_relative: dict[str, SecurityMonitoredFile] = {}
     for entry in entries:
-        # Strip legacy CUSTOM_ prefix from VM1 custom folder names
+        # Strip legacy VM1_/CUSTOM_ prefixes from VM1 custom folder names
         folder_root = str(entry.folder_root or "")
-        if folder_root.startswith("CUSTOM_"):
-            entry.folder_root = folder_root[7:]
+        clean_root = _clean_folder_root(folder_root)
+        if clean_root != folder_root:
+            entry.folder_root = clean_root
             relative = str(entry.relative_path or "").replace("\\", "/")
-            if relative.startswith("CUSTOM_"):
-                entry.relative_path = relative[7:]
+            clean_rel = _clean_folder_root(relative)
+            if clean_rel != relative:
+                entry.relative_path = clean_rel
             file_path = str(entry.file_path or "")
-            if "CUSTOM_" in file_path:
-                entry.file_path = file_path.replace("CUSTOM_", "", 1)
+            if "CUSTOM_" in file_path or "VM1_CUSTOM_" in file_path:
+                entry.file_path = file_path.replace("VM1_CUSTOM_", "", 1).replace("CUSTOM_", "", 1)
             changed += 1
         if is_database_entry(entry):
             by_path[normalized_path_key(entry.file_path)] = entry
@@ -3810,7 +3812,7 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
                             "size_bytes": snapshot.stat().st_size,
                             "sha256": file_hash,
                         })
-                        root_name = str(entry.folder_root or "").removeprefix("VM1_").removeprefix("CUSTOM_")
+                        root_name = _clean_folder_root(str(entry.folder_root or ""))
                         if root_name:
                             backed_up_roots.add(root_name)
                     entry.baseline_hash = entry.current_hash or entry.baseline_hash
@@ -5033,6 +5035,18 @@ def normalize_path_text(path: Path | str) -> str:
     return text.lower() if os.name == "nt" else text
 
 
+def _clean_folder_root(folder_root: str) -> str:
+    """Strip legacy VM1_ and CUSTOM_ prefixes from folder_root for display/matching."""
+    result = str(folder_root or "")
+    if result.startswith("VM1_CUSTOM_"):
+        result = result[11:]  # len("VM1_CUSTOM_") = 11
+    elif result.startswith("CUSTOM_"):
+        result = result[7:]  # len("CUSTOM_") = 7
+    if result.startswith("VM1_"):
+        result = result[4:]  # len("VM1_") = 4
+    return result
+
+
 def monitored_entries_for_folder(db: Session, root: Path) -> list[SecurityMonitoredFile]:
     rows = []
     folder_name = root.name
@@ -5048,15 +5062,18 @@ def monitored_entries_for_folder(db: Session, root: Path) -> list[SecurityMonito
         # match by folder_root name instead.
         if is_vm1_file(entry):
             entry_folder = str(entry.folder_root or "")
-            if entry_folder == folder_name or entry_folder == folder_name_upper:
+            clean_folder = _clean_folder_root(entry_folder)
+            if clean_folder == folder_name or clean_folder == folder_name_upper:
                 rows.append(entry)
                 continue
-            # Legacy CUSTOM_ prefix
-            if entry_folder == f"CUSTOM_{folder_name}" or entry_folder == f"CUSTOM_{folder_name_upper}":
-                rows.append(entry)
-                continue
-            # VM1_ prefix
-            if entry_folder == f"VM1_{folder_name}" or entry_folder == f"VM1_{folder_name_upper}":
+            # Also match the raw folder_root against all known prefix variants
+            variants = {
+                folder_name, folder_name_upper,
+                f"CUSTOM_{folder_name}", f"CUSTOM_{folder_name_upper}",
+                f"VM1_{folder_name}", f"VM1_{folder_name_upper}",
+                f"VM1_CUSTOM_{folder_name}", f"VM1_CUSTOM_{folder_name_upper}",
+            }
+            if entry_folder in variants:
                 rows.append(entry)
                 continue
     return rows
@@ -5513,10 +5530,7 @@ def serialize_recovery(item: SecurityRecoveryEvent | dict) -> dict:
 
 def serialize_file(item: SecurityMonitoredFile) -> dict:
     display_status = "clean" if item.status in {"verified_deleted", "verified_renamed"} else item.status
-    folder_root = str(item.folder_root or "")
-    # Strip legacy CUSTOM_ prefix from VM1 custom folder names
-    if folder_root.startswith("CUSTOM_"):
-        folder_root = folder_root[7:]
+    folder_root = _clean_folder_root(str(item.folder_root or ""))
     return {
         "id": item.id,
         "file_path": item.file_path,
@@ -5770,10 +5784,8 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
             rel_path = f["relative_path"]
             folder_root = f["folder_root"]
             # Normalize legacy CUSTOM_ prefix from older VM1 reporters
-            if folder_root.startswith("CUSTOM_"):
-                folder_root = folder_root[7:]
-                if rel_path.startswith("CUSTOM_"):
-                    rel_path = rel_path[7:]
+            folder_root = _clean_folder_root(folder_root)
+            rel_path = _clean_folder_root(rel_path)
             current_hash = f["current_hash"]
             size_bytes = f["size_bytes"]
             if Path(rel_path).name.lower() == ".env":
@@ -5816,10 +5828,8 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
         rel_path = f["relative_path"]
         folder_root = f["folder_root"]
         # Normalize legacy CUSTOM_ prefix from older VM1 reporters
-        if folder_root.startswith("CUSTOM_"):
-            folder_root = folder_root[7:]
-            if rel_path.startswith("CUSTOM_"):
-                rel_path = rel_path[7:]
+        folder_root = _clean_folder_root(folder_root)
+        rel_path = _clean_folder_root(rel_path)
         current_hash = f["current_hash"]
         size_bytes = f["size_bytes"]
 
