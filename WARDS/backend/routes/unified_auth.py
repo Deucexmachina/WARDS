@@ -397,7 +397,7 @@ def record_failed_attempt(portal: str, identifier: str, client_ip: str | None = 
     if strikes == 0 and attempts >= MAX_LOGIN_ATTEMPTS:
         strikes = 1
         new_strike = True
-    elif strikes >= 1 and attempts >= 1:
+    elif strikes >= 1 and attempts >= MAX_LOGIN_ATTEMPTS:
         strikes += 1
         new_strike = True
 

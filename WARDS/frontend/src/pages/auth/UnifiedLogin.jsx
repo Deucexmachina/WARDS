@@ -364,7 +364,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
     if (nextStrikes === 0 && nextAttempts >= FIRST_STRIKE_THRESHOLD) {
       nextStrikes = 1;
       lockedUntil = Date.now() + STRIKE_DURATIONS_MS[1];
-    } else if (nextStrikes >= 1 && nextAttempts >= 1) {
+    } else if (nextStrikes >= 1 && nextAttempts >= FIRST_STRIKE_THRESHOLD) {
       nextStrikes += 1;
       if (nextStrikes >= 6) {
         lockedUntil = -1; // permanent
