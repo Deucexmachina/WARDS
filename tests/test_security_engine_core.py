@@ -154,7 +154,8 @@ def test_add_monitored_folder_rejects_relative_path():
 def test_add_monitored_folder_accepts_absolute_path():
     with tempfile.TemporaryDirectory() as tmp:
         db = MonitoredFolderDB()
-        result = add_monitored_folder(db, tmp, vm_target="vm1")
+        with patch("SECURITY.security_engine.create_manual_backup", return_value=SimpleNamespace(status="success")):
+            result = add_monitored_folder(db, tmp, vm_target="vm1")
         assert result["folder_scope"] == "vm1"
         assert db.committed is True
 
@@ -169,9 +170,11 @@ def test_remove_monitored_folder_accepts_absolute_path():
     with tempfile.TemporaryDirectory() as tmp:
         db = MonitoredFolderDB()
         # First add the folder so removal succeeds
-        add_monitored_folder(db, tmp, vm_target="vm1")
+        with patch("SECURITY.security_engine.create_manual_backup", return_value=SimpleNamespace(status="success")):
+            add_monitored_folder(db, tmp, vm_target="vm1")
         db.committed = False
-        result = remove_monitored_folder(db, tmp, vm_target="vm1")
+        with patch("SECURITY.security_engine.create_manual_backup", return_value=SimpleNamespace(status="success")):
+            result = remove_monitored_folder(db, tmp, vm_target="vm1")
         assert result["folder_scope"] == "vm1"
         assert db.committed is True
 

@@ -5209,6 +5209,8 @@ def add_monitored_folder(db: Session, folder_path: str, initiated_by: int | None
             raise ValueError("Folder is already monitored on VM1.")
         existing.append(root)
         save_vm1_monitored_folders(db, existing, updated_by=str(initiated_by) if initiated_by else "system")
+        persist_configured_monitored_folder(db, root, updated_by=str(initiated_by) if initiated_by else "system")
+        backup_event = create_manual_backup(db, initiated_by=initiated_by, label="monitored_folder_added")
         logger.info("Added VM1 monitored folder '%s'.", root)
         return {
             "added_files": 0,
@@ -5220,7 +5222,7 @@ def add_monitored_folder(db: Session, folder_path: str, initiated_by: int | None
             "wazuh_reloaded": False,
             "wazuh_used_elevation": False,
             "wazuh_config_path": None,
-            "backup_refreshed": False,
+            "backup_refreshed": backup_event.status == "success",
         }
 
     if not root.exists() or not root.is_dir():
@@ -5256,36 +5258,23 @@ def remove_monitored_folder(db: Session, folder_path: str, initiated_by: int | N
         raise ValueError("Monitored folder must use an absolute filesystem path.")
 
     is_vm1 = str(vm_target or "").lower() == "vm1"
+    removed_from_vm1 = False
     if is_vm1:
         existing = load_vm1_monitored_folders(db)
-        if normalized_path_key(root) not in {normalized_path_key(p) for p in existing}:
-            raise ValueError("Folder is not currently monitored on VM1.")
-        updated = [p for p in existing if normalized_path_key(p) != normalized_path_key(root)]
-        save_vm1_monitored_folders(db, updated, updated_by=str(initiated_by) if initiated_by else "system")
-        logger.info("Removed VM1 monitored folder '%s'.", root)
-        return {
-            "removed_files": 0,
-            "removed_backups": 0,
-            "retired_records": 0,
-            "folder": str(root),
-            "folder_scope": "vm1",
-            "wazuh_config_updated": False,
-            "wazuh_reloaded": False,
-            "wazuh_used_elevation": False,
-            "wazuh_config_path": None,
-            "backup_refreshed": False,
-        }
+        if normalized_path_key(root) in {normalized_path_key(p) for p in existing}:
+            updated = [p for p in existing if normalized_path_key(p) != normalized_path_key(root)]
+            save_vm1_monitored_folders(db, updated, updated_by=str(initiated_by) if initiated_by else "system")
+            removed_from_vm1 = True
+            logger.info("Removed VM1 monitored folder '%s' from VM1 list.", root)
 
-    if not root.exists() or not root.is_dir():
-        raise ValueError("Folder does not exist")
-
+    # Clean up the regular monitored DB entries regardless of VM target
     backup_location = resolve_stored_path(get_setting(db, "backup_location", stored_path_value(DEFAULT_BACKUP_ROOT) or str(DEFAULT_BACKUP_ROOT))) or DEFAULT_BACKUP_ROOT.resolve()
     backup_roots = [item for item in backup_location.iterdir() if item.is_dir()] if backup_location.exists() else []
     removed = 0
     removed_backups = 0
     retired = 0
     entries = monitored_entries_for_folder(db, root)
-    if not entries:
+    if not entries and not removed_from_vm1:
         raise ValueError("Folder is not currently monitored.")
     scope = remove_configured_monitored_folder(db, root, updated_by=str(initiated_by) if initiated_by else "system")
     for entry in entries:
@@ -5315,7 +5304,7 @@ def remove_monitored_folder(db: Session, folder_path: str, initiated_by: int | N
         "removed_backup_files": removed_backups,
         "retired_files": retired,
         "folder": str(root),
-        "folder_scope": scope,
+        "folder_scope": "vm1" if removed_from_vm1 else scope,
         "folder_storage": shared_monitored_folder_token(root) or str(root),
         "wazuh_config_updated": wazuh_result["updated"],
         "wazuh_reloaded": wazuh_result["reloaded"],
