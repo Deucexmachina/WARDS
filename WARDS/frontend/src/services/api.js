@@ -5,7 +5,9 @@ import { getFriendlyErrorMessage, getModalToneForError, shouldSuppressGlobalErro
 const rawBaseUrl = import.meta.env.VITE_API_BASE_URL
   || `${window.location.protocol}//${window.location.hostname}:8000`;
 export const API_BASE_URL = rawBaseUrl.endsWith('/api') ? rawBaseUrl : rawBaseUrl + '/api';
-export const API_HOST = API_BASE_URL.replace(/\/api$/, '');
+export const API_HOST = rawBaseUrl.startsWith('/')
+  ? ''
+  : API_BASE_URL.replace(/\/api$/, '');
 
 const api = axios.create({
   baseURL: API_BASE_URL,
