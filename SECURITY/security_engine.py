@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 SECURITY_ROOT = MASTER_ROOT / "SECURITY"
 QUARANTINE_ROOT = MASTER_ROOT / "QUARANTINE"
 VM1_SNAPSHOT_ROOT = Path(os.getenv("VM1_SNAPSHOT_ROOT", str(SECURITY_ROOT / "vm1_snapshots")))
+VM1_DEFACED_SNAPSHOT_ROOT = VM1_SNAPSHOT_ROOT / ".defaced"
 DEFAULT_BACKUP_ROOT = SECURITY_ROOT / "local_backups"
 MODEL_STATE_PATH = SECURITY_ROOT / "ml" / "isolation_forest_state.json"
 MODEL_METADATA_PATH = SECURITY_ROOT / "ml" / "isolation_forest_metadata.json"
@@ -4414,6 +4415,14 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                         original_bytes = safe_quarantine.read_bytes()
                     except Exception:
                         pass
+                if original_bytes is not None:
+                    # Write clean snapshot on VM2 so backup and baseline use the original trusted content
+                    snapshot = VM1_SNAPSHOT_ROOT / file_entry.relative_path
+                    snapshot.parent.mkdir(parents=True, exist_ok=True)
+                    snapshot.write_bytes(original_bytes)
+                    clean_hash = hashlib.sha256(original_bytes).hexdigest()
+                    file_entry.baseline_hash = clean_hash
+                    file_entry.current_hash = clean_hash
                 file_entry.status = "clean"
                 file_entry.last_checked = now_utc()
                 db.add(file_entry)
@@ -4537,7 +4546,23 @@ def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_ba
             db.add(file_entry)
             if incident.response_action == "auto_recovered":
                 # Auto-recovery already ran; push the defaced snapshot back to VM1
-                _create_vm1_restore_command(db, file_entry, incident.detection_event_id)
+                defaced_snapshot = VM1_DEFACED_SNAPSHOT_ROOT / file_entry.relative_path
+                defaced_bytes = None
+                if defaced_snapshot.exists():
+                    try:
+                        defaced_bytes = defaced_snapshot.read_bytes()
+                    except Exception:
+                        pass
+                if defaced_bytes is not None:
+                    # Update VM2 snapshot to defaced so backup baseline matches
+                    snapshot = VM1_SNAPSHOT_ROOT / file_entry.relative_path
+                    snapshot.parent.mkdir(parents=True, exist_ok=True)
+                    snapshot.write_bytes(defaced_bytes)
+                    defaced_hash = hashlib.sha256(defaced_bytes).hexdigest()
+                    file_entry.baseline_hash = defaced_hash
+                    file_entry.current_hash = defaced_hash
+                    db.add(file_entry)
+                _create_vm1_restore_command(db, file_entry, incident.detection_event_id, original_content_bytes=defaced_bytes)
                 if create_event:
                     false_positive_recovery = SecurityRecoveryEvent(
                         detection_event_id=incident.detection_event_id,
@@ -5216,7 +5241,7 @@ def add_monitored_folder(db: Session, folder_path: str, initiated_by: int | None
     }
 
 
-def remove_monitored_folder(db: Session, folder_path: str, initiated_by: int | None = None, vm_target: str | None = None, delete_contents: bool = False) -> dict:
+def remove_monitored_folder(db: Session, folder_path: str, initiated_by: int | None = None, vm_target: str | None = None) -> dict:
     root = Path(folder_path).expanduser().resolve()
     if not root.is_absolute():
         raise ValueError("Monitored folder must use an absolute filesystem path.")
@@ -5275,12 +5300,6 @@ def remove_monitored_folder(db: Session, folder_path: str, initiated_by: int | N
     db.commit()
     wazuh_result = sync_wazuh_monitored_folders(db, allow_elevation=True)
     backup_event = create_manual_backup(db, initiated_by=initiated_by, label="monitored_folder_removed")
-    if delete_contents:
-        try:
-            shutil.rmtree(root)
-            logger.info("Deleted folder contents '%s' after removing from monitoring.", root)
-        except Exception as exc:
-            logger.warning("Failed to delete folder contents '%s': %s", root, exc)
     logger.info("Removed monitored folder '%s' with %s file record(s).", root, removed)
     return {
         "removed_files": removed,
@@ -5681,6 +5700,15 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
                 detection = _record_vm1_detection(db, entry, "vm1_content_modified", current_hash, old_content=old_content, new_content=new_content)
                 # Store the new snapshot so future changes have a baseline
                 _store_vm1_snapshot(rel_path, content_b64)
+                # Keep a copy of the defaced snapshot for false-positive revert
+                snapshot = VM1_SNAPSHOT_ROOT / rel_path
+                if snapshot.exists():
+                    defaced_path = VM1_DEFACED_SNAPSHOT_ROOT / rel_path
+                    defaced_path.parent.mkdir(parents=True, exist_ok=True)
+                    try:
+                        shutil.copy2(snapshot, defaced_path)
+                    except Exception:
+                        pass
                 if detection:
                     detections.append(detection)
             else:
