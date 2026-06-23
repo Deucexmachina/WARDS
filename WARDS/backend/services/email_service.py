@@ -1,13 +1,16 @@
 import base64
+import logging
 import os
 import smtplib
 from email.message import EmailMessage
 from datetime import datetime, timedelta
 from pathlib import Path
-from email.utils import make_msgid, parseaddr
+from email.utils import getaddresses, make_msgid, parseaddr
 from datetime import timezone
 from html import escape as html_escape
 import requests
+
+logger = logging.getLogger(__name__)
 try:
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 except ImportError:
@@ -151,14 +154,17 @@ def _send_via_brevo(message: EmailMessage) -> dict:
         raise RuntimeError("BREVO_API_KEY is not set")
 
     from_name, from_email = parseaddr(str(message["From"]))
-    _, to_email = parseaddr(str(message["To"]))
+    to_addrs = getaddresses([str(message.get("To", ""))])
+    to_list = [{"email": addr} for _, addr in to_addrs if addr]
+    if not to_list:
+        raise RuntimeError("No valid recipients in To header")
 
     payload = {
         "sender": {
             "name": from_name or os.getenv("SMTP_FROM_NAME", "WARDS Admin"),
             "email": from_email,
         },
-        "to": [{"email": to_email}],
+        "to": to_list,
         "subject": str(message["Subject"]),
     }
 
@@ -201,6 +207,8 @@ def _send_via_brevo(message: EmailMessage) -> dict:
         json=payload,
         timeout=20,
     )
+    if not response.ok:
+        logger.error("Brevo API error: %s %s — body: %s", response.status_code, response.reason, response.text)
     response.raise_for_status()
 
     return {"sent": True, "status": "sent"}
