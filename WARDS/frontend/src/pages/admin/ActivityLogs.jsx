@@ -274,12 +274,6 @@ const ActivityLogs = () => {
                   <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">Date &amp; Time</p>
                   <p className="mt-1 text-sm font-medium text-slate-700">{formatTimestamp(selectedLog.created_at)}</p>
                 </div>
-                <div>
-                  <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">Integrity Check</p>
-                  <p className={`mt-1 text-sm font-semibold ${selectedLog.integrity_valid ? 'text-emerald-600' : 'text-rose-600'}`}>
-                    {selectedLog.integrity_valid ? 'Valid' : 'Compromised'}
-                  </p>
-                </div>
               </div>
             </div>
 
