@@ -30,6 +30,7 @@ const ActivityLogs = () => {
   const [jumpPage, setJumpPage] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [selectedLog, setSelectedLog] = useState(null);
   const [filters, setFilters] = useState({
     type: '',
     dateFrom: '',
@@ -163,7 +164,7 @@ const ActivityLogs = () => {
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white">
                   {logs.map((log) => (
-                    <tr key={log.id} className="hover:bg-slate-50">
+                    <tr key={log.id} className="cursor-pointer hover:bg-slate-50" onClick={() => setSelectedLog(log)}>
                       <td className="max-w-xs px-4 py-3 font-bold text-primary">
                         <div>{log.title || log.action}</div>
                         <div className="mt-1 line-clamp-2 text-xs font-normal text-slate-500">{log.details || 'No additional details'}</div>
@@ -223,6 +224,78 @@ const ActivityLogs = () => {
           <div className="p-10 text-center text-gray-500">No activity logs matched the current filters.</div>
         )}
       </section>
+
+      {/* Activity Log Detail Modal */}
+      {selectedLog && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/60 px-4 py-6" role="dialog" aria-modal="true" aria-labelledby="log-modal-title">
+          <div className="w-full max-w-xl rounded-[28px] bg-white p-6 shadow-[0_30px_80px_rgba(15,23,42,0.28)] md:p-8">
+            <div className="flex items-start gap-4">
+              <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${typeColors[selectedLog.type] || 'bg-gray-100 text-gray-800'}`}>
+                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Activity Log Details</p>
+                <h2 id="log-modal-title" className="mt-2 text-2xl font-bold text-slate-900">{selectedLog.title || selectedLog.action}</h2>
+                <p className="mt-1 text-sm text-slate-500">Log ID #{selectedLog.id}</p>
+              </div>
+            </div>
+
+            <div className="mt-6 rounded-2xl border border-slate-100 bg-slate-50 p-5">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">Activity Type</p>
+                  <span className={`mt-1 inline-block rounded px-2 py-1 text-xs font-semibold ${typeColors[selectedLog.type] || 'bg-gray-100 text-gray-800'}`}>
+                    {selectedLog.type || 'general'}
+                  </span>
+                </div>
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">Action</p>
+                  <p className="mt-1 text-sm font-medium text-slate-700">{selectedLog.action}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">User / Email</p>
+                  <p className="mt-1 text-sm font-medium text-slate-700">{selectedLog.email || selectedLog.user || 'Unknown'}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">Role</p>
+                  <p className="mt-1 text-sm font-medium capitalize text-slate-700">{String(selectedLog.role || 'not recorded').replaceAll('_', ' ')}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">Branch</p>
+                  <p className="mt-1 text-sm font-medium text-slate-700">{selectedLog.branch || 'System-wide'}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">IP Address</p>
+                  <p className="mt-1 text-sm font-mono text-slate-700">{selectedLog.ip || 'not recorded'}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">Date &amp; Time</p>
+                  <p className="mt-1 text-sm font-medium text-slate-700">{formatTimestamp(selectedLog.created_at)}</p>
+                </div>
+              </div>
+            </div>
+
+            {selectedLog.details && (
+              <div className="mt-4 rounded-2xl border border-slate-100 bg-white p-5">
+                <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">Full Details</p>
+                <p className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap text-sm leading-6 text-slate-700">{selectedLog.details}</p>
+              </div>
+            )}
+
+            <div className="mt-6 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setSelectedLog(null)}
+                className="rounded-2xl bg-slate-900 px-6 py-3 text-sm font-semibold text-white transition hover:bg-slate-700"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

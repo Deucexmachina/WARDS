@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../../services/api';
 import { discrepancyAPI } from '../../services/api';
-import { formatUtc8DateTime, formatUtc8Time } from '../../utils/dateTime';
+import { formatUtc8DateTime, formatUtc8Date, formatUtc8Time } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
 import { CustomSelect, CustomDatePicker } from '../../components/FormControls';
@@ -132,6 +132,12 @@ const Dashboard = () => {
   const [discrepancyReplyDraft, setDiscrepancyReplyDraft] = useState('');
   const [showDiscrepancyReplyComposer, setShowDiscrepancyReplyComposer] = useState(false);
   const [paymentToDelete, setPaymentToDelete] = useState(null);
+  const [branchPageMap, setBranchPageMap] = useState({});
+  const [alertsPage, setAlertsPage] = useState(1);
+
+  const getBranchPage = (branchName) => branchPageMap[branchName] || 1;
+  const setBranchPage = (branchName, page) =>
+    setBranchPageMap((prev) => ({ ...prev, [branchName]: page }));
 
   useEffect(() => {
     fetchCurrentUser();
@@ -356,6 +362,8 @@ const Dashboard = () => {
   const pendingDiscrepancies = discrepancies.filter((report) => report.status === 'Pending Review').length;
   const verifiedDiscrepancies = discrepancies.filter((report) => report.status === 'Verified').length;
   const offlineDiscrepancies = discrepancies.filter((report) => report.submitted_offline).length;
+
+  const PAYMENTS_PER_PAGE = 5;
 
   if (loading) {
     return (
@@ -718,12 +726,16 @@ const Dashboard = () => {
                         <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Taxpayer</th>
                         <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Amount</th>
                         <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Status</th>
+                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Date</th>
                         <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Time</th>
                         <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 bg-white">
-                      {branchGroup.payments.map((payment) => (
+                      {(() => {
+                        const page = getBranchPage(branchGroup.branchName);
+                        const start = (page - 1) * PAYMENTS_PER_PAGE;
+                        return branchGroup.payments.slice(start, start + PAYMENTS_PER_PAGE).map((payment) => (
                         <tr key={payment.id} className="hover:bg-slate-50">
                           <td className="whitespace-nowrap px-5 py-4 font-mono text-sm text-slate-900">{payment.transaction_id}</td>
                           <td className="whitespace-nowrap px-5 py-4 font-semibold text-slate-900">{payment.taxpayer_name}</td>
@@ -733,6 +745,7 @@ const Dashboard = () => {
                               {getPaymentStatusLabel(payment.status)}
                             </span>
                           </td>
+                          <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-500">{formatUtc8Date(payment.created_at)}</td>
                           <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-500">{formatUtc8Time(payment.created_at)}</td>
                           <td className="whitespace-nowrap px-5 py-4">
                             {String(payment.status || '').trim().toLowerCase() === 'pending' ? (
@@ -749,10 +762,35 @@ const Dashboard = () => {
                             )}
                           </td>
                         </tr>
-                      ))}
+                      ));})()}
                     </tbody>
                   </table>
                 </div>
+                {branchGroup.payments.length > PAYMENTS_PER_PAGE && (
+                  <div className="flex items-center justify-between bg-slate-50 px-5 py-3">
+                    <span className="text-xs text-slate-500">
+                      Page {getBranchPage(branchGroup.branchName)} of {Math.ceil(branchGroup.payments.length / PAYMENTS_PER_PAGE)}
+                    </span>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setBranchPage(branchGroup.branchName, getBranchPage(branchGroup.branchName) - 1)}
+                        disabled={getBranchPage(branchGroup.branchName) <= 1}
+                        className="rounded-md bg-white px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Previous
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBranchPage(branchGroup.branchName, getBranchPage(branchGroup.branchName) + 1)}
+                        disabled={getBranchPage(branchGroup.branchName) >= Math.ceil(branchGroup.payments.length / PAYMENTS_PER_PAGE)}
+                        className="rounded-md bg-white px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                )}
               </section>
             ))}
           </div>
@@ -761,45 +799,81 @@ const Dashboard = () => {
 
       <div className="rounded-xl bg-white p-6 shadow-lg">
         <h3 className="mb-4 text-xl font-bold text-primary">System Alerts</h3>
-        {stats?.recent_alerts?.length === 0 ? (
-          <p className="py-8 text-center text-gray-500">No active alerts</p>
-        ) : (
-          <div className="space-y-4">
-            {stats?.recent_alerts?.map((alert) => (
-              <div
-                key={alert.id}
-                className={`rounded-lg border-l-4 p-4 ${
-                  alert.severity === 'high'
-                    ? 'border-red-500 bg-red-50'
-                    : alert.severity === 'medium'
-                    ? 'border-yellow-500 bg-yellow-50'
-                    : 'border-blue-500 bg-blue-50'
-                }`}
-              >
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="font-semibold">{alert.title}</p>
-                    <p className="mt-1 text-sm text-gray-600">{alert.message}</p>
-                    <p className="mt-2 text-xs text-gray-500">
-                      {formatUtc8DateTime(alert.created_at)}
-                    </p>
-                  </div>
-                  <span
-                    className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                      alert.severity === 'high'
-                        ? 'bg-red-100 text-red-800'
-                        : alert.severity === 'medium'
-                        ? 'bg-yellow-100 text-yellow-800'
-                        : 'bg-blue-100 text-blue-800'
-                    }`}
-                  >
-                    {alert.severity}
-                  </span>
+        {(() => {
+          const ALERTS_PER_PAGE = 5;
+          const allAlerts = stats?.recent_alerts || [];
+          const totalPages = Math.ceil(allAlerts.length / ALERTS_PER_PAGE) || 1;
+          const start = (alertsPage - 1) * ALERTS_PER_PAGE;
+          const paginatedAlerts = allAlerts.slice(start, start + ALERTS_PER_PAGE);
+          return (
+            <>
+              {allAlerts.length === 0 ? (
+                <p className="py-8 text-center text-gray-500">No active alerts</p>
+              ) : (
+                <div className="space-y-4">
+                  {paginatedAlerts.map((alert) => (
+                    <div
+                      key={alert.id}
+                      className={`rounded-lg border-l-4 p-4 ${
+                        alert.severity === 'high'
+                          ? 'border-red-500 bg-red-50'
+                          : alert.severity === 'medium'
+                          ? 'border-yellow-500 bg-yellow-50'
+                          : 'border-blue-500 bg-blue-50'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <p className="font-semibold">{alert.title}</p>
+                          <p className="mt-1 text-sm text-gray-600">{alert.message}</p>
+                          <p className="mt-2 text-xs text-gray-500">
+                            {formatUtc8DateTime(alert.created_at)}
+                          </p>
+                        </div>
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                            alert.severity === 'high'
+                              ? 'bg-red-100 text-red-800'
+                              : alert.severity === 'medium'
+                              ? 'bg-yellow-100 text-yellow-800'
+                              : 'bg-blue-100 text-blue-800'
+                          }`}
+                        >
+                          {alert.severity}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
+              )}
+              {allAlerts.length > ALERTS_PER_PAGE && (
+                <div className="mt-4 flex items-center justify-between">
+                  <span className="text-xs text-gray-500">
+                    Page {alertsPage} of {totalPages}
+                  </span>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setAlertsPage((p) => Math.max(1, p - 1))}
+                      disabled={alertsPage <= 1}
+                      className="rounded-md bg-white px-3 py-1 text-xs font-semibold text-gray-700 ring-1 ring-gray-200 transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Previous
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAlertsPage((p) => Math.min(totalPages, p + 1))}
+                      disabled={alertsPage >= totalPages}
+                      className="rounded-md bg-white px-3 py-1 text-xs font-semibold text-gray-700 ring-1 ring-gray-200 transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          );
+        })()}
       </div>
 
       <div className="mt-6 rounded-xl bg-white p-6 shadow-lg">

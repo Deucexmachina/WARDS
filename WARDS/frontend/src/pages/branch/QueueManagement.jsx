@@ -775,7 +775,8 @@ const WindowMonitoringSection = ({
                 }`}
               >
                 {windows.map((window) => {
-                  const activeQueue = window.queues.find((queue) => ['serving', 'called'].includes(getDerivedStatus(queue, now))) || null;
+                  const activeQueues = window.queues.filter((queue) => ['serving', 'called'].includes(getDerivedStatus(queue, now)));
+                  const activeQueue = activeQueues[0] || null;
                   const waitingCount = window.queues.filter((queue) => getDerivedStatus(queue, now) === 'waiting').length;
                   const appointmentCount = window.queues.filter((queue) => getDerivedStatus(queue, now) === 'appointment').length;
                   const skippedCount = window.queues.filter((queue) => getDerivedStatus(queue, now) === 'skipped').length;
@@ -840,10 +841,18 @@ const WindowMonitoringSection = ({
                               {windowStatus}
                             </span>
                             <div className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm shadow-sm lg:text-right backdrop-blur-sm">
-                              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/70">Current Queue</p>
-                              <p className="mt-1 text-lg font-bold text-white">{activeQueue?.queue_number || 'None'}</p>
-                              {currentQueueLabel ? (
+                              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/70">
+                                {activeQueues.length > 1 ? 'Active Queues' : 'Current Queue'}
+                              </p>
+                              <p className="mt-1 text-lg font-bold text-white">
+                                {activeQueues.length === 0 ? 'None' : activeQueues.length > 1 ? `${activeQueues.length} Active` : activeQueue?.queue_number}
+                              </p>
+                              {activeQueues.length === 1 && currentQueueLabel ? (
                                 <p className="mt-1 text-xs text-white/60">{currentQueueLabel}</p>
+                              ) : activeQueues.length > 1 ? (
+                                <p className="mt-1 text-xs text-white/60">
+                                  {activeQueues.map((q) => q.queue_number).join(', ')}
+                                </p>
                               ) : null}
                             </div>
                           </div>
@@ -906,7 +915,7 @@ const WindowMonitoringSection = ({
                                         </div>
                                         <div className="flex items-center gap-2">
                                           <p className="text-xs text-slate-500">{queue.taxpayer_name || 'Walk-in'}</p>
-                                          {queueTypeKey === 'appointment' && (isSuperadminBranch || isBranchAdmin) && (
+                                          {(isSuperadminBranch || isBranchAdmin) && (
                                             <button
                                               onClick={() => onDeleteRequest(queue)}
                                               disabled={queueUnavailable}
@@ -917,6 +926,42 @@ const WindowMonitoringSection = ({
                                           )}
                                         </div>
                                       </div>
+                                      {(isSuperadminBranch || isBranchAdmin) && ['called', 'serving'].includes(derivedStatus) && (
+                                        <div className="mt-2 flex flex-wrap gap-1.5">
+                                          {derivedStatus === 'called' && (
+                                            <button
+                                              onClick={() => onWindowServe(queue)}
+                                              disabled={queueUnavailable}
+                                              className="rounded-md bg-blue-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-blue-700 disabled:opacity-40"
+                                            >
+                                              Serve
+                                            </button>
+                                          )}
+                                          {derivedStatus === 'serving' && (
+                                            <button
+                                              onClick={() => onWindowComplete(queue)}
+                                              disabled={queueUnavailable}
+                                              className="rounded-md bg-emerald-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-emerald-700 disabled:opacity-40"
+                                            >
+                                              Complete
+                                            </button>
+                                          )}
+                                          <button
+                                            onClick={() => onWindowRecall(queue)}
+                                            disabled={queueUnavailable}
+                                            className="rounded-md bg-indigo-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-indigo-700 disabled:opacity-40"
+                                          >
+                                            Recall
+                                          </button>
+                                          <button
+                                            onClick={() => setSkipConfirmQueue(queue)}
+                                            disabled={queueUnavailable}
+                                            className="rounded-md bg-yellow-500 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-yellow-600 disabled:opacity-40"
+                                          >
+                                            Skip
+                                          </button>
+                                        </div>
+                                      )}
                                     </div>
                                   );
                                 })}
@@ -933,49 +978,10 @@ const WindowMonitoringSection = ({
                           <div className="mt-5 flex flex-wrap gap-2">
                             <button
                               onClick={() => onWindowCallNext(window.service_window)}
-                              disabled={queueUnavailable || Boolean(activeQueue) || isAnnouncementPlaying}
+                              disabled={queueUnavailable || !nextQueue || isAnnouncementPlaying}
                               className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-secondary disabled:opacity-50"
                             >
                               {isAnnouncementPlaying ? 'Announcing...' : 'Call Next'}
-                            </button>
-                            {activeQueue && (activeQueue.status || '').toLowerCase() === 'called' && (
-                              <button
-                                onClick={() => onWindowServe(activeQueue)}
-                                disabled={queueUnavailable}
-                                className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
-                              >
-                                Serve
-                              </button>
-                            )}
-                            {activeQueue && (activeQueue.status || '').toLowerCase() === 'serving' && (
-                              <button
-                                onClick={() => onWindowComplete(activeQueue)}
-                                disabled={queueUnavailable}
-                                className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
-                              >
-                                Complete
-                              </button>
-                            )}
-                            <button
-                              onClick={() => onWindowRecall(activeQueue)}
-                              disabled={queueUnavailable || !activeQueue}
-                              className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-50"
-                            >
-                              Recall
-                            </button>
-                            <button
-                              onClick={() => setSkipConfirmQueue(activeQueue)}
-                              disabled={queueUnavailable || !activeQueue}
-                              className="rounded-xl bg-yellow-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-yellow-600 disabled:opacity-50"
-                            >
-                              Skip
-                            </button>
-                            <button
-                              onClick={() => onDeleteRequest(activeQueue)}
-                              disabled={queueUnavailable || !activeQueue}
-                              className="rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-50"
-                            >
-                              Delete
                             </button>
                           </div>
                         )}
