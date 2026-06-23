@@ -3810,7 +3810,7 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
                             "size_bytes": snapshot.stat().st_size,
                             "sha256": file_hash,
                         })
-                        root_name = str(entry.folder_root or "").removeprefix("VM1_")
+                        root_name = str(entry.folder_root or "").removeprefix("VM1_").removeprefix("CUSTOM_")
                         if root_name:
                             backed_up_roots.add(root_name)
                     entry.baseline_hash = entry.current_hash or entry.baseline_hash
@@ -3839,8 +3839,9 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
                     "size_bytes": path.stat().st_size,
                     "sha256": file_hash,
                 })
-                if entry.folder_root:
-                    backed_up_roots.add(entry.folder_root)
+                root_name = str(entry.folder_root or "").removeprefix("VM1_").removeprefix("CUSTOM_")
+                if root_name:
+                    backed_up_roots.add(root_name)
             entry.baseline_hash = file_hash
             entry.current_hash = file_hash
             entry.status = "clean"
@@ -5034,12 +5035,30 @@ def normalize_path_text(path: Path | str) -> str:
 
 def monitored_entries_for_folder(db: Session, root: Path) -> list[SecurityMonitoredFile]:
     rows = []
+    folder_name = root.name
+    folder_name_upper = folder_name.upper()
     for entry in active_monitored_files_query(db).all():
         try:
             if path_is_inside(portable_monitored_path(entry), root):
                 rows.append(entry)
+                continue
         except Exception:
-            continue
+            pass
+        # VM1 entries don't have valid local filesystem paths (especially in Docker);
+        # match by folder_root name instead.
+        if is_vm1_file(entry):
+            entry_folder = str(entry.folder_root or "")
+            if entry_folder == folder_name or entry_folder == folder_name_upper:
+                rows.append(entry)
+                continue
+            # Legacy CUSTOM_ prefix
+            if entry_folder == f"CUSTOM_{folder_name}" or entry_folder == f"CUSTOM_{folder_name_upper}":
+                rows.append(entry)
+                continue
+            # VM1_ prefix
+            if entry_folder == f"VM1_{folder_name}" or entry_folder == f"VM1_{folder_name_upper}":
+                rows.append(entry)
+                continue
     return rows
 
 
@@ -5315,13 +5334,13 @@ def add_monitored_folder(db: Session, folder_path: str, initiated_by: int | None
 
     is_vm1 = str(vm_target or "").lower() == "vm1"
     if is_vm1:
-        # VM1 folders are stored as raw paths; existence is checked by VM1's reporter
+        # VM1 folders are stored as raw paths; existence is checked by VM1's reporter.
+        # They live only in vm1_custom_monitored_folders — never in local/shared settings.
         existing = load_vm1_monitored_folders(db)
         if normalized_path_key(root) in {normalized_path_key(p) for p in existing}:
             raise ValueError("Folder is already monitored on VM1.")
         existing.append(root)
         save_vm1_monitored_folders(db, existing, updated_by=str(initiated_by) if initiated_by else "system")
-        persist_configured_monitored_folder(db, root, updated_by=str(initiated_by) if initiated_by else "system")
         backup_event = create_manual_backup(db, initiated_by=initiated_by, label="monitored_folder_added")
         logger.info("Added VM1 monitored folder '%s'.", root)
         return {
@@ -5379,38 +5398,20 @@ def remove_monitored_folder(db: Session, folder_path: str, initiated_by: int | N
             removed_from_vm1 = True
             logger.info("Removed VM1 monitored folder '%s' from VM1 list.", root)
 
-    # VM1 folders are managed in DB settings only, not local/shared JSON
+    # VM1 folders are managed in DB settings only, not local/shared JSON.
+    # If an older version put the VM1 folder into local/shared settings, clean it up
+    # gracefully so a read-only container filesystem doesn't block removal.
     if is_vm1:
         scope = "vm1"
+        try:
+            remove_configured_monitored_folder(db, root, updated_by=str(initiated_by) if initiated_by else "system")
+        except OSError:
+            pass
     else:
         scope = remove_configured_monitored_folder(db, root, updated_by=str(initiated_by) if initiated_by else "system")
 
     # Gather all entries that belong to this folder (local + VM1)
-    folder_name = root.name
-    folder_name_upper = folder_name.upper()
-
-    # Local entries via path containment
     entries = monitored_entries_for_folder(db, root)
-    entry_ids = {e.id for e in entries}
-
-    # VM1 entries matched by folder_root (with or without legacy CUSTOM_ prefix)
-    vm1_folder_roots = {
-        folder_name,
-        folder_name_upper,
-        f"CUSTOM_{folder_name}",
-        f"CUSTOM_{folder_name_upper}",
-        f"VM1_{folder_name}",
-        f"VM1_{folder_name_upper}",
-    }
-    vm1_entries = (
-        db.query(SecurityMonitoredFile)
-        .filter(SecurityMonitoredFile.folder_root.in_(list(vm1_folder_roots)))
-        .all()
-    )
-    for ve in vm1_entries:
-        if ve.id not in entry_ids:
-            entries.append(ve)
-            entry_ids.add(ve.id)
 
     if not entries and not removed_from_vm1:
         raise ValueError("Folder is not currently monitored.")
