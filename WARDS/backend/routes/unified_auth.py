@@ -120,6 +120,22 @@ def _get_lockout_duration(strikes: int) -> int | None:
     return STRIKE_DURATIONS.get(min(strikes, 6), 30)
 
 
+def _lockout_info(portal: str, identifier: str) -> dict:
+    """Return current lockout state for a portal+identifier."""
+    _refresh_abuse_state()
+    key = tracking_key(portal, identifier)
+    entry = locked_accounts.get(key, {})
+    strikes = entry.get("strikes", 0)
+    locked_at = entry.get("locked_at")
+    duration = _get_lockout_duration(strikes)
+    remaining = 0
+    if strikes >= 6:
+        remaining = -1
+    elif locked_at and duration:
+        remaining = max(0, int(duration - (time.time() - locked_at)))
+    return {"strikes": strikes, "remaining_seconds": remaining, "locked": bool(locked_at) and (strikes >= 6 or (duration and time.time() - locked_at < duration))}
+
+
 def _add_permanent_ip_block(ip: str, reason: str) -> None:
     """Add an IP to the permanent block list in the database."""
     try:
@@ -743,42 +759,26 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
     if not portal or not account:
         logger.warning("[LOGIN] account not found for %s", credentials.identifier)
         if is_account_locked("unknown", credentials.identifier):
-            entry = locked_accounts[tracking_key("unknown", credentials.identifier)]
-            strikes = entry.get("strikes", 0)
-            if strikes >= 6:
-                wait_message = "permanently"
-            else:
-                duration = _get_lockout_duration(strikes) or 0
-                remaining = max(0, int(duration - (time.time() - entry["locked_at"])))
-                wait_message = f"{max(remaining, 1)} seconds" if remaining < 60 else f"{max(remaining // 60, 1)} minute(s)"
-            logger.warning("[LOGIN] account locked (unknown) for %s — %s remaining", credentials.identifier, wait_message)
-            raise HTTPException(
+            info = _lockout_info("unknown", credentials.identifier)
+            logger.warning("[LOGIN] account locked (unknown) for %s — remaining=%s", credentials.identifier, info["remaining_seconds"])
+            return JSONResponse(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Invalid credentials or account status.",
+                content={"detail": "Invalid credentials or account status.", **info},
             )
 
         record_failed_attempt("unknown", credentials.identifier, client_ip)
+        info = _lockout_info("unknown", credentials.identifier)
         return JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            content={"detail": "Invalid credentials or account status."},
+            content={"detail": "Invalid credentials or account status.", **info},
         )
 
     if is_account_locked(portal, credentials.identifier):
-        entry = locked_accounts[tracking_key(portal, credentials.identifier)]
-        strikes = entry.get("strikes", 0)
-        if strikes >= 6:
-            wait_message = "permanently"
-        else:
-            duration = _get_lockout_duration(strikes) or 0
-            remaining = max(0, int(duration - (time.time() - entry["locked_at"])))
-            if remaining >= 60:
-                wait_message = f"{max(remaining // 60, 1)} minute(s)"
-            else:
-                wait_message = f"{max(remaining, 1)} seconds"
-        logger.warning("[LOGIN] account locked (%s) for %s — %s remaining", portal, credentials.identifier, wait_message)
-        raise HTTPException(
+        info = _lockout_info(portal, credentials.identifier)
+        logger.warning("[LOGIN] account locked (%s) for %s — remaining=%s", portal, credentials.identifier, info["remaining_seconds"])
+        return JSONResponse(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid credentials or account status.",
+            content={"detail": "Invalid credentials or account status.", **info},
         )
 
     password_valid = pwd_context.verify(credentials.password, account.hashed_password)
@@ -794,10 +794,10 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
             request=request,
             role=getattr(account, 'role', 'citizen' if portal == 'public' else portal),
         )
-
+        info = _lockout_info(portal, credentials.identifier)
         return JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            content={"detail": "Invalid credentials or account status."},
+            content={"detail": "Invalid credentials or account status.", **info},
         )
 
     if portal == "branch" and (
@@ -836,18 +836,20 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
         if not credentials.recaptcha_token:
             logger.warning("[LOGIN] captcha required but no token for %s", credentials.identifier)
             record_failed_attempt(portal, credentials.identifier, client_ip)
+            info = _lockout_info(portal, credentials.identifier)
             return JSONResponse(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                content={"detail": "Please complete the security check.", "requires_captcha": True},
+                content={"detail": "Please complete the security check.", "requires_captcha": True, **info},
             )
 
         recaptcha_ok = verify_recaptcha(credentials.recaptcha_token, client_ip)
         logger.warning("[LOGIN] recaptcha_ok=%s for %s", recaptcha_ok, credentials.identifier)
         if not recaptcha_ok:
             record_failed_attempt(portal, credentials.identifier, client_ip)
+            info = _lockout_info(portal, credentials.identifier)
             return JSONResponse(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                content={"detail": "Security verification failed. Please try again."},
+                content={"detail": "Security verification failed. Please try again.", **info},
             )
         # Successful reCAPTCHA clears the accumulated failed attempts so the user
         # can log in with correct credentials without being blocked by prior failures.
@@ -887,9 +889,10 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
                     extended_ok,
                 )
                 record_failed_attempt(portal, credentials.identifier, client_ip)
+                info = _lockout_info(portal, credentials.identifier)
                 return JSONResponse(
                     status_code=status.HTTP_401_UNAUTHORIZED,
-                    content={"detail": "Invalid authenticator code. Please try again."},
+                    content={"detail": "Invalid authenticator code. Please try again.", **info},
                 )
             logger.warning("[LOGIN] TOTP verification PASSED for %s (portal=%s)", credentials.identifier, portal)
 

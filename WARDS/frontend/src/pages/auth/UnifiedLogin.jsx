@@ -252,6 +252,11 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
         }
 
         const parsed = JSON.parse(raw);
+        // Old-format entries (before strike-based system) lack the strikes field — clear them
+        if (!('strikes' in parsed)) {
+          localStorage.removeItem(storageKey);
+          return { attempts: 0, strikes: 0, lockedUntil: null };
+        }
         // Permanent blocks (-1) never expire
         if (parsed.lockedUntil === -1) {
           return {
@@ -260,10 +265,12 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
             lockedUntil: -1,
           };
         }
-        // Expire active lockouts
+        // Expire active lockouts — preserve strikes so escalation continues
         if (parsed.lockedUntil && parsed.lockedUntil <= Date.now()) {
-          localStorage.removeItem(storageKey);
-          return { attempts: 0, strikes: 0, lockedUntil: null };
+          const strikes = Number(parsed.strikes || 0);
+          const nextState = { attempts: 0, strikes, lockedUntil: null, lastAttempt: parsed.lastAttempt || Date.now() };
+          localStorage.setItem(storageKey, JSON.stringify(nextState));
+          return nextState;
         }
         // Expire stale attempt counters (older than stale threshold)
         const lastAttempt = parsed.lastAttempt || 0;
@@ -331,6 +338,14 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
     }
     const minutes = Math.ceil(seconds / 60);
     return `Account is locked. Please try again in ${minutes} minute(s).`;
+  };
+
+  const getBackendLockout = (responseData) => {
+    const strikes = responseData?.strikes ?? null;
+    const remainingSeconds = responseData?.remaining_seconds ?? null;
+    if (strikes === null || remainingSeconds === null) return null;
+    const lockedUntil = remainingSeconds === -1 ? -1 : Date.now() + remainingSeconds * 1000;
+    return { strikes, lockedUntil };
   };
 
   const registerFailedAttempt = (value, portal = getActivePortal()) => {
@@ -575,13 +590,16 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
       }
 
       lockDetectedPortal(portal);
+      const backendLockout = getBackendLockout(err.response?.data);
       const updatedGuardState = registerFailedAttempt(identifier, portal || getActivePortal());
-      setError(updatedGuardState.lockedUntil ? getLockMessage(updatedGuardState.lockedUntil, updatedGuardState.strikes) : detail);
+      const effectiveStrikes = backendLockout?.strikes ?? updatedGuardState.strikes;
+      const effectiveLockedUntil = backendLockout?.lockedUntil ?? updatedGuardState.lockedUntil;
+      setError(effectiveLockedUntil ? getLockMessage(effectiveLockedUntil, effectiveStrikes) : detail);
 
       if (
         detail.toLowerCase().includes('captcha') ||
         updatedGuardState.attempts >= CAPTCHA_THRESHOLD ||
-        updatedGuardState.strikes > 0
+        effectiveStrikes > 0
       ) {
         setRequiresCaptcha(true);
       }
@@ -630,13 +648,16 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
       const portal = getSubmissionPortal() || detectedPortal;
       lockDetectedPortal(portal);
       const detail = normalizeLoginErrorMessage(err.response?.data?.detail || 'Invalid TOTP code. Please try again.');
+      const backendLockout = getBackendLockout(err.response?.data);
       const updatedGuardState = registerFailedAttempt(identifier, portal || getActivePortal());
-      setError(updatedGuardState.lockedUntil ? getLockMessage(updatedGuardState.lockedUntil, updatedGuardState.strikes) : detail);
+      const effectiveStrikes = backendLockout?.strikes ?? updatedGuardState.strikes;
+      const effectiveLockedUntil = backendLockout?.lockedUntil ?? updatedGuardState.lockedUntil;
+      setError(effectiveLockedUntil ? getLockMessage(effectiveLockedUntil, effectiveStrikes) : detail);
       setTotpCode('');
       if (
         detail.toLowerCase().includes('captcha') ||
         updatedGuardState.attempts >= CAPTCHA_THRESHOLD ||
-        updatedGuardState.strikes > 0
+        effectiveStrikes > 0
       ) {
         setRequiresCaptcha(true);
       }
