@@ -329,21 +329,22 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
 
   const getLockMessage = (lockedUntil, strikes = 0) => {
     if (lockedUntil === -1 || strikes >= 6) {
-      return 'Account is permanently locked due to repeated failed login attempts. Contact support.';
+      return 'IP blocked due to repeated failed login attempts. Please contact support.';
     }
     const remainingMs = Math.max(0, lockedUntil - Date.now());
     const seconds = Math.max(1, Math.ceil(remainingMs / 1000));
     if (seconds < 60) {
-      return `Account is locked. Please try again in ${seconds} seconds.`;
+      return `Account locked. Please try again in ${seconds} seconds.`;
     }
     const minutes = Math.ceil(seconds / 60);
-    return `Account is locked. Please try again in ${minutes} minute(s).`;
+    return `Account locked. Please try again in ${minutes} minute(s).`;
   };
 
   const getBackendLockout = (responseData) => {
     const strikes = responseData?.strikes ?? null;
     const remainingSeconds = responseData?.remaining_seconds ?? null;
     if (strikes === null || remainingSeconds === null) return null;
+    if (strikes < 6 && remainingSeconds <= 0) return null;
     const lockedUntil = remainingSeconds === -1 ? -1 : Date.now() + remainingSeconds * 1000;
     return { strikes, lockedUntil };
   };
@@ -594,7 +595,8 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
       const updatedGuardState = registerFailedAttempt(identifier, portal || getActivePortal());
       const effectiveStrikes = backendLockout?.strikes ?? updatedGuardState.strikes;
       const effectiveLockedUntil = backendLockout?.lockedUntil ?? updatedGuardState.lockedUntil;
-      setError(effectiveLockedUntil ? getLockMessage(effectiveLockedUntil, effectiveStrikes) : detail);
+      const isLocked = effectiveLockedUntil === -1 || (effectiveLockedUntil && effectiveLockedUntil > Date.now());
+      setError(isLocked ? getLockMessage(effectiveLockedUntil, effectiveStrikes) : detail);
 
       if (
         detail.toLowerCase().includes('captcha') ||
@@ -652,7 +654,8 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
       const updatedGuardState = registerFailedAttempt(identifier, portal || getActivePortal());
       const effectiveStrikes = backendLockout?.strikes ?? updatedGuardState.strikes;
       const effectiveLockedUntil = backendLockout?.lockedUntil ?? updatedGuardState.lockedUntil;
-      setError(effectiveLockedUntil ? getLockMessage(effectiveLockedUntil, effectiveStrikes) : detail);
+      const isLocked = effectiveLockedUntil === -1 || (effectiveLockedUntil && effectiveLockedUntil > Date.now());
+      setError(isLocked ? getLockMessage(effectiveLockedUntil, effectiveStrikes) : detail);
       setTotpCode('');
       if (
         detail.toLowerCase().includes('captcha') ||
