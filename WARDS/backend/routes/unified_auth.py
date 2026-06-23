@@ -298,8 +298,10 @@ def is_account_locked(portal: str, identifier: str) -> bool:
         duration = PORTAL_CONFIG[portal]["lockout_duration"]
         if lock_time and time.time() - lock_time < duration:
             return True
-        del locked_accounts[key]
-    _save_abuse_state()
+        if lock_time and time.time() - lock_time >= duration:
+            # Lock expired — clear it so the user can try again
+            del locked_accounts[key]
+            _save_abuse_state()
     return False
 
 
@@ -615,14 +617,27 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
     client_ip = request.client.host
 
     portal, account = find_account_for_portal(db, credentials.identifier, credentials.portal)
+    abuse_key = tracking_key(portal or "unknown", credentials.identifier)
+    current_attempts = locked_accounts.get(abuse_key, {}).get("attempts", 0)
+    logger.info(
+        "[LOGIN] identifier=%s requested_portal=%s resolved_portal=%s account_found=%s attempts=%s ip=%s",
+        credentials.identifier,
+        credentials.portal,
+        portal,
+        bool(account),
+        current_attempts,
+        client_ip,
+    )
 
     if not portal or not account:
+        logger.info("[LOGIN] account not found for %s", credentials.identifier)
         if is_account_locked("unknown", credentials.identifier):
             remaining = int(
                 PORTAL_CONFIG["unknown"]["lockout_duration"] -
                 (time.time() - locked_accounts[tracking_key("unknown", credentials.identifier)]["locked_at"])
             )
             wait_message = f"{max(remaining, 1)} seconds" if remaining < 60 else f"{max(remaining // 60, 1)} minute(s)"
+            logger.warning("[LOGIN] account locked (unknown) for %s — %s remaining", credentials.identifier, wait_message)
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Invalid credentials or account status.",
@@ -643,12 +658,14 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
             wait_message = f"{max(remaining // 60, 1)} minute(s)"
         else:
             wait_message = f"{max(remaining, 1)} seconds"
+        logger.warning("[LOGIN] account locked (%s) for %s — %s remaining", portal, credentials.identifier, wait_message)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid credentials or account status.",
         )
 
     password_valid = pwd_context.verify(credentials.password, account.hashed_password)
+    logger.info("[LOGIN] password_valid=%s for %s (portal=%s)", password_valid, credentials.identifier, portal)
     if not password_valid:
         record_failed_attempt(portal, credentials.identifier)
         log_activity(
@@ -691,15 +708,25 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
             detail="Invalid credentials or account status.",
         )
 
-    if requires_captcha(portal, credentials.identifier):
+    captcha_needed = requires_captcha(portal, credentials.identifier)
+    logger.info(
+        "[LOGIN] captcha_needed=%s token_len=%s for %s",
+        captcha_needed,
+        len(credentials.recaptcha_token) if credentials.recaptcha_token else 0,
+        credentials.identifier,
+    )
+    if captcha_needed:
         if not credentials.recaptcha_token:
+            logger.warning("[LOGIN] captcha required but no token for %s", credentials.identifier)
             record_failed_attempt(portal, credentials.identifier)
             return JSONResponse(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 content={"detail": "Please complete the security check.", "requires_captcha": True},
             )
 
-        if not verify_recaptcha(credentials.recaptcha_token, client_ip):
+        recaptcha_ok = verify_recaptcha(credentials.recaptcha_token, client_ip)
+        logger.info("[LOGIN] recaptcha_ok=%s for %s", recaptcha_ok, credentials.identifier)
+        if not recaptcha_ok:
             record_failed_attempt(portal, credentials.identifier)
             return JSONResponse(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -714,6 +741,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
             pass
         else:
             if not credentials.totp_code:
+                logger.info("[LOGIN] MFA required for %s (portal=%s)", credentials.identifier, portal)
                 reset_failed_attempts(portal, credentials.identifier)
                 return {
                     "access_token": "",
