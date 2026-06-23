@@ -152,4 +152,3 @@ curl -I http://localhost:8000/api/discrepancies/branch/1/attachment | grep -i "c
 ---
 
 **Sign-off:** _________________  **Date:** _________________
-
