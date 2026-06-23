@@ -8,6 +8,7 @@ import random
 import secrets
 import string
 import time
+import uuid
 from pathlib import Path
 
 import pyotp
@@ -900,8 +901,15 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
 
     user_agent = request.headers.get("user-agent")
     token_payload = build_token_payload(portal, account, ip=client_ip, ua=user_agent)
+    session_id = str(uuid.uuid4())
+    token_payload["sid"] = session_id
     access_token = create_access_token(portal, token_payload)
     refresh_token = create_refresh_token(portal, token_payload)
+
+    r = get_redis_client()
+    if r:
+        ttl = PORTAL_CONFIG[portal]["expires_minutes"] * 60
+        r.setex(f"wards:session:{portal}:{account.id}", ttl, session_id)
     account.last_login = datetime.utcnow()
     if portal == "public":
         apply_citizen_user_security(account)
@@ -953,12 +961,33 @@ async def unified_logout(request: Request, db: Session = Depends(get_db)):
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         token = auth_header.split(" ", 1)[1]
+        portal = None
+        user_id = None
+        sid = None
+        for candidate_portal, config in PORTAL_CONFIG.items():
+            if candidate_portal == "unknown":
+                continue
+            try:
+                payload = decode_token(token, config["secret_key"], options={"verify_exp": False})
+                portal = payload.get("portal") or candidate_portal
+                user_id = payload.get("user_id")
+                sid = payload.get("sid")
+                break
+            except Exception:
+                continue
         for config in PORTAL_CONFIG.values():
             revoke_token(db, token, config["secret_key"], ALGORITHM, config.get("token_type"))
         try:
             db.commit()
         except IntegrityError:
             db.rollback()
+
+        if portal and user_id and sid:
+            r = get_redis_client()
+            if r:
+                stored = r.get(f"wards:session:{portal}:{user_id}")
+                if stored == sid:
+                    r.delete(f"wards:session:{portal}:{user_id}")
     return {"message": "Logged out successfully"}
 
 
@@ -982,6 +1011,15 @@ async def unified_refresh_token(request: Request, payload: RefreshTokenRequest, 
     if not decoded or portal not in {"public", "admin", "branch"}:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token")
 
+    sid = decoded.get("sid")
+    user_id = decoded.get("user_id")
+    if sid and user_id:
+        r = get_redis_client()
+        if r:
+            stored_sid = r.get(f"wards:session:{portal}:{user_id}")
+            if stored_sid != sid:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired: logged in from another device.")
+
     identifier = decoded.get("email") or decoded.get("sub")
     if portal == "public":
         account = find_citizen_by_email(db, CitizenUser, identifier)
@@ -999,6 +1037,14 @@ async def unified_refresh_token(request: Request, payload: RefreshTokenRequest, 
         ip=request.client.host if request.client else None,
         ua=request.headers.get("user-agent"),
     )
+    if sid:
+        token_payload["sid"] = sid
+
+    r = get_redis_client()
+    if r and sid and user_id:
+        ttl = PORTAL_CONFIG[portal]["expires_minutes"] * 60
+        r.setex(f"wards:session:{portal}:{user_id}", ttl, sid)
+
     mfa_setup_required = get_mfa_secret(db, portal, get_mfa_username(portal, account)) is None
 
     return {

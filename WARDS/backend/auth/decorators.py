@@ -8,6 +8,7 @@ from jose import JWTError, jwt
 from database.models import Admin, BranchStaff, CitizenUser, get_db
 from auth.token_revocation import is_token_revoked
 from utils.field_crypto import find_citizen_by_email
+from utils.redis_client import get_redis_client
 from auth.jwt_utils import (
     ALGORITHM,
     ADMIN_SECRET_KEY,
@@ -40,6 +41,23 @@ def _validate_token_binding(request: Request, payload: dict) -> None:
             detail="Session binding mismatch (device). Please log in again.",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+
+def _validate_active_session(portal: str, user_id: int | None, payload: dict) -> None:
+    """Raise 401 if the token session ID no longer matches the stored active session."""
+    if not user_id:
+        return
+    r = get_redis_client()
+    if not r:
+        return
+    stored_sid = r.get(f"wards:session:{portal}:{user_id}")
+    token_sid = payload.get("sid")
+    if stored_sid and token_sid and stored_sid != token_sid:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired: logged in from another device.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 from auth.permissions import (
     ROLE_SUPERADMIN,
     ROLE_MAIN_ADMIN,
@@ -69,6 +87,7 @@ async def get_current_admin_user(
     try:
         payload = decode_token(token, ADMIN_SECRET_KEY)
         _validate_token_binding(request, payload)
+        _validate_active_session("admin", payload.get("user_id"), payload)
         email = payload.get("email") or payload.get("sub")
         username = payload.get("sub")
         token_type = payload.get("type")
@@ -132,6 +151,7 @@ async def get_current_user(
     try:
         payload = decode_token(token, USER_SECRET_KEY)
         _validate_token_binding(request, payload)
+        _validate_active_session("public", payload.get("user_id"), payload)
         email = payload.get("email") or payload.get("sub")
         token_type = payload.get("type")
 
@@ -190,6 +210,7 @@ async def get_current_branch_staff(
     try:
         payload = decode_token(token, BRANCH_SECRET_KEY)
         _validate_token_binding(request, payload)
+        _validate_active_session("branch", payload.get("user_id"), payload)
         email = payload.get("email") or payload.get("sub")
         username = payload.get("sub")
         token_type = payload.get("type")
