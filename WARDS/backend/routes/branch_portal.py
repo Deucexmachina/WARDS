@@ -339,12 +339,7 @@ def get_effective_assigned_window_number(db: Session, staff: BranchStaff, servic
 
 def archive_completed_queue(db: Session, queue: Queue, completed_by: str) -> QueueHistory:
     decrypted_queue_number = queue_value(queue, "queue_number")
-    existing_history = (
-        db.query(QueueHistory)
-        .filter(QueueHistory.queue_number == decrypted_queue_number)
-        .first()
-    )
-    history_record = existing_history or QueueHistory(queue_number=decrypted_queue_number)
+    history_record = QueueHistory(queue_number=decrypted_queue_number)
     history_record.citizen_user_id = queue.citizen_user_id
     history_record.branch_id = queue.branch_id
     history_record.service_type = queue_value(queue, "service_type")
