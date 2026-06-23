@@ -132,6 +132,11 @@ const Dashboard = () => {
   const [discrepancyReplyDraft, setDiscrepancyReplyDraft] = useState('');
   const [showDiscrepancyReplyComposer, setShowDiscrepancyReplyComposer] = useState(false);
   const [paymentToDelete, setPaymentToDelete] = useState(null);
+  const [branchPageMap, setBranchPageMap] = useState({});
+
+  const getBranchPage = (branchName) => branchPageMap[branchName] || 1;
+  const setBranchPage = (branchName, page) =>
+    setBranchPageMap((prev) => ({ ...prev, [branchName]: page }));
 
   useEffect(() => {
     fetchCurrentUser();
@@ -356,6 +361,8 @@ const Dashboard = () => {
   const pendingDiscrepancies = discrepancies.filter((report) => report.status === 'Pending Review').length;
   const verifiedDiscrepancies = discrepancies.filter((report) => report.status === 'Verified').length;
   const offlineDiscrepancies = discrepancies.filter((report) => report.submitted_offline).length;
+
+  const PAYMENTS_PER_PAGE = 5;
 
   if (loading) {
     return (
@@ -723,7 +730,10 @@ const Dashboard = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 bg-white">
-                      {branchGroup.payments.map((payment) => (
+                      {(() => {
+                        const page = getBranchPage(branchGroup.branchName);
+                        const start = (page - 1) * PAYMENTS_PER_PAGE;
+                        return branchGroup.payments.slice(start, start + PAYMENTS_PER_PAGE).map((payment) => (
                         <tr key={payment.id} className="hover:bg-slate-50">
                           <td className="whitespace-nowrap px-5 py-4 font-mono text-sm text-slate-900">{payment.transaction_id}</td>
                           <td className="whitespace-nowrap px-5 py-4 font-semibold text-slate-900">{payment.taxpayer_name}</td>
@@ -749,10 +759,35 @@ const Dashboard = () => {
                             )}
                           </td>
                         </tr>
-                      ))}
+                      ));})()}
                     </tbody>
                   </table>
                 </div>
+                {branchGroup.payments.length > PAYMENTS_PER_PAGE && (
+                  <div className="flex items-center justify-between bg-slate-50 px-5 py-3">
+                    <span className="text-xs text-slate-500">
+                      Page {getBranchPage(branchGroup.branchName)} of {Math.ceil(branchGroup.payments.length / PAYMENTS_PER_PAGE)}
+                    </span>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setBranchPage(branchGroup.branchName, getBranchPage(branchGroup.branchName) - 1)}
+                        disabled={getBranchPage(branchGroup.branchName) <= 1}
+                        className="rounded-md bg-white px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Previous
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBranchPage(branchGroup.branchName, getBranchPage(branchGroup.branchName) + 1)}
+                        disabled={getBranchPage(branchGroup.branchName) >= Math.ceil(branchGroup.payments.length / PAYMENTS_PER_PAGE)}
+                        className="rounded-md bg-white px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                )}
               </section>
             ))}
           </div>
