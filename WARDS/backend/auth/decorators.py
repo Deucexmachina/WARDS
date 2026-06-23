@@ -180,6 +180,7 @@ async def get_optional_current_user(
     try:
         payload = decode_token(token, USER_SECRET_KEY)
         _validate_token_binding(request, payload)
+        _validate_active_session("public", payload.get("user_id"), payload)
         email = payload.get("email") or payload.get("sub")
         token_type = payload.get("type")
         if email and token_type in ("user", "public"):
@@ -287,6 +288,7 @@ async def get_current_admin_from_token(request: Request, db: Session) -> Admin:
     try:
         payload = decode_token(token, ADMIN_SECRET_KEY)
         _validate_token_binding(request, payload)
+        _validate_active_session("admin", payload.get("user_id"), payload)
         email = payload.get("email") or payload.get("sub")
         username = payload.get("sub")
 
@@ -342,6 +344,7 @@ def decode_active_account_from_bearer_token(
         if not account or getattr(account, "status", "Active") != "Active":
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
 
+        _validate_active_session(portal, payload.get("user_id"), payload)
         return portal, account, payload
 
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
