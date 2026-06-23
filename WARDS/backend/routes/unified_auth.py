@@ -397,7 +397,7 @@ def record_failed_attempt(portal: str, identifier: str, client_ip: str | None = 
     if strikes == 0 and attempts >= MAX_LOGIN_ATTEMPTS:
         strikes = 1
         new_strike = True
-    elif strikes >= 1 and attempts >= MAX_LOGIN_ATTEMPTS:
+    elif strikes >= 1 and attempts >= 1:
         strikes += 1
         new_strike = True
 
@@ -835,7 +835,6 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
     if captcha_needed:
         if not credentials.recaptcha_token:
             logger.warning("[LOGIN] captcha required but no token for %s", credentials.identifier)
-            record_failed_attempt(portal, credentials.identifier, client_ip)
             info = _lockout_info(portal, credentials.identifier)
             return JSONResponse(
                 status_code=status.HTTP_400_BAD_REQUEST,
