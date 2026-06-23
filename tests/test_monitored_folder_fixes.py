@@ -387,6 +387,81 @@ class TestMigratePortableMonitoredFilesMergeDuplicates:
         assert result >= 1
 
 
+class TestProcessVm1ManifestFiltersByAllowedRoots:
+    """process_vm1_file_manifest must skip files from folders not in the current VM1 list."""
+
+    def test_skips_removed_folder_files(self, monkeypatch):
+        from SECURITY.security_engine import process_vm1_file_manifest
+
+        db = MagicMock()
+        db.query.return_value.filter.return_value.filter.return_value.first.return_value = None
+        db.query.return_value.filter.return_value.first.return_value = None
+
+        monkeypatch.setattr(
+            "SECURITY.security_engine.is_deployment_in_progress",
+            lambda _db: False,
+        )
+        # SIGMA is NOT in the allowed list (it was removed)
+        monkeypatch.setattr(
+            "SECURITY.security_engine.load_vm1_monitored_folders",
+            lambda _db: [Path("/opt/wards/app/WARDS")],
+        )
+        monkeypatch.setattr(
+            "SECURITY.security_engine.create_incident",
+            lambda *a, **k: MagicMock(id=1),
+        )
+
+        files = [
+            {
+                "relative_path": "SIGMA/config.txt",
+                "folder_root": "VM1_SIGMA",
+                "current_hash": "abc123",
+                "size_bytes": 100,
+            }
+        ]
+        result = process_vm1_file_manifest(db, files)
+        assert result["registered"] == 0
+
+    def test_does_not_reactivate_removed_entries(self, monkeypatch):
+        from SECURITY.security_engine import process_vm1_file_manifest, MONITORING_REMOVED_STATUS
+
+        removed_entry = _make_entry(
+            id=1,
+            folder_root="SIGMA",
+            relative_path="SIGMA/config.txt",
+            file_path="vm1://SIGMA/config.txt",
+            status=MONITORING_REMOVED_STATUS,
+        )
+
+        db = MagicMock()
+        # First query finds the removed entry
+        db.query.return_value.filter.return_value.filter.return_value.first.return_value = removed_entry
+        db.query.return_value.filter.return_value.first.return_value = None
+
+        monkeypatch.setattr(
+            "SECURITY.security_engine.is_deployment_in_progress",
+            lambda _db: False,
+        )
+        monkeypatch.setattr(
+            "SECURITY.security_engine.load_vm1_monitored_folders",
+            lambda _db: [Path("/opt/wards/app/SIGMA")],
+        )
+
+        files = [
+            {
+                "relative_path": "SIGMA/config.txt",
+                "folder_root": "VM1_SIGMA",
+                "current_hash": "abc123",
+                "size_bytes": 100,
+            }
+        ]
+        result = process_vm1_file_manifest(db, files)
+        # Should not reactivate the removed entry
+        assert result["registered"] == 0
+        assert result["changed"] == 0
+        assert removed_entry.status == MONITORING_REMOVED_STATUS
+
+
 class TestProcessVm1ManifestNormalizesCustomPrefix:
     """process_vm1_file_manifest must strip CUSTOM_ from incoming data."""
 
@@ -409,6 +484,10 @@ class TestProcessVm1ManifestNormalizesCustomPrefix:
         monkeypatch.setattr(
             "SECURITY.security_engine.is_deployment_in_progress",
             lambda _db: True,
+        )
+        monkeypatch.setattr(
+            "SECURITY.security_engine.load_vm1_monitored_folders",
+            lambda _db: [Path("/opt/wards/app/SIGMA")],
         )
         monkeypatch.setattr(
             "SECURITY.security_engine.file_type",

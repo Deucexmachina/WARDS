@@ -5456,6 +5456,19 @@ def remove_monitored_folder(db: Session, folder_path: str, initiated_by: int | N
         removed += 1
 
     db.commit()
+
+    # Clean up VM1 snapshot files for removed folders so they don't reappear in backups
+    if is_vm1:
+        folder_name = root.name
+        snapshot_dir = VM1_SNAPSHOT_ROOT / folder_name
+        if snapshot_dir.exists():
+            try:
+                import shutil
+                shutil.rmtree(snapshot_dir)
+                logger.info("Removed VM1 snapshot directory for '%s'.", folder_name)
+            except OSError as exc:
+                logger.warning("Could not remove VM1 snapshot directory '%s': %s", snapshot_dir, exc)
+
     wazuh_result = sync_wazuh_monitored_folders(db, allow_elevation=True)
     backup_event = create_manual_backup(db, initiated_by=initiated_by, label="monitored_folder_removed")
     logger.info("Removed monitored folder '%s' with %s file record(s).", root, removed)
@@ -5789,6 +5802,13 @@ def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type
 
 
 def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
+    # Build the set of currently allowed VM1 folder roots so stale manifests
+    # from reporters that haven't refreshed config yet don't recreate entries.
+    allowed_vm1_roots = {
+        _clean_folder_root(p.name)
+        for p in load_vm1_monitored_folders(db)
+    }
+
     if is_deployment_in_progress(db):
         logger.info("Deployment in progress — skipping VM1 file change detections.")
         # Still register or update files so the baseline is correct post-deploy
@@ -5809,6 +5829,8 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
                 .first()
             )
             if entry:
+                if entry.status == MONITORING_REMOVED_STATUS:
+                    continue  # Don't reactivate removed entries
                 entry.current_hash = current_hash
                 entry.size_bytes = size_bytes
                 entry.last_checked = now_utc()
@@ -5842,6 +5864,11 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
         # Normalize legacy CUSTOM_ prefix from older VM1 reporters
         folder_root = _clean_folder_root(folder_root)
         rel_path = _clean_folder_root(rel_path)
+
+        # Skip files from folders that are no longer in the VM1 monitored list
+        if folder_root not in allowed_vm1_roots:
+            continue
+
         current_hash = f["current_hash"]
         size_bytes = f["size_bytes"]
 
@@ -5856,6 +5883,9 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
             .first()
         )
 
+        if entry:
+            if entry.status == MONITORING_REMOVED_STATUS:
+                continue  # Don't reactivate removed entries
         if not entry:
             # Migrate any stale local duplicate to the VM1 folder so it doesn't show as missing
             stale = (
