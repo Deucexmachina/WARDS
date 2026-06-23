@@ -504,8 +504,12 @@ const BackupRecovery = () => {
   };
 
   const refreshPermanentBlocks = async () => {
-    const response = await api.get('/security/permanent-blocks');
-    setPermanentBlocks(response.data?.permanent_blocks || []);
+    try {
+      const response = await api.get('/security/permanent-blocks');
+      setPermanentBlocks(response.data?.permanent_blocks || []);
+    } catch (error) {
+      setNotice(error.response?.data?.detail || 'Failed to load permanent blocks.');
+    }
   };
 
   const refreshUserRestrictions = async () => {
@@ -518,10 +522,14 @@ const BackupRecovery = () => {
       setNotice('Please enter an account ID.');
       return;
     }
-    await api.post('/security/user-restrictions', { ...restrictionInput, account_id: restrictionInput.account_id.trim(), duration: Number(restrictionInput.duration || 900) });
-    setNotice(`Temporary restriction applied to ${restrictionInput.account_type}:${restrictionInput.account_id.trim()}.`);
-    setRestrictionInput((current) => ({ ...current, account_id: '' }));
-    await refreshUserRestrictions();
+    try {
+      await api.post('/security/user-restrictions', { ...restrictionInput, account_id: restrictionInput.account_id.trim(), duration: Number(restrictionInput.duration || 900) });
+      setNotice(`Temporary restriction applied to ${restrictionInput.account_type}:${restrictionInput.account_id.trim()}.`);
+      setRestrictionInput((current) => ({ ...current, account_id: '' }));
+      await refreshUserRestrictions();
+    } catch (error) {
+      setNotice(error.response?.data?.detail || 'Failed to apply temporary restriction.');
+    }
   };
 
   const addPermanentBlock = async () => {
@@ -534,10 +542,14 @@ const BackupRecovery = () => {
       return;
     }
     try {
-      await api.post('/security/permanent-blocks', { ip: permanentBlockInput.trim(), reason: permanentBlockReason.trim() });
+      const response = await api.post('/security/permanent-blocks', { ip: permanentBlockInput.trim(), reason: permanentBlockReason.trim() });
       setNotice(`IP ${permanentBlockInput.trim()} permanently blocked.`);
       setPermanentBlockInput('');
       setPermanentBlockReason('');
+      const newBlock = response.data?.permanent_block;
+      if (newBlock) {
+        setPermanentBlocks((current) => [newBlock, ...current]);
+      }
       await refreshPermanentBlocks();
       await refreshBlockedIps();
     } catch (error) {
@@ -914,11 +926,11 @@ const BackupRecovery = () => {
     }
     if (folderPicker.mode === 'add-monitor') {
       setControls((current) => ({ ...current, monitoredFolder: path }));
-      askConfirm('Add monitored folder?', `WARDS will add ${path} to VM1 file monitoring.`, () => api.post('/security/folders', { path, vm_target: 'vm1' }), 'Monitored folder added.', 'Add folder');
+      askConfirm('Add monitored folder?', `WARDS will add ${path} to VM1 file monitoring.`, () => api.post('/security/folders', { path, vm_target: 'vm1' }).then((res) => { refreshFiles(); refreshDashboard(); return res; }), 'Monitored folder added.', 'Add folder');
       return;
     }
     if (folderPicker.mode === 'remove-monitor') {
-      askConfirm('Remove monitored folder?', `WARDS will remove ${path} from VM1 monitoring.`, () => api.post('/security/folders/remove', { path, vm_target: 'vm1' }), 'Monitored folder removed from VM1 monitoring.', 'Remove folder');
+      askConfirm('Remove monitored folder?', `WARDS will remove ${path} from VM1 monitoring.`, () => api.post('/security/folders/remove', { path, vm_target: 'vm1' }).then((res) => { refreshFiles(); refreshDashboard(); return res; }), 'Monitored folder removed from VM1 monitoring.', 'Remove folder');
     }
   };
 
@@ -1612,11 +1624,11 @@ const BackupRecovery = () => {
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                     <p className="mb-3 text-sm font-bold text-slate-900">Temporary User Restriction</p>
                     <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
-                      <input className="rounded-2xl border border-slate-200 px-4 py-3 text-sm" placeholder="Account ID" value={restrictionInput.account_id} onChange={(e) => setRestrictionInput({ ...restrictionInput, account_id: e.target.value })} />
+                      <input className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="Account ID" value={restrictionInput.account_id} onChange={(e) => setRestrictionInput({ ...restrictionInput, account_id: e.target.value })} />
                       <CustomSelect value={restrictionInput.account_type} onChange={(value) => setRestrictionInput({ ...restrictionInput, account_type: value })} options={[{ value: 'citizen', label: 'Citizen' }, { value: 'branch', label: 'Branch Admin' }, { value: 'admin', label: 'Main Admin' }, { value: 'superadmin', label: 'Super Admin' }]} placeholder="Select account type" />
                       <CustomSelect value={restrictionInput.scope} onChange={(value) => setRestrictionInput({ ...restrictionInput, scope: value })} options={[{ value: 'manual', label: 'Manual' }, { value: 'general', label: 'General' }, { value: 'search', label: 'Search' }, { value: 'registration', label: 'Registration' }, { value: 'admin_general', label: 'Admin General' }, { value: 'password_reset', label: 'Password Reset' }]} placeholder="Select scope" />
-                      <input className="rounded-2xl border border-slate-200 px-4 py-3 text-sm" type="number" min="60" max="604800" placeholder="Duration (seconds)" value={restrictionInput.duration} onChange={(e) => setRestrictionInput({ ...restrictionInput, duration: e.target.value })} />
-                      <button disabled={busy} className={`rounded-xl bg-red-600 px-4 py-3 font-semibold text-white${disabledButtonClass}`} onClick={() => askConfirm('Temporarily restrict this account?', `WARDS will restrict ${restrictionInput.account_type}:${restrictionInput.account_id || 'the entered account'} for ${restrictionInput.duration} seconds.`, restrictUser, 'Temporary user restriction added.', 'Restrict user')}>Restrict User</button>
+                      <input className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" type="number" min="60" max="604800" placeholder="Duration (seconds)" value={restrictionInput.duration} onChange={(e) => setRestrictionInput({ ...restrictionInput, duration: e.target.value })} />
+                      <button disabled={busy} className={`w-full whitespace-nowrap rounded-xl bg-red-600 px-4 py-3 font-semibold text-white${disabledButtonClass}`} onClick={() => askConfirm('Temporarily restrict this account?', `WARDS will restrict ${restrictionInput.account_type}:${restrictionInput.account_id || 'the entered account'} for ${restrictionInput.duration} seconds.`, restrictUser, 'Temporary user restriction added.', 'Restrict user')}>Restrict User</button>
                     </div>
                     <input className="mt-3 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Reason" value={restrictionInput.reason} onChange={(e) => setRestrictionInput({ ...restrictionInput, reason: e.target.value })} />
                   </div>
@@ -1630,8 +1642,8 @@ const BackupRecovery = () => {
                     ) : <div className="p-8 text-center text-sm text-slate-500">No account restrictions are active.</div>}
                   </div>
 
-                  <div className="max-h-80 overflow-x-auto rounded-xl border border-slate-200 md:overflow-auto">
-                    {blockedIps.length > 0 ? (
+                  {blockedIps.length > 0 && (
+                    <div className="max-h-80 overflow-x-auto rounded-xl border border-slate-200 md:overflow-auto">
                       <table className="w-full text-sm min-w-[400px]">
                         <thead className="bg-slate-50">
                           <tr>
@@ -1660,10 +1672,8 @@ const BackupRecovery = () => {
                           ))}
                         </tbody>
                       </table>
-                    ) : (
-                      <div className="p-8 text-center text-sm text-slate-500">No IP addresses are currently blocked.</div>
-                    )}
-                  </div>
+                    </div>
+                  )}
 
                   <div className="rounded-xl border border-orange-200 bg-orange-50 p-4">
                     <div className="flex items-center justify-between">

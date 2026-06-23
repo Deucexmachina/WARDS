@@ -593,7 +593,10 @@ class ConnectionLimitMiddleware(BaseHTTPMiddleware):
         if client_ip in _permanent_blocks_cache:
             return JSONResponse(
                 status_code=status.HTTP_403_FORBIDDEN,
-                content={"detail": "IP address is permanently blocked."}
+                content={
+                    "detail": "Access denied. Your IP address has been permanently blocked due to suspicious activity. If you believe this is an error, contact support.",
+                    "block_type": "permanent",
+                }
             )
         
         # Check if IP is temporarily blocked (in-memory)
@@ -603,8 +606,9 @@ class ConnectionLimitMiddleware(BaseHTTPMiddleware):
                 return JSONResponse(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                     content={
-                        "detail": "Too many requests. IP temporarily blocked.",
-                        "retry_after": remaining
+                        "detail": "Access denied. Your IP address has been temporarily blocked due to suspicious activity. If you believe this is an error, contact support.",
+                        "retry_after": remaining,
+                        "block_type": "temporary",
                     },
                     headers={"Retry-After": str(remaining)}
                 )
@@ -670,17 +674,23 @@ class AbuseDetectionMiddleware(BaseHTTPMiddleware):
                 pass  # If reputation check fails, continue normally
 
         scope, threshold, window = rate_limit_for_path(path)
-        restricted_until = float(account_rate_limit_state[account_key]["restricted_until_by_scope"].get(scope) or 0)
-        if restricted_until > current_time:
-            remaining = int(restricted_until - current_time)
+        scopes = account_rate_limit_state[account_key]["restricted_until_by_scope"]
+        # Check path-specific scope AND manual (global) scope
+        restricted_until = float(scopes.get(scope) or 0)
+        manual_restricted_until = float(scopes.get("manual") or 0)
+        effective_restricted_until = max(restricted_until, manual_restricted_until)
+        if effective_restricted_until > current_time:
+            remaining = int(effective_restricted_until - current_time)
+            active_scope = "manual" if manual_restricted_until > restricted_until else scope
             return JSONResponse(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 content={
-                    "detail": "Account functionality is temporarily restricted.",
-                    "scope": scope,
+                    "detail": "Access denied. Your account has been temporarily restricted due to suspicious activity. If you believe this is an error, contact support.",
+                    "scope": active_scope,
                     "account_id": account_key,
                     "account_type": account_type,
                     "retry_after": remaining,
+                    "block_type": "account_restriction",
                 },
                 headers={"Retry-After": str(remaining)}
             )

@@ -1150,7 +1150,18 @@ def add_permanent_block_endpoint(payload: PermanentBlockRequest, request: Reques
     ))
     db.commit()
 
-    return {"message": f"IP {payload.ip.strip()} has been permanently blocked.", "ip": payload.ip.strip()}
+    return {
+        "message": f"IP {payload.ip.strip()} has been permanently blocked.",
+        "ip": payload.ip.strip(),
+        "permanent_block": {
+            "id": block.id,
+            "ip": block.ip_address,
+            "reason": block.reason,
+            "blocked_by": block.blocked_by,
+            "blocked_at": block.blocked_at.isoformat() if block.blocked_at else None,
+            "abuse_count": block.abuse_count,
+        },
+    }
 
 
 @router.delete("/permanent-blocks/{ip}")
