@@ -3599,6 +3599,15 @@ def scan_all_files(db: Session, context: dict | None = None) -> list[SecurityDet
     if is_deployment_in_progress(db):
         logger.info("Deployment in progress — refreshing file registry without creating detections.")
         register_initial_files(db, refresh_existing=True, incremental=False)
+        # Force-update baselines for ALL existing local files so post-deploy scans
+        # see current_hash == baseline_hash and do not create false positives.
+        for entry in active_monitored_files_query(db).all():
+            if is_database_entry(entry) or is_vm1_file(entry):
+                continue
+            if entry.current_hash:
+                entry.baseline_hash = entry.current_hash
+                entry.status = "clean"
+                db.add(entry)
         _last_full_registration_at = now
         set_setting(db, "last_scan_at", now_utc().isoformat(), "security_scanner")
         db.commit()

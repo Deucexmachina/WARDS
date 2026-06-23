@@ -443,13 +443,14 @@ def api_vm1_restore_ack(payload: dict = {}, db=Depends(get_db)):
 
 @app.get("/v1/vm1/config", dependencies=[Depends(require_api_key)])
 def api_vm1_config(db=Depends(get_db)):
-    from SECURITY.security_engine import get_setting, load_vm1_monitored_folders
+    from SECURITY.security_engine import get_setting, load_vm1_monitored_folders, is_deployment_in_progress
     interval = max(5, int(get_setting(db, "scan_interval_seconds", "30")))
     custom_folders = [str(p) for p in load_vm1_monitored_folders(db)]
     return {
         "scan_interval_seconds": interval,
         "vm1_custom_folders": custom_folders,
         "monitoring_enabled": (get_setting(db, "monitoring_enabled", "true") or "true").lower() == "true",
+        "deployment_paused": is_deployment_in_progress(db),
     }
 
 

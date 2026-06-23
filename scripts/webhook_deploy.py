@@ -110,6 +110,29 @@ async def github_webhook(request: Request):
             except Exception as e:
                 logger.error("VM2 deploy trigger failed: %s", e)
 
+            # Wait for VM2 to come back up and finish its startup baseline
+            logger.info("Waiting for VM2 to finish startup baseline...")
+            import time
+            for attempt in range(30):
+                time.sleep(2)
+                try:
+                    status_resp = httpx.get(
+                        f"http://{VM2_HOST}:8443/internal/deploy-status",
+                        headers={"X-API-Key": VM2_API_KEY},
+                        timeout=5.0,
+                    )
+                    if status_resp.status_code == 200:
+                        logger.info("VM2 is back up: %s", status_resp.json())
+                        break
+                except Exception:
+                    pass
+            else:
+                logger.warning("VM2 did not become ready within timeout; proceeding anyway")
+
+            # Give the monitor loop time to run its startup baseline backup
+            # (it clears deployment mode automatically after baseline completes)
+            time.sleep(10)
+
             # Trigger post-deploy backup on VM2 so new files have a trusted baseline
             try:
                 backup_resp = httpx.post(
@@ -122,7 +145,9 @@ async def github_webhook(request: Request):
             except Exception as e:
                 logger.error("VM2 post-deploy backup trigger failed: %s", e)
 
-            # Resume VM2 monitoring after deploy + backup
+            # Deployment mode is cleared automatically by VM2 monitor_loop
+            # after startup baseline backup completes. If for some reason it
+            # is still active, clear it now so monitoring resumes.
             try:
                 httpx.post(
                     f"http://{VM2_HOST}:8443/internal/deployment-mode",
@@ -130,7 +155,7 @@ async def github_webhook(request: Request):
                     json={"in_progress": False},
                     timeout=10.0,
                 )
-                logger.info("VM2 deployment mode cleared")
+                logger.info("VM2 deployment mode cleared (fallback)")
             except Exception as e:
                 logger.warning("Could not clear VM2 deployment mode after deploy: %s", e)
 

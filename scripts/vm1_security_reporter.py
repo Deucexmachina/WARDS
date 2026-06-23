@@ -288,9 +288,13 @@ def main_loop():
                 last_heartbeat = now
 
         if now - last_scan >= DYNAMIC_SCAN_INTERVAL:
-            files = list(iter_monitored_files())
-            snapshot_files(files)
-            send_manifest(files)
+            cfg = fetch_vm2_config()
+            if cfg.get("deployment_paused"):
+                log("VM2 deployment is paused — skipping manifest upload")
+            else:
+                files = list(iter_monitored_files())
+                snapshot_files(files)
+                send_manifest(files)
             last_scan = now
 
         if now - last_restore_poll >= RESTORE_POLL_INTERVAL:
