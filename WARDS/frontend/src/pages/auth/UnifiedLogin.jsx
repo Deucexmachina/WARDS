@@ -349,6 +349,21 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
     return { strikes, lockedUntil };
   };
 
+  const clearLocalLockout = (value, portal = getActivePortal()) => {
+    const key = getTrackingKey(value, portal);
+    const raw = localStorage.getItem(key);
+    if (!raw) return;
+    try {
+      const data = JSON.parse(raw);
+      if (data.lockedUntil) {
+        data.lockedUntil = null;
+        localStorage.setItem(key, JSON.stringify(data));
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+
   const registerFailedAttempt = (value, portal = getActivePortal()) => {
     const current = readGuardState(value, portal);
 
@@ -592,6 +607,10 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
 
       lockDetectedPortal(portal);
       const backendLockout = getBackendLockout(err.response?.data);
+      // If backend says not locked, clear any stale local lockout
+      if (!backendLockout) {
+        clearLocalLockout(identifier, portal || getActivePortal());
+      }
       const updatedGuardState = registerFailedAttempt(identifier, portal || getActivePortal());
       const effectiveStrikes = backendLockout?.strikes ?? updatedGuardState.strikes;
       const effectiveLockedUntil = backendLockout?.lockedUntil ?? updatedGuardState.lockedUntil;
@@ -651,6 +670,9 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
       lockDetectedPortal(portal);
       const detail = normalizeLoginErrorMessage(err.response?.data?.detail || 'Invalid TOTP code. Please try again.');
       const backendLockout = getBackendLockout(err.response?.data);
+      if (!backendLockout) {
+        clearLocalLockout(identifier, portal || getActivePortal());
+      }
       const updatedGuardState = registerFailedAttempt(identifier, portal || getActivePortal());
       const effectiveStrikes = backendLockout?.strikes ?? updatedGuardState.strikes;
       const effectiveLockedUntil = backendLockout?.lockedUntil ?? updatedGuardState.lockedUntil;
