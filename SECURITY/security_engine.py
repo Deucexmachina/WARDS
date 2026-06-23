@@ -3700,6 +3700,12 @@ def mark_stale_backup_events_failed(db: Session, max_age_minutes: int = 10) -> i
 
 
 def create_manual_backup(db: Session, initiated_by: int | None, label: str = "manual") -> SecurityRecoveryEvent:
+    # FK safety: initiated_by may reference a VM1 admin ID that doesn't exist
+    # in the security DB. Fall back to None to avoid IntegrityError.
+    if initiated_by is not None:
+        admin_exists = db.query(Admin).filter(Admin.id == initiated_by).first()
+        if not admin_exists:
+            initiated_by = None
     seed_settings(db)
     migrate_portable_monitored_files(db)
     dedupe_monitored_files_by_relative_path(db)
@@ -3718,24 +3724,31 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
     db.add(event)
     db.commit()
     db.refresh(event)
+    event_id = event.id
     create_system_alert(
         db,
         "backup_started",
-        f"Backup #{event.id}: {label.replace('_', ' ')} backup started.",
+        f"Backup #{event_id}: {label.replace('_', ' ')} backup started.",
         "low",
-        dedupe_key=f"Backup #{event.id}",
+        dedupe_key=f"Backup #{event_id}",
     )
-    logger.info("Backup %s started for label '%s' at '%s'.", event.id, label, backup_root)
+    logger.info("Backup %s started for label '%s' at '%s'.", event_id, label, backup_root)
     try:
         backup_root.mkdir(parents=True, exist_ok=True)
         database_entry = normalize_database_monitor_entry(db, reset_baseline=False, ensure_snapshot=True)
         manifest_files: list[dict[str, object]] = []
         backed_up_roots: set[str] = set()
-        for entry in active_monitored_files_query(db).order_by(SecurityMonitoredFile.relative_path.asc()).all():
+        # Clear any pending state from the setup functions to avoid
+        # accumulating row locks before the main loop.
+        db.commit()
+        processed = 0
+        entries = active_monitored_files_query(db).order_by(SecurityMonitoredFile.relative_path.asc()).all()
+        for entry in entries:
             if is_database_entry(entry) and database_entry and entry.id != database_entry.id:
                 entry.status = "clean"
                 entry.last_checked = now_utc()
                 db.add(entry)
+                processed += 1
                 continue
             path = portable_monitored_path(entry)
             relative = entry.relative_path or safe_rel(path)
@@ -3792,6 +3805,7 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
                     entry.size_bytes = snapshot.stat().st_size if snapshot.exists() else entry.size_bytes
                     entry.last_checked = now_utc()
                     db.add(entry)
+                    processed += 1
                     continue
                 if not path.exists() or not path.is_file():
                     continue
@@ -3818,6 +3832,11 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
             entry.file_type = file_type(path)
             entry.size_bytes = path.stat().st_size
             entry.last_checked = now_utc()
+            processed += 1
+            # Incremental commit every 50 entries to avoid holding hundreds
+            # of row locks at once (prevents MySQL deadlock with monitor loop).
+            if processed % 50 == 0:
+                db.commit()
         db.commit()
         model_artifact_count = backup_ml_artifacts(
             backup_root,
@@ -3843,18 +3862,24 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
         removed_backups = prune_backup_type(backup_location, label, keep=BACKUP_RETENTION_LIMIT)
         logger.info(
             "Backup %s completed successfully. Retention kept the newest %s completed '%s' backup(s) and removed %s old backup(s).",
-            event.id,
+            event_id,
             BACKUP_RETENTION_LIMIT,
             label,
             removed_backups,
         )
     except Exception as exc:
+        # Session may be rolled back (e.g., MySQL deadlock). Roll back
+        # explicitly so we can safely update the event record.
+        try:
+            db.rollback()
+        except Exception:
+            pass
         event.status = "failed"
         event.error_message = str(exc)
         event.completed_at = now_utc()
         event.recovery_duration_ms = int((time.time() - started) * 1000)
         event.summary = "Local backup failed."
-        logger.exception("Backup %s failed for label '%s'.", event.id, label)
+        logger.exception("Backup %s failed for label '%s'.", event_id, label)
     db.add(event)
     db.commit()
     db.refresh(event)

@@ -40,8 +40,9 @@ def test_prune_backup_type_keeps_newest_completed_backups():
         removed = prune_backup_type(root, "manual", keep=2)
 
         remaining = sorted(item.name for item in root.iterdir() if item.is_dir())
-        assert removed == 2
-        assert "manual_backup_20240101_000002" in remaining
+        # All backup folders (completed + incomplete) are now counted for retention,
+        # so 5 total - keep 2 = 3 removed
+        assert removed == 3
         assert "manual_backup_20240101_000003" in remaining
         assert "manual_backup_20240101_999999" in remaining
 
