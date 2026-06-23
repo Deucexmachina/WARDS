@@ -346,6 +346,47 @@ class TestAddMonitoredFolderVm1:
 # ---------------------------------------------------------------------------
 # process_vm1_file_manifest
 # ---------------------------------------------------------------------------
+class TestMigratePortableMonitoredFilesMergeDuplicates:
+    """migrate_portable_monitored_files must merge entries when cleaning creates duplicates."""
+
+    def test_merges_duplicate_on_clean(self, monkeypatch):
+        from SECURITY.security_engine import migrate_portable_monitored_files
+
+        dirty = _make_entry(
+            id=1,
+            folder_root="VM1_CUSTOM_SIGMA",
+            relative_path="CUSTOM_SIGMA/config.txt",
+            file_path="vm1://CUSTOM_SIGMA/config.txt",
+            baseline_hash="old_hash",
+        )
+        clean = _make_entry(
+            id=2,
+            folder_root="SIGMA",
+            relative_path="SIGMA/config.txt",
+            file_path="vm1://SIGMA/config.txt",
+            baseline_hash=None,
+        )
+
+        db = MagicMock()
+        db.query.return_value.order_by.return_value.all.return_value = [dirty, clean]
+        # Simulate duplicate check finding the clean entry
+        db.query.return_value.filter.return_value.filter.return_value.first.return_value = clean
+
+        monkeypatch.setattr(
+            "SECURITY.security_engine.is_database_entry",
+            lambda e: False,
+        )
+        monkeypatch.setattr(
+            "SECURITY.security_engine.is_vm1_file",
+            lambda e: True,
+        )
+
+        result = migrate_portable_monitored_files(db)
+        # merge_monitored_file_entry should have been called, deleting dirty
+        db.delete.assert_called_once_with(dirty)
+        assert result >= 1
+
+
 class TestProcessVm1ManifestNormalizesCustomPrefix:
     """process_vm1_file_manifest must strip CUSTOM_ from incoming data."""
 

@@ -1011,7 +1011,19 @@ def migrate_portable_monitored_files(db: Session) -> int:
                 entry.relative_path = clean_rel
             file_path = str(entry.file_path or "")
             if "CUSTOM_" in file_path or "VM1_CUSTOM_" in file_path:
-                entry.file_path = file_path.replace("VM1_CUSTOM_", "", 1).replace("CUSTOM_", "", 1)
+                new_path = file_path.replace("VM1_CUSTOM_", "", 1).replace("CUSTOM_", "", 1)
+                # If cleaning creates a duplicate file_path, merge instead of updating
+                dup = (
+                    db.query(SecurityMonitoredFile)
+                    .filter(SecurityMonitoredFile.file_path == new_path)
+                    .filter(SecurityMonitoredFile.id != entry.id)
+                    .first()
+                )
+                if dup:
+                    merge_monitored_file_entry(db, entry, dup)
+                    changed += 1
+                    continue
+                entry.file_path = new_path
             changed += 1
         if is_database_entry(entry):
             by_path[normalized_path_key(entry.file_path)] = entry
