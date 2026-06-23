@@ -154,6 +154,12 @@ def _send_via_brevo(message: EmailMessage) -> dict:
         raise RuntimeError("BREVO_API_KEY is not set")
 
     from_name, from_email = parseaddr(str(message["From"]))
+    if not from_email:
+        raise RuntimeError(
+            f"SMTP_FROM_EMAIL is not set or invalid (From header was: {message.get('From')!r}). "
+            "Brevo requires a verified sender email."
+        )
+
     to_addrs = getaddresses([str(message.get("To", ""))])
     to_list = [{"email": addr} for _, addr in to_addrs if addr]
     if not to_list:
@@ -195,6 +201,9 @@ def _send_via_brevo(message: EmailMessage) -> dict:
         elif ctype == "text/html":
             payload["htmlContent"] = message.get_content()
 
+    if not payload.get("textContent") and not payload.get("htmlContent"):
+        raise RuntimeError("Email has no text or HTML content")
+
     if attachments:
         payload["attachment"] = attachments
 
@@ -208,7 +217,9 @@ def _send_via_brevo(message: EmailMessage) -> dict:
         timeout=20,
     )
     if not response.ok:
-        logger.error("Brevo API error: %s %s — body: %s", response.status_code, response.reason, response.text)
+        detail = response.text or "no details"
+        logger.error("Brevo API error: %s %s — body: %s", response.status_code, response.reason, detail)
+        raise RuntimeError(f"Brevo rejected the request ({response.status_code}): {detail}")
     response.raise_for_status()
 
     return {"sent": True, "status": "sent"}
