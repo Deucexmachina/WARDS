@@ -374,8 +374,21 @@ def verify_recaptcha(token: str, client_ip: str) -> bool:
         return False
 
 
-def log_activity(db: Session, action: str, user: str, details: str, log_type: str = "auth"):
-    db.add(ActivityLog(action=action, user=user, details=details, type=log_type))
+def log_activity(db: Session, action: str, user: str, details: str, log_type: str = "auth", *, request=None, role=None, branch=None, email=None):
+    meta_parts = []
+    if role:
+        meta_parts.append(f"role: {role}")
+    if branch:
+        meta_parts.append(f"branch: {branch}")
+    if email:
+        meta_parts.append(f"email: {email}")
+    if request and request.client and request.client.host:
+        meta_parts.append(f"ip: {request.client.host}")
+    full_details = details
+    if meta_parts:
+        separator = " | " if " | " in details else "; "
+        full_details = f"{details}{separator}{' | '.join(meta_parts)}"
+    db.add(ActivityLog(action=action, user=user, details=full_details, type=log_type))
     db.commit()
 
 
@@ -642,8 +655,10 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
             db,
             "Failed Unified Login",
             credentials.identifier,
-            f"Portal: {portal}, IP: {client_ip}",
+            f"Portal: {portal}",
             "security",
+            request=request,
+            role=getattr(account, 'role', 'citizen' if portal == 'public' else portal),
         )
 
         return JSONResponse(
@@ -747,8 +762,10 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
         db,
         "Successful Unified Login",
         credentials.identifier,
-        f"Portal: {portal}, IP: {client_ip}",
+        f"Portal: {portal}",
         "security",
+        request=request,
+        role=getattr(account, 'role', 'citizen' if portal == 'public' else portal),
     )
     log_unified_security_context(db, portal=portal, actor=get_mfa_username(portal, account), client_ip=client_ip, account=account)
 
@@ -1901,7 +1918,7 @@ async def branch_staff_change_password(
     db.commit()
 
     client_ip = request.client.host if request.client else "unknown"
-    log_activity(db, "Window Staff Password Changed", current_staff.username, f"IP: {client_ip}")
+    log_activity(db, "Window Staff Password Changed", current_staff.username, "Password changed", request=request, role=current_staff.role, branch=current_staff.branch.name if current_staff.branch else None)
 
     email_result = send_account_change_notification_email(
         recipient_email=current_staff.email,
@@ -1935,7 +1952,7 @@ async def branch_staff_reset_mfa(
     payload_data = generate_mfa_payload("branch", current_staff.username, totp_secret, issuer_name="WARDS Branch Portal")
 
     client_ip = request.client.host if request.client else "unknown"
-    log_activity(db, "Window Staff MFA Reset", current_staff.username, f"IP: {client_ip}")
+    log_activity(db, "Window Staff MFA Reset", current_staff.username, "MFA reset initiated", request=request, role=current_staff.role, branch=current_staff.branch.name if current_staff.branch else None)
 
     return {
         "message": "MFA reset. Please scan the QR code to complete setup.",
@@ -1965,14 +1982,14 @@ async def branch_staff_verify_mfa(
     totp = pyotp.TOTP(totp_secret)
     if not totp.verify(payload.totp_code, valid_window=1):
         client_ip = request.client.host if request.client else "unknown"
-        log_activity(db, "Window Staff MFA Verify Failed", current_staff.username, f"IP: {client_ip}")
+        log_activity(db, "Window Staff MFA Verify Failed", current_staff.username, "MFA verification failed", request=request, role=current_staff.role, branch=current_staff.branch.name if current_staff.branch else None)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid verification code.",
         )
 
     client_ip = request.client.host if request.client else "unknown"
-    log_activity(db, "Window Staff MFA Configured", current_staff.username, f"IP: {client_ip}")
+    log_activity(db, "Window Staff MFA Configured", current_staff.username, "MFA configured successfully", request=request, role=current_staff.role, branch=current_staff.branch.name if current_staff.branch else None)
 
     email_result = send_account_change_notification_email(
         recipient_email=current_staff.email,

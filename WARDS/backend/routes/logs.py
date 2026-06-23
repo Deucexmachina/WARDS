@@ -7,7 +7,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 from typing import Optional
 
-from database.models import ActivityLog, Branch, BranchStaff, Admin, get_db
+from database.models import ActivityLog, Branch, BranchStaff, Admin, CitizenUser, get_db
 from utils.field_crypto import get_decrypted_or_raw
 from auth import get_current_admin_user, get_current_branch_staff
 from utils.log_integrity import verify_record_integrity
@@ -130,6 +130,32 @@ async def get_activity_logs(
         match = re.search(rf"{re.escape(label)}\s*:\s*([^|,]+)", details, flags=re.IGNORECASE)
         return match.group(1).strip() if match else None
 
+    def _resolve_role(user_identifier: str) -> str | None:
+        if not user_identifier:
+            return None
+        admin = db.query(Admin).filter(Admin.username == user_identifier).first()
+        if admin:
+            return admin.role
+        staff = db.query(BranchStaff).filter(BranchStaff.username == user_identifier).first()
+        if staff:
+            return staff.role
+        if "@" in user_identifier:
+            return "citizen"
+        return None
+
+    def _extract_ip(details: str | None) -> str | None:
+        if not details:
+            return None
+        # Try standard ip: prefix first
+        match = re.search(r"ip\s*:\s*([^|,;\s]+)", details, flags=re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+        # Fallback: look for IP address patterns in the text
+        match = re.search(r"(?:IP|client ip|remote ip)\s*[:=]\s*([^|,;\s]+)", details, flags=re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+        return None
+
     items = [
         {
             "id": log.id,
@@ -137,9 +163,9 @@ async def get_activity_logs(
             "action": log.action,
             "user": log.user,
             "email": log.user if "@" in (log.user or "") else detail_value(log.details, "email"),
-            "role": detail_value(log.details, "role") or detail_value(log.details, "portal"),
+            "role": detail_value(log.details, "role") or detail_value(log.details, "portal") or _resolve_role(log.user) or "not recorded",
             "branch": detail_value(log.details, "branch") or detail_value(log.details, "branch_name"),
-            "ip": detail_value(log.details, "ip") or "not recorded",
+            "ip": _extract_ip(log.details) or "not recorded",
             "details": log.details,
             "type": log.type,
             "created_at": log.created_at.isoformat() if log.created_at else None,
