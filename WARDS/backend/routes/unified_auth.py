@@ -633,7 +633,7 @@ def get_account_type_label(portal: str, account: object) -> str:
 
 
 @router.post("/login", response_model=UnifiedToken)
-@limiter.limit("5/minute")
+@limiter.limit("10/minute")
 async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: Session = Depends(get_db)):
     client_ip = request.client.host
 
