@@ -36,7 +36,7 @@ const ViewMyTicket = ({ onClose }) => {
     try {
       setLoading(loading && !ticket); // Only show loading on first load
       setError(null);
-      const response = await api.get('/public/queue/my-ticket');
+      const response = await api.get('/public/queue/my-ticket', { suppressGlobalErrorModal: true });
       if (response.data.has_active_ticket) {
         setTicket(response.data.ticket);
       } else {
@@ -45,7 +45,7 @@ const ViewMyTicket = ({ onClose }) => {
     } catch (err) {
       console.error('Failed to fetch ticket:', err);
       if (err.response?.status === 401) {
-        setError('Please log in to view your ticket.');
+        setTicket(null);
       } else {
         setError(err.response?.data?.detail || 'Failed to load your ticket. Please try again.');
       }
