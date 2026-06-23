@@ -5,8 +5,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from database.models import (
-    get_db, Branch, Queue, QueueActivity, Payment, Admin, 
-    Alert, AlertView, ActivityLog, Announcement
+    get_db, Branch, Queue, QueueActivity, Payment, Admin,
+    Alert, AlertView, ActivityLog, Announcement, QueueHistory
 )
 from auth import get_current_admin_user
 from utils.rbac import require_permission
@@ -73,31 +73,47 @@ async def get_dashboard_statistics(
     
     # Get queues
     queues = queue_query.order_by(Queue.created_at.desc()).all()
-    
+
     # Aggregate statistics from Queue table
     total_waiting = len([q for q in queues if queue_value(q, "status") == "Waiting"])
     total_being_served = len([q for q in queues if queue_value(q, "status") == "Serving"])
-    total_completed = len([q for q in queues if queue_value(q, "status") == "Completed"])
-    
+
+    # Build mirrored history query for completed queues (archived to QueueHistory)
+    history_query = db.query(QueueHistory).filter(QueueHistory.final_status == "Completed")
+    if branch_id:
+        history_query = history_query.filter(QueueHistory.branch_id == branch_id)
+    elif current_user.role in ["branch_admin", "branch_staff"] and current_user.branch_id:
+        history_query = history_query.filter(QueueHistory.branch_id == current_user.branch_id)
+    if service_type:
+        history_query = history_query.filter(QueueHistory.service_type == service_type)
+    if date_from and date_to:
+        start_date = datetime.fromisoformat(date_from)
+        end_date = datetime.fromisoformat(date_to)
+        history_query = history_query.filter(QueueHistory.created_at.between(start_date, end_date))
+    total_completed = history_query.count()
+
     # Get payment statistics
     total_payments = payment_query.count()
     total_amount = payment_query.filter(
         Payment.status.in_(CONFIRMED_PAYMENT_STATUSES)
     ).with_entities(func.sum(Payment.amount)).scalar() or 0
-    
+
     # Get branch-specific data
     branches = db.query(Branch).all()
     if current_user.role in ["branch_admin", "branch_staff"] and current_user.branch_id:
         branches = [b for b in branches if b.id == current_user.branch_id]
-    
+
     branch_stats = []
     for branch in branches:
         branch_queues = [q for q in queues if q.branch_id == branch.id]
-        
+
         waiting_count = len([q for q in branch_queues if queue_value(q, "status") == "Waiting"])
         serving_count = len([q for q in branch_queues if queue_value(q, "status") == "Serving"])
-        completed_count = len([q for q in branch_queues if queue_value(q, "status") == "Completed"])
-        
+        completed_count = db.query(QueueHistory).filter(
+            QueueHistory.branch_id == branch.id,
+            QueueHistory.final_status == "Completed"
+        ).count()
+
         branch_stats.append({
             "branch_id": branch.id,
             "branch_name": get_decrypted_or_raw(branch, "name") or branch.name,
@@ -109,7 +125,7 @@ async def get_dashboard_statistics(
             "clients_completed": completed_count,
             "last_updated": branch_queues[0].created_at.isoformat() if branch_queues else None
         })
-    
+
     # Get served totals for dashboard period cards (using UTC+8 for Philippine time)
     ph_tz = timezone(timedelta(hours=8))
     now_ph = datetime.now(ph_tz)
@@ -117,9 +133,29 @@ async def get_dashboard_statistics(
     week_start_ph = now_ph - timedelta(days=now_ph.weekday())
     week_start = week_start_ph.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc).replace(tzinfo=None)
     month_start = now_ph.replace(day=1, hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc).replace(tzinfo=None)
-    daily_served = queue_query.filter(hash_aware_match(Queue, "status", "Completed"), Queue.completed_at >= today_start).count()
-    weekly_served = queue_query.filter(hash_aware_match(Queue, "status", "Completed"), Queue.completed_at >= week_start).count()
-    monthly_served = queue_query.filter(hash_aware_match(Queue, "status", "Completed"), Queue.completed_at >= month_start).count()
+    daily_served = db.query(QueueHistory).filter(
+        QueueHistory.final_status == "Completed",
+        QueueHistory.completed_at >= today_start
+    )
+    weekly_served = db.query(QueueHistory).filter(
+        QueueHistory.final_status == "Completed",
+        QueueHistory.completed_at >= week_start
+    )
+    monthly_served = db.query(QueueHistory).filter(
+        QueueHistory.final_status == "Completed",
+        QueueHistory.completed_at >= month_start
+    )
+    if branch_id:
+        daily_served = daily_served.filter(QueueHistory.branch_id == branch_id)
+        weekly_served = weekly_served.filter(QueueHistory.branch_id == branch_id)
+        monthly_served = monthly_served.filter(QueueHistory.branch_id == branch_id)
+    elif current_user.role in ["branch_admin", "branch_staff"] and current_user.branch_id:
+        daily_served = daily_served.filter(QueueHistory.branch_id == current_user.branch_id)
+        weekly_served = weekly_served.filter(QueueHistory.branch_id == current_user.branch_id)
+        monthly_served = monthly_served.filter(QueueHistory.branch_id == current_user.branch_id)
+    daily_served = daily_served.count()
+    weekly_served = weekly_served.count()
+    monthly_served = monthly_served.count()
 
     # Get payment statistics for today
     today_payments = payment_query.filter(Payment.created_at >= today_start)
