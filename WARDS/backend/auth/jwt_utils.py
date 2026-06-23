@@ -26,37 +26,39 @@ USER_SECRET_KEY = _require_env("USER_SECRET_KEY")
 BRANCH_SECRET_KEY = _require_env("BRANCH_SECRET_KEY")
 PASSWORD_RESET_SECRET_KEY = _require_env("PASSWORD_RESET_SECRET_KEY")
 
+_LOCKOUT_DURATION_SECONDS = int(os.getenv("LOCKOUT_DURATION_MINUTES", "15")) * 60
+
 PORTAL_CONFIG = {
     "unknown": {
         "secret_key": USER_SECRET_KEY,
         "token_type": "user",
         "expires_minutes": 30,
-        "captcha_threshold": 1,
-        "lockout_duration": 120,
+        "captcha_threshold": 3,
+        "lockout_duration": _LOCKOUT_DURATION_SECONDS,
         "issuer_name": "WARDS Portal",
     },
     "public": {
         "secret_key": USER_SECRET_KEY,
         "token_type": "user",
         "expires_minutes": 30,
-        "captcha_threshold": 1,
-        "lockout_duration": 120,
+        "captcha_threshold": 3,
+        "lockout_duration": _LOCKOUT_DURATION_SECONDS,
         "issuer_name": "WARDS Public Portal",
     },
     "admin": {
         "secret_key": ADMIN_SECRET_KEY,
         "token_type": "admin",
         "expires_minutes": 30,
-        "captcha_threshold": 1,
-        "lockout_duration": 120,
+        "captcha_threshold": 3,
+        "lockout_duration": _LOCKOUT_DURATION_SECONDS,
         "issuer_name": "WARDS Admin Portal",
     },
     "branch": {
         "secret_key": BRANCH_SECRET_KEY,
         "token_type": "branch",
         "expires_minutes": 30,
-        "captcha_threshold": 1,
-        "lockout_duration": 120,
+        "captcha_threshold": 3,
+        "lockout_duration": _LOCKOUT_DURATION_SECONDS,
         "issuer_name": "WARDS Branch Portal",
     },
 }

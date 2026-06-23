@@ -10,9 +10,9 @@ import cityHall from '../../assets/branding/qc_city_hall.jpg';
 
 import { API_HOST } from '../../services/api';
 const RECAPTCHA_SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY || '';
-const CAPTCHA_THRESHOLD = 1;
+const CAPTCHA_THRESHOLD = 3;
 const LOCKOUT_THRESHOLD = 5;
-const LOCKOUT_DURATION_MS = 2 * 60 * 1000;
+const LOCKOUT_DURATION_MS = 15 * 60 * 1000;
 
 const portalCopy = {
   public: {
