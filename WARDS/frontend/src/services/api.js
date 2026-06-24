@@ -5,6 +5,7 @@ import { getFriendlyErrorMessage, getModalToneForError, shouldSuppressGlobalErro
 const rawBaseUrl = import.meta.env.VITE_API_BASE_URL
   || `${window.location.protocol}//${window.location.hostname}:8000`;
 export const API_BASE_URL = rawBaseUrl.endsWith('/api') ? rawBaseUrl : rawBaseUrl + '/api';
+// Build hash: nano-fix-v2
 export const API_HOST = rawBaseUrl.startsWith('/')
   ? ''
   : API_BASE_URL.replace(/\/api$/, '');
