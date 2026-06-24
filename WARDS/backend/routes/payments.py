@@ -2936,10 +2936,12 @@ async def accept_main_remittance(
     account.current_balance = float(account.current_balance or 0) + float(remittance.total_amount or 0)
     account.total_collected = float(account.total_collected or 0) + float(remittance.total_amount or 0)
     account.updated_at = datetime.utcnow()
+    branch = remittance.branch
+    branch_name = get_decrypted_or_raw(branch, "name") or branch.name if branch else f"Branch {remittance.branch_id}"
     db.add(ActivityLog(
         action="Remittance Accepted",
         user=remittance.reviewed_by,
-        details=f"Accepted remittance {remittance.remittance_number}",
+        details=f"branch: {branch_name} | Accepted remittance {remittance.remittance_number}",
         type="remittance",
     ))
     db.commit()
@@ -2979,10 +2981,12 @@ async def reject_main_remittance(
         remittance.remarks = payload.remarks.strip()
     for item in remittance.items or []:
         item.status = "Rejected"
+    branch = remittance.branch
+    branch_name = get_decrypted_or_raw(branch, "name") or branch.name if branch else f"Branch {remittance.branch_id}"
     db.add(ActivityLog(
         action="Remittance Rejected",
         user=remittance.reviewed_by,
-        details=f"Rejected remittance {remittance.remittance_number}",
+        details=f"branch: {branch_name} | Rejected remittance {remittance.remittance_number}",
         type="remittance",
     ))
     db.commit()
@@ -3057,10 +3061,11 @@ async def verify_payment_by_id(
             apply_business_tax_application_security_fields(application)
     send_verified_payment_receipt_if_needed(db, payment, "manual branch verification")
 
+    payment_branch_name = resolve_payment_branch_name(payment) or "System"
     db.add(ActivityLog(
         action="Payment Verified",
         user=current_admin.username,
-        details=f"Payment {payment.ref_number} verified by admin",
+        details=f"branch: {payment_branch_name} | Payment {payment.ref_number} verified by admin",
         type="transaction",
     ))
     db.commit()
@@ -3091,10 +3096,11 @@ async def decline_payment(
             application.returned_at = datetime.utcnow()
             application.verifier_remarks = "Business Tax submission was returned for correction by the branch treasury office."
             apply_business_tax_application_security_fields(application)
+    payment_branch_name = resolve_payment_branch_name(payment) or "System"
     db.add(ActivityLog(
         action="Payment Declined",
         user=current_admin.username,
-        details=f"Payment {payment.ref_number} declined by admin",
+        details=f"branch: {payment_branch_name} | Payment {payment.ref_number} declined by admin",
         type="transaction",
     ))
     db.commit()

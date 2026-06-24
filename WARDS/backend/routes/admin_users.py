@@ -177,7 +177,7 @@ async def create_user(
         action="Admin User Created",
         user=current_admin.username,
         details=f"Created {role} account for {email}",
-        type="admin_user",
+        type="admin",
     ))
     db.commit()
     db.refresh(user)
@@ -227,7 +227,7 @@ async def update_user(
         action="Admin User Updated",
         user=current_admin.username,
         details=f"Updated {role} account for {user.email}",
-        type="admin_user",
+        type="admin",
     ))
     db.commit()
     return serialize_user(user, role)
@@ -250,7 +250,7 @@ async def deactivate_user(
         action="Admin User Deactivated",
         user=current_admin.username,
         details=f"Deactivated {role} account for {user.email}",
-        type="admin_user",
+        type="admin",
     ))
     db.commit()
     return {"message": "User deactivated successfully"}
@@ -273,7 +273,7 @@ async def activate_user(
         action="Admin User Activated",
         user=current_admin.username,
         details=f"Activated {role} account for {user.email}",
-        type="admin_user",
+        type="admin",
     ))
     db.commit()
     return {"message": "User activated successfully"}
@@ -297,7 +297,7 @@ async def delete_user(
         action="Admin User Deleted",
         user=current_admin.username,
         details=f"Deleted {role} account for {user.email}",
-        type="admin_user",
+        type="admin",
     ))
     db.delete(user)
     db.commit()

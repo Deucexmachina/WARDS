@@ -1717,10 +1717,16 @@ def save_receipt_record_payload(
     db.add(ActivityLog(
         action="Receipt Record Saved",
         user=uploaded_by,
-        details=f"Saved verified receipt record {normalized_ref_number or payload.receipt_number or record.id}",
+        details=_branch_log_details(db, branch_id, f"Saved verified receipt record {normalized_ref_number or payload.receipt_number or record.id}"),
         type="branch_receipts",
     ))
     return record
+
+
+def _branch_log_details(db: Session, branch_id: int, details: str) -> str:
+    branch = db.query(Branch).filter(Branch.id == branch_id).first()
+    branch_name = get_decrypted_or_raw(branch, "name") or branch.name if branch else f"Branch {branch_id}"
+    return f"branch: {branch_name} | {details}"
 
 
 def build_receipt_ocr_result(
@@ -2522,7 +2528,7 @@ async def delete_receipt_record(
     db.add(ActivityLog(
         action="Receipt Record Deleted",
         user=current_staff.username,
-        details=f"Deleted verified receipt record {record_label}",
+        details=_branch_log_details(db, current_staff.branch_id, f"Deleted verified receipt record {record_label}"),
         type="branch_receipts",
     ))
     db.commit()
@@ -2597,7 +2603,7 @@ async def delete_receipt_request_history(
     db.add(ActivityLog(
         action="Completed Receipt Request Deleted",
         user=current_staff.username,
-        details=f"Deleted completed receipt request {request_id}",
+        details=_branch_log_details(db, current_staff.branch_id, f"Deleted completed receipt request {request_id}"),
         type="branch_receipts",
     ))
     db.commit()
@@ -2639,10 +2645,14 @@ async def delete_receipt_request(
     db.add(ActivityLog(
         action="Receipt Request Deleted",
         user=current_staff.username,
-        details=(
-            f"Deleted receipt request {request_id}; "
-            f"removed {removed_pending_payments} pending payment record(s) and preserved "
-            f"{preserved_terminal_payments} verified/declined payment record(s)"
+        details=_branch_log_details(
+            db,
+            current_staff.branch_id,
+            (
+                f"Deleted receipt request {request_id}; "
+                f"removed {removed_pending_payments} pending payment record(s) and preserved "
+                f"{preserved_terminal_payments} verified/declined payment record(s)"
+            ),
         ),
         type="branch_receipts",
     ))
@@ -2706,7 +2716,7 @@ async def release_receipt_request(request_id: str, current_staff=Depends(get_cur
             db.add(ActivityLog(
                 action="Receipt Release Validation Failed",
                 user=current_staff.username,
-                details=f"OCR validation error for request {request_id}: {exc.detail}",
+                details=_branch_log_details(db, current_staff.branch_id, f"OCR validation error for request {request_id}: {exc.detail}"),
                 type="branch_receipts",
             ))
             db.commit()
@@ -2715,7 +2725,7 @@ async def release_receipt_request(request_id: str, current_staff=Depends(get_cur
             db.add(ActivityLog(
                 action="Receipt Release Validation Failed",
                 user=current_staff.username,
-                details=f"OCR validation exception for request {request_id}",
+                details=_branch_log_details(db, current_staff.branch_id, f"OCR validation exception for request {request_id}"),
                 type="branch_receipts",
             ))
             db.commit()
@@ -2764,7 +2774,7 @@ async def release_receipt_request(request_id: str, current_staff=Depends(get_cur
             db.add(ActivityLog(
                 action=log_action,
                 user=current_staff.username,
-                details=log_details,
+                details=_branch_log_details(db, current_staff.branch_id, log_details),
                 type="branch_receipts",
             ))
             db.commit()
@@ -2774,8 +2784,12 @@ async def release_receipt_request(request_id: str, current_staff=Depends(get_cur
         db.add(ActivityLog(
             action="Receipt Release Validation Passed",
             user=current_staff.username,
-            details=f"Release copy validation passed for request {receipt_request_value(receipt_request, 'request_id')}. "
-                    f"Extracted taxpayer: {extracted_taxpayer_name or 'N/A'}",
+            details=_branch_log_details(
+                db,
+                current_staff.branch_id,
+                f"Release copy validation passed for request {receipt_request_value(receipt_request, 'request_id')}. "
+                f"Extracted taxpayer: {extracted_taxpayer_name or 'N/A'}",
+            ),
             type="branch_receipts",
         ))
     # --- End Release Copy Validation ---
@@ -2812,10 +2826,14 @@ async def release_receipt_request(request_id: str, current_staff=Depends(get_cur
     db.add(ActivityLog(
         action="Receipt Request Released" if final_status == "Released" else "Receipt Appointment Completed",
         user=current_staff.username,
-        details=(
-            f"Released and cleared receipt request {request_id} while preserving the linked payment history"
-            if final_status == "Released"
-            else f"Completed appointment receipt request {request_id} through the receipt release workflow"
+        details=_branch_log_details(
+            db,
+            current_staff.branch_id,
+            (
+                f"Released and cleared receipt request {request_id} while preserving the linked payment history"
+                if final_status == "Released"
+                else f"Completed appointment receipt request {request_id} through the receipt release workflow"
+            ),
         ),
         type="branch_receipts",
     ))
@@ -2861,7 +2879,7 @@ async def complete_appointment_request(request_id: str, current_staff=Depends(ge
     db.add(ActivityLog(
         action="Receipt Appointment Completed",
         user=current_staff.username,
-        details=f"Completed appointment receipt request {request_label}",
+        details=_branch_log_details(db, current_staff.branch_id, f"Completed appointment receipt request {request_label}"),
         type="branch_receipts",
     ))
     db.commit()
@@ -2984,7 +3002,7 @@ async def upload_release_copy(
     db.add(ActivityLog(
         action="Receipt Release Copy Uploaded",
         user=current_staff.username,
-        details=f"Uploaded finished copy for {request_id}",
+        details=_branch_log_details(db, current_staff.branch_id, f"Uploaded finished copy for {request_id}"),
         type="branch_receipts",
     ))
     db.commit()
