@@ -927,8 +927,13 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
             client_ip,
             request.headers.get("user-agent"),
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.error(
+            "[LOGIN] Failed to send login notification email for %s: %s",
+            credentials.identifier,
+            exc,
+            exc_info=True,
+        )
 
     log_activity(
         db,
