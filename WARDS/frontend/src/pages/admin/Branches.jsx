@@ -17,7 +17,7 @@ const slugifyBranchName = (name) => {
   return slug || 'branch';
 };
 
-const buildBranchDashboardUrl = (name) => `http://localhost:3000/branch-dashboard/${slugifyBranchName(name)}`;
+const buildBranchDashboardUrl = (name) => `/branch-dashboard/${slugifyBranchName(name)}`;
 
 const BRANCH_PRESETS = [
   {
