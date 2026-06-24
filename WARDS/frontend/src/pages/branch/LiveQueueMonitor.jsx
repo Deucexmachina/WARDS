@@ -85,7 +85,8 @@ const LiveQueueMonitor = () => {
 
     // Find all newly added serving queues
     const newServingQueues = currentServingQueues.filter(queue => {
-      return !previousServingQueues.some(prev => prev.queue_number === queue.queue_number);
+      return !previousServingQueues.some(prev => prev.queue_number === queue.queue_number)
+        && queue.queue_number !== lastAnnouncedQueueRef.current;
     });
 
     if (newServingQueues.length > 0) {
