@@ -544,7 +544,7 @@ async def create_branch(
 
         email_delivery = send_branch_access_email(
             recipient_email=branch.admin_email,
-            branch_name=new_branch.name,
+            branch_name=get_decrypted_or_raw(new_branch, "name") or new_branch.name,
             login_email=branch.admin_email,
             password=branch.admin_password,
             dashboard_url=get_decrypted_or_raw(new_branch, "dashboard_url") or build_branch_dashboard_url(get_decrypted_or_raw(new_branch, "name") or ""),
