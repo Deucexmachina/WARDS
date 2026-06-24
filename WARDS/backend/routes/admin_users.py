@@ -28,6 +28,13 @@ def get_rate_limit_key(request: Request) -> str:
     return get_remote_address(request)
 
 
+def _get_client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
 limiter = Limiter(key_func=get_rate_limit_key)
 
 router = APIRouter()
@@ -176,7 +183,7 @@ async def create_user(
     db.add(ActivityLog(
         action="Admin User Created",
         user=current_admin.username,
-        details=f"Created {role} account for {email}",
+        details=f"Created {role} account for {email} | ip: {_get_client_ip(request)}",
         type="admin",
     ))
     db.commit()
@@ -226,7 +233,7 @@ async def update_user(
     db.add(ActivityLog(
         action="Admin User Updated",
         user=current_admin.username,
-        details=f"Updated {role} account for {user.email}",
+        details=f"Updated {role} account for {user.email} | ip: {_get_client_ip(request)}",
         type="admin",
     ))
     db.commit()
@@ -235,6 +242,7 @@ async def update_user(
 
 @router.put("/users/{role}/{user_id}/deactivate")
 async def deactivate_user(
+    request: Request,
     role: str,
     user_id: int,
     current_admin=Depends(get_current_admin_user),
@@ -249,7 +257,7 @@ async def deactivate_user(
     db.add(ActivityLog(
         action="Admin User Deactivated",
         user=current_admin.username,
-        details=f"Deactivated {role} account for {user.email}",
+        details=f"Deactivated {role} account for {user.email} | ip: {_get_client_ip(request)}",
         type="admin",
     ))
     db.commit()
@@ -258,6 +266,7 @@ async def deactivate_user(
 
 @router.put("/users/{role}/{user_id}/activate")
 async def activate_user(
+    request: Request,
     role: str,
     user_id: int,
     current_admin=Depends(get_current_admin_user),
@@ -272,7 +281,7 @@ async def activate_user(
     db.add(ActivityLog(
         action="Admin User Activated",
         user=current_admin.username,
-        details=f"Activated {role} account for {user.email}",
+        details=f"Activated {role} account for {user.email} | ip: {_get_client_ip(request)}",
         type="admin",
     ))
     db.commit()
@@ -296,7 +305,7 @@ async def delete_user(
     db.add(ActivityLog(
         action="Admin User Deleted",
         user=current_admin.username,
-        details=f"Deleted {role} account for {user.email}",
+        details=f"Deleted {role} account for {user.email} | ip: {_get_client_ip(request)}",
         type="admin",
     ))
     db.delete(user)

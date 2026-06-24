@@ -31,6 +31,13 @@ def get_rate_limit_key(request: Request) -> str:
     return get_remote_address(request)
 
 
+def _get_client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
 limiter = Limiter(key_func=get_rate_limit_key)
 
 router = APIRouter()
@@ -465,7 +472,7 @@ async def create_user(
     db.add(ActivityLog(
         action="User Account Created",
         user=current_user.username,
-        details=f"{branch_prefix}Created account: {username or user.full_name or email} with role {user.role}",
+        details=f"{branch_prefix}Created account: {username or user.full_name or email} with role {user.role} | ip: {_get_client_ip(request)}",
         type="admin",
     ))
     db.commit()
@@ -537,7 +544,7 @@ async def update_user(
     db.add(ActivityLog(
         action="User Account Updated",
         user=current_user.username,
-        details=f"{branch_prefix}Updated account: {getattr(account, 'username', None) or getattr(account, 'full_name', None) or account.email}",
+        details=f"{branch_prefix}Updated account: {getattr(account, 'username', None) or getattr(account, 'full_name', None) or account.email} | ip: {_get_client_ip(request)}",
         type="admin",
     ))
     db.commit()
@@ -548,6 +555,7 @@ async def update_user(
 
 @router.put("/{user_id}/deactivate")
 async def deactivate_user(
+    request: Request,
     user_id: int,
     role: Optional[str] = Query(None),
     payload: ProtectedAccountAction = None,
@@ -572,7 +580,7 @@ async def deactivate_user(
     db.add(ActivityLog(
         action="User Account Deactivated",
         user=current_user.username,
-        details=f"{branch_prefix}Deactivated account: {getattr(account, 'username', None) or getattr(account, 'full_name', None) or account.email}",
+        details=f"{branch_prefix}Deactivated account: {getattr(account, 'username', None) or getattr(account, 'full_name', None) or account.email} | ip: {_get_client_ip(request)}",
         type="admin",
     ))
     db.commit()
@@ -582,6 +590,7 @@ async def deactivate_user(
 
 @router.put("/{user_id}/activate")
 async def activate_user(
+    request: Request,
     user_id: int,
     role: Optional[str] = Query(None),
     payload: ProtectedAccountAction = None,
@@ -606,7 +615,7 @@ async def activate_user(
     db.add(ActivityLog(
         action="User Account Activated",
         user=current_user.username,
-        details=f"{branch_prefix}Activated account: {getattr(account, 'username', None) or getattr(account, 'full_name', None) or account.email}",
+        details=f"{branch_prefix}Activated account: {getattr(account, 'username', None) or getattr(account, 'full_name', None) or account.email} | ip: {_get_client_ip(request)}",
         type="admin",
     ))
     db.commit()
@@ -648,7 +657,7 @@ async def delete_user(
     db.add(ActivityLog(
         action="User Account Deleted",
         user=current_user.username,
-        details=f"{branch_prefix}Deleted account: {getattr(account, 'username', None) or getattr(account, 'full_name', None) or account.email}",
+        details=f"{branch_prefix}Deleted account: {getattr(account, 'username', None) or getattr(account, 'full_name', None) or account.email} | ip: {_get_client_ip(request)}",
         type="admin",
     ))
     db.delete(account)
