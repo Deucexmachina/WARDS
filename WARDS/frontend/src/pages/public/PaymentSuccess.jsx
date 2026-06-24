@@ -55,35 +55,16 @@ const PaymentSuccess = () => {
   }, [isMerchantReturn, navigate, refNumber]);
 
   useEffect(() => {
-    let intervalId;
+    if (!refNumber) {
+      setError(language === 'en' ? 'No payment reference found' : 'Walang nahanap na payment reference');
+      setLoading(false);
+      return;
+    }
 
-    const checkPaymentStatus = async () => {
-      if (!refNumber) {
-        setError(language === 'en' ? 'No payment reference found' : 'Walang nahanap na payment reference');
-        setLoading(false);
-        return;
-      }
-
-      try {
-        const response = await axios.get(`${API_BASE_URL}/payments/paymongo/status/${refNumber}`);
-        setPayment(response.data);
-        setLoading(false);
-
-        if (isPaymentVerified(response.data) || isPaymentFailed(response.data)) {
-          clearInterval(intervalId);
-        }
-      } catch (err) {
-        setError(err.response?.data?.detail || (language === 'en' ? 'Failed to verify payment status' : 'Nabigong beripikahin ang katayuan ng bayad'));
-        setLoading(false);
-        clearInterval(intervalId);
-      }
-    };
-
-    checkPaymentStatus();
-    intervalId = setInterval(checkPaymentStatus, 3000);
-
-    return () => clearInterval(intervalId);
-  }, [refNumber]);
+    // PaymentSuccess redirects to PaymentStatus when refNumber exists.
+    // PaymentStatus handles all status polling. Skip polling here to
+    // avoid duplicate API calls.
+  }, [refNumber, language]);
 
   useEffect(() => {
     if (!payment) {
