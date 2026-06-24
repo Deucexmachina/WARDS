@@ -222,6 +222,11 @@ def _send_via_brevo(message: EmailMessage) -> dict:
         raise RuntimeError(f"Brevo rejected the request ({response.status_code}): {detail}")
     response.raise_for_status()
 
+    try:
+        brevo_data = response.json()
+        logger.info("Brevo email sent: messageId=%s", brevo_data.get("messageId", "unknown"))
+    except Exception:
+        logger.info("Brevo email sent: non-JSON response %s", response.text[:200])
     return {"sent": True, "status": "sent"}
 
 
@@ -635,10 +640,13 @@ def send_branch_access_email(
         subtype="html",
     )
 
+    logger.info("Sending branch access email to=%s branch_name=%s dashboard_url=%s", recipient_email, branch_name, dashboard_url)
     try:
         result = _send_email_message(message)
+        logger.info("Branch access email result: %s", result)
         return {**result, "message": f"Branch access email sent to {recipient_email}.", "dashboard_url": dashboard_url}
     except Exception as exc:
+        logger.error("Branch access email failed: %s", exc, exc_info=True)
         return {
             "sent": False,
             "status": "failed",
