@@ -215,9 +215,7 @@ const DynamicSidebar = ({ open = false, onClose }) => {
       }));
     };
     const handleAdminAlertRead = () => fetchSidebarModuleCounts();
-    const handleTaxAssessmentUpdated = (event) => {
-      const newCount = resolveUnreadCount(event, unreadTaxAssessmentCount);
-      setUnreadTaxAssessmentCount(newCount);
+    const handleTaxAssessmentUpdated = () => {
       fetchUnreadTaxAssessmentCount();
     };
     const handleActivityLogsViewed = (event) => {
