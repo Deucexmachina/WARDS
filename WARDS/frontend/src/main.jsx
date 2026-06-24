@@ -37,6 +37,7 @@ axios.interceptors.response.use(
   }
 )
 
+console.log('[WARDS] deploy v2024.06.24')
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <App />
