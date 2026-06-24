@@ -459,10 +459,13 @@ async def create_user(
     db.add(account)
     if isinstance(account, CitizenUser):
         apply_citizen_user_security(account)
+    log_branch = db.query(Branch).filter(Branch.id == getattr(account, "branch_id", None)).first() if getattr(account, "branch_id", None) else None
+    log_branch_name = get_decrypted_or_raw(log_branch, "name") or log_branch.name if log_branch else None
+    branch_prefix = f"branch: {log_branch_name} | " if log_branch_name else ""
     db.add(ActivityLog(
         action="User Account Created",
         user=current_user.username,
-        details=f"Created account: {username or user.full_name or email} with role {user.role}",
+        details=f"{branch_prefix}Created account: {username or user.full_name or email} with role {user.role}",
         type="admin",
     ))
     db.commit()
@@ -528,10 +531,13 @@ async def update_user(
         apply_citizen_user_security(account)
         branch_name = "Public Portal"
 
+    log_branch = db.query(Branch).filter(Branch.id == getattr(account, "branch_id", None)).first() if getattr(account, "branch_id", None) else None
+    log_branch_name = get_decrypted_or_raw(log_branch, "name") or log_branch.name if log_branch else None
+    branch_prefix = f"branch: {log_branch_name} | " if log_branch_name else ""
     db.add(ActivityLog(
         action="User Account Updated",
         user=current_user.username,
-        details=f"Updated account: {getattr(account, 'username', None) or getattr(account, 'full_name', None) or account.email}",
+        details=f"{branch_prefix}Updated account: {getattr(account, 'username', None) or getattr(account, 'full_name', None) or account.email}",
         type="admin",
     ))
     db.commit()
@@ -560,10 +566,13 @@ async def deactivate_user(
     ensure_manageable_account(current_user, account, db)
 
     account.status = "Inactive"
+    log_branch = db.query(Branch).filter(Branch.id == getattr(account, "branch_id", None)).first() if getattr(account, "branch_id", None) else None
+    log_branch_name = get_decrypted_or_raw(log_branch, "name") or log_branch.name if log_branch else None
+    branch_prefix = f"branch: {log_branch_name} | " if log_branch_name else ""
     db.add(ActivityLog(
         action="User Account Deactivated",
         user=current_user.username,
-        details=f"Deactivated account: {getattr(account, 'username', None) or getattr(account, 'full_name', None) or account.email}",
+        details=f"{branch_prefix}Deactivated account: {getattr(account, 'username', None) or getattr(account, 'full_name', None) or account.email}",
         type="admin",
     ))
     db.commit()
@@ -591,10 +600,13 @@ async def activate_user(
     ensure_manageable_account(current_user, account, db)
 
     account.status = "Active"
+    log_branch = db.query(Branch).filter(Branch.id == getattr(account, "branch_id", None)).first() if getattr(account, "branch_id", None) else None
+    log_branch_name = get_decrypted_or_raw(log_branch, "name") or log_branch.name if log_branch else None
+    branch_prefix = f"branch: {log_branch_name} | " if log_branch_name else ""
     db.add(ActivityLog(
         action="User Account Activated",
         user=current_user.username,
-        details=f"Activated account: {getattr(account, 'username', None) or getattr(account, 'full_name', None) or account.email}",
+        details=f"{branch_prefix}Activated account: {getattr(account, 'username', None) or getattr(account, 'full_name', None) or account.email}",
         type="admin",
     ))
     db.commit()
@@ -630,10 +642,13 @@ async def delete_user(
     if isinstance(account, CitizenUser):
         db.query(PrivacyConsent).filter(PrivacyConsent.citizen_user_id == account.id).delete()
 
+    log_branch = db.query(Branch).filter(Branch.id == getattr(account, "branch_id", None)).first() if getattr(account, "branch_id", None) else None
+    log_branch_name = get_decrypted_or_raw(log_branch, "name") or log_branch.name if log_branch else None
+    branch_prefix = f"branch: {log_branch_name} | " if log_branch_name else ""
     db.add(ActivityLog(
         action="User Account Deleted",
         user=current_user.username,
-        details=f"Deleted account: {getattr(account, 'username', None) or getattr(account, 'full_name', None) or account.email}",
+        details=f"{branch_prefix}Deleted account: {getattr(account, 'username', None) or getattr(account, 'full_name', None) or account.email}",
         type="admin",
     ))
     db.delete(account)
