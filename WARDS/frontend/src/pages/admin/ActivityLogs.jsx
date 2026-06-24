@@ -267,7 +267,7 @@ const ActivityLogs = () => {
                 </div>
                 <div>
                   <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">IP Address</p>
-                  <p className="mt-1 text-sm font-mono text-slate-700">{selectedLog.ip || 'not recorded'}</p>
+                  <p className="mt-1 break-all text-sm font-mono text-slate-700">{selectedLog.ip || 'not recorded'}</p>
                 </div>
                 <div>
                   <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">Date &amp; Time</p>
