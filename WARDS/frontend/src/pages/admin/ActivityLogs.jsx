@@ -167,7 +167,6 @@ const ActivityLogs = () => {
                     <tr key={log.id} className="cursor-pointer hover:bg-slate-50" onClick={() => setSelectedLog(log)}>
                       <td className="max-w-xs px-4 py-3 font-bold text-primary">
                         <div>{log.title || log.action}</div>
-                        <div className="mt-1 line-clamp-2 text-xs font-normal text-slate-500">{log.details || 'No additional details'}</div>
                       </td>
                       <td className="px-4 py-3">
                         <span className={`rounded px-2 py-1 text-xs font-semibold ${typeColors[log.type] || 'bg-gray-100 text-gray-800'}`}>
