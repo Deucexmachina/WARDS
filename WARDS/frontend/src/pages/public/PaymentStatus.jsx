@@ -71,7 +71,10 @@ const PaymentStatus = () => {
   const receiptFlow = searchParams.get('receiptFlow') || '';
   const isMerchantReturn = searchParams.get('merchant_return') === '1';
   const hasOpenerWindow = typeof window !== 'undefined' && window.opener && !window.opener.closed;
-  const shouldHandOffMerchantReturn = isMerchantReturn && hasOpenerWindow;
+  // checkoutPopup.js clears popup.opener for security before redirecting to
+  // PayMongo, so window.opener is null on return. Detect popup by name instead.
+  const isKnownPopup = typeof window !== 'undefined' && /^(wardsPaymongoCheckout|wardsReceiptCheckout)$/.test(window.name);
+  const shouldHandOffMerchantReturn = isMerchantReturn && (hasOpenerWindow || isKnownPopup);
   const rawStatus = payment?.workflow_status || '';
   const isRptPayment = payment?.source_module === 'rpt_online_payment' || payment?.metadata?.is_rpt_workflow;
   const isBusinessTaxPayment = payment?.source_module === 'business_tax_online_payment' || payment?.metadata?.is_business_tax_workflow;
