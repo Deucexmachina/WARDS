@@ -547,7 +547,7 @@ async def create_branch(
             branch_name=new_branch.name,
             login_email=branch.admin_email,
             password=branch.admin_password,
-            dashboard_url=new_branch.dashboard_url,
+            dashboard_url=get_decrypted_or_raw(new_branch, "dashboard_url") or build_branch_dashboard_url(get_decrypted_or_raw(new_branch, "name") or ""),
             verification_url=verification_url,
             queue_accounts=window_account_deliveries,
         )
@@ -760,7 +760,7 @@ async def update_branch(
             email_delivery = send_new_window_accounts_email(
                 recipient_email=branch_admin.email,
                 branch_name=normalized_name,
-                dashboard_url=db_branch.dashboard_url,
+                dashboard_url=get_decrypted_or_raw(db_branch, "dashboard_url") or db_branch.dashboard_url,
                 new_accounts=new_window_account_deliveries,
                 deactivated_count=deactivated_count,
             )
@@ -784,7 +784,7 @@ async def update_branch(
                 branch_name=normalized_name,
                 login_email=branch_admin.email,
                 password=None,
-                dashboard_url=db_branch.dashboard_url,
+                dashboard_url=get_decrypted_or_raw(db_branch, "dashboard_url") or db_branch.dashboard_url,
                 queue_accounts=window_account_deliveries,
             )
             db.add(ActivityLog(
