@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime
 from typing import List, Optional
 
@@ -577,19 +578,23 @@ async def upload_announcement_attachments(
             )
             db.add(attachment)
             saved.append(attachment)
-        db.flush()
-        db.add(
-            ActivityLog(
-                action="Announcement Attachment Uploaded",
-                user=current_user.username,
-                details=(
-                    f"Uploaded {len(saved)} attachment(s) to announcement #{announcement_id}: "
-                    + ", ".join(att.original_filename for att in saved)
-                ),
-                type="admin",
+
+        def _commit():
+            db.flush()
+            db.add(
+                ActivityLog(
+                    action="Announcement Attachment Uploaded",
+                    user=current_user.username,
+                    details=(
+                        f"Uploaded {len(saved)} attachment(s) to announcement #{announcement_id}: "
+                        + ", ".join(att.original_filename for att in saved)
+                    ),
+                    type="admin",
+                )
             )
-        )
-        db.commit()
+            db.commit()
+
+        await asyncio.to_thread(_commit)
     except HTTPException:
         db.rollback()
         for attachment in saved:

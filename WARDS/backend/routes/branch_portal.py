@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 import json
@@ -2593,14 +2594,18 @@ async def upload_branch_announcement_attachments(
             )
             db.add(attachment)
             saved.append(attachment)
-        db.flush()
-        log_branch_action(
-            db,
-            current_staff,
-            "Announcement Attachment Uploaded",
-            f"Uploaded {len(saved)} attachment(s) to announcement #{announcement_id}",
-        )
-        db.commit()
+
+        def _commit():
+            db.flush()
+            log_branch_action(
+                db,
+                current_staff,
+                "Announcement Attachment Uploaded",
+                f"Uploaded {len(saved)} attachment(s) to announcement #{announcement_id}",
+            )
+            db.commit()
+
+        await asyncio.to_thread(_commit)
     except HTTPException:
         db.rollback()
         for attachment in saved:
