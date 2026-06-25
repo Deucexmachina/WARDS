@@ -2546,7 +2546,7 @@ const QueueManagement = () => {
         <div className="mt-5 grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-4">
           <CustomSelect value={queueTypeFilter} onChange={(value) => setQueueTypeFilter(value)} options={[{ value: 'all', label: 'All queue types' }, { value: 'immediate', label: 'Immediate' }, { value: 'appointment', label: 'Appointment' }]} placeholder="All queue types" />
           <CustomSelect value={statusFilter} onChange={(value) => setStatusFilter(value)} options={[{ value: 'all', label: 'All statuses' }, { value: 'appointment', label: 'Appointment' }, { value: 'waiting', label: 'Waiting' }, { value: 'called', label: 'Called' }, { value: 'serving', label: 'Serving' }, { value: 'completed', label: 'Completed' }, { value: 'skipped', label: 'Skipped' }]} placeholder="All statuses" />
-          <CustomDatePicker value={dateFilter} onChange={(event) => setDateFilter(event.target.value)} />
+          <CustomDatePicker value={dateFilter} onChange={(event) => setDateFilter(event.target.value)} max={currentDateInputValue} />
           <input type="time" value={timeSlotFilter} onChange={(event) => setTimeSlotFilter(event.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none" />
           <CustomSelect value={serviceTypeFilter} onChange={(value) => setServiceTypeFilter(value)} options={[{ value: 'all', label: 'All services' }, ...serviceTypes.map((serviceType) => ({ value: serviceType, label: serviceType }))]} placeholder="All services" />
           {isMonitorOnlyRole ? (
