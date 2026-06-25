@@ -23,9 +23,9 @@ from pathlib import Path
 from auth import ADMIN_SECRET_KEY, BRANCH_SECRET_KEY, USER_SECRET_KEY, decode_token
 from utils.redis_client import get_redis_client
 
-MAX_REQUEST_SIZE = int(os.getenv("MAX_REQUEST_SIZE_BYTES", 5 * 1024 * 1024))  # 5MB
+MAX_REQUEST_SIZE = int(os.getenv("MAX_REQUEST_SIZE_BYTES", 50 * 1024 * 1024))  # 50MB
 MAX_FILES_PER_REQUEST = int(os.getenv("MAX_FILES_PER_REQUEST", 5))
-REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT_SECONDS", 30))
+REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT_SECONDS", 120))
 MAX_CONCURRENT_REQUESTS_PER_IP = int(os.getenv("MAX_CONCURRENT_REQUESTS_PER_IP", 50))
 ABUSE_THRESHOLD = int(os.getenv("ABUSE_THRESHOLD_REQUESTS", 300))
 ABUSE_WINDOW = int(os.getenv("ABUSE_WINDOW_SECONDS", 60))
@@ -523,18 +523,27 @@ class RequestSizeMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         content_length = request.headers.get("content-length")
         if content_length:
-            if int(content_length) > MAX_REQUEST_SIZE:
+            size = int(content_length)
+            if size > MAX_REQUEST_SIZE:
                 return JSONResponse(
                     status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                     content={"detail": f"Request too large. Maximum size: {MAX_REQUEST_SIZE // (1024*1024)}MB"}
                 )
+            # If we already know the total size is within limits, skip the
+            # expensive full-body read just to count files. Per-file limits and
+            # magic-byte validation are enforced in the endpoint handlers.
+            return await call_next(request)
 
+        # No content-length header: read body to enforce size + file limits
         content_type = request.headers.get("content-type", "")
         if content_type.startswith("multipart/form-data"):
             body = await request.body()
-            # Rough count of file parts in multipart body
+            if len(body) > MAX_REQUEST_SIZE:
+                return JSONResponse(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    content={"detail": f"Request too large. Maximum size: {MAX_REQUEST_SIZE // (1024*1024)}MB"}
+                )
             file_count = body.count(b'filename="') + body.count(b"filename='") + body.count(b'filename=')
-            # Each occurrence appears twice in typical multipart (header + end), so divide by 2
             estimated_files = max(1, file_count // 2)
             if estimated_files > MAX_FILES_PER_REQUEST:
                 return JSONResponse(

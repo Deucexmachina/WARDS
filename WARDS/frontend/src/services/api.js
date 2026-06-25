@@ -349,6 +349,7 @@ export const announcementAPI = {
     api.post(`/announcements/${id}/attachments`, buildAttachmentFormData(files), {
       headers: { 'Content-Type': 'multipart/form-data' },
       onUploadProgress,
+      timeout: 120_000,
     }),
   deleteAttachment: (id, attachmentId) =>
     api.delete(`/announcements/${id}/attachments/${attachmentId}`),
@@ -366,6 +367,7 @@ export const branchAnnouncementAPI = {
     api.post(`/branch/announcements/${id}/attachments`, buildAttachmentFormData(files), {
       headers: { 'Content-Type': 'multipart/form-data' },
       onUploadProgress,
+      timeout: 120_000,
     }),
   deleteAttachment: (id, attachmentId) =>
     api.delete(`/branch/announcements/${id}/attachments/${attachmentId}`),
