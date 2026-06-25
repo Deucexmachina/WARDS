@@ -151,6 +151,9 @@ export const CustomDatePicker = ({
     else setViewMonth((m) => m + 1);
   };
 
+  const canPrevMonth = !(minParsed && viewYear === minParsed.year && viewMonth === minParsed.month);
+  const canNextMonth = !(maxParsed && viewYear === maxParsed.year && viewMonth === maxParsed.month);
+
   const firstDay = new Date(viewYear, viewMonth, 1).getDay();
   const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
 
@@ -186,13 +189,13 @@ export const CustomDatePicker = ({
         <div className="absolute left-0 z-50 mt-1 w-72 rounded-2xl border border-slate-200 bg-white shadow-xl overflow-hidden">
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-            <button type="button" onClick={prevMonth} className="p-1 rounded-lg hover:bg-slate-100 transition text-slate-500">
+            <button type="button" onClick={prevMonth} disabled={!canPrevMonth} className={`p-1 rounded-lg transition text-slate-500 ${canPrevMonth ? 'hover:bg-slate-100' : 'opacity-30 cursor-not-allowed'}`}>
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
               </svg>
             </button>
             <span className="text-sm font-bold text-slate-800">{MONTHS[viewMonth]} {viewYear}</span>
-            <button type="button" onClick={nextMonth} className="p-1 rounded-lg hover:bg-slate-100 transition text-slate-500">
+            <button type="button" onClick={nextMonth} disabled={!canNextMonth} className={`p-1 rounded-lg transition text-slate-500 ${canNextMonth ? 'hover:bg-slate-100' : 'opacity-30 cursor-not-allowed'}`}>
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
               </svg>
