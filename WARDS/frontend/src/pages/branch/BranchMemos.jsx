@@ -298,9 +298,9 @@ const BranchMemos = () => {
   const MemoCard = ({ memo }) => (
     <div className={`rounded-xl border-l-4 p-5 shadow-md transition duration-300 hover:shadow-lg ${!memo.is_viewed ? `${UNREAD_CARD_HIGHLIGHT_CLASS} border-l-primary` : 'bg-white border-l-primary'}`}>
       <div className="flex items-start justify-between gap-4 mb-3">
-        <div className="flex-1">
+        <div className="flex-1 min-w-0">
           <div className="flex items-center gap-3 mb-2">
-            <h3 className="text-lg font-bold text-gray-900">{memo.title}</h3>
+            <h3 className="text-lg font-bold text-gray-900 break-words min-w-0">{memo.title}</h3>
             <span className={`px-2 py-1 rounded-full text-xs font-semibold ${priorityStyles[memo.priority] || priorityStyles.normal}`}>
               {(memo.priority || 'normal').toUpperCase()}
             </span>
@@ -310,7 +310,7 @@ const BranchMemos = () => {
               </span>
             ) : null}
           </div>
-          <p className="text-sm text-gray-600 line-clamp-2">{memo.content}</p>
+          <p className="text-sm text-gray-600 line-clamp-2 break-words">{memo.content}</p>
         </div>
       </div>
 
@@ -455,7 +455,7 @@ const BranchMemos = () => {
             <div className="px-8 py-6">
               <div className="mb-6">
                 <div className="flex items-center gap-3 mb-3">
-                  <h2 className="text-2xl font-bold text-gray-900">{viewingMemo.title}</h2>
+                  <h2 className="text-2xl font-bold text-gray-900 break-words min-w-0">{viewingMemo.title}</h2>
                   <span className={`px-3 py-1 rounded-full text-xs font-semibold ${priorityStyles[viewingMemo.priority] || priorityStyles.normal}`}>
                     {(viewingMemo.priority || 'normal').toUpperCase()}
                   </span>
@@ -466,7 +466,7 @@ const BranchMemos = () => {
               <div className="mb-6">
                 <h4 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Content</h4>
                 <div className="bg-gray-50 rounded-lg p-5 border border-gray-200">
-                  <p className="text-gray-800 whitespace-pre-line leading-relaxed">
+                  <p className="text-gray-800 whitespace-pre-line leading-relaxed break-words">
                     {expandedContent || viewingMemo.content.length <= 500
                       ? viewingMemo.content
                       : `${viewingMemo.content.substring(0, 500)}...`}

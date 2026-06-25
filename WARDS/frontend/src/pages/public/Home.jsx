@@ -526,10 +526,10 @@ const Home = () => {
                         </span>
                       </div>
 
-                      <h3 className="text-base font-bold text-slate-800 leading-snug mb-1 group-hover:text-primary transition-colors duration-200">
+                      <h3 className="text-base font-bold text-slate-800 leading-snug mb-1 group-hover:text-primary transition-colors duration-200 break-words">
                         {announcement.title}
                       </h3>
-                      <p className="text-sm leading-relaxed text-slate-500 line-clamp-2">
+                      <p className="text-sm leading-relaxed text-slate-500 line-clamp-2 break-words">
                         {announcement.content}
                       </p>
 

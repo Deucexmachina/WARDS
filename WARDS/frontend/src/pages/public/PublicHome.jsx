@@ -166,9 +166,9 @@ const PublicHome = () => {
             </h2>
             <div className="space-y-4">
               {announcements.map((announcement) => (
-                <div key={announcement.id} className="border-l-4 border-blue-600 bg-blue-50 p-4 rounded">
-                  <h3 className="font-bold text-gray-800 mb-1">{announcement.title}</h3>
-                  <p className="text-gray-600 text-sm">{announcement.content}</p>
+                <div key={announcement.id} className="border-l-4 border-blue-600 bg-blue-50 p-4 rounded min-w-0">
+                  <h3 className="font-bold text-gray-800 mb-1 break-words">{announcement.title}</h3>
+                  <p className="text-gray-600 text-sm break-words">{announcement.content}</p>
                   <p className="text-xs text-gray-500 mt-2">
                     {new Date(announcement.publish_date).toLocaleDateString()}
                   </p>

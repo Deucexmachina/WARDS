@@ -179,16 +179,16 @@ const BranchHome = () => {
                     <svg className={`w-6 h-6 mr-3 ${getIconColor(announcement.icon_color)}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"></path>
                     </svg>
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="font-bold text-gray-800">{announcement.title}</h3>
+                        <h3 className="font-bold text-gray-800 break-words">{announcement.title}</h3>
                         {announcement.branch_name && (
                           <span className="inline-flex items-center rounded-full border border-blue-200 bg-white px-3 py-1 text-xs font-semibold text-blue-700">
                             From {announcement.branch_name}
                           </span>
                         )}
                       </div>
-                      <p className="text-gray-600 mt-1">{announcement.content}</p>
+                      <p className="text-gray-600 mt-1 break-words">{announcement.content}</p>
                       <p className="text-sm text-gray-500 mt-2">
                         {new Date(announcement.publish_date).toLocaleDateString()}
                       </p>
