@@ -5,6 +5,7 @@ import { CustomSelect } from '../../components/FormControls';
 import {
   AnnouncementAttachmentsField,
   AnnouncementAttachmentsList,
+  validatePendingFile,
 } from '../../components/AnnouncementAttachments';
 import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
 import { UNREAD_CARD_HIGHLIGHT_CLASS, UNREAD_STATUS_BADGE_CLASS } from '../../utils/notificationUI';
@@ -167,6 +168,12 @@ const Announcements = () => {
 
   const handleSaveAnnouncement = async () => {
     if (!validateForm()) return;
+
+    const pendingErrors = pendingFiles.map(validatePendingFile).filter(Boolean);
+    if (pendingErrors.length > 0) {
+      setPageError(pendingErrors.join(' '));
+      return;
+    }
 
     setLoading(true);
     setPageError('');
@@ -481,6 +488,14 @@ const Announcements = () => {
                 />
               </div>
             </div>
+
+            {pageError && (
+              <div className="px-6 sm:px-8 pt-4">
+                <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {pageError}
+                </div>
+              </div>
+            )}
 
             <div className="flex flex-col-reverse gap-2 border-t border-slate-200 bg-white/95 px-6 py-3.5 backdrop-blur sm:flex-row sm:justify-end sm:px-8 sm:py-4">
               <button

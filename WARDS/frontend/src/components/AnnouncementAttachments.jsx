@@ -16,6 +16,7 @@ const ALLOWED_EXTENSIONS = [
 ];
 const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024;
 export const ANNOUNCEMENT_MAX_ATTACHMENTS = 10;
+export { validatePendingFile };
 
 const ACCEPT_ATTRIBUTE = ALLOWED_EXTENSIONS.map((ext) => `.${ext}`).join(',');
 
