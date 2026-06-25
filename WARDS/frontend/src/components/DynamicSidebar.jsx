@@ -218,6 +218,9 @@ const DynamicSidebar = ({ open = false, onClose }) => {
     const handleTaxAssessmentUpdated = () => {
       fetchUnreadTaxAssessmentCount();
     };
+    const handleRemittanceReviewed = () => {
+      fetchSidebarModuleCounts();
+    };
     const handleActivityLogsViewed = (event) => {
       const unreadCount = Number(event?.detail?.unreadCount || 0);
       setModuleCounts((current) => ({
@@ -242,6 +245,7 @@ const DynamicSidebar = ({ open = false, onClose }) => {
     window.addEventListener('security-notifications-updated', handleSecurityNotificationsUpdated);
     window.addEventListener('admin-alert-read', handleAdminAlertRead);
     window.addEventListener('tax-assessment-updated', handleTaxAssessmentUpdated);
+    window.addEventListener('remittance-reviewed', handleRemittanceReviewed);
     window.addEventListener(ACTIVITY_LOGS_VIEWED_EVENT, handleActivityLogsViewed);
     window.addEventListener(ACTIVITY_LOGS_UPDATED_EVENT, handleActivityLogsUpdated);
     return () => {
@@ -262,6 +266,7 @@ const DynamicSidebar = ({ open = false, onClose }) => {
       window.removeEventListener('security-notifications-updated', handleSecurityNotificationsUpdated);
       window.removeEventListener('admin-alert-read', handleAdminAlertRead);
       window.removeEventListener('tax-assessment-updated', handleTaxAssessmentUpdated);
+      window.removeEventListener('remittance-reviewed', handleRemittanceReviewed);
       window.removeEventListener(ACTIVITY_LOGS_VIEWED_EVENT, handleActivityLogsViewed);
       window.removeEventListener(ACTIVITY_LOGS_UPDATED_EVENT, handleActivityLogsUpdated);
     };
@@ -344,6 +349,7 @@ const DynamicSidebar = ({ open = false, onClose }) => {
           accountsResult,
           backupResult,
           activityLogsResult,
+          remittancesResult,
         ] = await Promise.allSettled([
           announcementAPI.getUnreadCount(),
           api.get('/alerts/unread-count'),
@@ -351,16 +357,19 @@ const DynamicSidebar = ({ open = false, onClose }) => {
           api.get('/accounts', { params: { page: 1, page_size: 1 } }),
           api.get('/security/unread-counts'),
           activityLogAPI.getUnreadCount({ since: getActivityLogsLastViewedAt() || undefined }),
+          api.get('/payments/remittances'),
         ]);
 
         const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}');
         const securityCounts = backupResult.status === 'fulfilled' ? (backupResult.value.data || {}) : {};
+        const remittances = remittancesResult.status === 'fulfilled' ? (remittancesResult.value.data?.remittances || []) : [];
+        const pendingRemittanceCount = remittances.filter((r) => r.status === 'Submitted').length;
 
         setModuleCounts({
           announcements: announcementsResult.status === 'fulfilled' ? Number(announcementsResult.value.data?.unread_count || 0) : 0,
           alerts: alertsResult.status === 'fulfilled' ? Number(alertsResult.value.data?.unread_count || 0) : 0,
           receipts: 0,
-          payments: 0,
+          payments: pendingRemittanceCount,
           queue: 0,
           reports: reportsResult.status === 'fulfilled' ? getUnreadAdminReportCount(reportsResult.value || [], adminUser) : 0,
           accounts: accountsResult.status === 'fulfilled' ? Number(accountsResult.value.data?.total || 0) : 0,

@@ -353,6 +353,7 @@ const PaymentManagement = () => {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       setSuccessMessage(`Remittance ${action === 'accept' ? 'accepted' : 'rejected'} successfully.`);
+      window.dispatchEvent(new CustomEvent('remittance-reviewed'));
       await fetchRemittances();
     } catch (error) {
       console.error('Failed to review remittance:', error);
