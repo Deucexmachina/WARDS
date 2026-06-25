@@ -565,26 +565,19 @@ async def upload_announcement_attachments(
     )
     enforce_attachment_limit(existing_count, len(files))
 
-    import time
     saved: list[AnnouncementAttachment] = []
     try:
         for upload in files:
-            t0 = time.time()
             file_bytes = await upload.read()
-            t1 = time.time()
             attachment = store_announcement_attachment(
                 announcement_id,
                 upload,
                 file_bytes,
                 uploaded_by=current_user.username,
             )
-            t2 = time.time()
             db.add(attachment)
             saved.append(attachment)
-            print(f"[UPLOAD_TIMING] read={t1-t0:.3f}s validate={t2-t1:.3f}s size={len(file_bytes)} bytes", flush=True)
-        t3 = time.time()
         db.flush()
-        t4 = time.time()
         db.add(
             ActivityLog(
                 action="Announcement Attachment Uploaded",
@@ -597,8 +590,6 @@ async def upload_announcement_attachments(
             )
         )
         db.commit()
-        t5 = time.time()
-        print(f"[UPLOAD_TIMING] flush={t4-t3:.3f}s commit={t5-t4:.3f}s total_db={t5-t3:.3f}s", flush=True)
     except HTTPException:
         db.rollback()
         for attachment in saved:
@@ -610,11 +601,7 @@ async def upload_announcement_attachments(
             remove_attachment_file(attachment)
         raise HTTPException(status_code=500, detail="Failed to save attachments")
 
-    t6 = time.time()
-    result = _list_attachment_dicts(db, announcement_id)
-    t7 = time.time()
-    print(f"[UPLOAD_TIMING] list_query={t7-t6:.3f}s", flush=True)
-    return result
+    return _list_attachment_dicts(db, announcement_id)
 
 
 def _resolve_admin_attachment(
