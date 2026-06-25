@@ -2564,7 +2564,7 @@ async def list_branch_announcement_attachments(
 
 
 @router.post("/announcements/{announcement_id}/attachments")
-def upload_branch_announcement_attachments(
+async def upload_branch_announcement_attachments(
     announcement_id: int,
     files: List[UploadFile] = File(...),
     current_staff: BranchStaff = Depends(get_current_branch_staff),
@@ -2581,20 +2581,26 @@ def upload_branch_announcement_attachments(
     )
     enforce_attachment_limit(existing_count, len(files))
 
+    import time
     saved: list[AnnouncementAttachment] = []
     try:
         for upload in files:
-            upload.file.seek(0)
-            file_bytes = upload.file.read()
+            t0 = time.time()
+            file_bytes = await upload.read()
+            t1 = time.time()
             attachment = store_announcement_attachment(
                 announcement_id,
                 upload,
                 file_bytes,
                 uploaded_by=getattr(current_staff, "username", None),
             )
+            t2 = time.time()
             db.add(attachment)
             saved.append(attachment)
+            print(f"[UPLOAD_TIMING] read={t1-t0:.3f}s validate={t2-t1:.3f}s size={len(file_bytes)} bytes", flush=True)
+        t3 = time.time()
         db.flush()
+        t4 = time.time()
         log_branch_action(
             db,
             current_staff,
@@ -2602,6 +2608,8 @@ def upload_branch_announcement_attachments(
             f"Uploaded {len(saved)} attachment(s) to announcement #{announcement_id}",
         )
         db.commit()
+        t5 = time.time()
+        print(f"[UPLOAD_TIMING] flush={t4-t3:.3f}s commit={t5-t4:.3f}s total_db={t5-t3:.3f}s", flush=True)
     except HTTPException:
         db.rollback()
         for attachment in saved:
@@ -2613,7 +2621,10 @@ def upload_branch_announcement_attachments(
             remove_attachment_file(attachment)
         raise HTTPException(status_code=500, detail="Failed to save attachments")
 
+    t6 = time.time()
     attachments = _branch_attachment_query(db, announcement_id).all()
+    t7 = time.time()
+    print(f"[UPLOAD_TIMING] list_query={t7-t6:.3f}s", flush=True)
     return serialize_attachments(
         attachments,
         base_path=f"/api/branch/announcements/{announcement_id}/attachments",
