@@ -1,7 +1,7 @@
 import api from '../../services/api';
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { accountAPI, branchAPI, branchSettingsAPI } from '../../services/api';
+import { accountAPI, branchAPI, branchSettingsAPI, settingsAPI } from '../../services/api';
 import {
   getEmailValidationMessage,
   normalizeCitizenFullName,
@@ -492,18 +492,21 @@ const Accounts = () => {
     });
   };
 
-  const handleResetStaffMfa = async (account) => {
+  const handleResetMfa = async (account) => {
     setError('');
     setSuccessMessage('');
     try {
-      const res = await branchSettingsAPI.resetStaffMfa({ staff_id: account.id });
+      const isAdmin = account.role === 'main_admin' || account.role === 'superadmin';
+      const res = isAdmin
+        ? await settingsAPI.resetAdminMfa({ admin_id: account.id })
+        : await branchSettingsAPI.resetStaffMfa({ staff_id: account.id });
       openActionModal({
         tone: 'success',
         title: 'MFA Reset Successful',
         message: res.data?.message || `MFA for ${account.full_name || account.username} has been reset. They will be prompted to set up MFA on their next login.`,
       });
     } catch (err) {
-      const detail = err?.response?.data?.detail || 'Failed to reset staff MFA. Please try again.';
+      const detail = err?.response?.data?.detail || 'Failed to reset MFA. Please try again.';
       openActionModal({
         tone: 'error',
         title: 'Reset Failed',
@@ -1271,7 +1274,9 @@ const Accounts = () => {
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/60 px-4 py-6">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-[0_30px_80px_rgba(15,23,42,0.28)]">
             <div className="mb-4">
-              <h3 className="text-xl font-bold text-slate-900">Reset Staff MFA</h3>
+              <h3 className="text-xl font-bold text-slate-900">
+                Reset {(pendingMfaReset.role === 'main_admin' || pendingMfaReset.role === 'superadmin') ? 'Admin' : 'Staff'} MFA
+              </h3>
               <p className="mt-2 text-sm text-slate-600">
                 Are you sure you want to reset MFA for <strong>{pendingMfaReset.full_name || pendingMfaReset.username}</strong>?
                 They will be prompted to set up MFA on their next login.
@@ -1286,7 +1291,7 @@ const Accounts = () => {
               </button>
               <button
                 onClick={() => {
-                  handleResetStaffMfa(pendingMfaReset);
+                  handleResetMfa(pendingMfaReset);
                   setPendingMfaReset(null);
                 }}
                 className="rounded-xl bg-purple-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-purple-700"

@@ -1946,6 +1946,10 @@ class ResetStaffMfaRequest(BaseModel):
     staff_id: int
 
 
+class ResetAdminMfaRequest(BaseModel):
+    admin_id: int
+
+
 @router.post("/branch/admin/reset-staff-mfa")
 async def reset_staff_mfa(
     payload: ResetStaffMfaRequest,
@@ -1967,13 +1971,41 @@ async def reset_staff_mfa(
     if not target:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff member not found")
 
-    mfa_record = find_mfa_secret_record(db, "branch", target.username)
-    if mfa_record:
-        db.delete(mfa_record)
+    delete_mfa_secret(db, "branch", target.username)
 
     db.add(ActivityLog(
         action="Branch Staff MFA Reset",
         user=current_staff.username,
+        details=f"Reset MFA for {target.username} (ID: {target.id})",
+        type="security",
+    ))
+    db.commit()
+
+    return {"message": f"MFA reset for {target.username}"}
+
+
+@router.post("/admin/reset-mfa")
+async def reset_admin_mfa(
+    payload: ResetAdminMfaRequest,
+    current_user: Admin = Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    """Reset MFA for an admin user. Only superadmin or main_admin can reset other admins' MFA."""
+    if current_user.role not in {"superadmin", "main_admin"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Superadmin or Main Admin access required",
+        )
+
+    target = db.query(Admin).filter(Admin.id == payload.admin_id).first()
+    if not target:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Admin not found")
+
+    delete_mfa_secret(db, "admin", target.username)
+
+    db.add(ActivityLog(
+        action="Admin MFA Reset",
+        user=current_user.username,
         details=f"Reset MFA for {target.username} (ID: {target.id})",
         type="security",
     ))

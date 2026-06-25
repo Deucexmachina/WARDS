@@ -325,7 +325,7 @@ export const branchSettingsAPI = {
   publishAppointmentSettings: (data) => api.post('/branch/settings/appointments/publish', data),
   setupBranchMfa: () => api.post('/branch/auth/setup-mfa-authenticated'),
   listBranchStaff: () => api.get('/branch/auth/admin/staff'),
-  resetStaffMfa: (data) => api.post('/branch/auth/admin/reset-staff-mfa', data),
+  resetStaffMfa: (data) => api.post('/auth/unified/branch/admin/reset-staff-mfa', data),
 };
 
 const buildAttachmentFormData = (files) => {
@@ -473,6 +473,7 @@ export const settingsAPI = {
   getHistory: (params) => api.get('/settings/history', { params }),
   deleteHistoryEntry: (id) => api.delete(`/settings/history/${id}`),
   setupAdminMfa: () => api.post('/auth/unified/setup-mfa-authenticated'),
+  resetAdminMfa: (data) => api.post('/auth/unified/admin/reset-mfa', data),
 };
 
 export const accountAPI = {
