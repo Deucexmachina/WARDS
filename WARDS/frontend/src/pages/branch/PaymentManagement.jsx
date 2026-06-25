@@ -172,7 +172,7 @@ const STATUS_CONFIG = {
 };
 
 const SectionCard = ({ title, subtitle, action, children }) => (
-  <section className="overflow-hidden rounded-[28px] border border-slate-300/90 bg-white shadow-[0_14px_36px_rgba(15,23,42,0.08)]">
+  <section className="overflow-visible rounded-[28px] border border-slate-300/90 bg-white shadow-[0_14px_36px_rgba(15,23,42,0.08)]">
     <div className="border-b border-slate-200 bg-slate-50/80 px-6 py-5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
