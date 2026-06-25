@@ -2584,6 +2584,7 @@ def upload_branch_announcement_attachments(
     saved: list[AnnouncementAttachment] = []
     try:
         for upload in files:
+            upload.file.seek(0)
             file_bytes = upload.file.read()
             attachment = store_announcement_attachment(
                 announcement_id,

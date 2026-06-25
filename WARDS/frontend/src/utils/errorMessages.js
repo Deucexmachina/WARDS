@@ -54,6 +54,10 @@ export const getFriendlyErrorMessage = (error, fallback = 'Something went wrong.
     return 'The requested record could not be found.';
   }
   if (status >= 500) {
+    const detail = extractDetail(error);
+    if (detail && !isTechnicalMessage(detail)) {
+      return detail;
+    }
     return 'The server encountered a problem. Please try again later.';
   }
 
