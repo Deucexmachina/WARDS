@@ -249,12 +249,25 @@ class RequestIntegrityMiddleware(BaseHTTPMiddleware):
 
 app = FastAPI(title="WARDS API", version="1.0.0")
 
+# Startup verification: confirm upload endpoints are sync (not async)
+import inspect, routes.announcements, routes.branch_portal
+_ann_upload = getattr(routes.announcements, "upload_announcement_attachments", None)
+_branch_upload = getattr(routes.branch_portal, "upload_branch_announcement_attachments", None)
+logging.getLogger("main").info(
+    "Upload endpoints: admin=%s branch=%s",
+    "async" if _ann_upload and inspect.iscoroutinefunction(_ann_upload) else "sync",
+    "async" if _branch_upload and inspect.iscoroutinefunction(_branch_upload) else "sync",
+)
+
 
 @app.exception_handler(Exception)
 async def production_exception_handler(request: Request, exc: Exception):
     import traceback
     traceback.print_exc()
-    return JSONResponse(status_code=500, content={"detail": "An internal server error occurred."})
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"[{type(exc).__name__}] {exc}"},
+    )
 
 def hybrid_rate_limit_key(request: Request) -> str:
     """Return account-based key for authenticated users, IP for anonymous."""
