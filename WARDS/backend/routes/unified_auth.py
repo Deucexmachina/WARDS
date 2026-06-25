@@ -104,6 +104,7 @@ SERVER_STARTED_AT = datetime.utcnow().isoformat()
 MAX_LOGIN_ATTEMPTS = int(os.getenv("MAX_LOGIN_ATTEMPTS", "5"))
 RATE_LIMIT_WINDOW = 60
 MAX_REQUESTS_PER_WINDOW = 30
+STRIKE_RESET_SECONDS = 24 * 60 * 60  # Reset strikes 1-5 after 24h of inactivity
 MFA_VALID_WINDOW_STEPS = 2
 
 STRIKE_DURATIONS = {
@@ -354,11 +355,27 @@ def check_rate_limit(ip_address: str) -> bool:
     return True
 
 
+def _maybe_reset_strikes(entry: dict) -> bool:
+    """Reset strikes to 0 if 24h passed since last attempt (for strikes 1-5)."""
+    strikes = entry.get("strikes", 0)
+    if strikes >= 6:
+        return False  # Permanent stays permanent
+    last_attempt = entry.get("last_attempt")
+    if last_attempt and time.time() - last_attempt >= STRIKE_RESET_SECONDS:
+        entry["strikes"] = 0
+        entry["attempts"] = 0
+        entry["locked_at"] = None
+        return True
+    return False
+
+
 def is_account_locked(portal: str, identifier: str) -> bool:
     _refresh_abuse_state()
     key = tracking_key(portal, identifier)
     if key in locked_accounts:
         entry = locked_accounts[key]
+        if _maybe_reset_strikes(entry):
+            _save_abuse_state()
         strikes = entry.get("strikes", 0)
         if strikes >= 6:
             return True  # Permanent block
@@ -380,6 +397,11 @@ def record_failed_attempt(portal: str, identifier: str, client_ip: str | None = 
         locked_accounts[key] = {"attempts": 0, "strikes": 0, "locked_at": None}
 
     entry = locked_accounts[key]
+
+    # Reset strikes 1-5 if 24h passed since last failed attempt
+    if _maybe_reset_strikes(entry):
+        _save_abuse_state()
+
     attempts = entry.get("attempts", 0)
     strikes = entry.get("strikes", 0)
     locked_at = entry.get("locked_at")
@@ -392,13 +414,14 @@ def record_failed_attempt(portal: str, identifier: str, client_ip: str | None = 
 
     attempts += 1
     entry["attempts"] = attempts
+    entry["last_attempt"] = time.time()
 
     # Determine if a new strike should be triggered
     new_strike = False
     if strikes == 0 and attempts >= MAX_LOGIN_ATTEMPTS:
         strikes = 1
         new_strike = True
-    elif strikes >= 1 and attempts >= 1:
+    elif strikes >= 1 and attempts >= MAX_LOGIN_ATTEMPTS:
         strikes += 1
         new_strike = True
 
@@ -456,6 +479,8 @@ def requires_captcha(portal: str, identifier: str) -> bool:
     if key not in locked_accounts:
         return False
     entry = locked_accounts[key]
+    if _maybe_reset_strikes(entry):
+        _save_abuse_state()
     lock_time = entry.get("locked_at")
     strikes = entry.get("strikes", 0)
     if strikes >= 6:
