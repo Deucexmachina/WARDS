@@ -1192,9 +1192,9 @@ def bootstrap_admin():
         if admin:
             admin.username = admin_username
             admin.email = admin_email.lower()
-            admin.hashed_password = hash_password(admin_password)
             admin.status = "Active"
             admin.is_verified = True
+            # Do NOT overwrite hashed_password — preserve manual password changes
         else:
             db.add(Admin(
                 username=admin_username,
@@ -1222,9 +1222,9 @@ def bootstrap_superadmin():
         if admin:
             admin.username = superadmin_username
             admin.email = superadmin_email.lower()
-            admin.hashed_password = hash_password(superadmin_password)
             admin.status = "Active"
             admin.is_verified = True
+            # Do NOT overwrite hashed_password — preserve manual password changes
         else:
             db.add(Admin(
                 username=superadmin_username,
