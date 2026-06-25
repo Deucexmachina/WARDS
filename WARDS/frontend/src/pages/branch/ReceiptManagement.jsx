@@ -376,6 +376,28 @@ const getBranchTaxDisplayName = (name) => {
   return name;
 };
 
+const isValidDateString = (str) => {
+  if (!str) return true;
+  const sep = str.includes('-') ? '-' : '/';
+  const parts = str.split(sep);
+  if (parts.length !== 3) return false;
+  const nums = parts.map((p) => parseInt(p, 10));
+  if (nums.some((n) => Number.isNaN(n))) return false;
+  if (nums.every((n) => n === 0)) return false;
+  let year, month, day;
+  if (parts[0].length === 4 && sep === '-') {
+    [year, month, day] = nums;
+  } else if (sep === '/') {
+    [month, day, year] = nums;
+    if (year < 100) year += year < 50 ? 2000 : 1900;
+  } else {
+    return false;
+  }
+  if (month < 1 || month > 12 || day < 1 || day > 31 || year < 1) return false;
+  const d = new Date(year, month - 1, day);
+  return d.getFullYear() === year && d.getMonth() === month - 1 && d.getDate() === day;
+};
+
 const validateField = (name, value) => {
   switch (name) {
     case 'ref_number':
@@ -388,11 +410,23 @@ const validateField = (name, value) => {
       if (value && /[<>]/.test(value)) return 'Taxpayer name must not contain < or > symbols.';
       break;
     case 'transaction_date':
-      if (value && /[^0-9/]/.test(value)) {
-        return 'Transaction date must only contain numbers and /.';
+      if (value && /[^0-9/-]/.test(value)) {
+        return 'Transaction date must only contain numbers, / and -.';
+      }
+      if (value && !isValidDateString(value)) {
+        return 'Transaction date is invalid.';
       }
       if (value) {
-        const parsed = new Date(value);
+        const sep = value.includes('-') ? '-' : '/';
+        const parts = value.split(sep);
+        let year, month, day;
+        if (parts[0].length === 4 && sep === '-') {
+          [year, month, day] = parts.map((p) => parseInt(p, 10));
+        } else {
+          [month, day, year] = parts.map((p) => parseInt(p, 10));
+          if (year < 100) year += year < 50 ? 2000 : 1900;
+        }
+        const parsed = new Date(year, month - 1, day);
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         if (!Number.isNaN(parsed.getTime()) && parsed > today) {

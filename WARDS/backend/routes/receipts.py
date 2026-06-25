@@ -422,23 +422,53 @@ def validate_taxpayer_name(value: str) -> str:
     return normalized
 
 
-def validate_transaction_date(value: str) -> str:
+def _parse_and_validate_date_string(value: str) -> date:
     normalized = (value or "").strip()
     if not normalized:
         raise HTTPException(status_code=400, detail="Transaction date is required")
 
-    if re.search(r"[^0-9/]", normalized):
-        raise HTTPException(status_code=400, detail="Transaction date must only contain numbers and /.")
+    if re.search(r"[^0-9/-]", normalized):
+        raise HTTPException(status_code=400, detail="Transaction date must only contain numbers, / and -.")
+
+    sep = "-" if "-" in normalized else "/"
+    parts = normalized.split(sep)
+    if len(parts) != 3:
+        raise HTTPException(status_code=400, detail="Transaction date must use a valid date.")
 
     try:
-        parsed_date = date.fromisoformat(normalized)
+        nums = [int(p) for p in parts]
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Transaction date must use a valid date.") from exc
+
+    if all(n == 0 for n in nums):
+        raise HTTPException(status_code=400, detail="Transaction date is invalid.")
+
+    if sep == "-" and len(parts[0]) == 4:
+        year, month, day = nums
+    elif sep == "/":
+        month, day, year = nums
+        if year < 100:
+            year += 2000 if year < 50 else 1900
+    else:
+        raise HTTPException(status_code=400, detail="Transaction date must use a valid date.")
+
+    if month < 1 or month > 12 or day < 1 or day > 31 or year < 1:
+        raise HTTPException(status_code=400, detail="Transaction date is invalid.")
+
+    try:
+        parsed_date = date(year, month, day)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Transaction date is invalid.") from exc
 
     if parsed_date > datetime.now(MANILA_TIMEZONE).date():
         raise HTTPException(status_code=400, detail="Transaction date cannot be in the future.")
 
-    return normalized
+    return parsed_date
+
+
+def validate_transaction_date(value: str) -> str:
+    parsed = _parse_and_validate_date_string(value)
+    return parsed.isoformat()
 
 
 def validate_receipt_request_reason(reason: str | None, custom_reason: str | None) -> tuple[str, str | None]:
