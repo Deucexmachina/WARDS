@@ -2564,7 +2564,7 @@ async def list_branch_announcement_attachments(
 
 
 @router.post("/announcements/{announcement_id}/attachments")
-async def upload_branch_announcement_attachments(
+def upload_branch_announcement_attachments(
     announcement_id: int,
     files: List[UploadFile] = File(...),
     current_staff: BranchStaff = Depends(get_current_branch_staff),
@@ -2584,7 +2584,8 @@ async def upload_branch_announcement_attachments(
     saved: list[AnnouncementAttachment] = []
     try:
         for upload in files:
-            file_bytes = await upload.read()
+            upload.file.seek(0)
+            file_bytes = upload.file.read()
             attachment = store_announcement_attachment(
                 announcement_id,
                 upload,
