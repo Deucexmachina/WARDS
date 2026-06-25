@@ -6,7 +6,7 @@ the manifest to VM2's Security API. Sends heartbeats and polls for restore
 commands from VM2.
 
 Environment variables:
-  SECURITY_API_URL          - VM2 security API base URL (e.g. http://vm2_ip:8443)
+  SECURITY_API_URL          - VM2 security API base URL (e.g. https://security.yourdomain.com)
   SECURITY_API_KEY          - API key shared with VM2
   VM1_WARDS_DIR             - Path to WARDS folder on VM1 (default: /WARDS)
   VM1_OCR_DIR               - Path to OCR folder on VM1 (default: /OCR)

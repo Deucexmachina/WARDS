@@ -81,7 +81,7 @@ async def github_webhook(request: Request):
         if VM2_HOST and VM2_API_KEY:
             try:
                 httpx.post(
-                    f"http://{VM2_HOST}:8443/internal/deployment-mode",
+                    f"https://{VM2_HOST}/internal/deployment-mode",
                     headers={"X-API-Key": VM2_API_KEY},
                     json={"in_progress": True},
                     timeout=10.0,
@@ -96,12 +96,12 @@ async def github_webhook(request: Request):
         run_cmd(["git", "reset", "--hard", "origin/main"], cwd=DEPLOY_DIR)
         run_cmd(["docker", "compose", "up", "-d", "--build"], cwd=DEPLOY_DIR)
 
-        # Deploy VM2 via authenticated HTTP trigger
+        # Deploy VM2 via authenticated HTTPS trigger
         if VM2_HOST and VM2_API_KEY:
             logger.info("Triggering VM2 deploy at %s", VM2_HOST)
             try:
                 resp = httpx.post(
-                    f"http://{VM2_HOST}:8443/internal/deploy",
+                    f"https://{VM2_HOST}/internal/deploy",
                     headers={"X-API-Key": VM2_API_KEY},
                     timeout=30.0,
                 )
@@ -109,6 +109,7 @@ async def github_webhook(request: Request):
                 logger.info("VM2 deploy triggered: %s", resp.json())
             except Exception as e:
                 logger.error("VM2 deploy trigger failed: %s", e)
+                raise RuntimeError(f"VM2 deploy trigger failed: {e}") from e
 
             # Wait for VM2 to come back up and finish its startup baseline
             logger.info("Waiting for VM2 to finish startup baseline...")
@@ -117,7 +118,7 @@ async def github_webhook(request: Request):
                 time.sleep(2)
                 try:
                     status_resp = httpx.get(
-                        f"http://{VM2_HOST}:8443/internal/deploy-status",
+                        f"https://{VM2_HOST}/internal/deploy-status",
                         headers={"X-API-Key": VM2_API_KEY},
                         timeout=5.0,
                     )
@@ -136,7 +137,7 @@ async def github_webhook(request: Request):
             # Trigger post-deploy backup on VM2 so new files have a trusted baseline
             try:
                 backup_resp = httpx.post(
-                    f"http://{VM2_HOST}:8443/v1/backup/full",
+                    f"https://{VM2_HOST}/v1/backup/full",
                     headers={"X-API-Key": VM2_API_KEY},
                     timeout=120.0,
                 )
@@ -150,7 +151,7 @@ async def github_webhook(request: Request):
             # is still active, clear it now so monitoring resumes.
             try:
                 httpx.post(
-                    f"http://{VM2_HOST}:8443/internal/deployment-mode",
+                    f"https://{VM2_HOST}/internal/deployment-mode",
                     headers={"X-API-Key": VM2_API_KEY},
                     json={"in_progress": False},
                     timeout=10.0,
@@ -188,7 +189,7 @@ async def vm2_deploy_status():
         raise HTTPException(status_code=503, detail="VM2 not configured")
     try:
         resp = httpx.get(
-            f"http://{VM2_HOST}:8443/internal/deploy-status",
+            f"https://{VM2_HOST}/internal/deploy-status",
             headers={"X-API-Key": VM2_API_KEY},
             timeout=10.0,
         )
