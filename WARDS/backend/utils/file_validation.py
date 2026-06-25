@@ -173,11 +173,11 @@ def validate_upload_file(
         # Verify extension matches detected type
         expected_extensions = _get_extensions_for_mime(detected_mime)
         if extension not in expected_extensions:
+            friendly = _friendly_type_name(detected_mime)
             raise HTTPException(
                 status_code=400,
-                detail=f"'{filename}' does not match its claimed type. "
-                       f"Detected: {detected_mime}, but extension is {extension}. "
-                       "Please upload a valid file.",
+                detail=f"Type mismatch: this file is a {friendly}, not a {extension}. "
+                       "Please rename it to the correct extension or re-save it.",
             )
         
         return extension, detected_mime
@@ -190,6 +190,20 @@ def validate_upload_file(
     import mimetypes
     guessed_mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
     return extension, guessed_mime
+
+
+def _friendly_type_name(mime_type: str) -> str:
+    """Return a user-friendly name for a detected MIME type."""
+    names = {
+        SafeFileType.PDF: "PDF",
+        SafeFileType.PNG: "PNG",
+        SafeFileType.JPEG: "JPEG",
+        SafeFileType.JPG: "JPEG",
+        SafeFileType.DOCX: "Word document",
+        SafeFileType.XLSX: "Excel spreadsheet",
+        SafeFileType.OLE: "legacy Office file",
+    }
+    return names.get(mime_type, "different file type")
 
 
 def _get_extensions_for_mime(mime_type: str) -> set[str]:

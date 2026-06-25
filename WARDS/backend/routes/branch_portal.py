@@ -12,7 +12,7 @@ from typing import List
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 from sqlalchemy.exc import IntegrityError, OperationalError
 
 from database.models import ActivityLog, Announcement, AnnouncementAttachment, AnnouncementView, Branch, BranchStaff, BusinessTaxApplication, CollectionAccount, Memo, MemoView, Payment, Policy, PolicyView, Queue, QueueHistory, ReceiptRequest, ReceiptRequestHistory, Remittance, RemittanceItem, Service, get_db
@@ -2539,15 +2539,26 @@ def _get_owned_branch_announcement(
     return announcement
 
 
+def _branch_attachment_query(db: Session, announcement_id: int):
+    """Query attachments without loading the file_content BLOB."""
+    return (
+        db.query(AnnouncementAttachment)
+        .filter(AnnouncementAttachment.announcement_id == announcement_id)
+        .order_by(AnnouncementAttachment.created_at.asc(), AnnouncementAttachment.id.asc())
+        .options(defer(AnnouncementAttachment.file_content))
+    )
+
+
 @router.get("/announcements/{announcement_id}/attachments")
 async def list_branch_announcement_attachments(
     announcement_id: int,
     current_staff: BranchStaff = Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
-    announcement = _get_owned_branch_announcement(db, announcement_id, current_staff)
+    _get_owned_branch_announcement(db, announcement_id, current_staff)
+    attachments = _branch_attachment_query(db, announcement_id).all()
     return serialize_attachments(
-        announcement.attachments or [],
+        attachments,
         base_path=f"/api/branch/announcements/{announcement_id}/attachments",
     )
 
@@ -2559,11 +2570,16 @@ async def upload_branch_announcement_attachments(
     current_staff: BranchStaff = Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
 ):
-    announcement = _get_owned_branch_announcement(db, announcement_id, current_staff)
+    _get_owned_branch_announcement(db, announcement_id, current_staff)
     if not files:
         raise HTTPException(status_code=400, detail="No files were provided")
 
-    enforce_attachment_limit(len(announcement.attachments or []), len(files))
+    existing_count = (
+        db.query(AnnouncementAttachment)
+        .filter(AnnouncementAttachment.announcement_id == announcement_id)
+        .count()
+    )
+    enforce_attachment_limit(existing_count, len(files))
 
     saved: list[AnnouncementAttachment] = []
     try:
@@ -2596,9 +2612,9 @@ async def upload_branch_announcement_attachments(
             remove_attachment_file(attachment)
         raise HTTPException(status_code=500, detail="Failed to save attachments")
 
-    db.refresh(announcement)
+    attachments = _branch_attachment_query(db, announcement_id).all()
     return serialize_attachments(
-        announcement.attachments or [],
+        attachments,
         base_path=f"/api/branch/announcements/{announcement_id}/attachments",
     )
 

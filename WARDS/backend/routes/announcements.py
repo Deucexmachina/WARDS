@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 
 from database.models import ActivityLog, Announcement, AnnouncementAttachment, AnnouncementView, Admin, get_db
 from auth import get_current_admin_user
@@ -38,6 +38,7 @@ def _list_attachment_dicts(db: Session, announcement_id: int) -> list[dict]:
         db.query(AnnouncementAttachment)
         .filter(AnnouncementAttachment.announcement_id == announcement_id)
         .order_by(AnnouncementAttachment.created_at.asc(), AnnouncementAttachment.id.asc())
+        .options(defer(AnnouncementAttachment.file_content))
         .all()
     )
     return serialize_attachments(

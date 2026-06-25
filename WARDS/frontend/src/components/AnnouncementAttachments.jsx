@@ -12,10 +12,7 @@ const FILE_HOST = (() => {
 })();
 
 const ALLOWED_EXTENSIONS = [
-  'jpg', 'jpeg', 'png', 'gif', 'webp',
-  'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv',
-  'mp4', 'mov', 'webm',
-  'zip',
+  'jpg', 'jpeg', 'png', 'pdf',
 ];
 const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024;
 export const ANNOUNCEMENT_MAX_ATTACHMENTS = 10;
