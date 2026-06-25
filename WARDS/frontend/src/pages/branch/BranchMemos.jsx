@@ -296,7 +296,7 @@ const BranchMemos = () => {
   }
 
   const MemoCard = ({ memo }) => (
-    <div className={`rounded-xl border-l-4 p-5 shadow-md transition duration-300 hover:shadow-lg ${!memo.is_viewed ? `${UNREAD_CARD_HIGHLIGHT_CLASS} border-l-primary` : 'bg-white border-l-primary'}`}>
+    <div className={`rounded-xl border border-gray-200 p-5 shadow-md transition duration-300 hover:shadow-lg ${!memo.is_viewed ? UNREAD_CARD_HIGHLIGHT_CLASS : 'bg-white'}`}>
       <div className="flex items-start justify-between gap-4 mb-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-3 mb-2">
@@ -396,15 +396,15 @@ const BranchMemos = () => {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div className="bg-white rounded-xl shadow-md p-5 border-l-4 border-l-primary">
+        <div className="bg-white rounded-xl shadow-md p-5 border border-gray-200">
           <p className="text-sm text-gray-500 font-medium">Total Memos</p>
           <p className="text-3xl font-bold text-primary mt-2">{summary.total}</p>
         </div>
-        <div className="bg-white rounded-xl shadow-md p-5 border-l-4 border-l-red-500">
+        <div className="bg-white rounded-xl shadow-md p-5 border border-gray-200">
           <p className="text-sm text-gray-500 font-medium">High Priority</p>
           <p className="text-3xl font-bold text-red-600 mt-2">{summary.highPriority}</p>
         </div>
-        <div className="bg-white rounded-xl shadow-md p-5 border-l-4 border-l-indigo-500">
+        <div className="bg-white rounded-xl shadow-md p-5 border border-gray-200">
           <p className="text-sm text-gray-500 font-medium">Organization-Wide</p>
           <p className="text-3xl font-bold text-indigo-600 mt-2">{summary.orgWide}</p>
         </div>
