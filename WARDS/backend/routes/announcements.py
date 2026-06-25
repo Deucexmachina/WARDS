@@ -1,4 +1,3 @@
-import asyncio
 from datetime import datetime
 from typing import List, Optional
 
@@ -547,7 +546,7 @@ async def list_announcement_attachments(
 
 
 @router.post("/{announcement_id}/attachments")
-async def upload_announcement_attachments(
+def upload_announcement_attachments(
     announcement_id: int,
     files: List[UploadFile] = File(...),
     current_user: Admin = Depends(get_current_admin_user),
@@ -569,7 +568,7 @@ async def upload_announcement_attachments(
     saved: list[AnnouncementAttachment] = []
     try:
         for upload in files:
-            file_bytes = await upload.read()
+            file_bytes = upload.file.read()
             attachment = store_announcement_attachment(
                 announcement_id,
                 upload,
@@ -578,23 +577,19 @@ async def upload_announcement_attachments(
             )
             db.add(attachment)
             saved.append(attachment)
-
-        def _commit():
-            db.flush()
-            db.add(
-                ActivityLog(
-                    action="Announcement Attachment Uploaded",
-                    user=current_user.username,
-                    details=(
-                        f"Uploaded {len(saved)} attachment(s) to announcement #{announcement_id}: "
-                        + ", ".join(att.original_filename for att in saved)
-                    ),
-                    type="admin",
-                )
+        db.flush()
+        db.add(
+            ActivityLog(
+                action="Announcement Attachment Uploaded",
+                user=current_user.username,
+                details=(
+                    f"Uploaded {len(saved)} attachment(s) to announcement #{announcement_id}: "
+                    + ", ".join(att.original_filename for att in saved)
+                ),
+                type="admin",
             )
-            db.commit()
-
-        await asyncio.to_thread(_commit)
+        )
+        db.commit()
     except HTTPException:
         db.rollback()
         for attachment in saved:

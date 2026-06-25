@@ -1,4 +1,3 @@
-import asyncio
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 import json
@@ -2565,7 +2564,7 @@ async def list_branch_announcement_attachments(
 
 
 @router.post("/announcements/{announcement_id}/attachments")
-async def upload_branch_announcement_attachments(
+def upload_branch_announcement_attachments(
     announcement_id: int,
     files: List[UploadFile] = File(...),
     current_staff: BranchStaff = Depends(get_current_branch_staff),
@@ -2585,7 +2584,7 @@ async def upload_branch_announcement_attachments(
     saved: list[AnnouncementAttachment] = []
     try:
         for upload in files:
-            file_bytes = await upload.read()
+            file_bytes = upload.file.read()
             attachment = store_announcement_attachment(
                 announcement_id,
                 upload,
@@ -2594,18 +2593,14 @@ async def upload_branch_announcement_attachments(
             )
             db.add(attachment)
             saved.append(attachment)
-
-        def _commit():
-            db.flush()
-            log_branch_action(
-                db,
-                current_staff,
-                "Announcement Attachment Uploaded",
-                f"Uploaded {len(saved)} attachment(s) to announcement #{announcement_id}",
-            )
-            db.commit()
-
-        await asyncio.to_thread(_commit)
+        db.flush()
+        log_branch_action(
+            db,
+            current_staff,
+            "Announcement Attachment Uploaded",
+            f"Uploaded {len(saved)} attachment(s) to announcement #{announcement_id}",
+        )
+        db.commit()
     except HTTPException:
         db.rollback()
         for attachment in saved:
