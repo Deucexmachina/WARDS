@@ -376,6 +376,52 @@ const getBranchTaxDisplayName = (name) => {
   return name;
 };
 
+const validateField = (name, value) => {
+  switch (name) {
+    case 'ref_number':
+      if (value && value.length > 100) return 'Reference number must be 100 characters or fewer.';
+      break;
+    case 'taxpayer_name':
+      if (value && value.length > 255) return 'Taxpayer name must be 255 characters or fewer.';
+      if (value && value.trim().length > 0 && value.trim().length < 2) return 'Taxpayer name must be at least 2 characters.';
+      if (value && /\d/.test(value)) return 'Taxpayer name must not contain numbers.';
+      if (value && /[<>]/.test(value)) return 'Taxpayer name must not contain < or > symbols.';
+      break;
+    case 'transaction_date':
+      if (value && /[^0-9/]/.test(value)) {
+        return 'Transaction date must only contain numbers and /.';
+      }
+      if (value) {
+        const parsed = new Date(value);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        if (!Number.isNaN(parsed.getTime()) && parsed > today) {
+          return 'Transaction date cannot be in the future.';
+        }
+      }
+      break;
+    case 'amount':
+      if (value !== '' && value !== null && value !== undefined) {
+        if (/[^0-9.,]/.test(value.toString())) {
+          return 'Amount must only contain numbers, . and ,.';
+        }
+        const num = Number(value);
+        if (Number.isNaN(num)) return 'Amount must be a valid number.';
+        if (num <= 0) return 'Amount must be greater than zero.';
+        if (num > 999999999.99) return 'Amount exceeds maximum allowed value.';
+        const decimals = (value.toString().split('.')[1] || '').length;
+        if (decimals > 2) return 'Amount can have at most 2 decimal places.';
+      }
+      break;
+    case 'market_purpose_of_renewal':
+      if (value && value.length > 255) return 'Purpose must be 255 characters or fewer.';
+      break;
+    default:
+      break;
+  }
+  return '';
+};
+
 const ReceiptManagement = () => {
   const [selectedFile, setSelectedFile] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState('RPT');
@@ -400,6 +446,7 @@ const ReceiptManagement = () => {
   const [releaseTarget, setReleaseTarget] = useState(null);
   const [releasing, setReleasing] = useState(false);
   const [releaseUploadDrafts, setReleaseUploadDrafts] = useState({});
+  const [fieldErrors, setFieldErrors] = useState({});
   const { registerDirty } = useUnsavedChanges();
   const navSaveRef = useRef(() => {});
 
@@ -613,8 +660,9 @@ const ReceiptManagement = () => {
     !ocrDraft?.auto_rename_source_image
   );
   const amountInvalid = isAmountInvalid(ocrDraft?.amount);
+  const hasFieldErrors = Object.values(fieldErrors).some(Boolean);
   const saveBlocked = Boolean(
-    categoryMismatch || ocrDraft?.duplicate_detected || filenameMismatchBlocked || missingRequiredFields.length || amountInvalid
+    categoryMismatch || ocrDraft?.duplicate_detected || filenameMismatchBlocked || missingRequiredFields.length || amountInvalid || hasFieldErrors
   );
   const duplicateWarning = ocrDraft?.duplicate_warning || '';
   const activeProcessingModal = useMemo(() => {
@@ -946,6 +994,7 @@ const ReceiptManagement = () => {
 
   const handleDraftChange = (event) => {
     const { name, value } = event.target;
+    setFieldErrors((prev) => ({ ...prev, [name]: validateField(name, value) }));
     setOcrDraft((current) => normalizeReceiptDraftReviewState({
       ...current,
       [name]: name === 'amount' ? (value === '' ? '' : Number(value)) : value,
@@ -963,6 +1012,7 @@ const ReceiptManagement = () => {
       return;
     }
     setError('');
+    setFieldErrors((prev) => ({ ...prev, [name]: validateField(name, value) }));
     handleDraftChange(event);
   };
 
@@ -2032,13 +2082,16 @@ const handleCancelScan = () => {
                           name="ref_number"
                           value={ocrDraft.ref_number || ''}
                           onChange={handleDraftChange}
-                          aria-invalid={missingRequiredFields.includes('ref_number') ? 'true' : 'false'}
+                          maxLength={100}
+                          aria-invalid={missingRequiredFields.includes('ref_number') || fieldErrors.ref_number ? 'true' : 'false'}
                           className={`w-full px-4 py-2 border rounded-lg ${
-                            missingRequiredFields.includes('ref_number') ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                            missingRequiredFields.includes('ref_number') || fieldErrors.ref_number ? 'border-red-500 bg-red-50' : 'border-gray-300'
                           }`}
                         />
                         {missingRequiredFields.includes('ref_number') ? (
                           <p className="mt-1 text-xs font-semibold text-red-600">{getReceiptFieldLabel('ref_number', effectiveSelectedCategory)} could not be extracted. Please enter a value.</p>
+                        ) : fieldErrors.ref_number ? (
+                          <p className="mt-1 text-xs font-semibold text-red-600">{fieldErrors.ref_number}</p>
                         ) : null}
                       </div>
                     ) : null}
@@ -2048,13 +2101,16 @@ const handleCancelScan = () => {
                         name="taxpayer_name"
                         value={ocrDraft.taxpayer_name || ''}
                         onChange={handleDraftChange}
-                        aria-invalid={missingRequiredFields.includes('taxpayer_name') ? 'true' : 'false'}
+                        maxLength={255}
+                        aria-invalid={missingRequiredFields.includes('taxpayer_name') || fieldErrors.taxpayer_name ? 'true' : 'false'}
                         className={`w-full px-4 py-2 border rounded-lg ${
-                          missingRequiredFields.includes('taxpayer_name') ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                          missingRequiredFields.includes('taxpayer_name') || fieldErrors.taxpayer_name ? 'border-red-500 bg-red-50' : 'border-gray-300'
                         }`}
                       />
                       {missingRequiredFields.includes('taxpayer_name') ? (
                         <p className="mt-1 text-xs font-semibold text-red-600">{getReceiptFieldLabel('taxpayer_name', effectiveSelectedCategory)} could not be extracted. Please enter a value.</p>
+                      ) : fieldErrors.taxpayer_name ? (
+                        <p className="mt-1 text-xs font-semibold text-red-600">{fieldErrors.taxpayer_name}</p>
                       ) : null}
                     </div>
                     <div>
@@ -2068,13 +2124,15 @@ const handleCancelScan = () => {
                         onChange={activeReceiptCategory === 'MARKET'
                           ? handleMarketDateChange
                           : handleDraftChange}
-                        aria-invalid={missingRequiredFields.includes('transaction_date') ? 'true' : 'false'}
+                        aria-invalid={missingRequiredFields.includes('transaction_date') || fieldErrors.transaction_date ? 'true' : 'false'}
                         className={`w-full px-4 py-2 border rounded-lg ${
-                          missingRequiredFields.includes('transaction_date') ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                          missingRequiredFields.includes('transaction_date') || fieldErrors.transaction_date ? 'border-red-500 bg-red-50' : 'border-gray-300'
                         }`}
                       />
                       {missingRequiredFields.includes('transaction_date') ? (
                         <p className="mt-1 text-xs font-semibold text-red-600">{getReceiptFieldLabel('transaction_date', effectiveSelectedCategory)} could not be extracted. Please enter a value.</p>
+                      ) : fieldErrors.transaction_date ? (
+                        <p className="mt-1 text-xs font-semibold text-red-600">{fieldErrors.transaction_date}</p>
                       ) : null}
                     </div>
                     {activeReceiptCategory === 'MARKET' ? (
@@ -2097,14 +2155,17 @@ const handleCancelScan = () => {
                               value={ocrDraft.market_purpose_of_renewal || ''}
                               onChange={handleDraftChange}
                               placeholder="Type the purpose of renewal"
-                              aria-invalid={missingRequiredFields.includes('market_purpose_of_renewal') ? 'true' : 'false'}
+                              maxLength={255}
+                              aria-invalid={missingRequiredFields.includes('market_purpose_of_renewal') || fieldErrors.market_purpose_of_renewal ? 'true' : 'false'}
                               className={`mt-2 w-full px-4 py-2 border rounded-lg ${
-                                missingRequiredFields.includes('market_purpose_of_renewal') ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                                missingRequiredFields.includes('market_purpose_of_renewal') || fieldErrors.market_purpose_of_renewal ? 'border-red-500 bg-red-50' : 'border-gray-300'
                               }`}
                             />
                           ) : null}
                         {missingRequiredFields.includes('market_purpose_of_renewal') ? (
                           <p className="mt-1 text-xs font-semibold text-red-600">{getReceiptFieldLabel('market_purpose_of_renewal', effectiveSelectedCategory)} could not be extracted. Please enter a value.</p>
+                        ) : fieldErrors.market_purpose_of_renewal ? (
+                          <p className="mt-1 text-xs font-semibold text-red-600">{fieldErrors.market_purpose_of_renewal}</p>
                         ) : null}
                         </div>
                         <div>
@@ -2131,16 +2192,18 @@ const handleCancelScan = () => {
                           min="0.01"
                           value={ocrDraft.amount || ''}
                           onChange={handleDraftChange}
-                          aria-invalid={missingRequiredFields.includes('amount') || amountInvalid ? 'true' : 'false'}
+                          aria-invalid={missingRequiredFields.includes('amount') || amountInvalid || fieldErrors.amount ? 'true' : 'false'}
                           className={`w-full px-4 py-2 border rounded-lg ${
-                            missingRequiredFields.includes('amount') || amountInvalid ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                            missingRequiredFields.includes('amount') || amountInvalid || fieldErrors.amount ? 'border-red-500 bg-red-50' : 'border-gray-300'
                           }`}
                         />
-                        {missingRequiredFields.includes('amount') || amountInvalid ? (
+                        {missingRequiredFields.includes('amount') || amountInvalid || fieldErrors.amount ? (
                           <p className="mt-1 text-xs font-semibold text-red-600">
                             {amountInvalid
                               ? 'Amount must be greater than zero.'
-                              : `${getReceiptFieldLabel('amount', effectiveSelectedCategory)} could not be extracted. Please enter a value.`}
+                              : fieldErrors.amount
+                                ? fieldErrors.amount
+                                : `${getReceiptFieldLabel('amount', effectiveSelectedCategory)} could not be extracted. Please enter a value.`}
                           </p>
                         ) : null}
                       </div>

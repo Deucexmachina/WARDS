@@ -427,6 +427,9 @@ def validate_transaction_date(value: str) -> str:
     if not normalized:
         raise HTTPException(status_code=400, detail="Transaction date is required")
 
+    if re.search(r"[^0-9/]", normalized):
+        raise HTTPException(status_code=400, detail="Transaction date must only contain numbers and /.")
+
     try:
         parsed_date = date.fromisoformat(normalized)
     except ValueError as exc:
@@ -1359,17 +1362,70 @@ def validate_required_receipt_fields(
 
 def validate_receipt_amount(amount: float | None) -> None:
     if amount is not None and amount != "":
+        amount_str = str(amount)
+        if re.search(r"[^0-9.,]", amount_str):
+            raise HTTPException(
+                status_code=400,
+                detail="Amount must only contain numbers, . and ,.",
+            )
         try:
-            if float(amount) <= 0:
+            num = float(amount)
+            if num <= 0:
                 raise HTTPException(
                     status_code=400,
                     detail="Amount must be greater than zero.",
+                )
+            if num > 999999999.99:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Amount exceeds maximum allowed value.",
                 )
         except (ValueError, TypeError):
             raise HTTPException(
                 status_code=400,
                 detail="Amount must be a valid number greater than zero.",
             )
+
+
+def validate_receipt_field_constraints(
+    *,
+    ref_number: str | None,
+    taxpayer_name: str | None,
+    amount: float | None,
+    market_purpose_of_renewal: str | None = None,
+) -> None:
+    if ref_number and len(ref_number) > 100:
+        raise HTTPException(
+            status_code=400,
+            detail="Reference number must be 100 characters or fewer.",
+        )
+    if taxpayer_name:
+        if len(taxpayer_name) > 255:
+            raise HTTPException(
+                status_code=400,
+                detail="Taxpayer name must be 255 characters or fewer.",
+            )
+        stripped = taxpayer_name.strip()
+        if stripped and len(stripped) < 2:
+            raise HTTPException(
+                status_code=400,
+                detail="Taxpayer name must be at least 2 characters.",
+            )
+        if re.search(r"\d", taxpayer_name):
+            raise HTTPException(
+                status_code=400,
+                detail="Taxpayer name must not contain numbers.",
+            )
+        if re.search(r"[<>]", taxpayer_name):
+            raise HTTPException(
+                status_code=400,
+                detail="Taxpayer name must not contain < or > symbols.",
+            )
+    if market_purpose_of_renewal and len(market_purpose_of_renewal) > 255:
+        raise HTTPException(
+            status_code=400,
+            detail="Purpose must be 255 characters or fewer.",
+        )
 
 
 def compare_taxpayer_names(left: str | None, right: str | None) -> bool:
@@ -1629,6 +1685,12 @@ def save_receipt_record_payload(
             category=normalized_tax_type,
         )
     validate_receipt_amount(payload.amount)
+    validate_receipt_field_constraints(
+        ref_number=payload.ref_number,
+        taxpayer_name=payload.taxpayer_name,
+        amount=payload.amount,
+        market_purpose_of_renewal=payload.market_purpose_of_renewal,
+    )
     if normalized_ref_number:
         existing_reference_record = (
             db.query(ReceiptRecord)
