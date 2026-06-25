@@ -55,6 +55,10 @@ services:
       # Remove this mount once dashboard routes fully proxy to VM 2 (future Phase 8).
       - ./SECURITY:/SECURITY:ro
       - .:/opt/wards/app:ro
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 100M
 
   frontend:
     build:

@@ -23,6 +23,11 @@ from slowapi.errors import RateLimitExceeded
 
 load_dotenv(Path(__file__).resolve().with_name(".env"), override=True)
 
+# Keep uploaded files in RAM up to 50 MB instead of spooling to slow Docker
+# overlay filesystem at the default 1 MB threshold.
+from starlette.datastructures import UploadFile
+UploadFile.spool_max_size = 50 * 1024 * 1024
+
 # Startup diagnostics for reCAPTCHA
 _recaptcha_key = os.getenv("RECAPTCHA_SECRET_KEY")
 if _recaptcha_key:
