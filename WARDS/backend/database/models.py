@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, Column, Integer, String as SQLString, Float, DateTime, Boolean, Text, ForeignKey, event, text, LargeBinary
-from sqlalchemy.dialects.mysql import LONGTEXT
+from sqlalchemy.dialects.mysql import LONGTEXT, LONGBLOB
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session as SASession, sessionmaker, relationship
 
@@ -911,7 +911,7 @@ class AnnouncementAttachment(Base):
     stored_filename = Column(String(255), nullable=False)
     mime_type = Column(String(150), nullable=True)
     file_size = Column(Integer, default=0)
-    file_content = Column(LargeBinary, nullable=True)
+    file_content = Column(LONGBLOB, nullable=True)
     uploaded_by = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
