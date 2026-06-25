@@ -55,7 +55,7 @@ export const getFriendlyErrorMessage = (error, fallback = 'Something went wrong.
   }
   if (status >= 500) {
     const detail = extractDetail(error);
-    if (detail && !isTechnicalMessage(detail)) {
+    if (detail) {
       return detail;
     }
     return 'The server encountered a problem. Please try again later.';
