@@ -632,7 +632,7 @@ const Home = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-2xl min-w-0 max-h-[85vh] overflow-y-auto rounded-2xl bg-white shadow-2xl">
             <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-50 px-6 py-5">
-              <div>
+              <div className="min-w-0 flex-1">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
                   Latest Announcement
                 </p>
