@@ -155,11 +155,17 @@ const BranchAnnouncements = () => {
 
   const validateForm = () => {
     const errors = {};
-    if (!formData.title.trim()) {
+    const titleTrim = formData.title.trim();
+    const contentTrim = formData.content.trim();
+    if (!titleTrim) {
       errors.title = 'Please enter the Announcement Title.';
+    } else if (titleTrim.length > 200) {
+      errors.title = 'Title must be 200 characters or fewer.';
     }
-    if (!formData.content.trim()) {
+    if (!contentTrim) {
       errors.content = 'Please enter the Announcement Content.';
+    } else if (contentTrim.length > 10000) {
+      errors.content = 'Content must be 10,000 characters or fewer.';
     }
     setValidationErrors(errors);
     return Object.keys(errors).length === 0;

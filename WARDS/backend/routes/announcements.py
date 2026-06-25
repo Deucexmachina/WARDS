@@ -3,7 +3,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session, defer
 
@@ -48,16 +48,16 @@ def _list_attachment_dicts(db: Session, announcement_id: int) -> list[dict]:
 
 
 class AnnouncementCreate(BaseModel):
-    title: str
-    content: str
+    title: str = Field(..., max_length=200)
+    content: str = Field(..., max_length=10000)
     icon_type: Optional[str] = "megaphone"
     icon_color: Optional[str] = "blue"
     is_active: Optional[bool] = True
 
 
 class AnnouncementUpdate(BaseModel):
-    title: str
-    content: str
+    title: str = Field(..., max_length=200)
+    content: str = Field(..., max_length=10000)
     icon_type: Optional[str] = "megaphone"
     icon_color: Optional[str] = "blue"
     is_active: Optional[bool] = True

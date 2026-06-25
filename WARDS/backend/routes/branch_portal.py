@@ -11,7 +11,7 @@ from typing import List
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, defer
 from sqlalchemy.exc import IntegrityError, OperationalError
 
@@ -92,8 +92,8 @@ def get_current_manila_naive() -> datetime:
 
 
 class BranchAnnouncementPayload(BaseModel):
-    title: str
-    content: str
+    title: str = Field(..., max_length=200)
+    content: str = Field(..., max_length=10000)
     icon_type: Optional[str] = "megaphone"
     icon_color: Optional[str] = "blue"
     is_active: Optional[bool] = True
