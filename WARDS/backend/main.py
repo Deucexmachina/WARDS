@@ -252,12 +252,7 @@ app = FastAPI(title="WARDS API", version="1.0.0")
 
 @app.exception_handler(Exception)
 async def production_exception_handler(request: Request, exc: Exception):
-    import traceback
-    traceback.print_exc()
-    return JSONResponse(
-        status_code=500,
-        content={"detail": f"[{type(exc).__name__}] {exc}"},
-    )
+    return JSONResponse(status_code=500, content={"detail": "An internal server error occurred."})
 
 def hybrid_rate_limit_key(request: Request) -> str:
     """Return account-based key for authenticated users, IP for anonymous."""
