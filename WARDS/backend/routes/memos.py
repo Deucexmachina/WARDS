@@ -77,8 +77,12 @@ def serialize_memo(memo: Memo, branch_lookup: dict[int, str], current_username: 
 def validate_recipients(memo_data: MemoCreate | MemoUpdate):
     if not memo_data.title.strip():
         raise HTTPException(status_code=400, detail="Memo title is required")
+    if len(memo_data.title.strip()) > 200:
+        raise HTTPException(status_code=400, detail="Memo title must be 200 characters or fewer.")
     if not memo_data.content.strip():
         raise HTTPException(status_code=400, detail="Memo content is required")
+    if len(memo_data.content.strip()) > 10000:
+        raise HTTPException(status_code=400, detail="Memo content must be 10,000 characters or fewer.")
 
     if memo_data.recipient_type == "specific_branches":
         branch_ids = [item.strip() for item in memo_data.recipients.split(",") if item.strip()]

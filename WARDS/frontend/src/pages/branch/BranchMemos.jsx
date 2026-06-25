@@ -189,9 +189,13 @@ const BranchMemos = () => {
     const errors = {};
     if (!formState.title.trim()) {
       errors.title = 'Please enter the Memo Title.';
+    } else if (formState.title.trim().length > 200) {
+      errors.title = 'Memo title must be 200 characters or fewer.';
     }
     if (!formState.content.trim()) {
       errors.content = 'Please enter the Memo Details.';
+    } else if (formState.content.trim().length > 10000) {
+      errors.content = 'Memo content must be 10,000 characters or fewer.';
     }
     if (!formState.priority) {
       errors.priority = 'Please select a priority level.';
@@ -559,6 +563,7 @@ const BranchMemos = () => {
                   name="title"
                   value={formState.title}
                   onChange={handleInputChange}
+                  maxLength={200}
                   className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent ${
                     validationErrors.title ? 'border-red-500 bg-red-50' : 'border-gray-300'
                   }`}
@@ -576,6 +581,7 @@ const BranchMemos = () => {
                   value={formState.content}
                   onChange={handleInputChange}
                   rows="8"
+                  maxLength={10000}
                   className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent ${
                     validationErrors.content ? 'border-red-500 bg-red-50' : 'border-gray-300'
                   }`}
