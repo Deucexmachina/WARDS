@@ -496,10 +496,15 @@ const Accounts = () => {
     setError('');
     setSuccessMessage('');
     try {
-      const isAdmin = account.role === 'main_admin' || account.role === 'superadmin';
-      const res = isAdmin
-        ? await settingsAPI.resetAdminMfa({ admin_id: account.id })
-        : await branchSettingsAPI.resetStaffMfa({ staff_id: account.id });
+      const isAdminAccount = account.role === 'main_admin' || account.role === 'superadmin';
+      let res;
+      if (isAdminAccount) {
+        res = await settingsAPI.resetAdminMfa({ admin_id: account.id });
+      } else if (!isBranchPortal) {
+        res = await settingsAPI.resetStaffMfa({ staff_id: account.id });
+      } else {
+        res = await branchSettingsAPI.resetStaffMfa({ staff_id: account.id });
+      }
       openActionModal({
         tone: 'success',
         title: 'MFA Reset Successful',

@@ -2014,6 +2014,40 @@ async def reset_admin_mfa(
     return {"message": f"MFA reset for {target.username}"}
 
 
+class AdminResetStaffMfaRequest(BaseModel):
+    staff_id: int
+
+
+@router.post("/admin/reset-staff-mfa")
+async def admin_reset_staff_mfa(
+    payload: AdminResetStaffMfaRequest,
+    current_user: Admin = Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    """Allow superadmin/main_admin to reset any branch staff's MFA."""
+    if current_user.role not in {"superadmin", "main_admin"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Superadmin or Main Admin access required",
+        )
+
+    target = db.query(BranchStaff).filter(BranchStaff.id == payload.staff_id).first()
+    if not target:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff member not found")
+
+    delete_mfa_secret(db, "branch", target.username)
+
+    db.add(ActivityLog(
+        action="Branch Staff MFA Reset (by Admin)",
+        user=current_user.username,
+        details=f"Reset MFA for {target.username} (ID: {target.id}) from admin portal",
+        type="security",
+    ))
+    db.commit()
+
+    return {"message": f"MFA reset for {target.username}"}
+
+
 def _build_branch_verification_page(*, success: bool, title: str, message: str, detail: str | None = None) -> str:
     """Build a styled HTML page for branch email verification outcomes."""
     frontend_base = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000").rstrip("/")

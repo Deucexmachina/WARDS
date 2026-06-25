@@ -474,6 +474,7 @@ export const settingsAPI = {
   deleteHistoryEntry: (id) => api.delete(`/settings/history/${id}`),
   setupAdminMfa: () => api.post('/auth/unified/setup-mfa-authenticated'),
   resetAdminMfa: (data) => api.post('/auth/unified/admin/reset-mfa', data),
+  resetStaffMfa: (data) => api.post('/auth/unified/admin/reset-staff-mfa', data),
 };
 
 export const accountAPI = {
