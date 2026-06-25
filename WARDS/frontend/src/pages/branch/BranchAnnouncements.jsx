@@ -365,7 +365,7 @@ const BranchAnnouncements = () => {
                         </span>
                       )}
                     </div>
-                    <p className="text-gray-600 mb-4 break-words overflow-hidden min-w-0">{announcement.content}</p>
+                    <p className="text-gray-600 mb-4 break-words overflow-hidden min-w-0 line-clamp-2">{announcement.content}</p>
                     <div className="flex gap-4 text-sm text-gray-500 flex-wrap">
                       <span>Published: {formatDate(announcement.publish_date)}</span>
                       <span>Created by: {announcement.created_by || 'Branch Staff'}</span>

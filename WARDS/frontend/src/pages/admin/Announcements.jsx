@@ -350,7 +350,7 @@ const Announcements = () => {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-3 mb-2">
-                      <h3 className="text-xl font-bold text-primary break-words">{announcement.title}</h3>
+                      <h3 className="text-xl font-bold text-primary break-words min-w-0">{announcement.title}</h3>
                       {announcement.branch_name && (
                         <span className="inline-flex items-center rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 border border-blue-200">
                           Branch Source: {announcement.branch_name}
@@ -362,7 +362,7 @@ const Announcements = () => {
                         </span>
                       )}
                     </div>
-                    <p className="text-gray-600 mb-4 break-words overflow-hidden">{announcement.content}</p>
+                    <p className="text-gray-600 mb-4 break-words overflow-hidden line-clamp-2">{announcement.content}</p>
                     <div className="flex gap-4 text-sm text-gray-500 flex-wrap">
                       <span>Published: {formatDate(announcement.publish_date)}</span>
                       <span>Created by: {announcement.created_by || 'Admin'}</span>
@@ -531,8 +531,8 @@ const Announcements = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 sm:p-6">
           <div className="flex w-full max-w-3xl max-h-[90vh] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
             <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-6 py-4 sm:px-8 sm:py-5">
-              <div>
-                <h3 className="text-xl sm:text-2xl font-bold text-primary">Announcement Details</h3>
+              <div className="min-w-0 flex-1">
+                <h3 className="text-xl sm:text-2xl font-bold text-primary break-words">Announcement Details</h3>
                 <p className="mt-1 text-sm text-slate-500">Viewing this announcement marks it as read for your account.</p>
               </div>
               <button
@@ -554,9 +554,9 @@ const Announcements = () => {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={getIconPath(selectedAnnouncement.icon_type)}></path>
                   </svg>
                 </div>
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <div className="flex flex-wrap items-center gap-3 mb-2">
-                    <h4 className="text-2xl font-bold text-primary">{selectedAnnouncement.title}</h4>
+                    <h4 className="text-2xl font-bold text-primary break-words min-w-0">{selectedAnnouncement.title}</h4>
                     <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
                       selectedAnnouncement.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
                     }`}>
@@ -569,7 +569,7 @@ const Announcements = () => {
                   </div>
                 </div>
               </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-700 whitespace-pre-wrap">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-700 whitespace-pre-wrap break-words">
                 {selectedAnnouncement.content}
               </div>
               <AnnouncementAttachmentsList attachments={selectedAnnouncement.attachments} />
