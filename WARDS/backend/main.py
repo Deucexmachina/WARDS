@@ -249,16 +249,6 @@ class RequestIntegrityMiddleware(BaseHTTPMiddleware):
 
 app = FastAPI(title="WARDS API", version="1.0.0")
 
-# Startup verification: confirm upload endpoints are sync (not async)
-import inspect, routes.announcements, routes.branch_portal
-_ann_upload = getattr(routes.announcements, "upload_announcement_attachments", None)
-_branch_upload = getattr(routes.branch_portal, "upload_branch_announcement_attachments", None)
-logging.getLogger("main").info(
-    "Upload endpoints: admin=%s branch=%s",
-    "async" if _ann_upload and inspect.iscoroutinefunction(_ann_upload) else "sync",
-    "async" if _branch_upload and inspect.iscoroutinefunction(_branch_upload) else "sync",
-)
-
 
 @app.exception_handler(Exception)
 async def production_exception_handler(request: Request, exc: Exception):
