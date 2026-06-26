@@ -125,7 +125,10 @@ async def get_activity_logs(
     page = min(max(1, page), total_pages)
     logs = query.order_by(ActivityLog.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
 
-    earliest_record = db.query(func.min(ActivityLog.created_at)).scalar()
+    try:
+        earliest_record = db.query(func.min(ActivityLog.created_at)).scalar()
+    except Exception:
+        earliest_record = None
     earliest_record_date = earliest_record.date().isoformat() if earliest_record else None
 
     def detail_value(details: str | None, label: str) -> str | None:

@@ -173,9 +173,18 @@ async def get_dashboard_statistics(
     recent_payments = payment_query.order_by(Payment.created_at.desc()).limit(10).all()
     
     # Get earliest record date across key tables
-    earliest_queue = db.query(func.min(QueueHistory.created_at)).scalar()
-    earliest_payment = db.query(func.min(Payment.created_at)).scalar()
-    earliest_activity = db.query(func.min(ActivityLog.created_at)).scalar()
+    try:
+        earliest_queue = db.query(func.min(QueueHistory.created_at)).scalar()
+    except Exception:
+        earliest_queue = None
+    try:
+        earliest_payment = db.query(func.min(Payment.created_at)).scalar()
+    except Exception:
+        earliest_payment = None
+    try:
+        earliest_activity = db.query(func.min(ActivityLog.created_at)).scalar()
+    except Exception:
+        earliest_activity = None
     earliest_dates = [d for d in [earliest_queue, earliest_payment, earliest_activity] if d]
     earliest_record_date = min(earliest_dates).date().isoformat() if earliest_dates else None
 
