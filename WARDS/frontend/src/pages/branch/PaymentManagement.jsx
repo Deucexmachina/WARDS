@@ -1722,7 +1722,7 @@ const PaymentManagement = () => {
                     </div>
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Email</p>
-                      <p className="mt-1 text-sm text-slate-900">{selectedPayment.email || 'N/A'}</p>
+                      <p className="mt-1 truncate text-sm text-slate-900">{selectedPayment.email || 'N/A'}</p>
                     </div>
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Property / Business Reference</p>
