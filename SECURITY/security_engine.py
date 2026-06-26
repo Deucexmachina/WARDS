@@ -5487,16 +5487,12 @@ def remove_monitored_folder(db: Session, folder_path: str, initiated_by: int | N
     if not entries and not removed_from_vm1:
         raise ValueError("Folder is not currently monitored.")
 
-    removed = 0
-    for entry in entries:
-        # Remove related detection events
-        db.query(SecurityDetectionEvent).filter(SecurityDetectionEvent.file_id == entry.id).delete(synchronize_session=False)
-        # Remove related recovery events
-        db.query(SecurityRecoveryEvent).filter(SecurityRecoveryEvent.file_id == entry.id).delete(synchronize_session=False)
-        # Remove the monitored file entry itself
-        db.delete(entry)
-        removed += 1
-
+    removed = len(entries)
+    entry_ids = [entry.id for entry in entries]
+    if entry_ids:
+        db.query(SecurityDetectionEvent).filter(SecurityDetectionEvent.file_id.in_(entry_ids)).delete(synchronize_session=False)
+        db.query(SecurityRecoveryEvent).filter(SecurityRecoveryEvent.file_id.in_(entry_ids)).delete(synchronize_session=False)
+        db.query(SecurityMonitoredFile).filter(SecurityMonitoredFile.id.in_(entry_ids)).delete(synchronize_session=False)
     db.commit()
 
     # Clean up VM1 snapshot files for removed folders so they don't reappear in backups
