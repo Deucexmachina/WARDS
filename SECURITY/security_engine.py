@@ -1947,11 +1947,18 @@ def writable_backup_location(db: Session, updated_by: str = "system") -> Path:
             if portable_target != current_value:
                 set_setting(db, "backup_location", portable_target, updated_by)
             return target
-        except OSError:
+        except (OSError, ValueError):
             continue
-    fallback.mkdir(parents=True, exist_ok=True)
-    set_setting(db, "backup_location", stored_path_value(fallback) or str(fallback), updated_by)
-    return fallback
+    try:
+        fallback.mkdir(parents=True, exist_ok=True)
+        set_setting(db, "backup_location", stored_path_value(fallback) or str(fallback), updated_by)
+        return fallback
+    except (OSError, ValueError):
+        # Last resort: use /tmp for backups if the default is not writable
+        tmp_fallback = Path("/tmp/wards_backups")
+        tmp_fallback.mkdir(parents=True, exist_ok=True)
+        set_setting(db, "backup_location", str(tmp_fallback), updated_by)
+        return tmp_fallback
 
 
 def validate_backup_destination(raw_path: Path | str, create: bool = True) -> Path:

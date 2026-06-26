@@ -544,12 +544,15 @@ def api_file_recover(payload: dict = {}, db=Depends(get_db)):
 @app.post("/v1/folders", dependencies=[Depends(require_api_key)])
 def api_add_folder(payload: dict = {}, db=Depends(get_db)):
     try:
-        return add_monitored_folder(db, payload["path"], initiated_by=payload.get("initiated_by"), vm_target=payload.get("vm_target"))
+        return add_monitored_folder(db, payload.get("path", ""), initiated_by=payload.get("initiated_by"), vm_target=payload.get("vm_target"))
     except ValueError as exc:
         detail = str(exc)
         if "already monitored" in detail.lower():
             raise HTTPException(status_code=409, detail=detail)
         raise HTTPException(status_code=400, detail=detail)
+    except Exception as exc:
+        logger.error("api_add_folder error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to add monitored folder: {exc}")
 
 
 @app.post("/v1/folders/remove", dependencies=[Depends(require_api_key)])

@@ -871,6 +871,12 @@ def add_folder(payload: AddFolderRequest, db: Session = Depends(get_db), admin=D
         raise HTTPException(status_code=403, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code if exc.response else 502
+        detail = exc.response.text if exc.response else str(exc)
+        raise HTTPException(status_code=status_code, detail=detail)
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Security service timed out while adding folder.")
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
