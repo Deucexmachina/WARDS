@@ -553,6 +553,12 @@ const RequestReceipt = () => {
         taxType: paymentContext.taxType || formData.taxType,
       });
 
+      const paymentRef = initiateResponse.data.paymentRefNumber || '';
+      const accessToken = initiateResponse.data.publicAccessToken || '';
+      if (paymentRef && accessToken && typeof window !== 'undefined') {
+        window.sessionStorage.setItem(`wards_payment_token_${paymentRef}`, accessToken);
+      }
+
       setRequestStatus((current) => (
         current
           ? {
@@ -574,11 +580,13 @@ const RequestReceipt = () => {
         refNumber: initiateResponse.data.paymentRefNumber,
         paymentMethod: checkoutDetails.method || paymentMethod,
         bankCode: checkoutDetails.bankCode || undefined,
+        token: accessToken,
       });
 
       if (paymentResponse.data.checkoutUrl) {
+        const tokenParam = accessToken ? `&token=${encodeURIComponent(accessToken)}` : '';
         const paymentStatusPath = appendLanguageParam(
-          `/payment/status?ref=${encodeURIComponent(paymentResponse.data.refNumber || initiateResponse.data.paymentRefNumber)}&receiptFlow=standalone`,
+          `/payment/status?ref=${encodeURIComponent(paymentResponse.data.refNumber || initiateResponse.data.paymentRefNumber)}&receiptFlow=standalone${tokenParam}`,
           language
         );
         if (checkoutWindow && !checkoutWindow.closed) {

@@ -3323,6 +3323,7 @@ async def pay_request_fee(
         status="Pending",
         source_module="receipt_request",
         related_request_id=resolved_request_id,
+        public_access_token=secrets.token_urlsafe(32),
     )
     receipt_request.payment_ref_number = payment_ref
     apply_receipt_request_security(receipt_request)
@@ -3358,6 +3359,7 @@ async def pay_request_fee(
         "status": "Pending",
         "paymentMethod": normalized_payment_method,
         "placeholderGateway": "PayMongo Placeholder",
+        "publicAccessToken": payment.public_access_token,
     }
 
 

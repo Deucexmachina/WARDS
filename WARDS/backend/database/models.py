@@ -361,6 +361,7 @@ class Payment(Base):
     receipt_sent_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     verified_at = Column(DateTime, nullable=True)
+    public_access_token = Column(String, nullable=True, index=True)
 
     branch_record = relationship("Branch", backref="payments")
 

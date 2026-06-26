@@ -499,6 +499,11 @@ const PayTaxesBT = () => {
         paymentMethod,
         bankCode: paymentMethod === 'banking' ? selectedBank : undefined,
       });
+      const refNumber = response.data?.refNumber || '';
+      const accessToken = response.data?.publicAccessToken || '';
+      if (refNumber && accessToken && typeof window !== 'undefined') {
+        window.sessionStorage.setItem(`wards_payment_token_${refNumber}`, accessToken);
+      }
       setMessage(text.paymentReferenceGenerated(response.data?.refNumber));
       await fetchApplications({ selectedTracking: selectedApplication.tracking_number });
     } catch (referenceError) {
@@ -518,10 +523,12 @@ const PayTaxesBT = () => {
     setProcessingPayment(true);
     setError('');
     try {
+      const storedToken = typeof window !== 'undefined' ? window.sessionStorage.getItem(`wards_payment_token_${selectedApplication.payment_ref_number}`) : '';
       const response = await paymentAPI.processPayment({
         refNumber: selectedApplication.payment_ref_number,
         paymentMethod,
         bankCode: paymentMethod === 'banking' ? selectedBank : undefined,
+        token: storedToken,
       });
 
       if (response.data?.checkoutUrl) {
@@ -531,7 +538,8 @@ const PayTaxesBT = () => {
           setError(text.openCheckoutFailed);
           return;
         }
-        navigate(appendLanguageParam(`/payment/status?ref=${encodeURIComponent(selectedApplication.payment_ref_number)}`, language));
+        const tokenParam = storedToken ? `&token=${encodeURIComponent(storedToken)}` : '';
+        navigate(appendLanguageParam(`/payment/status?ref=${encodeURIComponent(selectedApplication.payment_ref_number)}${tokenParam}`, language));
       }
     } catch (paymentError) {
       setError(paymentError.response?.data?.detail || text.openCheckoutFailed);

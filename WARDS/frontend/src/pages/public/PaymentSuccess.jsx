@@ -19,6 +19,7 @@ const PaymentSuccess = () => {
   const [error, setError] = useState('');
 
   const refNumber = searchParams.get('ref');
+  const accessToken = searchParams.get('token') || '';
   const paymentSource = searchParams.get('source');
   const isMerchantReturn = searchParams.get('merchant_return') === '1';
   const urlLanguage = searchParams.get('lang');
@@ -44,15 +45,16 @@ const PaymentSuccess = () => {
 
   useEffect(() => {
     if (refNumber) {
+      const tokenParam = accessToken ? `&token=${encodeURIComponent(accessToken)}` : '';
       navigate(
-        appendLanguageParam(`/payment/status?ref=${encodeURIComponent(refNumber)}${isMerchantReturn ? '&merchant_return=1' : ''}`, language),
+        appendLanguageParam(`/payment/status?ref=${encodeURIComponent(refNumber)}${isMerchantReturn ? '&merchant_return=1' : ''}${tokenParam}`, language),
         { replace: true }
       );
       return undefined;
     }
 
     return undefined;
-  }, [isMerchantReturn, navigate, refNumber]);
+  }, [isMerchantReturn, navigate, refNumber, accessToken]);
 
   useEffect(() => {
     if (!refNumber) {
@@ -74,9 +76,10 @@ const PaymentSuccess = () => {
     const status = normalizeStatus(payment?.status);
     const paymongoStatus = normalizeStatus(payment?.paymongo_status);
     if (FAILED_STATUSES.has(status) || FAILED_STATUSES.has(paymongoStatus)) {
-      navigate(appendLanguageParam(`/payment/failed?ref=${encodeURIComponent(refNumber || '')}`, language), { replace: true });
+      const tokenParam = accessToken ? `&token=${encodeURIComponent(accessToken)}` : '';
+      navigate(appendLanguageParam(`/payment/failed?ref=${encodeURIComponent(refNumber || '')}${tokenParam}`, language), { replace: true });
     }
-  }, [navigate, payment, refNumber]);
+  }, [navigate, payment, refNumber, accessToken, language]);
 
   useEffect(() => {
     if (!isMerchantReturn || !payment || !isPaymentVerified(payment) || typeof window === 'undefined') {

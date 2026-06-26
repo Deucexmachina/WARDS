@@ -19,6 +19,7 @@ const PaymentFailed = () => {
   const [error, setError] = useState('');
 
   const refNumber = searchParams.get('ref');
+  const accessToken = searchParams.get('token') || '';
   const urlLanguage = searchParams.get('lang');
   const language = resolvePublicLanguage(searchParams);
 
@@ -55,7 +56,8 @@ const PaymentFailed = () => {
       }
 
       try {
-        const response = await axios.get(`${API_BASE_URL}/payments/paymongo/status/${refNumber}`);
+        const tokenQuery = accessToken ? `?token=${encodeURIComponent(accessToken)}` : '';
+        const response = await axios.get(`${API_BASE_URL}/payments/paymongo/status/${refNumber}${tokenQuery}`);
         setPayment(response.data);
         setLoading(false);
 

@@ -796,6 +796,11 @@ const PayTaxesRPT = () => {
           payment_option: item.payment_option_value || (item.payment_option?.toLowerCase() === 'quarterly' ? 'quarterly' : 'full'),
         })),
       });
+      const refNumber = response.data?.refNumber || '';
+      const accessToken = response.data?.publicAccessToken || '';
+      if (refNumber && accessToken && typeof window !== 'undefined') {
+        window.sessionStorage.setItem(`wards_payment_token_${refNumber}`, accessToken);
+      }
       setPaymentReference(response.data);
       setPaymentConfirmationOpen(true);
     } catch (err) {
@@ -831,10 +836,12 @@ const PayTaxesRPT = () => {
         description: 'Please wait while we redirect you to PayMongo. Keep this tab open to complete your payment.',
       });
 
+      const accessToken = paymentReference?.publicAccessToken || '';
       const response = await paymentAPI.processPayment({
         refNumber: paymentReference.refNumber,
         paymentMethod: selectedPaymentMethod,
         ...(selectedPaymentMethod === 'banking' && selectedBank ? { bankCode: selectedBank } : {}),
+        token: accessToken,
       });
 
       if (response.data.checkoutUrl) {
@@ -843,7 +850,8 @@ const PayTaxesRPT = () => {
         } else {
           safeNavigate(response.data.checkoutUrl);
         }
-        navigate(appendLanguageParam(`/payment/status?ref=${encodeURIComponent(response.data.refNumber || paymentReference.refNumber)}`, language));
+        const tokenParam = accessToken ? `&token=${encodeURIComponent(accessToken)}` : '';
+        navigate(appendLanguageParam(`/payment/status?ref=${encodeURIComponent(response.data.refNumber || paymentReference.refNumber)}${tokenParam}`, language));
         return;
       }
 
@@ -1021,7 +1029,11 @@ const PayTaxesRPT = () => {
                     </div>
                     <button
                       type="button"
-                      onClick={() => navigate(appendLanguageParam(`/payment/status?ref=${encodeURIComponent(activePendingPayment.ref_number)}`, language))}
+                      onClick={() => {
+                        const storedToken = typeof window !== 'undefined' ? window.sessionStorage.getItem(`wards_payment_token_${activePendingPayment.ref_number}`) : '';
+                        const tokenParam = storedToken ? `&token=${encodeURIComponent(storedToken)}` : '';
+                        navigate(appendLanguageParam(`/payment/status?ref=${encodeURIComponent(activePendingPayment.ref_number)}${tokenParam}`, language));
+                      }}
                       className="rounded-full bg-[#0f5b83] px-6 py-3 text-sm font-bold uppercase tracking-[0.12em] text-white transition hover:bg-[#0c4d6f]"
                     >
                       {text.pendingButton}

@@ -66,6 +66,7 @@ const PaymentStatus = () => {
   const intervalIdRef = useRef(null);
 
   const refNumber = searchParams.get('ref');
+  const accessToken = searchParams.get('token') || '';
   const urlLanguage = searchParams.get('lang');
   const language = resolvePublicLanguage(searchParams);
   const receiptFlow = searchParams.get('receiptFlow') || '';
@@ -135,7 +136,8 @@ const PaymentStatus = () => {
       }
 
       try {
-        const response = await axios.get(`${API_BASE_URL}/payments/paymongo/status/${refNumber}`);
+        const tokenQuery = accessToken ? `?token=${encodeURIComponent(accessToken)}` : '';
+        const response = await axios.get(`${API_BASE_URL}/payments/paymongo/status/${refNumber}${tokenQuery}`);
         const paymentData = response.data;
         setPayment(paymentData);
         setLoading(false);
@@ -205,7 +207,8 @@ const PaymentStatus = () => {
       }
 
       try {
-        const response = await axios.get(`${API_BASE_URL}/payments/paymongo/status/${refNumber}`);
+        const tokenQuery = accessToken ? `?token=${encodeURIComponent(accessToken)}` : '';
+        const response = await axios.get(`${API_BASE_URL}/payments/paymongo/status/${refNumber}${tokenQuery}`);
         setPayment(response.data);
         setError('');
       } catch (err) {

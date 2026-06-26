@@ -4,6 +4,7 @@ import hmac
 import hashlib
 import json
 import random
+import secrets
 import os
 import re
 from pathlib import Path
@@ -172,6 +173,7 @@ class PaymentProcessRequest(BaseModel):
     refNumber: str
     paymentMethod: str | None = None
     bankCode: str | None = None
+    token: str | None = None
 
 
 class PayMongoWebhookPayload(BaseModel):
@@ -2169,6 +2171,7 @@ async def generate_rpt_payment_reference(
         status="PAYMENT_INITIATED",
         source_module="rpt_online_payment",
         payment_expiry=expiry,
+        public_access_token=secrets.token_urlsafe(32),
     )
     set_payment_metadata(payment, metadata)
     db.add(payment)
@@ -2191,6 +2194,7 @@ async def generate_rpt_payment_reference(
         "paymentMethod": payment_method,
         "contactNumber": contact_number,
         "cartItems": validated_items,
+        "publicAccessToken": payment.public_access_token,
     }
 
 
@@ -2510,6 +2514,7 @@ async def generate_business_tax_reference(
         source_module="business_tax_online_payment",
         related_request_id=application.tracking_number,
         payment_expiry=expiry,
+        public_access_token=secrets.token_urlsafe(32),
     )
     set_payment_metadata(payment, payment_metadata)
     db.add(payment)
@@ -2538,6 +2543,7 @@ async def generate_business_tax_reference(
         "paymentId": payment.id,
         "paymentMethod": payment_method,
         "contactNumber": contact_number,
+        "publicAccessToken": payment.public_access_token,
         "application": serialize_business_tax_application(application),
     }
 
@@ -2580,6 +2586,7 @@ async def generate_payment_reference(
         status="Pending",
         source_module="tax_payment",
         payment_expiry=expiry,
+        public_access_token=secrets.token_urlsafe(32),
     )
     apply_payment_security(payment)
     db.add(payment)
@@ -2601,6 +2608,7 @@ async def generate_payment_reference(
         "paymentId": payment.id,
         "paymentMethod": payment_method,
         "contactNumber": contact_number,
+        "publicAccessToken": payment.public_access_token,
     }
 
 
@@ -2662,12 +2670,14 @@ async def process_payment(request: Request, payload: PaymentProcessRequest, _sig
         tax_type = payment_value(payment, "tax_type")
         description = f"{tax_type} - {taxpayer_name} ({ref_number})"
 
+        token_param = f"&token={payload.token}" if payload.token else ""
+
         if normalized_payment_method == "gcash":
             source_response = paymongo_service.create_source(
                 source_type="gcash",
                 amount=payment.amount,
-                redirect_success=f"{frontend_url}/payment/status?ref={ref_number}&merchant_return=1",
-                redirect_failed=f"{frontend_url}/payment/failed?ref={ref_number}",
+                redirect_success=f"{frontend_url}/payment/status?ref={ref_number}&merchant_return=1{token_param}",
+                redirect_failed=f"{frontend_url}/payment/failed?ref={ref_number}{token_param}",
                 description=description,
                 statement_descriptor="WARDS",
                 metadata=metadata,
@@ -2732,7 +2742,7 @@ async def process_payment(request: Request, payload: PaymentProcessRequest, _sig
                 payment_intent_id=intent_id,
                 payment_method_id=method_id,
                 client_key=client_key,
-                return_url=f"{frontend_url}/payment/status?ref={ref_number}&merchant_return=1",
+                return_url=f"{frontend_url}/payment/status?ref={ref_number}&merchant_return=1{token_param}",
             )
             attach_attrs = attach_response.get("data", {}).get("attributes", {}) or {}
             next_action = attach_attrs.get("next_action", {}) or {}
@@ -2800,7 +2810,7 @@ async def process_payment(request: Request, payload: PaymentProcessRequest, _sig
                 payment_intent_id=intent_id,
                 payment_method_id=method_id,
                 client_key=client_key,
-                return_url=f"{frontend_url}/payment/status?ref={ref_number}&merchant_return=1",
+                return_url=f"{frontend_url}/payment/status?ref={ref_number}&merchant_return=1{token_param}",
             )
             attach_attrs = attach_response.get("data", {}).get("attributes", {}) or {}
             next_action = attach_attrs.get("next_action", {}) or {}
@@ -2839,8 +2849,8 @@ async def process_payment(request: Request, payload: PaymentProcessRequest, _sig
             item_name=tax_type,
             reference_number=ref_number,
             payment_method_types=checkout_payment_methods,
-            success_url=f"{frontend_url}/payment/status?ref={ref_number}&merchant_return=1",
-            cancel_url=f"{frontend_url}/payment/failed?ref={ref_number}",
+            success_url=f"{frontend_url}/payment/status?ref={ref_number}&merchant_return=1{token_param}",
+            cancel_url=f"{frontend_url}/payment/failed?ref={ref_number}{token_param}",
             description=description,
             billing={
                 "name": taxpayer_name,
@@ -3532,14 +3542,21 @@ async def paymongo_webhook(request: Request, db: Session = Depends(get_db)):
 
 
 @router.get("/paymongo/status/{ref_number}")
-async def check_paymongo_status(ref_number: str, db: Session = Depends(get_db)):
+async def check_paymongo_status(
+    ref_number: str,
+    token: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
     """
     Check payment status from PayMongo and update local database
     """
     payment = find_payment_by_ref_number(db, Payment, ref_number)
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
-    
+
+    if payment.public_access_token and payment.public_access_token != token:
+        raise HTTPException(status_code=401, detail="Invalid access token")
+
     if is_confirmed_payment(payment):
         if payment.status not in {"Verified", "PAYMENT_SUBMITTED", "Pending Transaction", "PAYMENT_VERIFIED", "OR_GENERATED", "COMPLETED"}:
             mark_payment_submitted(payment)
