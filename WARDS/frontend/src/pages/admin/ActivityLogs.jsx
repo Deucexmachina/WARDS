@@ -162,32 +162,52 @@ const ActivityLogs = () => {
           <div className="m-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
         ) : logs.length ? (
           <>
-            <div className="overflow-hidden rounded-xl border border-slate-200">
-              <table className="w-full table-auto text-sm">
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <table className="w-full min-w-[1000px] table-fixed text-xs">
+                <colgroup>
+                  <col className="w-[18%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[10%]" />
+                </colgroup>
                 <thead className="bg-slate-50">
                   <tr>
                     {['Log Title', 'Activity Type', 'Branch', 'Email/User', 'Role', 'IP', 'Action', 'Date'].map((heading) => (
-                      <th key={heading} className="whitespace-nowrap px-4 py-3 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-500">{heading}</th>
+                      <th key={heading} className="whitespace-nowrap px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">{heading}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white">
                   {logs.map((log) => (
                     <tr key={log.id} className="cursor-pointer hover:bg-slate-50" onClick={() => setSelectedLog(log)}>
-                      <td className="max-w-xs px-4 py-3 font-bold text-primary">
-                        <div>{log.title || log.action}</div>
+                      <td className="px-3 py-2.5">
+                        <div className="truncate font-bold text-primary" title={log.title || log.action}>{log.title || log.action}</div>
                       </td>
-                      <td className="px-4 py-3">
-                        <span className={`rounded px-2 py-1 text-xs font-semibold ${typeColors[log.type] || 'bg-gray-100 text-gray-800'}`}>
+                      <td className="px-3 py-2.5">
+                        <span className={`inline-block truncate max-w-full rounded px-1.5 py-0.5 text-[10px] font-semibold ${typeColors[log.type] || 'bg-gray-100 text-gray-800'}`} title={log.type || 'general'}>
                           {log.type || 'general'}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-slate-700">{log.branch || 'System-wide'}</td>
-                      <td className="px-4 py-3 text-slate-700">{log.email || log.user || 'Unknown'}</td>
-                      <td className="px-4 py-3 capitalize text-slate-700">{String(log.role || 'not recorded').replaceAll('_', ' ')}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-slate-600">{log.ip || 'not recorded'}</td>
-                      <td className="px-4 py-3 text-slate-700">{log.action}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-slate-500">{formatTimestamp(log.created_at)}</td>
+                      <td className="px-3 py-2.5 text-slate-700">
+                        <div className="truncate" title={log.branch || 'System-wide'}>{log.branch || 'System-wide'}</div>
+                      </td>
+                      <td className="px-3 py-2.5 text-slate-700">
+                        <div className="truncate" title={log.email || log.user || 'Unknown'}>{log.email || log.user || 'Unknown'}</div>
+                      </td>
+                      <td className="px-3 py-2.5 capitalize text-slate-700">
+                        <div className="truncate" title={String(log.role || 'not recorded').replaceAll('_', ' ')}>{String(log.role || 'not recorded').replaceAll('_', ' ')}</div>
+                      </td>
+                      <td className="px-3 py-2.5 font-mono text-[10px] text-slate-600">
+                        <div className="truncate" title={log.ip || 'not recorded'}>{log.ip || 'not recorded'}</div>
+                      </td>
+                      <td className="px-3 py-2.5 text-slate-700">
+                        <div className="truncate" title={log.action}>{log.action}</div>
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2.5 text-slate-500">{formatTimestamp(log.created_at)}</td>
                     </tr>
                   ))}
                 </tbody>
