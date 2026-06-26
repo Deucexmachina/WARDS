@@ -368,6 +368,49 @@ def serialize_payment(payment: Payment):
     }
 
 
+PUBLIC_METADATA_KEYS = {
+    "is_rpt_workflow",
+    "is_business_tax_workflow",
+    "cart_items",
+    "business_name",
+    "mayor_permit_number",
+    "sec_dti_cda_number",
+    "owner_name",
+    "tracking_number",
+}
+
+
+def serialize_payment_public(payment: Payment):
+    metadata = parse_payment_metadata(payment)
+    if isinstance(metadata, dict):
+        metadata = {k: v for k, v in metadata.items() if k in PUBLIC_METADATA_KEYS}
+    else:
+        metadata = {}
+    return {
+        "id": payment.id,
+        "ref_number": payment_value(payment, "ref_number"),
+        "transaction_id": payment_value(payment, "txn_id"),
+        "taxpayer_name": payment_value(payment, "taxpayer_name"),
+        "tax_type": payment_value(payment, "tax_type"),
+        "amount": float(payment.amount or 0),
+        "payment_method": payment_value(payment, "payment_method"),
+        "status": normalize_payment_status(payment.status),
+        "workflow_status": payment.status,
+        "branch": resolve_payment_branch_name(payment) or payment_value(payment, "branch"),
+        "source_module": payment.source_module or "tax_payment",
+        "paymongo_status": payment_value(payment, "paymongo_status"),
+        "failure_reason": get_failure_reason_message(payment),
+        "metadata": metadata,
+        "proof_file_name": payment_value(payment, "proof_file_name"),
+        "proof_uploaded_at": to_utc_iso(payment.proof_uploaded_at),
+        "has_payment_proof": bool(payment_value(payment, "proof_file_path")),
+        "treasury_remarks": payment_value(payment, "treasury_remarks"),
+        "official_receipt_download_url": f"/api/payments/{payment.id}/official-receipt" if payment_value(payment, "official_receipt_path") else None,
+        "created_at": to_utc_iso(payment.created_at),
+        "verified_at": to_utc_iso(payment.verified_at),
+    }
+
+
 def get_or_create_main_collection_account(db: Session) -> CollectionAccount:
     account = (
         db.query(CollectionAccount)
@@ -2856,7 +2899,11 @@ async def process_payment(request: Request, payload: PaymentProcessRequest, _sig
 
 
 @router.get("/verify/{ref_number}")
-async def verify_payment(ref_number: str, db: Session = Depends(get_db)):
+async def verify_payment(
+    ref_number: str,
+    db: Session = Depends(get_db),
+    current_user: CitizenUser = Depends(get_current_user),
+):
     payment = find_payment_by_ref_number(db, Payment, ref_number)
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
@@ -3008,7 +3055,10 @@ async def reject_main_remittance(
 
 
 @router.get("/transactions")
-async def get_transactions(db: Session = Depends(get_db)):
+async def get_transactions(
+    db: Session = Depends(get_db),
+    current_admin=Depends(require_main_admin()),
+):
     payments = db.query(Payment).order_by(Payment.created_at.asc()).limit(50).all()
     return [serialize_payment(payment) for payment in payments]
 
@@ -3497,7 +3547,7 @@ async def check_paymongo_status(ref_number: str, db: Session = Depends(get_db)):
             apply_payment_security(payment)
             db.commit()
             db.refresh(payment)
-        return serialize_payment(payment)
+        return serialize_payment_public(payment)
 
     if payment.paymongo_checkout_session_id:
         try:
@@ -3534,10 +3584,10 @@ async def check_paymongo_status(ref_number: str, db: Session = Depends(get_db)):
             ))
             db.commit()
 
-        return serialize_payment(payment)
+        return serialize_payment_public(payment)
     
     if not payment.paymongo_source_id:
-        return serialize_payment(payment)
+        return serialize_payment_public(payment)
     
     try:
         source_response = paymongo_service.retrieve_source(payment.paymongo_source_id)
@@ -3647,7 +3697,7 @@ async def check_paymongo_status(ref_number: str, db: Session = Depends(get_db)):
         ))
         db.commit()
     
-    return serialize_payment(payment)
+    return serialize_payment_public(payment)
 
 
 @router.delete("/{payment_id}")
