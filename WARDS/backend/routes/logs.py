@@ -176,13 +176,6 @@ async def get_activity_logs(
             return match.group(0)
         return None
 
-
-def _is_ip_like(value: str) -> bool:
-    """Quick heuristic to check if a string looks like an IP address."""
-    if not value or value.lower() in {"unknown", "none", "not recorded", "n/a"}:
-        return False
-    return bool(re.match(r"^(?:\d{1,3}\.){3}\d{1,3}$", value))
-
     items = [
         {
             "id": log.id,
@@ -208,3 +201,10 @@ def _is_ip_like(value: str) -> bool:
         "total_pages": total_pages,
         "earliest_record_date": earliest_record_date,
     }
+
+
+def _is_ip_like(value: str) -> bool:
+    """Quick heuristic to check if a string looks like an IP address."""
+    if not value or value.lower() in {"unknown", "none", "not recorded", "n/a"}:
+        return False
+    return bool(re.match(r"^(?:\d{1,3}\.){3}\d{1,3}$", value))
