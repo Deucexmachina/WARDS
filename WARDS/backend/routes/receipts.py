@@ -3271,7 +3271,7 @@ async def get_request_status(request_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/request/{request_id}/pay")
-@limiter.limit("5/minute")
+@limiter.limit("5/minute;20/day")
 async def pay_request_fee(
     request: Request,
     request_id: str,
