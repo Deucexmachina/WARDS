@@ -15,13 +15,13 @@ MASTER_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(MASTER_ROOT))
 sys.path.insert(0, str(MASTER_ROOT / "WARDS" / "backend"))
 
-from fastapi import FastAPI, HTTPException, Header, Depends
+from fastapi import FastAPI, HTTPException, Header, Depends, BackgroundTasks
 from starlette.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import inspect
 from typing import Any
 
-from database.models import SessionLocal, engine, Admin, Base
+from database.models import SessionLocal, engine, Admin, Base, Alert
 from SECURITY.security_engine import (
     dashboard_payload,
     scan_single_file,
@@ -474,8 +474,23 @@ def api_backup_location(payload: dict = {}, db=Depends(get_db)):
 
 
 @app.post("/v1/recover/full", dependencies=[Depends(require_api_key)])
-def api_recover_full(payload: dict = {}, db=Depends(get_db)):
-    return full_system_recovery(db, _resolve_admin_id(db, payload.get("admin_id")))
+def api_recover_full(payload: dict = {}, background_tasks: BackgroundTasks = None, db=Depends(get_db)):
+    admin_id = _resolve_admin_id(db, payload.get("admin_id"))
+
+    def _run_recovery():
+        db2 = SessionLocal()
+        try:
+            full_system_recovery(db2, admin_id)
+        finally:
+            db2.close()
+
+    if background_tasks:
+        background_tasks.add_task(_run_recovery)
+    else:
+        # Fallback for test environments without background-task support
+        threading.Thread(target=_run_recovery, daemon=True).start()
+
+    return {"status": "processing", "message": "Full system recovery started in the background. Check recovery logs for results."}
 
 
 @app.post("/v1/backup/database", dependencies=[Depends(require_api_key)])
@@ -813,4 +828,32 @@ def api_clear_all_logs(db=Depends(get_db)):
         "incidents_deleted": deleted_incidents,
         "detections_deleted": deleted_detections,
         "recoveries_deleted": deleted_recoveries,
+    }
+
+
+@app.get("/v1/system-alerts", dependencies=[Depends(require_api_key)])
+def api_system_alerts(limit: int = 50, db=Depends(get_db)):
+    """Return recent system alerts stored in the security DB."""
+    try:
+        alerts = (
+            db.query(Alert)
+            .order_by(Alert.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+    except Exception:
+        return {"alerts": []}
+    return {
+        "alerts": [
+            {
+                "id": alert.id,
+                "type": alert.type,
+                "title": alert.title,
+                "message": alert.message,
+                "severity": alert.severity,
+                "read": alert.read,
+                "created_at": alert.created_at.isoformat() if alert.created_at else None,
+            }
+            for alert in alerts
+        ]
     }
