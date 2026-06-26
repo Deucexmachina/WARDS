@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 
 from database.models import ActivityLog, Branch, BranchStaff, Admin, CitizenUser, get_db
+from sqlalchemy import func
 from utils.field_crypto import get_decrypted_or_raw
 from auth import get_current_admin_user, get_current_branch_staff
 from utils.log_integrity import verify_record_integrity
@@ -124,6 +125,9 @@ async def get_activity_logs(
     page = min(max(1, page), total_pages)
     logs = query.order_by(ActivityLog.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
 
+    earliest_record = db.query(func.min(ActivityLog.created_at)).scalar()
+    earliest_record_date = earliest_record.date().isoformat() if earliest_record else None
+
     def detail_value(details: str | None, label: str) -> str | None:
         if not details:
             return None
@@ -179,4 +183,5 @@ async def get_activity_logs(
         "page_size": page_size,
         "total": total,
         "total_pages": total_pages,
+        "earliest_record_date": earliest_record_date,
     }

@@ -513,6 +513,7 @@ const ConfirmationModal = ({
 );
 
 const PaymentManagement = () => {
+  const todayStr = new Date().toISOString().split('T')[0];
   const [payments, setPayments] = useState([]);
   const [remittanceSummary, setRemittanceSummary] = useState(null);
   const [remittances, setRemittances] = useState([]);
@@ -1472,7 +1473,7 @@ const PaymentManagement = () => {
           <div>
             <label className="mb-2 block text-sm font-semibold text-slate-700">Date From</label>
             <CustomDatePicker
-              max={draftFilters.dateTo || undefined}
+              max={draftFilters.dateTo && draftFilters.dateTo <= todayStr ? draftFilters.dateTo : todayStr}
               value={draftFilters.dateFrom}
               onChange={(event) => updateDraftFilter('dateFrom', event.target.value)}
             />
@@ -1481,6 +1482,7 @@ const PaymentManagement = () => {
             <label className="mb-2 block text-sm font-semibold text-slate-700">Date To</label>
             <CustomDatePicker
               min={draftFilters.dateFrom || undefined}
+              max={todayStr}
               value={draftFilters.dateTo}
               onChange={(event) => updateDraftFilter('dateTo', event.target.value)}
             />

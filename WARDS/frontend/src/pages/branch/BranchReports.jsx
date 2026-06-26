@@ -110,11 +110,13 @@ const ReportMetricsModal = ({ report, metrics, onClose }) => {
 };
 
 const BranchReports = () => {
+  const todayStr = new Date().toISOString().split('T')[0];
   const [activeTab, setActiveTab] = useState('active');
   const [filters, setFilters] = useState(initialFilters);
   const [generationMode, setGenerationMode] = useState('manual');
   const [reportsState, setReportsState] = useState({ items: [], page: 1, page_size: PAGE_SIZE, total: 0, total_pages: 1 });
   const [historyState, setHistoryState] = useState({ items: [], page: 1, page_size: PAGE_SIZE, total: 0, total_pages: 1 });
+  const [earliestRecordDate, setEarliestRecordDate] = useState(null);
   const [loading, setLoading] = useState(true);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -148,6 +150,7 @@ const BranchReports = () => {
         ...response.data,
         items: applyBranchReportViewedState(response.data?.items || [], branchStaff),
       });
+      setEarliestRecordDate(response.data?.earliest_record_date || null);
     } catch (fetchError) {
       console.error('Failed to fetch branch reports:', fetchError);
       setError(fetchError.response?.data?.detail || 'Failed to load submitted branch reports.');
@@ -422,7 +425,8 @@ const BranchReports = () => {
             <div>
               <label className="mb-2 block text-sm font-semibold text-slate-700">Date From</label>
               <CustomDatePicker
-                max={filters.dateTo || undefined}
+                min={earliestRecordDate || undefined}
+                max={filters.dateTo && filters.dateTo <= todayStr ? filters.dateTo : todayStr}
                 value={filters.dateFrom}
                 onChange={(event) => setFilters((current) => ({ ...current, dateFrom: event.target.value }))}
               />
@@ -431,7 +435,8 @@ const BranchReports = () => {
             <div>
               <label className="mb-2 block text-sm font-semibold text-slate-700">Date To</label>
               <CustomDatePicker
-                min={filters.dateFrom || undefined}
+                min={filters.dateFrom || earliestRecordDate || undefined}
+                max={todayStr}
                 value={filters.dateTo}
                 onChange={(event) => setFilters((current) => ({ ...current, dateTo: event.target.value }))}
               />

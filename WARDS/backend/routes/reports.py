@@ -514,12 +514,15 @@ def build_report_history_response(query, *, page: int, page_size: int) -> Dict[s
         .limit(page_size)
         .all()
     )
+    earliest_record = query.with_entities(func.min(Report.created_at)).scalar()
+    earliest_record_date = earliest_record.date().isoformat() if earliest_record else None
     return {
         "items": [serialize_report_summary(report) for report in reports],
         "page": page,
         "page_size": page_size,
         "total": total,
         "total_pages": total_pages,
+        "earliest_record_date": earliest_record_date,
     }
 
 

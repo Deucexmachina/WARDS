@@ -136,11 +136,13 @@ const MiniChart = ({ data, empty = 'No data yet.' }) => {
   );
 };
 
-const Filters = ({ filters, setFilters, showType, showStatus, showClassification = false }) => (
-  <div className="grid w-full gap-3 md:ml-auto md:w-[min(100%,64rem)] md:grid-cols-6">
-    <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Search keyword" value={filters.keyword} onChange={(e) => setFilters({ ...filters, keyword: e.target.value })} />
-    <CustomDatePicker name="date_from" value={filters.date_from} onChange={(e) => setFilters({ ...filters, date_from: e.target.value })} />
-    <CustomDatePicker name="date_to" value={filters.date_to} onChange={(e) => setFilters({ ...filters, date_to: e.target.value })} />
+const Filters = ({ filters, setFilters, showType, showStatus, showClassification = false }) => {
+  const todayStr = new Date().toISOString().split('T')[0];
+  return (
+    <div className="grid w-full gap-3 md:ml-auto md:w-[min(100%,64rem)] md:grid-cols-6">
+      <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Search keyword" value={filters.keyword} onChange={(e) => setFilters({ ...filters, keyword: e.target.value })} />
+      <CustomDatePicker name="date_from" max={todayStr} value={filters.date_from} onChange={(e) => setFilters({ ...filters, date_from: e.target.value })} />
+      <CustomDatePicker name="date_to" max={todayStr} value={filters.date_to} onChange={(e) => setFilters({ ...filters, date_to: e.target.value })} />
     {showType ? (
       <CustomSelect value={filters.type} onChange={(value) => setFilters({ ...filters, type: value })} options={[{ value: '', label: 'All types' }, ...showType.map((item) => ({ value: item, label: titleize(item) }))]} placeholder="All types" />
     ) : showClassification ? (
@@ -155,7 +157,8 @@ const Filters = ({ filters, setFilters, showType, showStatus, showClassification
     )}
     <CustomSelect value={filters.sort || 'newest'} onChange={(value) => setFilters({ ...filters, sort: value })} options={sortOptions} placeholder="Sort" />
   </div>
-);
+  );
+};
 
 const PaginationFooter = ({ state, onPage }) => {
   const [jumpPage, setJumpPage] = useState('');
@@ -293,6 +296,7 @@ const FolderPicker = ({ picker, onClose, onSelect, onOpen }) => {
 };
 
 const BackupRecovery = () => {
+  const todayStr = new Date().toISOString().split('T')[0];
   const [activeTab, setActiveTab] = useState('Dashboard');
   const [dashboard, setDashboard] = useState(null);
   const [files, setFiles] = useState([]);
@@ -1317,8 +1321,8 @@ const BackupRecovery = () => {
               actions={
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-6">
                   <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Search incidents" value={incidentFilters.keyword} onChange={(e) => setIncidentFilters({ ...incidentFilters, keyword: e.target.value })} />
-                  <CustomDatePicker name="date_from" value={incidentFilters.date_from} onChange={(e) => setIncidentFilters({ ...incidentFilters, date_from: e.target.value })} />
-                  <CustomDatePicker name="date_to" value={incidentFilters.date_to} onChange={(e) => setIncidentFilters({ ...incidentFilters, date_to: e.target.value })} />
+                  <CustomDatePicker name="date_from" max={todayStr} value={incidentFilters.date_from} onChange={(e) => setIncidentFilters({ ...incidentFilters, date_from: e.target.value })} />
+                  <CustomDatePicker name="date_to" max={todayStr} value={incidentFilters.date_to} onChange={(e) => setIncidentFilters({ ...incidentFilters, date_to: e.target.value })} />
                   <CustomSelect value={incidentFilters.status} onChange={(value) => setIncidentFilters({ ...incidentFilters, status: value })} options={[{ value: '', label: 'All statuses' }, ...['open', 'investigating', 'resolved', 'false_positive'].map((item) => ({ value: item, label: badgeText(item) }))]} placeholder="All statuses" />
                   <CustomSelect value={incidentFilters.severity} onChange={(value) => setIncidentFilters({ ...incidentFilters, severity: value })} options={[{ value: '', label: 'All severities' }, ...severities.map((item) => ({ value: item, label: titleize(item) }))]} placeholder="All severities" />
                   <CustomSelect value={incidentFilters.sort} onChange={(value) => setIncidentFilters({ ...incidentFilters, sort: value })} options={sortOptions} placeholder="Sort" />

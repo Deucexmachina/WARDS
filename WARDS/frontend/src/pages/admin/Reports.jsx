@@ -121,12 +121,14 @@ const ReportDetailModal = ({ report, metrics, onClose, onExport, exportingFormat
 };
 
 const Reports = () => {
+  const todayStr = new Date().toISOString().split('T')[0];
   const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}');
   const [activeTab, setActiveTab] = useState('active');
   const [filters, setFilters] = useState(initialFilters);
   const [appliedFilters, setAppliedFilters] = useState(initialFilters);
   const [reportsState, setReportsState] = useState({ items: [], page: 1, page_size: PAGE_SIZE, total: 0, total_pages: 1 });
   const [historyState, setHistoryState] = useState({ items: [], page: 1, page_size: PAGE_SIZE, total: 0, total_pages: 1 });
+  const [earliestRecordDate, setEarliestRecordDate] = useState(null);
   const [branches, setBranches] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [historyPage, setHistoryPage] = useState(1);
@@ -187,6 +189,7 @@ const Reports = () => {
         ...response.data,
         items: applyAdminReportViewedState(response.data?.items || [], adminUser),
       });
+      setEarliestRecordDate(response.data?.earliest_record_date || null);
       window.dispatchEvent(new CustomEvent(BRANCH_REPORTS_UPDATED_EVENT, {
         detail: {
           unreadCount: getUnreadAdminReportCount(response.data?.items || [], adminUser),
@@ -468,12 +471,12 @@ const Reports = () => {
 
           <div>
             <label className="mb-2 block text-sm font-semibold text-slate-700">Date From</label>
-            <CustomDatePicker name="date_from" max={filters.date_to || undefined} value={filters.date_from} onChange={handleFilterChange} />
+            <CustomDatePicker name="date_from" min={earliestRecordDate || undefined} max={filters.date_to && filters.date_to <= todayStr ? filters.date_to : todayStr} value={filters.date_from} onChange={handleFilterChange} />
           </div>
 
           <div>
             <label className="mb-2 block text-sm font-semibold text-slate-700">Date To</label>
-            <CustomDatePicker name="date_to" min={filters.date_from || undefined} value={filters.date_to} onChange={handleFilterChange} />
+            <CustomDatePicker name="date_to" min={filters.date_from || earliestRecordDate || undefined} max={todayStr} value={filters.date_to} onChange={handleFilterChange} />
           </div>
         </div>
 

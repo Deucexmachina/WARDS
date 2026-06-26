@@ -172,6 +172,13 @@ async def get_dashboard_statistics(
     # Get recent payments
     recent_payments = payment_query.order_by(Payment.created_at.desc()).limit(10).all()
     
+    # Get earliest record date across key tables
+    earliest_queue = db.query(func.min(QueueHistory.created_at)).scalar()
+    earliest_payment = db.query(func.min(Payment.created_at)).scalar()
+    earliest_activity = db.query(func.min(ActivityLog.created_at)).scalar()
+    earliest_dates = [d for d in [earliest_queue, earliest_payment, earliest_activity] if d]
+    earliest_record_date = min(earliest_dates).date().isoformat() if earliest_dates else None
+
     # Get recent stored alerts with per-admin read state.
     alerts = db.query(Alert).order_by(Alert.created_at.desc()).all()
     viewed_alert_ids = {
@@ -261,6 +268,7 @@ async def get_dashboard_statistics(
                 if branch["status"] in ["Inactive", "Unavailable"]
             ]
         },
+        "earliest_record_date": earliest_record_date,
         "timestamp": datetime.utcnow().isoformat()
     }
 

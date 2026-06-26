@@ -414,6 +414,8 @@ const Dashboard = () => {
                 <CustomDatePicker
                   value={dateFrom}
                   onChange={(e) => setDateFrom(e.target.value)}
+                  min={stats?.earliest_record_date || undefined}
+                  max={new Date().toISOString().split('T')[0]}
                 />
               </div>
 
@@ -424,6 +426,8 @@ const Dashboard = () => {
                 <CustomDatePicker
                   value={dateTo}
                   onChange={(e) => setDateTo(e.target.value)}
+                  min={dateFrom || stats?.earliest_record_date || undefined}
+                  max={new Date().toISOString().split('T')[0]}
                 />
               </div>
 

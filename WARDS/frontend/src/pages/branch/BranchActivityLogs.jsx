@@ -22,12 +22,14 @@ const formatTimestamp = (value) =>
   formatUtc8DateTime(value, 'en-US', { second: undefined });
 
 const BranchActivityLogs = () => {
+  const todayStr = new Date().toISOString().split('T')[0];
   const [logs, setLogs] = useState([]);
   const [pageState, setPageState] = useState({ page: 1, page_size: 10, total: 0, total_pages: 1 });
   const [jumpPage, setJumpPage] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedLog, setSelectedLog] = useState(null);
+  const [earliestRecordDate, setEarliestRecordDate] = useState(null);
   const [filters, setFilters] = useState({
     type: '',
     dateFrom: '',
@@ -52,6 +54,7 @@ const BranchActivityLogs = () => {
         total: data.total || 0,
         total_pages: data.total_pages || 1,
       });
+      setEarliestRecordDate(data.earliest_record_date || null);
     } catch (fetchError) {
       console.error('Failed to load branch activity logs:', fetchError);
       setError(fetchError.response?.data?.detail || 'Failed to load activity logs.');
@@ -118,6 +121,8 @@ const BranchActivityLogs = () => {
             <label className="block text-gray-700 font-semibold mb-2">Date From</label>
             <CustomDatePicker
               name="dateFrom"
+              min={earliestRecordDate || undefined}
+              max={todayStr}
               value={filters.dateFrom}
               onChange={handleFilterChange}
             />
@@ -126,6 +131,8 @@ const BranchActivityLogs = () => {
             <label className="block text-gray-700 font-semibold mb-2">Date To</label>
             <CustomDatePicker
               name="dateTo"
+              min={filters.dateFrom || earliestRecordDate || undefined}
+              max={todayStr}
               value={filters.dateTo}
               onChange={handleFilterChange}
             />
