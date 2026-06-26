@@ -928,14 +928,8 @@ const BackupRecovery = () => {
       );
       return;
     }
-    if (folderPicker.mode === 'add-monitor') {
-      setControls((current) => ({ ...current, monitoredFolder: path }));
-      askConfirm('Add monitored folder?', `WARDS will add ${path} to VM1 file monitoring.`, () => api.post('/security/folders', { path, vm_target: 'vm1' }).then((res) => { refreshFiles(); refreshDashboard(); return res; }), 'Monitored folder added.', 'Add folder');
-      return;
-    }
-    if (folderPicker.mode === 'remove-monitor') {
-      askConfirm('Remove monitored folder?', `WARDS will remove ${path} from VM1 monitoring.`, () => api.post('/security/folders/remove', { path, vm_target: 'vm1' }).then((res) => { refreshFiles(); refreshDashboard(); return res; }), 'Monitored folder removed from VM1 monitoring.', 'Remove folder');
-    }
+    // add-monitor and remove-monitor modes deprecated; use automatic deployment scans instead
+    // (kept backup mode for backup location selection)
   };
 
   const loadWeeklyAiData = () => runAction(async () => {
@@ -1454,14 +1448,6 @@ const BackupRecovery = () => {
 
               <Section title="Monitoring">
                 <div className="space-y-3">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
-                    <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Last selected folder</p>
-                    <p className="mt-1 break-all text-sm font-semibold text-slate-800">{controls.monitoredFolder || 'No extra monitored folder selected yet.'}</p>
-                  </div>
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                    <button disabled={busy} className={`rounded-xl bg-primary px-4 py-3 font-semibold text-white${disabledButtonClass}`} onClick={() => openFolderPicker('add-monitor', 'Add monitored folder', controls.monitoredFolder)}>Add monitored folder</button>
-                    <button disabled={busy} className={`rounded-xl bg-red-50 px-4 py-3 font-semibold text-red-700${disabledButtonClass}`} onClick={() => openFolderPicker('remove-monitor', 'Remove monitored folder', controls.monitoredFolder)}>Remove monitored folder</button>
-                  </div>
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                     <div className="mb-4 flex flex-col gap-3 rounded-xl bg-white p-3 md:flex-row md:items-center md:justify-between">
                       <div>

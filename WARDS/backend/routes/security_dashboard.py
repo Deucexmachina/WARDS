@@ -863,8 +863,12 @@ def backup_location(payload: BackupLocationRequest, db: Session = Depends(get_db
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+import logging
+_logger = logging.getLogger(__name__)
+
 @router.post("/folders")
 def add_folder(payload: AddFolderRequest, db: Session = Depends(get_db), admin=Depends(current_admin)):
+    _logger.warning("Deprecated endpoint /security/folders called by %s. Use automatic deployment scans instead.", admin.username)
     try:
         return add_monitored_folder(db, payload.path, initiated_by=admin.id, vm_target=payload.vm_target)
     except PermissionError as exc:
@@ -883,6 +887,7 @@ def add_folder(payload: AddFolderRequest, db: Session = Depends(get_db), admin=D
 
 @router.post("/folders/remove")
 def remove_folder(payload: AddFolderRequest, db: Session = Depends(get_db), admin=Depends(current_admin)):
+    _logger.warning("Deprecated endpoint /security/folders/remove called by %s. Use automatic deployment scans instead.", admin.username)
     try:
         return remove_monitored_folder(db, payload.path, initiated_by=admin.id, vm_target=payload.vm_target)
     except PermissionError as exc:
