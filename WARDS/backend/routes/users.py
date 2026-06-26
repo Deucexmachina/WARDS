@@ -82,6 +82,8 @@ class UserUpdate(BaseModel):
     email: str
     password: Optional[str] = None
     role: str
+    username: Optional[str] = None
+    full_name: Optional[str] = None
     contact_number: Optional[str] = None
     current_admin_password: str
 
@@ -522,10 +524,22 @@ async def update_user(
             raise HTTPException(status_code=400, detail="Admin accounts must keep an admin role")
         if user.role == "main_admin" and current_user.role not in {"main_admin", "superadmin"}:
             raise HTTPException(status_code=403, detail="Only Main Admin or Super Admin can assign the main_admin role")
+        if user.username:
+            username = normalize_username(user.username)
+            ensure_username_is_unique(db, username, exclude_admin_id=account.id)
+            account.username = username
+        if user.full_name:
+            account.full_name = normalize_citizen_full_name(user.full_name)
         branch_name = "All Branches"
     elif isinstance(account, BranchStaff):
         if not is_branch_role(user.role):
             raise HTTPException(status_code=400, detail="Branch accounts must keep a branch role")
+        if user.username:
+            username = normalize_username(user.username)
+            ensure_username_is_unique(db, username, exclude_branch_staff_id=account.id)
+            account.username = username
+        if user.full_name:
+            account.full_name = normalize_citizen_full_name(user.full_name)
         branch = db.query(Branch).filter(Branch.id == account.branch_id).first()
         branch_name = (get_decrypted_or_raw(branch, "name") or branch.name) if branch else "Unassigned Branch"
     else:
@@ -535,6 +549,8 @@ async def update_user(
             normalized_contact = normalize_ph_contact_number(user.contact_number)
             ensure_contact_number_is_unique(db, normalized_contact, exclude_citizen_id=account.id)
             account.contact_number = normalized_contact
+        if user.full_name:
+            account.full_name = normalize_citizen_full_name(user.full_name)
         apply_citizen_user_security(account)
         branch_name = "Public Portal"
 

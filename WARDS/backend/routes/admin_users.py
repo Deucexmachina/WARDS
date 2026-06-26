@@ -95,8 +95,8 @@ def serialize_user(user, role: str):
     }
     if role in {"admin", "branch"}:
         data["username"] = user.username
+        data["full_name"] = getattr(user, "full_name", None)
     if role == "branch":
-        data["full_name"] = user.full_name
         data["branch_id"] = user.branch_id
     if role == "public":
         data["full_name"] = citizen_profile["full_name"]
@@ -142,9 +142,11 @@ async def create_user(
         requested_username = normalize_username(user_data.username) if user_data.username else None
         username = unique_username(db, Admin, email, requested_username)
         ensure_username_is_unique(db, username)
+        full_name = normalize_citizen_full_name(user_data.full_name or email.split("@", 1)[0])
         user = Admin(
             username=username,
             email=email,
+            full_name=full_name,
             hashed_password=hashed_password,
             role="main_admin",
             status=user_data.status,
@@ -221,9 +223,9 @@ async def update_user(
         username = normalize_username(user_data.username)
         ensure_username_is_unique(db, username, exclude_admin_id=exclude_admin_id, exclude_branch_staff_id=exclude_branch_staff_id)
         user.username = username
+    if role in {"admin", "branch"} and user_data.full_name:
+        user.full_name = normalize_citizen_full_name(user_data.full_name)
     if role == "branch":
-        if user_data.full_name:
-            user.full_name = normalize_citizen_full_name(user_data.full_name)
         user.branch_id = user_data.branch_id
     if role == "public":
         if user_data.full_name:

@@ -50,6 +50,16 @@ const PHYSICAL_WINDOW_OPTIONS = [1, 2, 3, 4, 5];
 const READ_ONLY_INPUT_CLASS = 'w-full rounded-2xl border border-slate-200 bg-slate-100 px-4 py-3 text-sm font-medium text-slate-500 shadow-sm';
 const EDITABLE_INPUT_CLASS = 'w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm font-medium text-slate-900 placeholder-slate-400 shadow-sm transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:outline-none';
 
+const canEditIdentityFields = (currentUserRole, targetAccountRole) => {
+  const hierarchy = {
+    superadmin: ['superadmin', 'main_admin', 'branch_admin', 'branch_staff'],
+    main_admin: ['main_admin', 'branch_admin', 'branch_staff'],
+    branch_admin: ['branch_admin', 'branch_staff'],
+  };
+  const allowed = hierarchy[currentUserRole] || [];
+  return allowed.includes(targetAccountRole);
+};
+
 const Accounts = () => {
   const location = useLocation();
   const isBranchPortal = location.pathname.includes('/branch-dashboard/');
@@ -127,6 +137,10 @@ const Accounts = () => {
     : 'Create, review, and maintain main admin, branch, and citizen accounts.';
 
   const isCitizenAccount = formData.role === 'public';
+  const canEditIdentity = useMemo(() => {
+    const currentUserRole = currentManager?.internal_role || currentManager?.role || '';
+    return canEditIdentityFields(currentUserRole, formData.role);
+  }, [currentManager, formData.role]);
 
   const getServiceWindowLabel = (value) => {
     if (value === 'BUSINESS') return 'BT';
@@ -264,6 +278,12 @@ const Accounts = () => {
         setContactError(validatePhilippineContactDigits(normalizedContact));
       } else if (name === 'password') {
         setFormData((current) => ({ ...current, password: value }));
+      } else if (name === 'username') {
+        setFormData((current) => ({ ...current, username: value }));
+      } else if (name === 'full_name') {
+        setFormData((current) => ({ ...current, full_name: value }));
+        const normalized = normalizeCitizenFullName(value);
+        setFullNameError(validateCitizenFullName(normalized));
       }
       setError('');
       return;
@@ -437,6 +457,8 @@ const Accounts = () => {
       setSuccessMessage('');
 
       if (editingAccount) {
+        const currentUserRole = currentManager?.internal_role || currentManager?.role || '';
+        const canEditIdentity = canEditIdentityFields(currentUserRole, formData.role);
         const updatePayload = {
           role: formData.role,
           email: formData.email,
@@ -444,6 +466,15 @@ const Accounts = () => {
 
         if (formData.password) {
           updatePayload.password = formData.password;
+        }
+
+        if (canEditIdentity) {
+          if (formData.username) {
+            updatePayload.username = formData.username;
+          }
+          if (formData.full_name) {
+            updatePayload.full_name = formData.full_name;
+          }
         }
 
         if (formData.role === 'public') {
@@ -1078,7 +1109,9 @@ const Accounts = () => {
                 </h3>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
                   {editingAccount
-                    ? 'Only email, password, and contact number can be changed here. All other account details remain visible but read-only.'
+                    ? (canEditIdentity
+                      ? 'Email, password, username, and full name can be changed here. All other account details remain visible but read-only.'
+                      : 'Only email, password, and contact number can be changed here. All other account details remain visible but read-only.')
                     : 'Create a new account with the required branch, role, and access settings.'}
                 </p>
               </div>
@@ -1105,13 +1138,14 @@ const Accounts = () => {
                   <div>
                     <h4 className="mb-4 text-lg font-semibold text-slate-900">View-Only Account Details</h4>
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                      {renderReadOnlyField(formData.role === 'public' ? 'Full Name' : 'Username', formData.role === 'public' ? formData.full_name : formData.username)}
+                      {isCitizenAccount && renderReadOnlyField('Full Name', formData.full_name || 'N/A')}
+                      {!isCitizenAccount && !canEditIdentity && renderReadOnlyField('Username', formData.username || 'N/A')}
                       {renderReadOnlyField('Role', getRoleDisplay(formData.role))}
                       {renderReadOnlyField('Branch Assignment', formData.branch_id ? (editingAccount?.branch_name || `Branch ${formData.branch_id}`) : 'All Branches')}
                       {renderReadOnlyField('Account Type', formData.role === 'public' ? 'Citizen Account' : 'Employee Account')}
                       {renderReadOnlyField('Status', formData.status)}
                       {renderReadOnlyField('Created Date', editingAccount?.created_at ? formatUtc8DateTime(editingAccount.created_at) : 'N/A')}
-                      {formData.role !== 'public' && renderReadOnlyField('Full Name', formData.full_name || 'N/A')}
+                      {!isCitizenAccount && !canEditIdentity && renderReadOnlyField('Full Name', formData.full_name || 'N/A')}
                       {formData.role === 'branch_staff' && renderReadOnlyField('Queue Assignment', `${getServiceWindowLabel(formData.service_window)} - Window ${formData.assigned_window_number || 1}`)}
                     </div>
                   </div>
@@ -1119,6 +1153,35 @@ const Accounts = () => {
                   <div>
                     <h4 className="mb-4 text-lg font-semibold text-slate-900">Editable Information</h4>
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      {!isCitizenAccount && canEditIdentity && (
+                        <>
+                          <div>
+                            <label className="mb-2 block text-sm font-semibold text-slate-700">Username</label>
+                            <input
+                              type="text"
+                              name="username"
+                              value={formData.username}
+                              onChange={handleInputChange}
+                              maxLength={32}
+                              className={EDITABLE_INPUT_CLASS}
+                              placeholder="Enter username"
+                            />
+                          </div>
+                          <div>
+                            <label className="mb-2 block text-sm font-semibold text-slate-700">Full Name</label>
+                            <input
+                              type="text"
+                              name="full_name"
+                              value={formData.full_name}
+                              onChange={handleInputChange}
+                              className={`${EDITABLE_INPUT_CLASS} ${fullNameError ? 'border-red-300 bg-red-50 text-red-900 focus:border-red-500 focus:ring-red-500/20' : ''}`}
+                              placeholder="Enter full name"
+                            />
+                            {fullNameError && <p className="mt-2 text-sm font-medium text-red-600">{fullNameError}</p>}
+                          </div>
+                        </>
+                      )}
+
                       <div className={isCitizenAccount ? '' : 'sm:col-span-2'}>
                         <label className="mb-2 block text-sm font-semibold text-slate-700">Email Address</label>
                         <input
@@ -1416,6 +1479,12 @@ const Accounts = () => {
                   <p className="text-sm font-semibold text-blue-900">Update Summary</p>
                   <div className="mt-2 space-y-1 text-sm text-blue-900">
                     <p><span className="font-semibold">Role:</span> {getRoleDisplay(pendingAccountSave.payload.role)}</p>
+                    {pendingAccountSave.payload.username !== undefined && (
+                      <p><span className="font-semibold">Username:</span> {pendingAccountSave.payload.username}</p>
+                    )}
+                    {pendingAccountSave.payload.full_name !== undefined && (
+                      <p><span className="font-semibold">Full Name:</span> {pendingAccountSave.payload.full_name}</p>
+                    )}
                     <p><span className="font-semibold">Email:</span> {pendingAccountSave.payload.email}</p>
                     {pendingAccountSave.payload.contact_number !== undefined && (
                       <p><span className="font-semibold">Contact Number:</span> {pendingAccountSave.payload.contact_number ? `+63 ${pendingAccountSave.payload.contact_number}` : 'Cleared'}</p>

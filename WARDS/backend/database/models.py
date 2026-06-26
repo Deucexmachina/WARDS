@@ -124,10 +124,11 @@ def get_db():
 
 class Admin(Base):
     __tablename__ = "admins"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True)
     email = Column(String, unique=True, index=True)
+    full_name = Column(String, nullable=True)
     hashed_password = Column(String)
     role = Column(String, default="main_admin")
     is_verified = Column(Boolean, default=False)

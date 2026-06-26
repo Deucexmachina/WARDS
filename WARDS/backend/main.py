@@ -380,6 +380,11 @@ def ensure_auth_extensions():
         ):
             ensure_integrity_columns(protected_table)
 
+        if "admins" in table_names:
+            admin_columns = {column["name"] for column in inspector.get_columns("admins")}
+            if "full_name" not in admin_columns:
+                conn.execute(text("ALTER TABLE admins ADD COLUMN full_name VARCHAR(255)"))
+
         if "backups" in table_names:
             backup_columns = {column["name"] for column in inspector.get_columns("backups")}
             if "checksum" not in backup_columns:
