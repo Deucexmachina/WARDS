@@ -16,9 +16,11 @@ from database.models import engine, SQLALCHEMY_DATABASE_URL, SessionLocal, Payme
 
 def add_public_access_token():
     """Add public_access_token field to payments table and populate existing records."""
+    is_mysql = engine.dialect.name.startswith("mysql")
+    varchar_type = "VARCHAR(255)" if is_mysql else "VARCHAR"
+
     migrations = [
-        "ALTER TABLE payments ADD COLUMN public_access_token VARCHAR",
-        "CREATE INDEX IF NOT EXISTS ix_payments_public_access_token ON payments(public_access_token)",
+        f"ALTER TABLE payments ADD COLUMN public_access_token {varchar_type} NULL",
     ]
 
     with engine.connect() as conn:
@@ -35,25 +37,23 @@ def add_public_access_token():
                     print(f"  Error: {migration}")
                     print(f"    {str(e)}")
 
-    db = SessionLocal()
-    try:
-        payments_without_token = db.query(Payment).filter(
-            (Payment.public_access_token == None) | (Payment.public_access_token == "")
-        ).all()
-
-        if payments_without_token:
-            print(f"\n  Generating tokens for {len(payments_without_token)} existing payment(s)...")
-            for payment in payments_without_token:
-                payment.public_access_token = secrets.token_urlsafe(32)
-            db.commit()
-            print(f"  Generated tokens for {len(payments_without_token)} payment(s).")
-        else:
-            print("\n  All existing payments already have a public_access_token.")
-    except Exception as e:
-        db.rollback()
-        print(f"\n  Error generating tokens: {str(e)}")
-    finally:
-        db.close()
+        # Generate tokens for existing payments using raw SQL to avoid ORM column mismatch
+        try:
+            result = conn.execute(text("SELECT COUNT(*) FROM payments WHERE public_access_token IS NULL OR public_access_token = ''"))
+            count = result.scalar()
+            if count:
+                print(f"\n  Generating tokens for {count} existing payment(s)...")
+                conn.execute(text(
+                    f"UPDATE payments SET public_access_token = {('LEFT(UUID(), 43)' if is_mysql else 'LOWER(HEX(RANDOMBLOB(16)))')} "
+                    f"WHERE public_access_token IS NULL OR public_access_token = ''"
+                ))
+                conn.commit()
+                print(f"  Generated tokens for {count} payment(s).")
+            else:
+                print("\n  All existing payments already have a public_access_token.")
+        except Exception as e:
+            conn.rollback()
+            print(f"\n  Error generating tokens: {str(e)}")
 
     print("\nMigration completed successfully!")
 
