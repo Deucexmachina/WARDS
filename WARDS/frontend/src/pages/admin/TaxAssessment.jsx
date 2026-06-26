@@ -621,10 +621,35 @@ const TaxAssessment = () => {
     try {
       setSavingAssessment(true);
       const response = await taxAssessmentAPI.saveAssessment({
-        ...assessmentForm,
+        assessment_id: assessmentForm.assessment_id ? Number(assessmentForm.assessment_id) : null,
         citizen_user_id: assessmentForm.citizen_user_id ? Number(assessmentForm.citizen_user_id) : null,
         submission_id: assessmentForm.submission_id ? Number(assessmentForm.submission_id) : null,
         branch_id: assessmentForm.branch_id ? Number(assessmentForm.branch_id) : null,
+        tax_type: assessmentForm.tax_type,
+        assessment_status: assessmentForm.assessment_status,
+        verification_status: assessmentForm.verification_status,
+        taxpayer_name: assessmentForm.taxpayer_name,
+        taxpayer_email: assessmentForm.taxpayer_email || null,
+        taxpayer_type: assessmentForm.taxpayer_type,
+        mobile_number: assessmentForm.mobile_number || null,
+        address: assessmentForm.address || null,
+        tax_year: assessmentForm.tax_year || null,
+        remarks: assessmentForm.remarks || null,
+        rejection_reason: assessmentForm.rejection_reason || null,
+        visible_to_taxpayer: Boolean(assessmentForm.visible_to_taxpayer),
+        tdn: assessmentForm.tdn || null,
+        property_type: assessmentForm.property_type || null,
+        property_address: assessmentForm.property_address || null,
+        fair_market_value: Number(assessmentForm.fair_market_value || 0),
+        assessment_level: Number(assessmentForm.assessment_level || 0),
+        months_late: Number(assessmentForm.months_late || 0),
+        discount_rate: Number(assessmentForm.discount_rate || 0),
+        mayor_permit_number: assessmentForm.mayor_permit_number || null,
+        sec_dti_cda_number: assessmentForm.sec_dti_cda_number || null,
+        business_name: assessmentForm.business_name || null,
+        business_type: assessmentForm.business_type || null,
+        annual_gross_sales: Number(assessmentForm.annual_gross_sales || 0),
+        business_tax_rate: Number(assessmentForm.business_tax_rate || 0),
       });
       setMessage(response.data?.message || 'Assessment saved successfully.');
       setError('');
