@@ -278,7 +278,7 @@ const DetailStat = ({ label, value, tone = 'default' }) => (
 
 const getQuarterlyAmount = (property) => {
   const quarterlyBase = (Number(property?.basic_tax_due || 0) + Number(property?.sef_tax || 0)) / 4;
-  const total = quarterlyBase + Number(property?.penalties || 0) - Number(property?.discounts || 0);
+  const total = quarterlyBase + Number(property?.penalties || 0);
   return Math.max(total, 0);
 };
 
@@ -1655,7 +1655,7 @@ const PayTaxesRPT = () => {
                 <p className="text-sm font-bold uppercase tracking-[0.14em] text-[#0f5b83]">{language === 'en' ? 'Payment Option 1: Quarterly' : 'Payment Option 1: Kada quarter'}</p>
                 <div className="mt-5 space-y-2 text-sm text-slate-600">
                   <div className="flex justify-between gap-4"><span>{language === 'en' ? 'Amount Due' : 'Halagang Dapat Bayaran'}</span><span>{formatCurrency((Number(searchedProperty.basic_tax_due || 0) + Number(searchedProperty.sef_tax || 0)) / 4)}</span></div>
-                  <div className="flex justify-between gap-4"><span>{language === 'en' ? 'Discount' : 'Diskwento'}</span><span>-{formatCurrency(searchedProperty.discounts)}</span></div>
+                  <div className="flex justify-between gap-4"><span>{language === 'en' ? 'Discount' : 'Diskwento'}</span><span>-{formatCurrency(stagedPaymentOption === 'quarterly' ? 0 : searchedProperty.discounts)}</span></div>
                   <div className="flex justify-between gap-4"><span>{language === 'en' ? 'Penalty Fee' : 'Penalty Fee'}</span><span>{formatCurrency(searchedProperty.penalties)}</span></div>
                   <div className="flex justify-between gap-4 border-t border-slate-200 pt-3 text-base font-bold text-slate-900">
                     <span>{language === 'en' ? 'Total' : 'Kabuuan'}</span>

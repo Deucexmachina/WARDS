@@ -1025,7 +1025,7 @@ def compute_rpt_amount_for_option(computed: dict, payment_option: str) -> tuple[
     normalized_option = normalize_rpt_payment_option(payment_option)
     if normalized_option == "quarterly":
         quarterly_base = round((float(computed["basic_tax_due"]) + float(computed["sef_tax"])) / 4, 2)
-        total_amount = round(quarterly_base + float(computed["penalties"]) - float(computed["discounts"]), 2)
+        total_amount = round(quarterly_base + float(computed["penalties"]), 2)
         return max(total_amount, 0.0), "Current Quarter"
     return round(float(computed["final_total_amount_due"]), 2), "Full Year"
 
