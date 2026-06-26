@@ -80,6 +80,7 @@ from utils.security_client import (
     source_ids_for_log_type,
     update_ai_rules,
     weekly_ai_behavior_data,
+    sync_security_alerts,
     next_weekday,
     json_dumps,
 )
@@ -253,6 +254,7 @@ def initialize_security(db: Session = Depends(get_db), admin=Depends(current_adm
 @router.get("/dashboard")
 def get_dashboard(db: Session = Depends(get_db), _=Depends(current_admin)):
     mark_stale_backup_events_failed(db)
+    sync_security_alerts(db, limit=50)
     return dashboard_payload(db)
 
 
@@ -589,7 +591,15 @@ def scan_result(job_id: str, _=Depends(current_admin)):
 
 @router.post("/recover/full")
 def recover_full(request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
-    result = full_system_recovery(db, admin.id)
+    try:
+        result = full_system_recovery(db, admin.id)
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code if exc.response else 502
+        raise HTTPException(status_code=status_code, detail=f"Security service error: {exc}")
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Security service timed out. VM2 may be unreachable.")
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Unable to reach security service: {exc}")
     db.add(ActivityLog(
         action="Security Full System Recovery",
         user=admin.username,
@@ -840,7 +850,14 @@ def remove_folder(payload: AddFolderRequest, db: Session = Depends(get_db), admi
 def folder_browser(path: str | None = Query(None), _=Depends(current_admin)):
     try:
         from SECURITY.security_engine import stored_path_value
-        current = Path(path).expanduser().resolve() if path else MASTER_ROOT
+        if not path or path in {".", "./"}:
+            current = MASTER_ROOT
+        else:
+            expanded = Path(path).expanduser()
+            if not expanded.is_absolute():
+                current = (MASTER_ROOT / expanded).resolve()
+            else:
+                current = expanded.resolve()
         if not current.exists() or not current.is_dir():
             current = MASTER_ROOT
         directories = []

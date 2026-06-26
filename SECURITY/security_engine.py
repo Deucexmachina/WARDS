@@ -765,7 +765,8 @@ def stored_path_value(path: Path | str | None, base_root: Path = MASTER_ROOT) ->
     if not resolved:
         return str(path).replace("\\", "/")
     try:
-        return str(resolved.relative_to(base_root)).replace("\\", "/")
+        rel = str(resolved.relative_to(base_root)).replace("\\", "/")
+        return rel if rel != "." else str(resolved).replace("\\", "/")
     except ValueError:
         return str(resolved)
 

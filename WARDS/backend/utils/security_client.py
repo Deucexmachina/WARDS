@@ -4,11 +4,12 @@
 import os
 import asyncio
 import httpx
+from datetime import datetime
 from typing import Any
 
 SECURITY_API_URL = os.getenv("SECURITY_API_URL", "").rstrip("/")
 SECURITY_API_KEY = os.getenv("SECURITY_API_KEY", "")
-TIMEOUT = 30.0
+TIMEOUT = 8.0
 
 
 def _headers() -> dict[str, str]:
@@ -63,10 +64,8 @@ def _sync_get(path: str, params: dict | None = None) -> Any:
 # Dashboard / query proxies
 # ---------------------------------------------------------------------------
 def dashboard_payload(db) -> dict:
-    if not SECURITY_API_URL:
-        from SECURITY.security_engine import dashboard_payload as _local
-        return _local(db)
-    return _sync_get("/v1/dashboard")
+    from SECURITY.security_engine import dashboard_payload as _local
+    return _local(db)
 
 
 def active_monitored_files_query(db):
@@ -78,11 +77,9 @@ def active_monitored_files_query(db):
 
 
 def list_monitored_files(db):
-    if not SECURITY_API_URL:
-        from SECURITY.security_engine import active_monitored_files_query as _local
-        from SECURITY.security_models import SecurityMonitoredFile
-        return [serialize_file(item) for item in _local(db).order_by(SecurityMonitoredFile.relative_path.asc()).all()]
-    return _sync_get("/v1/files")
+    from SECURITY.security_engine import active_monitored_files_query as _local
+    from SECURITY.security_models import SecurityMonitoredFile
+    return [serialize_file(item) for item in _local(db).order_by(SecurityMonitoredFile.relative_path.asc()).all()]
 
 
 def query_incidents(db, keyword=None, status=None, severity=None, date_from=None, date_to=None, limit=200, sort="newest"):
@@ -112,41 +109,28 @@ def query_incidents(db, keyword=None, status=None, severity=None, date_from=None
 
 
 def source_ids_for_log_type(db, log_type: str) -> list[int]:
-    if not SECURITY_API_URL:
-        from SECURITY.security_models import SecurityIncident, SecurityDetectionEvent, SecurityRecoveryEvent
-        if log_type == "detections":
-            rows = db.query(SecurityDetectionEvent.id).filter(SecurityDetectionEvent.is_legitimate == False).all()
-        elif log_type == "recoveries":
-            rows = db.query(SecurityRecoveryEvent.id).filter(SecurityRecoveryEvent.recovery_type.notlike("%backup%")).all()
-        elif log_type == "incidents":
-            rows = db.query(SecurityIncident.id).filter(SecurityIncident.status.in_(["open", "investigating"])).all()
-        elif log_type == "backups":
-            rows = db.query(SecurityRecoveryEvent.id).filter(SecurityRecoveryEvent.recovery_type.like("%backup%")).all()
-        else:
-            raise ValueError("Invalid security log type.")
-        return [row[0] for row in rows]
-    resp = _sync_get(f"/v1/source-ids/{log_type}")
-    return resp.get("ids", [])
+    from SECURITY.security_models import SecurityIncident, SecurityDetectionEvent, SecurityRecoveryEvent
+    if log_type == "detections":
+        rows = db.query(SecurityDetectionEvent.id).filter(SecurityDetectionEvent.is_legitimate == False).all()
+    elif log_type == "recoveries":
+        rows = db.query(SecurityRecoveryEvent.id).filter(SecurityRecoveryEvent.recovery_type.notlike("%backup%")).all()
+    elif log_type == "incidents":
+        rows = db.query(SecurityIncident.id).filter(SecurityIncident.status.in_(["open", "investigating"])).all()
+    elif log_type == "backups":
+        rows = db.query(SecurityRecoveryEvent.id).filter(SecurityRecoveryEvent.recovery_type.like("%backup%")).all()
+    else:
+        raise ValueError("Invalid security log type.")
+    return [row[0] for row in rows]
 
 
 def query_detections(db, keyword=None, date_from=None, date_to=None, target=None, severity=None, limit=200, sort="newest", classification=None):
-    if not SECURITY_API_URL:
-        from SECURITY.security_engine import query_detections as _local
-        return _local(db, keyword, date_from, date_to, target, severity, limit, sort, classification)
-    return _sync_post("/v1/detections/query", {
-        "keyword": keyword, "date_from": date_from, "date_to": date_to,
-        "target": target, "severity": severity, "limit": limit, "sort": sort, "classification": classification,
-    })
+    from SECURITY.security_engine import query_detections as _local
+    return _local(db, keyword, date_from, date_to, target, severity, limit, sort, classification)
 
 
 def query_recoveries(db, keyword=None, date_from=None, date_to=None, recovery_type=None, status=None, limit=200, sort="newest"):
-    if not SECURITY_API_URL:
-        from SECURITY.security_engine import query_recoveries as _local
-        return _local(db, keyword, date_from, date_to, recovery_type, status, limit, sort)
-    return _sync_post("/v1/recoveries/query", {
-        "keyword": keyword, "date_from": date_from, "date_to": date_to,
-        "recovery_type": recovery_type, "status": status, "limit": limit, "sort": sort,
-    })
+    from SECURITY.security_engine import query_recoveries as _local
+    return _local(db, keyword, date_from, date_to, recovery_type, status, limit, sort)
 
 
 # ---------------------------------------------------------------------------
@@ -176,17 +160,13 @@ def scan_all_files(db, context=None):
 # AI rule proxies
 # ---------------------------------------------------------------------------
 def get_ai_rules(db) -> dict:
-    if not SECURITY_API_URL:
-        from SECURITY.security_engine import get_ai_rules as _local
-        return _local(db)
-    return _sync_get("/v1/ai/rules")
+    from SECURITY.security_engine import get_ai_rules as _local
+    return _local(db)
 
 
 def get_ai_sensitivity(db) -> str:
-    if not SECURITY_API_URL:
-        from SECURITY.security_engine import get_ai_sensitivity as _local
-        return _local(db)
-    return _sync_get("/v1/ai/sensitivity")
+    from SECURITY.security_engine import get_ai_sensitivity as _local
+    return _local(db)
 
 
 def update_ai_rules(db, rules, actor):
@@ -376,10 +356,8 @@ def bulk_update_incidents(db, action, admin_id, confirm_missing_files=False):
 # Setting / state proxies
 # ---------------------------------------------------------------------------
 def get_setting(db, key, default=None):
-    if not SECURITY_API_URL:
-        from SECURITY.security_engine import get_setting as _local
-        return _local(db, key, default=default)
-    return _sync_post("/v1/settings/get", {"key": key, "default": default})
+    from SECURITY.security_engine import get_setting as _local
+    return _local(db, key, default=default)
 
 
 def set_setting(db, key, value, actor=None):
@@ -467,10 +445,8 @@ def register_initial_files(db):
 
 
 def current_hash_index(db):
-    if not SECURITY_API_URL:
-        from SECURITY.security_engine import current_hash_index as _local
-        return _local(db)
-    return _sync_get("/v1/files/hash-index")
+    from SECURITY.security_engine import current_hash_index as _local
+    return _local(db)
 
 
 def is_database_entry(file_entry) -> bool:
@@ -555,7 +531,6 @@ def record_context_detection(db, target_name, actor, change_type, context=None):
 
 def fetch_system_alerts(db, limit: int = 50) -> list[dict]:
     if not SECURITY_API_URL:
-        from SECURITY.security_engine import create_system_alert
         from database.models import Alert
         try:
             alerts = (
@@ -579,9 +554,57 @@ def fetch_system_alerts(db, limit: int = 50) -> list[dict]:
             for alert in alerts
         ]
     try:
-        return _sync_get("/v1/system-alerts", {"limit": limit}).get("alerts", [])
+        import asyncio
+        async def _short_get():
+            async with httpx.AsyncClient(timeout=3.0, verify=False) as client:
+                r = await client.get(
+                    f"{SECURITY_API_URL}/v1/system-alerts",
+                    headers=_headers(),
+                    params={"limit": limit},
+                )
+                r.raise_for_status()
+                return r.json()
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(_short_get()).get("alerts", [])
+        finally:
+            loop.close()
     except Exception:
         return []
+
+
+def sync_security_alerts(db, limit: int = 50) -> int:
+    """Fetch system alerts from VM2 and persist them into the VM1 DB."""
+    from database.models import Alert
+    try:
+        security_alerts = fetch_system_alerts(db, limit=limit)
+    except Exception:
+        return 0
+    if not security_alerts:
+        return 0
+    existing = {
+        (a.type, a.title, a.message)
+        for a in db.query(Alert).all()
+    }
+    added = 0
+    for sa in security_alerts:
+        key = (sa.get("type"), sa.get("title"), sa.get("message"))
+        if key not in existing:
+            db.add(
+                Alert(
+                    type=sa.get("type", "security"),
+                    title=sa.get("title", "Security Alert"),
+                    message=sa.get("message", ""),
+                    severity=sa.get("severity", "low"),
+                    read=False,
+                    created_at=datetime.fromisoformat(sa["created_at"]) if sa.get("created_at") else datetime.utcnow(),
+                )
+            )
+            added += 1
+            existing.add(key)
+    if added:
+        db.commit()
+    return added
 
 
 class MissingFileConfirmationRequired(Exception):
