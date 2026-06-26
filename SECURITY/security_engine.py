@@ -765,7 +765,8 @@ def stored_path_value(path: Path | str | None, base_root: Path = MASTER_ROOT) ->
     if not resolved:
         return str(path).replace("\\", "/")
     try:
-        return str(resolved.relative_to(base_root)).replace("\\", "/")
+        rel = str(resolved.relative_to(base_root)).replace("\\", "/")
+        return rel if rel != "." else str(resolved).replace("\\", "/")
     except ValueError:
         return str(resolved)
 
@@ -1903,10 +1904,7 @@ def latest_backup_root(db: Session) -> Path | None:
         path = resolve_stored_path(raw)
         if path.exists():
             return path
-    location = writable_backup_location(db)
-    if not location.exists():
-        return None
-    backups = sorted([item for item in location.iterdir() if item.is_dir()], reverse=True)
+    backups = all_backup_roots(db)
     if backups:
         set_setting(db, "latest_backup_path", stored_path_value(backups[0]) or str(backups[0]), "backup_location_fallback")
         return backups[0]
@@ -1949,11 +1947,18 @@ def writable_backup_location(db: Session, updated_by: str = "system") -> Path:
             if portable_target != current_value:
                 set_setting(db, "backup_location", portable_target, updated_by)
             return target
-        except OSError:
+        except (OSError, ValueError):
             continue
-    fallback.mkdir(parents=True, exist_ok=True)
-    set_setting(db, "backup_location", stored_path_value(fallback) or str(fallback), updated_by)
-    return fallback
+    try:
+        fallback.mkdir(parents=True, exist_ok=True)
+        set_setting(db, "backup_location", stored_path_value(fallback) or str(fallback), updated_by)
+        return fallback
+    except (OSError, ValueError):
+        # Last resort: use /tmp for backups if the default is not writable
+        tmp_fallback = Path("/tmp/wards_backups")
+        tmp_fallback.mkdir(parents=True, exist_ok=True)
+        set_setting(db, "backup_location", str(tmp_fallback), updated_by)
+        return tmp_fallback
 
 
 def validate_backup_destination(raw_path: Path | str, create: bool = True) -> Path:

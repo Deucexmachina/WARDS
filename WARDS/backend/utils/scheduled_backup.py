@@ -36,7 +36,11 @@ def _scheduled_backup_loop():
         time.sleep(60)
 
         try:
-            schedule_raw = get_setting(None, "backup_schedule", "{}")
+            db = SessionLocal()
+            try:
+                schedule_raw = get_setting(db, "backup_schedule", "{}")
+            finally:
+                db.close()
             schedule = json.loads(schedule_raw) if isinstance(schedule_raw, str) else (schedule_raw or {})
         except Exception as exc:
             print(f"[SCHEDULED BACKUP] failed to read schedule: {exc}")

@@ -11,7 +11,7 @@ from database.models import (
 from auth import get_current_admin_user
 from utils.rbac import require_permission
 from utils.field_crypto import get_decrypted_or_raw, hash_aware_match, queue_value, hash_optional_value
-from utils.security_client import fetch_system_alerts
+from utils.security_client import sync_security_alerts
 
 CONFIRMED_PAYMENT_STATUSES = {
     "Verified", "PAYMENT_VERIFIED", "OR_GENERATED", "COMPLETED"
@@ -198,24 +198,11 @@ async def get_dashboard_statistics(
         ).all()
     }
     # Sync security system alerts from VM2 into the main DB so the main dashboard stays current
-    security_alerts = fetch_system_alerts(db, limit=50)
-    seen = {(a.type, a.title, a.message) for a in alerts}
-    for sa in security_alerts:
-        key = (sa.get("type"), sa.get("title"), sa.get("message"))
-        if key not in seen:
-            db.add(
-                Alert(
-                    type=sa.get("type", "security"),
-                    title=sa.get("title", "Security Alert"),
-                    message=sa.get("message", ""),
-                    severity=sa.get("severity", "low"),
-                    read=False,
-                    created_at=datetime.fromisoformat(sa["created_at"]) if sa.get("created_at") else datetime.utcnow(),
-                )
-            )
-    if security_alerts:
-        db.commit()
-        alerts = db.query(Alert).order_by(Alert.created_at.desc()).all()
+    try:
+        sync_security_alerts(db, limit=50)
+    except Exception:
+        pass
+    alerts = db.query(Alert).order_by(Alert.created_at.desc()).all()
     
     return {
         "summary": {
