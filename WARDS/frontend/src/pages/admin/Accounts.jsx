@@ -511,7 +511,14 @@ const Accounts = () => {
     setError('');
     setSuccessMessage('');
     setReassignError('');
-    const staffAccounts = rows.filter((account) => account.role === 'branch_staff' && account.status === 'Active');
+    const branch = branches.find((b) => b.name === branchName);
+    const counters = branch?.counters || 6;
+    const staffAccounts = rows.filter(
+      (account) =>
+        account.role === 'branch_staff' &&
+        account.status === 'Active' &&
+        (account.assigned_window_number || 1) <= counters
+    );
     const branchId = staffAccounts[0]?.branch_id;
     const services = {};
     staffAccounts.forEach((account) => {
@@ -520,6 +527,7 @@ const Accounts = () => {
     setReassignBranchData({
       id: branchId,
       name: branchName,
+      counters,
       window_accounts: staffAccounts.map((account) => ({
         id: account.id,
         username: account.username,

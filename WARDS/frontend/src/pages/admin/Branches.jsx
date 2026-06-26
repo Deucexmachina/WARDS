@@ -455,8 +455,12 @@ const Branches = () => {
     setSuccessMessage('');
     setReassignError('');
     setReassignBranch(branch);
+    const counters = branch.counters || MAX_QUEUE_WINDOWS;
+    const availableAccounts = (branch.window_accounts || []).filter(
+      (account) => (account.assigned_window_number || 1) <= counters
+    );
     const services = {};
-    (branch.window_accounts || []).forEach((account) => {
+    availableAccounts.forEach((account) => {
       services[account.assigned_window_number || 1] = account.service_window || 'RPT';
     });
     setReassignServices(services);
@@ -1327,7 +1331,7 @@ const Branches = () => {
               </div>
             )}
             <div className="space-y-4">
-              {(reassignBranch.window_accounts || []).map((account, index) => (
+              {(reassignBranch.window_accounts || []).filter((account) => (account.assigned_window_number || 1) <= (reassignBranch.counters || MAX_QUEUE_WINDOWS)).map((account, index) => (
                 <div key={account.assigned_window_number || index} className="rounded-xl border border-slate-200 p-4">
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                     <div className="flex items-center gap-3">
@@ -1355,7 +1359,7 @@ const Branches = () => {
                   </div>
                 </div>
               ))}
-              {(reassignBranch.window_accounts || []).length === 0 && (
+              {(reassignBranch.window_accounts || []).filter((account) => (account.assigned_window_number || 1) <= (reassignBranch.counters || MAX_QUEUE_WINDOWS)).length === 0 && (
                 <p className="py-8 text-center text-gray-500">
                   No active window accounts found for this branch.
                 </p>
