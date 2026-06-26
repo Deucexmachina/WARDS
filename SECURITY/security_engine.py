@@ -1904,10 +1904,7 @@ def latest_backup_root(db: Session) -> Path | None:
         path = resolve_stored_path(raw)
         if path.exists():
             return path
-    location = writable_backup_location(db)
-    if not location.exists():
-        return None
-    backups = sorted([item for item in location.iterdir() if item.is_dir()], reverse=True)
+    backups = all_backup_roots(db)
     if backups:
         set_setting(db, "latest_backup_path", stored_path_value(backups[0]) or str(backups[0]), "backup_location_fallback")
         return backups[0]
