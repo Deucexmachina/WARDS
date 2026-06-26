@@ -318,8 +318,9 @@ const DynamicSidebar = ({ open = false, onClose }) => {
     try {
       const storedRole = getStoredRole();
       if (storedRole === 'main_admin' || storedRole === 'superadmin') {
-        const response = await taxAssessmentAPI.getUnreadCount();
-        setUnreadTaxAssessmentCount(response.data.unread_count || 0);
+        const response = await taxAssessmentAPI.listSubmissions();
+        const pendingCount = (response.data?.items || []).filter((item) => item.status === 'Pending Verification').length;
+        setUnreadTaxAssessmentCount(pendingCount);
       }
     } catch (error) {
       console.error('Failed to fetch unread tax assessment count:', error);
