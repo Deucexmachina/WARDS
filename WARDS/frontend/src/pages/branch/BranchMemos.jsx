@@ -311,6 +311,14 @@ const BranchMemos = () => {
             ) : null}
           </div>
           <p className="text-sm text-gray-600 line-clamp-2 break-words">{memo.content}</p>
+          {memo.content && memo.content.length > 150 && (
+            <button
+              onClick={() => openViewModal(memo)}
+              className="mt-1 text-xs font-semibold text-blue-500 hover:text-blue-700 transition"
+            >
+              See More...
+            </button>
+          )}
         </div>
       </div>
 
