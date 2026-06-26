@@ -4,12 +4,43 @@
 import os
 import asyncio
 import httpx
+import time
 from datetime import datetime
 from typing import Any
 
 SECURITY_API_URL = os.getenv("SECURITY_API_URL", "").rstrip("/")
 SECURITY_API_KEY = os.getenv("SECURITY_API_KEY", "")
 TIMEOUT = 8.0
+
+# In-memory cache for VM2 read responses to avoid repeated slow calls
+_cache: dict[str, tuple[Any, float]] = {}
+_CACHE_TTL: dict[str, int] = {
+    "dashboard_payload": 10,
+    "list_monitored_files": 30,
+    "source_ids": 10,
+    "query_detections": 10,
+    "query_recoveries": 10,
+    "get_ai_rules": 60,
+    "get_ai_sensitivity": 60,
+    "get_setting": 30,
+    "current_hash_index": 30,
+}
+
+
+def _cached_fetch(cache_key: str, ttl_seconds: int, fetch_fn, default=None):
+    now = time.time()
+    if cache_key in _cache:
+        value, expiry = _cache[cache_key]
+        if now < expiry:
+            return value
+    try:
+        value = fetch_fn()
+        _cache[cache_key] = (value, now + ttl_seconds)
+        return value
+    except Exception:
+        if cache_key in _cache:
+            return _cache[cache_key][0]
+        return default
 
 
 def _headers() -> dict[str, str]:
@@ -64,8 +95,10 @@ def _sync_get(path: str, params: dict | None = None) -> Any:
 # Dashboard / query proxies
 # ---------------------------------------------------------------------------
 def dashboard_payload(db) -> dict:
-    from SECURITY.security_engine import dashboard_payload as _local
-    return _local(db)
+    if not SECURITY_API_URL:
+        from SECURITY.security_engine import dashboard_payload as _local
+        return _local(db)
+    return _cached_fetch("dashboard_payload", _CACHE_TTL["dashboard_payload"], lambda: _sync_get("/v1/dashboard"), default={})
 
 
 def active_monitored_files_query(db):
@@ -77,9 +110,11 @@ def active_monitored_files_query(db):
 
 
 def list_monitored_files(db):
-    from SECURITY.security_engine import active_monitored_files_query as _local
-    from SECURITY.security_models import SecurityMonitoredFile
-    return [serialize_file(item) for item in _local(db).order_by(SecurityMonitoredFile.relative_path.asc()).all()]
+    if not SECURITY_API_URL:
+        from SECURITY.security_engine import active_monitored_files_query as _local
+        from SECURITY.security_models import SecurityMonitoredFile
+        return [serialize_file(item) for item in _local(db).order_by(SecurityMonitoredFile.relative_path.asc()).all()]
+    return _cached_fetch("list_monitored_files", _CACHE_TTL["list_monitored_files"], lambda: _sync_get("/v1/files"), default=[])
 
 
 def query_incidents(db, keyword=None, status=None, severity=None, date_from=None, date_to=None, limit=200, sort="newest"):
@@ -109,28 +144,80 @@ def query_incidents(db, keyword=None, status=None, severity=None, date_from=None
 
 
 def source_ids_for_log_type(db, log_type: str) -> list[int]:
-    from SECURITY.security_models import SecurityIncident, SecurityDetectionEvent, SecurityRecoveryEvent
-    if log_type == "detections":
-        rows = db.query(SecurityDetectionEvent.id).filter(SecurityDetectionEvent.is_legitimate == False).all()
-    elif log_type == "recoveries":
-        rows = db.query(SecurityRecoveryEvent.id).filter(SecurityRecoveryEvent.recovery_type.notlike("%backup%")).all()
-    elif log_type == "incidents":
-        rows = db.query(SecurityIncident.id).filter(SecurityIncident.status.in_(["open", "investigating"])).all()
-    elif log_type == "backups":
-        rows = db.query(SecurityRecoveryEvent.id).filter(SecurityRecoveryEvent.recovery_type.like("%backup%")).all()
-    else:
-        raise ValueError("Invalid security log type.")
-    return [row[0] for row in rows]
+    if not SECURITY_API_URL:
+        from SECURITY.security_models import SecurityIncident, SecurityDetectionEvent, SecurityRecoveryEvent
+        if log_type == "detections":
+            rows = db.query(SecurityDetectionEvent.id).filter(SecurityDetectionEvent.is_legitimate == False).all()
+        elif log_type == "recoveries":
+            rows = db.query(SecurityRecoveryEvent.id).filter(SecurityRecoveryEvent.recovery_type.notlike("%backup%")).all()
+        elif log_type == "incidents":
+            rows = db.query(SecurityIncident.id).filter(SecurityIncident.status.in_(["open", "investigating"])).all()
+        elif log_type == "backups":
+            rows = db.query(SecurityRecoveryEvent.id).filter(SecurityRecoveryEvent.recovery_type.like("%backup%")).all()
+        else:
+            raise ValueError("Invalid security log type.")
+        return [row[0] for row in rows]
+    def _fetch():
+        resp = _sync_get(f"/v1/source-ids/{log_type}")
+        return resp.get("ids", [])
+    return _cached_fetch(f"source_ids:{log_type}", _CACHE_TTL["source_ids"], _fetch, default=[])
+
+
+def source_ids_batch(db, log_types: list[str]) -> dict[str, list[int]]:
+    """Fetch source IDs for multiple log types in parallel from VM2."""
+    if not SECURITY_API_URL:
+        return {lt: source_ids_for_log_type(db, lt) for lt in log_types}
+
+    async def _fetch_all():
+        async with httpx.AsyncClient(timeout=TIMEOUT, verify=False) as client:
+            tasks = [
+                client.get(f"{SECURITY_API_URL}/v1/source-ids/{lt}", headers=_headers())
+                for lt in log_types
+            ]
+            responses = await asyncio.gather(*tasks, return_exceptions=True)
+            results: dict[str, list[int]] = {}
+            for lt, resp in zip(log_types, responses):
+                if isinstance(resp, Exception):
+                    results[lt] = []
+                else:
+                    try:
+                        resp.raise_for_status()
+                        results[lt] = resp.json().get("ids", [])
+                    except Exception:
+                        results[lt] = []
+            return results
+
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(_fetch_all())
+    finally:
+        loop.close()
 
 
 def query_detections(db, keyword=None, date_from=None, date_to=None, target=None, severity=None, limit=200, sort="newest", classification=None):
-    from SECURITY.security_engine import query_detections as _local
-    return _local(db, keyword, date_from, date_to, target, severity, limit, sort, classification)
+    if not SECURITY_API_URL:
+        from SECURITY.security_engine import query_detections as _local
+        return _local(db, keyword, date_from, date_to, target, severity, limit, sort, classification)
+    def _fetch():
+        return _sync_post("/v1/detections/query", {
+            "keyword": keyword, "date_from": date_from, "date_to": date_to,
+            "target": target, "severity": severity, "limit": limit, "sort": sort, "classification": classification,
+        })
+    cache_key = f"query_detections:{keyword}:{date_from}:{date_to}:{target}:{severity}:{limit}:{sort}:{classification}"
+    return _cached_fetch(cache_key, _CACHE_TTL["query_detections"], _fetch, default=[])
 
 
 def query_recoveries(db, keyword=None, date_from=None, date_to=None, recovery_type=None, status=None, limit=200, sort="newest"):
-    from SECURITY.security_engine import query_recoveries as _local
-    return _local(db, keyword, date_from, date_to, recovery_type, status, limit, sort)
+    if not SECURITY_API_URL:
+        from SECURITY.security_engine import query_recoveries as _local
+        return _local(db, keyword, date_from, date_to, recovery_type, status, limit, sort)
+    def _fetch():
+        return _sync_post("/v1/recoveries/query", {
+            "keyword": keyword, "date_from": date_from, "date_to": date_to,
+            "recovery_type": recovery_type, "status": status, "limit": limit, "sort": sort,
+        })
+    cache_key = f"query_recoveries:{keyword}:{date_from}:{date_to}:{recovery_type}:{status}:{limit}:{sort}"
+    return _cached_fetch(cache_key, _CACHE_TTL["query_recoveries"], _fetch, default=[])
 
 
 # ---------------------------------------------------------------------------
@@ -160,13 +247,17 @@ def scan_all_files(db, context=None):
 # AI rule proxies
 # ---------------------------------------------------------------------------
 def get_ai_rules(db) -> dict:
-    from SECURITY.security_engine import get_ai_rules as _local
-    return _local(db)
+    if not SECURITY_API_URL:
+        from SECURITY.security_engine import get_ai_rules as _local
+        return _local(db)
+    return _cached_fetch("get_ai_rules", _CACHE_TTL["get_ai_rules"], lambda: _sync_get("/v1/ai/rules"), default={})
 
 
 def get_ai_sensitivity(db) -> str:
-    from SECURITY.security_engine import get_ai_sensitivity as _local
-    return _local(db)
+    if not SECURITY_API_URL:
+        from SECURITY.security_engine import get_ai_sensitivity as _local
+        return _local(db)
+    return _cached_fetch("get_ai_sensitivity", _CACHE_TTL["get_ai_sensitivity"], lambda: _sync_get("/v1/ai/sensitivity"), default="medium")
 
 
 def update_ai_rules(db, rules, actor):
@@ -356,8 +447,12 @@ def bulk_update_incidents(db, action, admin_id, confirm_missing_files=False):
 # Setting / state proxies
 # ---------------------------------------------------------------------------
 def get_setting(db, key, default=None):
-    from SECURITY.security_engine import get_setting as _local
-    return _local(db, key, default=default)
+    if not SECURITY_API_URL:
+        from SECURITY.security_engine import get_setting as _local
+        return _local(db, key, default=default)
+    def _fetch():
+        return _sync_post("/v1/settings/get", {"key": key, "default": default})
+    return _cached_fetch(f"get_setting:{key}", _CACHE_TTL["get_setting"], _fetch, default=default)
 
 
 def set_setting(db, key, value, actor=None):
@@ -445,8 +540,10 @@ def register_initial_files(db):
 
 
 def current_hash_index(db):
-    from SECURITY.security_engine import current_hash_index as _local
-    return _local(db)
+    if not SECURITY_API_URL:
+        from SECURITY.security_engine import current_hash_index as _local
+        return _local(db)
+    return _cached_fetch("current_hash_index", _CACHE_TTL["current_hash_index"], lambda: _sync_get("/v1/files/hash-index"), default={})
 
 
 def is_database_entry(file_entry) -> bool:

@@ -78,6 +78,7 @@ from utils.security_client import (
     set_backup_location,
     set_setting,
     source_ids_for_log_type,
+    source_ids_batch,
     update_ai_rules,
     weekly_ai_behavior_data,
     sync_security_alerts,
@@ -253,14 +254,41 @@ def initialize_security(db: Session = Depends(get_db), admin=Depends(current_adm
 
 @router.get("/dashboard")
 def get_dashboard(db: Session = Depends(get_db), _=Depends(current_admin)):
-    mark_stale_backup_events_failed(db)
-    sync_security_alerts(db, limit=50)
-    return dashboard_payload(db)
+    try:
+        mark_stale_backup_events_failed(db)
+    except Exception:
+        pass
+    try:
+        sync_security_alerts(db, limit=50)
+    except Exception:
+        pass
+    try:
+        return dashboard_payload(db)
+    except Exception as exc:
+        return {
+            "system_status": "Unknown",
+            "monitored_files": 0,
+            "active_incidents": 0,
+            "last_scan": None,
+            "next_scheduled_backup": "Not scheduled",
+            "severity_distribution": {},
+            "attack_types": {},
+            "behaviors": {},
+            "today_summary": {"incidents": 0, "detections": 0, "high_severity": 0},
+            "backup_location": None,
+            "latest_backup": None,
+            "ai_model_status": {"trained": False, "last_trained": None},
+            "monitoring_enabled": False,
+            "_service_warning": str(exc),
+        }
 
 
 @router.get("/files")
 def list_files(db: Session = Depends(get_db), _=Depends(current_admin)):
-    return list_monitored_files(db)
+    try:
+        return list_monitored_files(db)
+    except Exception:
+        return []
 
 
 @router.post("/files/{file_id}/scan")
@@ -309,9 +337,12 @@ def detections(
     db: Session = Depends(get_db),
     admin=Depends(current_admin),
 ):
-    rows = query_detections(db, keyword, date_from, date_to, target, severity, limit, sort, classification)
-    items = _with_view_flags([serialize_detection(item) for item in rows], _viewed_ids(db, admin.username, "detections"))
-    return _paginate(items, page, page_size)
+    try:
+        rows = query_detections(db, keyword, date_from, date_to, target, severity, limit, sort, classification)
+        items = _with_view_flags([serialize_detection(item) for item in rows], _viewed_ids(db, admin.username, "detections"))
+        return _paginate(items, page, page_size)
+    except Exception:
+        return _paginate([], page, page_size)
 
 
 @router.get("/recoveries")
@@ -328,12 +359,15 @@ def recoveries(
     db: Session = Depends(get_db),
     admin=Depends(current_admin),
 ):
-    mark_stale_backup_events_failed(db)
-    rows = query_recoveries(db, keyword, date_from, date_to, recovery_type, status, limit, sort)
-    if not recovery_type:
-        rows = [row for row in rows if "backup" not in (_getval(row, "recovery_type") or "")]
-    items = _with_view_flags([serialize_recovery(item) for item in rows], _viewed_ids(db, admin.username, "recoveries"))
-    return _paginate(items, page, page_size)
+    try:
+        mark_stale_backup_events_failed(db)
+        rows = query_recoveries(db, keyword, date_from, date_to, recovery_type, status, limit, sort)
+        if not recovery_type:
+            rows = [row for row in rows if "backup" not in (_getval(row, "recovery_type") or "")]
+        items = _with_view_flags([serialize_recovery(item) for item in rows], _viewed_ids(db, admin.username, "recoveries"))
+        return _paginate(items, page, page_size)
+    except Exception:
+        return _paginate([], page, page_size)
 
 
 @router.get("/incidents")
@@ -350,9 +384,12 @@ def incidents(
     db: Session = Depends(get_db),
     admin=Depends(current_admin),
 ):
-    rows = query_incidents(db, keyword=keyword, status=status, severity=severity, date_from=date_from, date_to=date_to, limit=limit, sort=sort)
-    items = _with_view_flags([serialize_incident(item) for item in rows], _viewed_ids(db, admin.username, "incidents"))
-    return _paginate(items, page, page_size)
+    try:
+        rows = query_incidents(db, keyword=keyword, status=status, severity=severity, date_from=date_from, date_to=date_to, limit=limit, sort=sort)
+        items = _with_view_flags([serialize_incident(item) for item in rows], _viewed_ids(db, admin.username, "incidents"))
+        return _paginate(items, page, page_size)
+    except Exception:
+        return _paginate([], page, page_size)
 
 
 @router.get("/backups")
@@ -368,31 +405,38 @@ def backup_history(
     db: Session = Depends(get_db),
     admin=Depends(current_admin),
 ):
-    mark_stale_backup_events_failed(db)
-    query_type = None if recovery_type in {None, "", "automatic_backup"} else recovery_type or "manual_backup"
-    rows = query_recoveries(db, keyword, date_from, date_to, query_type, status, 500, sort)
-    backup_rows = [row for row in rows if "backup" in (_getval(row, "recovery_type") or "")]
-    if recovery_type == "automatic_backup":
-        backup_rows = [
-            row for row in backup_rows
-            if _getval(row, "initiated_by") is None
-            or any(label in str((_getval(row, "backup_path") or _getval(row, "summary") or "")).lower() for label in ("startup", "initial", "scheduled", "automatic"))
-        ]
-    elif recovery_type == "manual_backup":
-        backup_rows = [
-            row for row in backup_rows
-            if _getval(row, "initiated_by") is not None
-            and not any(label in str((_getval(row, "backup_path") or _getval(row, "summary") or "")).lower() for label in ("startup", "initial", "scheduled", "automatic"))
-        ]
-    items = _with_view_flags([serialize_recovery(item) for item in backup_rows], _viewed_ids(db, admin.username, "backups"))
-    return _paginate(items, page, page_size)
+    try:
+        mark_stale_backup_events_failed(db)
+        query_type = None if recovery_type in {None, "", "automatic_backup"} else recovery_type or "manual_backup"
+        rows = query_recoveries(db, keyword, date_from, date_to, query_type, status, 500, sort)
+        backup_rows = [row for row in rows if "backup" in (_getval(row, "recovery_type") or "")]
+        if recovery_type == "automatic_backup":
+            backup_rows = [
+                row for row in backup_rows
+                if _getval(row, "initiated_by") is None
+                or any(label in str((_getval(row, "backup_path") or _getval(row, "summary") or "")).lower() for label in ("startup", "initial", "scheduled", "automatic"))
+            ]
+        elif recovery_type == "manual_backup":
+            backup_rows = [
+                row for row in backup_rows
+                if _getval(row, "initiated_by") is not None
+                and not any(label in str((_getval(row, "backup_path") or _getval(row, "summary") or "")).lower() for label in ("startup", "initial", "scheduled", "automatic"))
+            ]
+        items = _with_view_flags([serialize_recovery(item) for item in backup_rows], _viewed_ids(db, admin.username, "backups"))
+        return _paginate(items, page, page_size)
+    except Exception:
+        return _paginate([], page, page_size)
 
 
 @router.get("/unread-counts")
 def unread_counts(db: Session = Depends(get_db), admin=Depends(current_admin)):
+    try:
+        ids_map = source_ids_batch(db, ["detections", "recoveries", "incidents", "backups"])
+    except Exception:
+        ids_map = {}
     counts = {}
     for log_type in ("detections", "recoveries", "incidents", "backups"):
-        ids = set(source_ids_for_log_type(db, log_type))
+        ids = set(ids_map.get(log_type, []))
         if log_type == "incidents":
             counts[log_type] = len(ids)
         else:

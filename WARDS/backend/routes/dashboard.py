@@ -198,7 +198,10 @@ async def get_dashboard_statistics(
         ).all()
     }
     # Sync security system alerts from VM2 into the main DB so the main dashboard stays current
-    sync_security_alerts(db, limit=50)
+    try:
+        sync_security_alerts(db, limit=50)
+    except Exception:
+        pass
     alerts = db.query(Alert).order_by(Alert.created_at.desc()).all()
     
     return {
