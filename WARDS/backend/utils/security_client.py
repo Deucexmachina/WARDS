@@ -439,18 +439,21 @@ def json_dumps(obj):
     return json.dumps(obj, default=str)
 
 
-def next_weekday(day_name: str):
+def next_weekday(day_name: str, time_value: str):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import next_weekday as _local
-        return _local(day_name)
+        return _local(day_name, time_value)
     import calendar
     from datetime import datetime, timedelta
-    target = list(calendar.day_name).index(day_name)
-    d = datetime.now().date()
-    days_ahead = target - d.weekday()
-    if days_ahead <= 0:
-        days_ahead += 7
-    return d + timedelta(days=days_ahead)
+    target_day = list(calendar.day_name).index(day_name)
+    hour, minute = [int(part) for part in time_value.split(":", 1)]
+    now = datetime.now()
+    base = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    days_ahead = (target_day - base.weekday()) % 7
+    candidate = base + timedelta(days=days_ahead)
+    if candidate <= now:
+        candidate += timedelta(days=7)
+    return candidate.isoformat()
 
 
 # ---------------------------------------------------------------------------
@@ -548,6 +551,37 @@ def record_context_detection(db, target_name, actor, change_type, context=None):
         "change_type": change_type,
         "context": context or {},
     })
+
+
+def fetch_system_alerts(db, limit: int = 50) -> list[dict]:
+    if not SECURITY_API_URL:
+        from SECURITY.security_engine import create_system_alert
+        from database.models import Alert
+        try:
+            alerts = (
+                db.query(Alert)
+                .order_by(Alert.created_at.desc())
+                .limit(limit)
+                .all()
+            )
+        except Exception:
+            return []
+        return [
+            {
+                "id": alert.id,
+                "type": alert.type,
+                "title": alert.title,
+                "message": alert.message,
+                "severity": alert.severity,
+                "read": alert.read,
+                "created_at": alert.created_at.isoformat() if alert.created_at else None,
+            }
+            for alert in alerts
+        ]
+    try:
+        return _sync_get("/v1/system-alerts", {"limit": limit}).get("alerts", [])
+    except Exception:
+        return []
 
 
 class MissingFileConfirmationRequired(Exception):

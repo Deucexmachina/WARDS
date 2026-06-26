@@ -4376,8 +4376,12 @@ def manual_recover_file(db: Session, file_id: int, admin_id: int) -> SecurityRec
 def full_system_recovery(db: Session, admin_id: int) -> dict:
     restored = 0
     failed = 0
+    skipped = 0
     started = time.time()
     for file_entry in db.query(SecurityMonitoredFile).order_by(SecurityMonitoredFile.relative_path.asc()).all():
+        if is_vm1_file(file_entry):
+            skipped += 1
+            continue
         try:
             restore_from_backup(db, file_entry, None, "manual_full", admin_id, create_event=False)
             restored += 1
@@ -4390,7 +4394,7 @@ def full_system_recovery(db: Session, admin_id: int) -> dict:
         status="success" if failed == 0 else "failed",
         completed_at=now_utc(),
         recovery_duration_ms=int((time.time() - started) * 1000),
-        summary=f"Full system recovery: {restored} file(s) restored, {failed} failed, {restored_ml_artifacts} ML artifact(s).",
+        summary=f"Full system recovery: {restored} file(s) restored, {failed} failed, {skipped} VM1 file(s) skipped, {restored_ml_artifacts} ML artifact(s).",
     )
     db.add(recovery)
     db.commit()
@@ -4399,6 +4403,7 @@ def full_system_recovery(db: Session, admin_id: int) -> dict:
     return {
         "restored": restored,
         "failed": failed,
+        "skipped": skipped,
         "restored_ml_artifacts": restored_ml_artifacts,
         "recovery_event_id": recovery.id,
     }
@@ -4598,7 +4603,7 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
     cleanup_quarantine_paths(json_loads(incident.quarantine_paths_json, []))
     db.add(incident)
     # Resolve any other open incidents for the same file to prevent duplicates
-    if detection:
+    if detection and detection.file_id is not None:
         for other in db.query(SecurityIncident).join(SecurityDetectionEvent).filter(
             SecurityDetectionEvent.file_id == detection.file_id,
             SecurityIncident.id != incident.id,
@@ -4630,8 +4635,34 @@ def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_ba
         quarantine_paths = [quarantine_paths]
 
     ensure_missing_file_confirmation(db, [incident], "false_positive", confirm_missing_files)
-    if not file_entry:
-        raise ValueError("Incident has no monitored file to restore")
+
+    # Non-file incidents (e.g., vm1_host_silent) have no file_entry and no quarantine.
+    # For these, resolve and false_positive are equivalent — just mark the status.
+    is_non_file_incident = not file_entry or (detection and detection.target_type in {"vm1_host", "system"})
+    if is_non_file_incident:
+        if detection:
+            detection.is_legitimate = True
+            detection.ai_prediction = "normal"
+            detection.ai_score = 0.0
+            detection.confidence = 1.0
+            detection.severity_level = "info"
+            detection.trigger_summary = f"False positive accepted by admin for {detection.target_name}."
+            db.add(detection)
+        incident.status = "false_positive"
+        incident.response_action = "authorized_non_file_acknowledged"
+        incident.resolved_at = now_utc()
+        incident.resolved_by = _valid_admin_id(db, admin_id)
+        db.add(incident)
+        db.commit()
+        if create_event:
+            create_system_alert(
+                db,
+                "incident_false_positive",
+                f"SEC-{incident.id}: Incident marked false positive. Non-file incident acknowledged; no file restoration was performed.",
+                "low",
+                dedupe_key=f"SEC-{incident.id}",
+            )
+        return incident
 
     quarantine_source = quarantine_paths[0] if quarantine_paths else None
     safe_source = safe_quarantine_path(quarantine_source) if quarantine_source else None
@@ -4715,7 +4746,7 @@ def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_ba
     incident.resolved_by = _valid_admin_id(db, admin_id)
     db.add(incident)
     # Mark any other open incidents for the same file as false_positive to prevent duplicates
-    if detection:
+    if detection and detection.file_id is not None:
         for other in db.query(SecurityIncident).join(SecurityDetectionEvent).filter(
             SecurityDetectionEvent.file_id == detection.file_id,
             SecurityIncident.id != incident.id,
@@ -5030,8 +5061,9 @@ def set_backup_location(db: Session, new_location: str, delete_previous: bool, u
     if delete_previous and previous.exists() and previous_resolved != target:
         shutil.rmtree(previous, ignore_errors=True)
         deleted = True
+    backup_event = create_manual_backup(db, initiated_by=None, label="location_changed")
     logger.info("Backup location updated from '%s' to '%s'.", previous_resolved, target)
-    return {"backup_location": stored_path_value(target) or str(target), "previous_deleted": deleted, "absolute_path": str(target)}
+    return {"backup_location": stored_path_value(target) or str(target), "previous_deleted": deleted, "absolute_path": str(target), "backup_event_id": getattr(backup_event, 'id', None)}
 
 
 def path_is_inside(path: Path, root: Path) -> bool:
@@ -5808,6 +5840,9 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
         _clean_folder_root(p.name)
         for p in load_vm1_monitored_folders(db)
     }
+    # Standard VM1 roots (WARDS, OCR) are hardcoded on VM1 and not stored in
+    # vm1_custom_monitored_folders, but their manifests must still be accepted.
+    allowed_vm1_roots |= set(MONITORED_ROOTS.keys())
 
     if is_deployment_in_progress(db):
         logger.info("Deployment in progress — skipping VM1 file change detections.")
@@ -6021,6 +6056,25 @@ def check_vm1_heartbeat_timeout(db: Session) -> SecurityDetectionEvent | None:
                 return None
         except Exception:
             pass
+
+    # DEDUPE: if an open vm1_host_compromised incident already exists, just update its timestamp
+    existing_incident = (
+        db.query(SecurityIncident)
+        .filter(SecurityIncident.incident_type == "vm1_host_compromised")
+        .filter(SecurityIncident.status.in_(["open", "investigating"]))
+        .order_by(SecurityIncident.created_at.desc())
+        .first()
+    )
+    if existing_incident:
+        existing_incident.description = (
+            f"VM1 heartbeat timeout recurrence at {now_utc().isoformat()}. "
+            f"Original detection: {existing_incident.created_at.isoformat() if existing_incident.created_at else 'unknown'}."
+        )
+        db.add(existing_incident)
+        db.commit()
+        set_setting(db, "vm1_last_silent_detection_at", now_utc().isoformat(), "vm2_monitor")
+        set_setting(db, "vm1_last_heartbeat_status", "timeout_detected", "vm2_monitor")
+        return None
 
     context = {
         "host_vm": "vm1",

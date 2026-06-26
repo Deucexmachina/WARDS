@@ -839,6 +839,7 @@ def remove_folder(payload: AddFolderRequest, db: Session = Depends(get_db), admi
 @router.get("/folder-browser")
 def folder_browser(path: str | None = Query(None), _=Depends(current_admin)):
     try:
+        from SECURITY.security_engine import stored_path_value
         current = Path(path).expanduser().resolve() if path else MASTER_ROOT
         if not current.exists() or not current.is_dir():
             current = MASTER_ROOT
@@ -846,7 +847,7 @@ def folder_browser(path: str | None = Query(None), _=Depends(current_admin)):
         for item in current.iterdir():
             try:
                 if item.is_dir() and not item.name.startswith("."):
-                    directories.append({"name": item.name, "path": str(item.resolve())})
+                    directories.append({"name": item.name, "path": stored_path_value(item.resolve()) or str(item.resolve())})
             except PermissionError:
                 continue
         drives = []
@@ -858,9 +859,9 @@ def folder_browser(path: str | None = Query(None), _=Depends(current_admin)):
         else:
             drives.append({"name": "/", "path": "/"})
         quick_roots = [
-            {"name": "WARDS", "path": str(MASTER_ROOT / "WARDS")},
-            {"name": "OCR", "path": str(MASTER_ROOT / "OCR")},
-            {"name": "Security Root", "path": str(MASTER_ROOT / "SECURITY")},
+            {"name": "WARDS", "path": stored_path_value(MASTER_ROOT / "WARDS") or str(MASTER_ROOT / "WARDS")},
+            {"name": "OCR", "path": stored_path_value(MASTER_ROOT / "OCR") or str(MASTER_ROOT / "OCR")},
+            {"name": "Security Root", "path": stored_path_value(MASTER_ROOT / "SECURITY") or str(MASTER_ROOT / "SECURITY")},
         ]
         if Path("/opt/wards/app").exists():
             quick_roots.append({"name": "App Root", "path": "/opt/wards/app"})
@@ -868,13 +869,13 @@ def folder_browser(path: str | None = Query(None), _=Depends(current_admin)):
             quick_roots.append({"name": "Security App", "path": "/opt/wards/security"})
         local_backups = MASTER_ROOT / "SECURITY" / "local_backups"
         if local_backups.exists():
-            quick_roots.append({"name": "Local Backups", "path": str(local_backups)})
+            quick_roots.append({"name": "Local Backups", "path": stored_path_value(local_backups) or str(local_backups)})
         home_dir = Path.home()
         if home_dir.exists() and str(home_dir) != "/":
             quick_roots.append({"name": "Home", "path": str(home_dir)})
         return {
-            "current": str(current),
-            "parent": str(current.parent) if current.parent != current else None,
+            "current": stored_path_value(current) or str(current),
+            "parent": stored_path_value(current.parent) or str(current.parent) if current.parent != current else None,
             "directories": sorted(directories, key=lambda item: item["name"].lower()),
             "quick_roots": quick_roots,
             "drives": drives,
