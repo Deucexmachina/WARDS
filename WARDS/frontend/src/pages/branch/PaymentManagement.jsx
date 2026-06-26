@@ -1814,12 +1814,6 @@ const PaymentManagement = () => {
                     Decline Payment
                   </button>
                 ) : null}
-                <button
-                  onClick={() => setShowDetailModal(false)}
-                  className="rounded-2xl bg-slate-200 px-5 py-3 font-semibold text-slate-700 transition hover:bg-slate-300"
-                >
-                  Close
-                </button>
               </div>
             </div>
           </div>
