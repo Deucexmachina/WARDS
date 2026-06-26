@@ -1589,7 +1589,7 @@ def resolve_frontend_base_url(request: Request) -> str:
         if frontend_url:
             return frontend_url.rstrip("/")
 
-    return "http://localhost:3000"
+    return "https://localhost:3000"
 
 
 def ensure_public_payment_gateway_enabled(db: Session, branch_id: int | None = None):

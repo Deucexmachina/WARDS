@@ -57,7 +57,7 @@ def resolve_frontend_base_url(request: Request) -> str:
         if frontend_url:
             return frontend_url.rstrip("/")
 
-    return "http://localhost:3000"
+    return "https://localhost:3000"
 
 
 ACTIVE_QUEUE_STATUSES = ("Pending", "Waiting", "Called", "Serving")

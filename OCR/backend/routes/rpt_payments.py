@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional
@@ -415,8 +416,8 @@ async def create_rpt_checkout(
         get_taxpayer_email(current_taxpayer),
     )
 
-    success_url = request.success_url or "http://localhost:5173/rpt-payment?status=success"
-    cancel_url = request.cancel_url or "http://localhost:5173/rpt-payment?status=cancelled"
+    success_url = request.success_url or os.getenv("FRONTEND_BASE_URL", "https://nanowards.com").rstrip("/") + "/rpt-payment?status=success"
+    cancel_url = request.cancel_url or os.getenv("FRONTEND_BASE_URL", "https://nanowards.com").rstrip("/") + "/rpt-payment?status=cancelled"
 
     paymongo_response = create_paymongo_checkout_session(
         taxpayer=current_taxpayer,
