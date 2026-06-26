@@ -721,7 +721,7 @@ class AbuseDetectionMiddleware(BaseHTTPMiddleware):
             return JSONResponse(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 content={
-                    "detail": "Rate limit exceeded. Three violations create one account strike.",
+                    "detail": "Too many requests for this action. Please wait before trying again.",
                     "scope": scope,
                     "account_id": account_key,
                     "account_type": account_type,
