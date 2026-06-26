@@ -82,3 +82,4 @@ If you want to harden this, the highest-impact additions would be:
 1. **MySQL SSL connections** — add `ssl_ca`, `ssl_cert`, `ssl_key` to `create_engine()`.
 2. **Encrypted backups** — encrypt the `.sql.gz` output with a key before writing to disk.
 3. **Add field encryption to VM 2 security tables** — apply the same `_enc`/`_hash` pattern to `security_incidents`, `security_detection_events`, etc., if they contain sensitive context.
+
