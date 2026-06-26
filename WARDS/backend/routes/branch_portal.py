@@ -2158,6 +2158,9 @@ async def delete_branch_payment(
     if not payment or not payment_belongs_to_branch(payment, branch, current_staff, db):
         raise HTTPException(status_code=404, detail="Payment not found")
 
+    if is_payment_locked_for_remittance(db, payment.id):
+        raise HTTPException(status_code=409, detail="This payment is part of an active remittance and cannot be deleted.")
+
     ref_number = payment.ref_number
     db.delete(payment)
     log_branch_action(db, current_staff, "Payment Deleted", f"Deleted payment {ref_number}", request.client.host)

@@ -528,6 +528,7 @@ const PaymentManagement = () => {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [paymentToDelete, setPaymentToDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
   const [showDeclineModal, setShowDeclineModal] = useState(false);
   const [paymentToDecline, setPaymentToDecline] = useState(null);
   const [declining, setDeclining] = useState(false);
@@ -685,6 +686,7 @@ const PaymentManagement = () => {
 
   const handleDeleteClick = (payment) => {
     setPaymentToDelete(payment);
+    setDeleteError('');
     setShowDeleteModal(true);
   };
 
@@ -694,14 +696,18 @@ const PaymentManagement = () => {
     setDeleting(true);
     try {
       setFeedback({ type: '', message: '' });
+      setDeleteError('');
       await api.delete(`/branch/payments/${paymentToDelete.id}`);
       setShowDeleteModal(false);
       setPaymentToDelete(null);
+      setDeleteError('');
       setFeedback({ type: 'success', message: 'Payment deleted successfully.' });
       fetchPayments();
     } catch (error) {
       console.error('Failed to delete payment:', error);
-      setFeedback({ type: 'error', message: error.response?.data?.detail || error.message || 'Failed to delete payment.' });
+      const message = error.response?.data?.detail || error.message || 'Failed to delete payment.';
+      setDeleteError(message);
+      setFeedback({ type: 'error', message });
     } finally {
       setDeleting(false);
     }
@@ -710,6 +716,7 @@ const PaymentManagement = () => {
   const handleDeleteCancel = () => {
     setShowDeleteModal(false);
     setPaymentToDelete(null);
+    setDeleteError('');
   };
 
   const handleDeclineClick = (payment) => {
@@ -936,36 +943,6 @@ const PaymentManagement = () => {
     return points;
   }, [filteredPayments, appliedFilters.dateFrom, appliedFilters.dateTo]);
 
-  const detailAuditTrail = selectedPayment
-    ? [
-        {
-          label: 'Created',
-          value: `${formatPaymentDate(selectedPayment.created_at, { year: 'numeric', month: 'short', day: 'numeric' })} at ${formatPaymentDate(selectedPayment.created_at, {
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: true,
-          })}`,
-        },
-        selectedPayment.verified_at
-          ? {
-              label: 'Verified',
-              value: `${formatPaymentDate(selectedPayment.verified_at, { year: 'numeric', month: 'short', day: 'numeric' })} at ${formatPaymentDate(selectedPayment.verified_at, {
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit',
-                hour12: true,
-              })}`,
-            }
-          : null,
-        selectedPayment.paymongo_status
-          ? {
-              label: 'PayMongo Status',
-              value: selectedPayment.paymongo_status,
-            }
-          : null,
-      ].filter(Boolean)
-    : [];
 
   const renderTransactionTable = ({
     items,
@@ -1027,7 +1004,6 @@ const PaymentManagement = () => {
                   <th className="px-3 py-2.5">Reference</th>
                   <th className="px-3 py-2.5">Date & Time</th>
                   <th className="px-3 py-2.5">Citizen</th>
-                  <th className="px-3 py-2.5">TIN</th>
                   <th className="px-3 py-2.5">Tax Type</th>
                   <th className="px-3 py-2.5 text-right">Amount</th>
                   <th className="px-3 py-2.5">Status</th>
@@ -1056,7 +1032,6 @@ const PaymentManagement = () => {
                       <p className="max-w-[110px] truncate text-sm font-medium text-slate-700" title={payment.taxpayer_name}>{payment.taxpayer_name || 'N/A'}</p>
                       <p className="max-w-[110px] truncate text-[10px] text-slate-400">{payment.email || 'No email'}</p>
                     </td>
-                    <td className="px-3 py-2.5 font-mono text-[11px] text-slate-600">{payment.tin || 'N/A'}</td>
                     <td className="px-3 py-2.5">
                       <span className="inline-block max-w-[90px] truncate rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700" title={payment.tax_type}>
                         {payment.tax_type || 'N/A'}
@@ -1104,7 +1079,7 @@ const PaymentManagement = () => {
                 ))}
                 {paginated && Array.from({ length: TRANSACTIONS_PER_PAGE - visibleItems.length }).map((_, i) => (
                   <tr key={`empty-${i}`} className="h-[54px]">
-                    <td colSpan="8" className="px-3 py-2.5">&nbsp;</td>
+                    <td colSpan="7" className="px-3 py-2.5">&nbsp;</td>
                   </tr>
                 ))}
               </tbody>
@@ -1531,16 +1506,6 @@ const PaymentManagement = () => {
             />
           </div>
           <div>
-            <label className="mb-2 block text-sm font-semibold text-slate-700">TIN</label>
-            <input
-              type="text"
-              value={draftFilters.tin}
-              onChange={(event) => updateDraftFilter('tin', event.target.value)}
-              placeholder="Taxpayer TIN"
-              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm shadow-sm focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-slate-200"
-            />
-          </div>
-          <div>
             <label className="mb-2 block text-sm font-semibold text-slate-700">Email</label>
             <input
               type="text"
@@ -1654,6 +1619,7 @@ const PaymentManagement = () => {
           cancelLabel="No, Cancel"
           confirmLabel="Yes, Delete"
           confirmClassName="bg-rose-600 hover:bg-rose-700"
+          errorMessage={deleteError}
           onCancel={handleDeleteCancel}
           onConfirm={handleDeleteConfirm}
           loading={deleting}
@@ -1753,10 +1719,6 @@ const PaymentManagement = () => {
                       <p className="mt-1 text-sm font-semibold text-slate-900">{selectedPayment.taxpayer_name || 'N/A'}</p>
                     </div>
                     <div>
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">TIN</p>
-                      <p className="mt-1 text-sm text-slate-900">{selectedPayment.tin || 'N/A'}</p>
-                    </div>
-                    <div>
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Email</p>
                       <p className="mt-1 text-sm text-slate-900">{selectedPayment.email || 'N/A'}</p>
                     </div>
@@ -1826,105 +1788,6 @@ const PaymentManagement = () => {
                 </div>
               </div>
 
-              <div className="grid gap-6 xl:grid-cols-2">
-                <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-                  <h3 className="text-sm font-bold uppercase tracking-[0.16em] text-slate-900">Audit Trail / Payment History</h3>
-                  <div className="mt-4 space-y-3">
-                    {detailAuditTrail.length ? detailAuditTrail.map((entry) => (
-                      <div key={entry.label} className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{entry.label}</p>
-                        <p className="mt-1 text-sm font-semibold text-slate-900">{entry.value}</p>
-                      </div>
-                    )) : (
-                      <p className="text-sm text-slate-500">No audit history available for this payment.</p>
-                    )}
-                  </div>
-                </div>
-
-                <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-                  <h3 className="text-sm font-bold uppercase tracking-[0.16em] text-slate-900">Receipt Preview / Payment Processor</h3>
-                  <div className="mt-4 space-y-3">
-                    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Uploaded Payment Proof</p>
-                      <p className="mt-1 text-sm font-semibold text-slate-900">{selectedPayment.proof_file_name || 'No uploaded proof on this transaction'}</p>
-                      {selectedPayment.proof_uploaded_at ? (
-                        <p className="mt-1 text-xs text-slate-500">
-                          Uploaded on {formatPaymentDate(selectedPayment.proof_uploaded_at, { year: 'numeric', month: 'long', day: 'numeric' })} at{' '}
-                          {formatPaymentDate(selectedPayment.proof_uploaded_at, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
-                        </p>
-                      ) : null}
-                      {selectedPayment.proof_download_url ? (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <a
-                            href={buildApiAssetUrl(selectedPayment.proof_download_url)}
-                            download
-                            className="rounded-xl bg-[#0f2f5f] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#19498d]"
-                          >
-                            Download Proof
-                          </a>
-                        </div>
-                      ) : null}
-                    </div>
-                    {selectedPayment.bt_application ? (
-                      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Business Tax Uploaded Files</p>
-                        <div className="mt-2 space-y-2 text-sm text-slate-700">
-                          <p>Tracking Number: <span className="font-semibold text-slate-900">{selectedPayment.bt_application.tracking_number}</span></p>
-                          <p>Business Name: <span className="font-semibold text-slate-900">{selectedPayment.bt_application.business_name}</span></p>
-                          <p>Mayor&apos;s Permit Number: <span className="font-semibold text-slate-900">{selectedPayment.bt_application.mayor_permit_number}</span></p>
-                          <p>SEC/DTI/CDA Number: <span className="font-semibold text-slate-900">{selectedPayment.bt_application.sec_dti_cda_number}</span></p>
-                        </div>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {selectedPayment.bt_application.sales_declaration_download_url ? (
-                            <a href={buildApiAssetUrl(selectedPayment.bt_application.sales_declaration_download_url)} target="_blank" rel="noreferrer" className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-800 transition hover:bg-slate-200">
-                              Sales Declaration
-                            </a>
-                          ) : null}
-                          {selectedPayment.bt_application.financial_statements_download_url ? (
-                            <a href={buildApiAssetUrl(selectedPayment.bt_application.financial_statements_download_url)} target="_blank" rel="noreferrer" className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-800 transition hover:bg-slate-200">
-                              Financial Statements
-                            </a>
-                          ) : null}
-                          {selectedPayment.bt_application.supporting_documents_download_url ? (
-                            <a href={buildApiAssetUrl(selectedPayment.bt_application.supporting_documents_download_url)} target="_blank" rel="noreferrer" className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-800 transition hover:bg-slate-200">
-                              Supporting Documents
-                            </a>
-                          ) : null}
-                          {selectedPayment.bt_application.proof_of_payment_download_url ? (
-                            <a href={buildApiAssetUrl(selectedPayment.bt_application.proof_of_payment_download_url)} target="_blank" rel="noreferrer" className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-800 transition hover:bg-slate-200">
-                              Proof Of Payment
-                            </a>
-                          ) : null}
-                          {selectedPayment.bt_application.official_receipt_download_url ? (
-                            <a href={buildApiAssetUrl(selectedPayment.bt_application.official_receipt_download_url)} target="_blank" rel="noreferrer" className="rounded-xl bg-emerald-100 px-3 py-2 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-200">
-                              Official Receipt
-                            </a>
-                          ) : null}
-                        </div>
-                        {selectedPayment.bt_application.verifier_remarks ? (
-                          <p className="mt-3 text-xs text-amber-700">{selectedPayment.bt_application.verifier_remarks}</p>
-                        ) : null}
-                      </div>
-                    ) : null}
-                    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Checkout Session ID</p>
-                      <p className="mt-1 break-all font-mono text-xs text-slate-900">{selectedPayment.paymongo_checkout_session_id || 'Not available'}</p>
-                    </div>
-                    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Payment Intent ID</p>
-                      <p className="mt-1 break-all font-mono text-xs text-slate-900">{selectedPayment.paymongo_payment_intent_id || 'Not available'}</p>
-                    </div>
-                    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Payment ID</p>
-                      <p className="mt-1 break-all font-mono text-xs text-slate-900">{selectedPayment.paymongo_payment_id || 'Not available'}</p>
-                    </div>
-                    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Processor Status</p>
-                      <p className="mt-1 text-sm font-semibold text-slate-900">{selectedPayment.paymongo_status || 'Not available'}</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
 
               <div className="flex flex-col gap-3 border-t border-slate-100 pt-4 sm:flex-row">
                 {isProcessingPayment(selectedPayment) ? (
