@@ -326,6 +326,8 @@ export const branchSettingsAPI = {
   setupBranchMfa: () => api.post('/branch/auth/setup-mfa-authenticated'),
   listBranchStaff: () => api.get('/branch/auth/admin/staff'),
   resetStaffMfa: (data) => api.post('/auth/unified/branch/admin/reset-staff-mfa', data),
+  getWindowAccounts: () => api.get('/branch/settings/window-accounts'),
+  reassignWindowServices: (data) => api.put('/branch/settings/window-services', data),
 };
 
 const buildAttachmentFormData = (files) => {

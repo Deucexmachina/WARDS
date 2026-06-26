@@ -1,3 +1,6 @@
+import json
+from typing import List
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from slowapi import Limiter
@@ -5,8 +8,8 @@ from slowapi.util import get_remote_address
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
-from database.models import Branch, BranchStaff, Service, get_db
-from auth import require_branch_admin
+from database.models import ActivityLog, Branch, BranchStaff, BranchSystemSetting, Service, get_db
+from auth import require_branch_admin, verify_account_password
 from utils.branch_appointment_settings import (
     delete_branch_schedule_history_entry,
     get_branch_schedule_history,
@@ -15,7 +18,14 @@ from utils.branch_appointment_settings import (
     save_branch_schedule_draft,
 )
 from utils.branch_system_settings import get_branch_settings_payload, update_branch_system_settings
+from utils.field_crypto import get_decrypted_or_raw
 from utils.system_settings import get_settings_payload
+from utils.branch_window_config import (
+    get_configured_window_accounts,
+    get_default_window_label,
+    get_service_window_display_label,
+    normalize_service_window as normalize_window_service_code,
+)
 
 
 def get_rate_limit_key(request: Request) -> str:
@@ -174,3 +184,153 @@ async def publish_branch_appointment_settings(
         config=payload.model_dump(exclude={"reason"}),
         reason=payload.reason,
     )
+
+
+def _normalize_service_window(value: str) -> str:
+    try:
+        return normalize_window_service_code(value)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Unsupported service window: {value}")
+
+
+def _get_window_display_label(account: BranchStaff) -> str:
+    return get_service_window_display_label(account.service_window, account.service_window_label)
+
+
+def _generate_window_full_name(branch_name: str, window_label: str) -> str:
+    return f"{branch_name} {window_label} Staff"
+
+
+class ReassignWindowService(BaseModel):
+    assigned_window_number: int
+    service_window: str
+
+
+class BranchReassignServicesRequest(BaseModel):
+    window_services: List[ReassignWindowService]
+    current_admin_password: str
+
+
+@router.get("/window-accounts")
+async def get_branch_window_accounts(
+    current_staff: BranchStaff = Depends(require_branch_admin()),
+    db: Session = Depends(get_db),
+):
+    """List active queue window accounts for the current branch admin's branch."""
+    branch = get_current_staff_branch(current_staff, db)
+    accounts = (
+        db.query(BranchStaff)
+        .filter(
+            BranchStaff.branch_id == branch.id,
+            BranchStaff.role == "branch_staff",
+            BranchStaff.account_scope == "queue_window",
+            BranchStaff.status == "Active",
+        )
+        .order_by(BranchStaff.assigned_window_number.asc(), BranchStaff.id.asc())
+        .all()
+    )
+    return [
+        {
+            "id": a.id,
+            "username": a.username,
+            "full_name": a.full_name,
+            "service_window": a.service_window,
+            "service_window_label": _get_window_display_label(a),
+            "assigned_window_number": a.assigned_window_number,
+        }
+        for a in accounts
+    ]
+
+
+@router.put("/window-services")
+@limiter.limit("10/minute")
+async def reassign_branch_window_services(
+    request: Request,
+    payload: BranchReassignServicesRequest,
+    current_staff: BranchStaff = Depends(require_branch_admin()),
+    db: Session = Depends(get_db),
+):
+    """Reassign service windows for existing branch window accounts without creating new accounts or resetting passwords."""
+    branch = get_current_staff_branch(current_staff, db)
+
+    verify_account_password(
+        payload.current_admin_password,
+        current_staff.hashed_password,
+        detail="Incorrect password. Please try again.",
+    )
+
+    existing_accounts = (
+        db.query(BranchStaff)
+        .filter(
+            BranchStaff.branch_id == branch.id,
+            BranchStaff.role == "branch_staff",
+            BranchStaff.account_scope == "queue_window",
+            BranchStaff.status == "Active",
+        )
+        .all()
+    )
+    accounts_by_window = {a.assigned_window_number: a for a in existing_accounts}
+
+    used_services: set[str] = set()
+    updated_accounts = []
+
+    for mapping in payload.window_services:
+        service_window = _normalize_service_window(mapping.service_window)
+        window_label = get_default_window_label(service_window)
+        if service_window in used_services:
+            raise HTTPException(status_code=400, detail=f"{window_label} is already assigned to another window.")
+        used_services.add(service_window)
+
+        account = accounts_by_window.get(mapping.assigned_window_number)
+        if not account:
+            raise HTTPException(status_code=400, detail=f"No active window account found for Window {mapping.assigned_window_number}.")
+
+        account.service_window = service_window
+        account.service_window_label = window_label
+        branch_name = get_decrypted_or_raw(branch, "name") or branch.name
+        account.full_name = _generate_window_full_name(branch_name, window_label)
+        updated_accounts.append({
+            "id": account.id,
+            "username": account.username,
+            "assigned_window_number": account.assigned_window_number,
+            "service_window": account.service_window,
+            "window_label": _get_window_display_label(account),
+        })
+
+    # Sync branch enabledServices with all active service windows
+    active_service_windows = sorted({
+        account.service_window
+        for account in get_configured_window_accounts(db, branch.id)
+        if account.status == "Active" and account.service_window
+    })
+    branch_setting = db.query(BranchSystemSetting).filter(
+        BranchSystemSetting.branch_id == branch.id,
+        BranchSystemSetting.key == "enabledServices",
+    ).first()
+    if branch_setting:
+        branch_setting.value = json.dumps(active_service_windows)
+        branch_setting.value_json = json.dumps(active_service_windows)
+    else:
+        db.add(BranchSystemSetting(
+            branch_id=branch.id,
+            key="enabledServices",
+            label="Enabled Public Services",
+            category="Services",
+            value=json.dumps(active_service_windows),
+            value_json=json.dumps(active_service_windows),
+            value_type="json",
+            description="Service names available for public queueing and branch-facing service listings.",
+        ))
+
+    db.add(ActivityLog(
+        action="Branch Window Services Reassigned",
+        user=current_staff.username,
+        details=f"Reassigned window services for {get_decrypted_or_raw(branch, 'name') or branch.name} via branch admin portal.",
+        type="branch_admin",
+    ))
+    db.commit()
+
+    return {
+        "message": "Window services reassigned successfully.",
+        "window_accounts_updated": updated_accounts,
+    }

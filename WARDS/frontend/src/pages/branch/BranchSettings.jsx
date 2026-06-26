@@ -297,6 +297,11 @@ const BranchSettings = () => {
   const [settingUpMfa, setSettingUpMfa] = useState(false);
   const [showMfaConfirmModal, setShowMfaConfirmModal] = useState(false);
   const [overrideErrors, setOverrideErrors] = useState([]);
+  const [windowAccounts, setWindowAccounts] = useState([]);
+  const [reassignServices, setReassignServices] = useState({});
+  const [reassignError, setReassignError] = useState('');
+  const [reassignPassword, setReassignPassword] = useState('');
+  const [reassignLoading, setReassignLoading] = useState(false);
   const initialServicesSeeded = useRef(false);
   const navSaveRef = useRef(() => {});
   const { registerDirty } = useUnsavedChanges();
@@ -310,10 +315,11 @@ const BranchSettings = () => {
 
   const fetchSettings = async () => {
     initialServicesSeeded.current = false;
-    const [settingsResponse, historyResponse, systemSettingsResponse] = await Promise.all([
+    const [settingsResponse, historyResponse, systemSettingsResponse, windowAccountsResponse] = await Promise.all([
       branchSettingsAPI.getAppointmentSettings(),
       branchSettingsAPI.getAppointmentHistory({ page: 1, page_size: PAGE_SIZE }),
       branchSettingsAPI.getSystemSettings(),
+      branchSettingsAPI.getWindowAccounts(),
     ]);
     const appointmentSettings = settingsResponse.data || {};
     setSchedule(normalizeScheduleConfig(appointmentSettings.draft, todayDate));
@@ -324,6 +330,14 @@ const BranchSettings = () => {
     setSystemSettings(normalizedSystemSettings);
     setPublishedSystemSettings(normalizedSystemSettings);
     setHistoryState(normalizeHistoryState(historyResponse.data));
+
+    const accounts = windowAccountsResponse.data || [];
+    setWindowAccounts(accounts);
+    const services = {};
+    accounts.forEach((account) => {
+      services[account.assigned_window_number || 1] = (account.service_window || 'RPT').toUpperCase();
+    });
+    setReassignServices(services);
   };
 
   useEffect(() => {
@@ -573,6 +587,67 @@ const BranchSettings = () => {
       setMfaError(resetError.response?.data?.detail || 'Failed to prepare MFA reset.');
     } finally {
       setSettingUpMfa(false);
+    }
+  };
+
+  const handleReassignServiceChange = (windowNumber, service) => {
+    setReassignServices((previous) => {
+      const next = { ...previous, [windowNumber]: service };
+      const counts = {};
+      Object.entries(next).forEach(([wn, svc]) => {
+        counts[svc] = (counts[svc] || 0) + 1;
+      });
+      const dupes = Object.entries(counts).filter(([, count]) => count > 1);
+      if (dupes.length > 0) {
+        const [dupService] = dupes[0];
+        const windows = Object.entries(next)
+          .filter(([, svc]) => svc === dupService)
+          .map(([wn]) => `Window ${wn}`)
+          .join(', ');
+        const label = SERVICE_WINDOW_LABELS[dupService] || dupService;
+        setReassignError(`${label} is already assigned to ${windows}. Each service can only be assigned to one window.`);
+      } else {
+        setReassignError('');
+      }
+      return next;
+    });
+  };
+
+  const handleSaveReassignServices = async () => {
+    if (!reassignPassword.trim()) {
+      setReassignError('Please enter your password to confirm this action.');
+      return;
+    }
+    const usedServices = new Set();
+    const windowNumbers = Object.keys(reassignServices);
+    for (const windowNumber of windowNumbers) {
+      const service = reassignServices[windowNumber];
+      if (usedServices.has(service)) {
+        const label = SERVICE_WINDOW_LABELS[service] || service;
+        setReassignError(`${label} is already assigned to another window.`);
+        return;
+      }
+      usedServices.add(service);
+    }
+    try {
+      setReassignLoading(true);
+      setReassignError('');
+      const payload = {
+        window_services: Object.entries(reassignServices).map(([wn, svc]) => ({
+          assigned_window_number: Number(wn),
+          service_window: svc,
+        })),
+        current_admin_password: reassignPassword,
+      };
+      await branchSettingsAPI.reassignWindowServices(payload);
+      setSuccessMessage('Window services reassigned successfully.');
+      setReassignPassword('');
+      await fetchSettings();
+    } catch (saveError) {
+      console.error('Failed to reassign window services:', saveError);
+      setReassignError(saveError.response?.data?.detail || 'Failed to reassign window services.');
+    } finally {
+      setReassignLoading(false);
     }
   };
 
@@ -831,6 +906,76 @@ const BranchSettings = () => {
                   />
                 ))}
               </div>
+            </div>
+          </SectionCard>
+
+          {/* Window Service Assignments */}
+          <SectionCard
+            title="Window Service Assignments"
+            subtitle="Assign which service each queue window handles. Changes apply immediately and do not reset staff passwords."
+          >
+            <div className="p-5 space-y-4">
+              {windowAccounts.length === 0 ? (
+                <div className="rounded border-l-4 border-yellow-400 bg-yellow-50 p-3 text-sm text-yellow-800">
+                  No active queue window accounts found for this branch. Please ask a Main Admin to set up service windows.
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-3">
+                    {windowAccounts.map((account) => (
+                      <div key={account.id} className="flex flex-col gap-3 rounded-xl border border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-200 text-sm font-bold text-slate-700">
+                            {account.assigned_window_number}
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-slate-800">{account.username}</p>
+                            <p className="text-xs text-slate-500">Window {account.assigned_window_number}</p>
+                          </div>
+                        </div>
+                        <div className="sm:w-64">
+                          <CustomSelect
+                            value={reassignServices[account.assigned_window_number] || account.service_window || 'RPT'}
+                            onChange={(value) => handleReassignServiceChange(account.assigned_window_number, value)}
+                            options={Object.entries(SERVICE_WINDOW_LABELS).map(([code, label]) => ({ value: code, label }))}
+                            placeholder="Select service"
+                            disabled={!isBranchAdmin}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {reassignError && (
+                    <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+                      {reassignError}
+                    </div>
+                  )}
+
+                  {isBranchAdmin && (
+                    <div className="rounded-xl border border-slate-200 p-4">
+                      <label className="mb-2 block text-sm font-semibold text-slate-700">Confirm with your password</label>
+                      <input
+                        type="password"
+                        value={reassignPassword}
+                        onChange={(e) => { setReassignPassword(e.target.value); if (reassignError) setReassignError(''); }}
+                        placeholder="Enter your branch admin password"
+                        className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:border-transparent focus:ring-2 focus:ring-accent"
+                      />
+                      <div className="mt-4 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={handleSaveReassignServices}
+                          disabled={reassignLoading || !!reassignError}
+                          className="rounded-lg bg-emerald-600 px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
+                        >
+                          {reassignLoading ? 'Saving...' : 'Save Assignments'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           </SectionCard>
 
