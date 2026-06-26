@@ -23,6 +23,7 @@ from typing import Iterable
 
 import requests
 from sqlalchemy import MetaData, Table, inspect, or_, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from database.models import Admin, Alert
 from utils.log_integrity import verify_record_integrity
@@ -3737,8 +3738,12 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
     # FK safety: initiated_by may reference a VM1 admin ID that doesn't exist
     # in the security DB. Fall back to None to avoid IntegrityError.
     if initiated_by is not None:
-        admin_exists = db.query(Admin).filter(Admin.id == initiated_by).first()
-        if not admin_exists:
+        try:
+            admin_exists = db.query(Admin).filter(Admin.id == initiated_by).first()
+            if not admin_exists:
+                initiated_by = None
+        except OperationalError:
+            # VM2 security DB may not have the full admins schema (e.g. missing full_name column)
             initiated_by = None
     seed_settings(db)
     migrate_portable_monitored_files(db)
