@@ -199,6 +199,12 @@ const Branches = () => {
   const [mapSearchQuery, setMapSearchQuery] = useState('');
   const [mapSearchResults, setMapSearchResults] = useState([]);
   const [selectedMapLocation, setSelectedMapLocation] = useState(null);
+
+  const [showReassignModal, setShowReassignModal] = useState(false);
+  const [reassignBranch, setReassignBranch] = useState(null);
+  const [reassignServices, setReassignServices] = useState({});
+  const [reassignError, setReassignError] = useState('');
+
   const mapContainerRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const mapMarkerRef = useRef(null);
@@ -442,6 +448,72 @@ const Branches = () => {
     } catch (error) {
       setPageError(error.response?.data?.detail || 'Unable to open this branch dashboard as Superadmin.');
     }
+  };
+
+  const handleReassignServices = (branch) => {
+    setPageError('');
+    setSuccessMessage('');
+    setReassignError('');
+    setReassignBranch(branch);
+    const services = {};
+    (branch.window_accounts || []).forEach((account) => {
+      services[account.assigned_window_number || 1] = account.service_window || 'RPT';
+    });
+    setReassignServices(services);
+    setShowReassignModal(true);
+  };
+
+  const handleReassignServiceChange = (windowNumber, service) => {
+    setReassignServices((previous) => {
+      const next = { ...previous, [windowNumber]: service };
+      const counts = {};
+      Object.entries(next).forEach(([wn, svc]) => {
+        counts[svc] = (counts[svc] || 0) + 1;
+      });
+      const dupes = Object.entries(counts).filter(([, count]) => count > 1);
+      if (dupes.length > 0) {
+        const [dupService] = dupes[0];
+        const windows = Object.entries(next)
+          .filter(([, svc]) => svc === dupService)
+          .map(([wn]) => `Window ${wn}`)
+          .join(', ');
+        const label = SERVICE_WINDOW_CHOICES.find((c) => c.key === dupService)?.label || dupService;
+        setReassignError(`${label} is already assigned to ${windows}. Each service can only be assigned to one window.`);
+      } else {
+        setReassignError('');
+      }
+      return next;
+    });
+  };
+
+  const handleSaveReassignServices = () => {
+    if (!reassignBranch) return;
+    const usedServices = new Set();
+    const windowNumbers = Object.keys(reassignServices);
+    for (const windowNumber of windowNumbers) {
+      const service = reassignServices[windowNumber];
+      if (usedServices.has(service)) {
+        const label = SERVICE_WINDOW_CHOICES.find((c) => c.key === service)?.label || service;
+        setReassignError(`${label} is already assigned to another window.`);
+        return;
+      }
+      usedServices.add(service);
+    }
+    setReassignError('');
+    setAuthModal({
+      mode: 'reassign',
+      branchId: reassignBranch.id,
+      branchName: reassignBranch.name,
+      password: '',
+    });
+    setAuthModalError('');
+  };
+
+  const closeReassignModal = () => {
+    setShowReassignModal(false);
+    setReassignBranch(null);
+    setReassignServices({});
+    setReassignError('');
   };
 
   const openLocationMapPicker = () => {
@@ -767,6 +839,21 @@ const Branches = () => {
         setSuccessMessage(successParts.join(' '));
       }
 
+      if (authModal.mode === 'reassign' && reassignBranch) {
+        const windowServices = Object.entries(reassignServices).map(([windowNumber, service]) => ({
+          assigned_window_number: Number(windowNumber),
+          service_window: service,
+        }));
+        await api.put(`/branches/${reassignBranch.id}/reassign-services`, {
+          window_services: windowServices,
+          current_admin_password: authModal.password,
+        });
+        await fetchBranches();
+        window.dispatchEvent(new Event('wards-accounts-refresh'));
+        closeReassignModal();
+        setSuccessMessage('Window services reassigned successfully. Existing staff accounts kept the same login credentials.');
+      }
+
       if (authModal.mode === 'delete' && authModal.branchId) {
         await api.delete(`/branches/${authModal.branchId}`, {
           data: {
@@ -922,6 +1009,12 @@ const Branches = () => {
                   Manage
                 </button>
               )}
+              <button
+                onClick={() => handleReassignServices(branch)}
+                className="w-full rounded-lg bg-emerald-600 py-2 font-semibold text-white transition duration-300 hover:bg-emerald-700"
+              >
+                Reassign Services
+              </button>
               <button
                 onClick={() => handleEditBranch(branch)}
                 className="w-full rounded-lg bg-accent py-2 font-semibold text-white transition duration-300 hover:bg-blue-600"
@@ -1110,7 +1203,7 @@ const Branches = () => {
                     <h4 className="text-lg font-bold text-gray-700 mb-3">Service Counters / Queue Window Staff Accounts</h4>
                     <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
                       {editingBranch
-                        ? `Reassign each queue-only branch staff account to the correct physical window and transaction type here. Saving updates the connected window assignment, branch login behavior, and live queue routing so the existing credentials continue pointing to the correct window setup.`
+                        ? `Current queue window assignments are shown below. To change the service type for each window without affecting staff passwords, use the "Reassign Services" button on the branch card.`
                         : `Service counters and queue window staff accounts are the same setup here. If you set ${getNormalizedCounterCount(formData.counters)} service counter${getNormalizedCounterCount(formData.counters) > 1 ? 's' : ''}, the system will generate ${getNormalizedCounterCount(formData.counters)} queue-only branch staff account${getNormalizedCounterCount(formData.counters) > 1 ? 's' : ''}. The system automatically generates the login email addresses, passwords, and staff names, then includes those credentials in the same branch admin email verification message. Every generated queue account uses Microsoft Authenticator MFA on first login.`}
                     </div>
                   </div>
@@ -1124,49 +1217,71 @@ const Branches = () => {
                     const hasServiceConflict = Boolean(assignmentConflicts.conflictingServiceRow);
                     return (
                       <div key={option.key} className="md:col-span-2 rounded-xl border border-slate-200 p-4">
-                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                          <div className="flex items-start gap-3">
-                            <div className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-sm font-bold text-white">
-                              {index + 1}
-                            </div>
-                            <span>
-                              <span className="block text-base font-semibold text-slate-800">Assignment {index + 1}</span>
-                              <span className="mt-1 block text-sm text-slate-500">Queue-only staff account that can be assigned to any available physical window and standard service.</span>
-                            </span>
-                          </div>
-                          <div className="grid w-full gap-4 lg:w-[32rem] lg:grid-cols-2">
-                            <div>
-                              <label className="mb-2 block text-sm font-semibold text-slate-700">Assigned Window</label>
-                              <CustomSelect value={String(selectedAssignedWindowNumber)} onChange={(value) => handleWindowAccountChange(option.key, 'assigned_window_number', Number(value))} options={getActiveWindowOptions().map((windowOption) => ({ value: String(windowOption.number), label: `Window ${windowOption.number}` }))} placeholder="Select window" hasError={hasWindowConflict} />
-                              {hasWindowConflict ? (
-                                <p className="mt-2 text-sm font-semibold text-red-600">
-                                  Window {selectedAssignedWindowNumber} is already assigned to another assignment.
+                        {editingBranch ? (
+                          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-200 text-sm font-bold text-slate-700">
+                                {index + 1}
+                              </div>
+                              <div>
+                                <p className="text-base font-semibold text-slate-800">
+                                  {windowAccounts[option.key]?.username || 'Window Account'}
                                 </p>
-                              ) : null}
+                              </div>
                             </div>
-                            <div>
-                              <label className="mb-2 block text-sm font-semibold text-slate-700">Assigned Service</label>
-                              <CustomSelect value={selectedServiceWindow} onChange={(value) => handleWindowAccountChange(option.key, 'service_window', value)} options={serviceChoices.map((choice) => ({ value: choice.key, label: choice.label }))} placeholder="Select service" hasError={hasServiceConflict} />
-                              {hasServiceConflict ? (
-                                <p className="mt-2 text-sm font-semibold text-red-600">
-                                  {selectedServiceLabel} is already assigned to another assignment.
-                                </p>
-                              ) : null}
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-800">
+                                Window {selectedAssignedWindowNumber}
+                              </span>
+                              <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
+                                {selectedServiceLabel}
+                              </span>
                             </div>
                           </div>
-                        </div>
-
-                        <div className={`mt-4 rounded-lg border px-4 py-3 text-sm ${
-                          assignmentConflicts.hasConflict
-                            ? 'border-red-200 bg-red-50 text-red-700'
-                            : 'border-dashed border-slate-300 bg-slate-50 text-slate-600'
-                        }`}>
-                          {assignmentConflicts.hasConflict ? (
-                            `Resolve the duplicate window or service selection before saving this branch setup.`
-                          ) : editingBranch
-                            ? `Saving will update this staff account to Window ${selectedAssignedWindowNumber} with ${selectedServiceLabel} routing while keeping connected branch logic in sync.`
-                            : `Login email address, temporary password, staff full name, queue-only access scope, Microsoft Authenticator MFA setup, and the configured voice announcement route for ${selectedServiceLabel} will be generated automatically.`}
-                        </div>
+                        ) : (
+                          <>
+                            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                              <div className="flex items-start gap-3">
+                                <div className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-sm font-bold text-white">
+                                  {index + 1}
+                                </div>
+                                <span>
+                                  <span className="block text-base font-semibold text-slate-800">Assignment {index + 1}</span>
+                                  <span className="mt-1 block text-sm text-slate-500">Queue-only staff account that can be assigned to any available physical window and standard service.</span>
+                                </span>
+                              </div>
+                              <div className="grid w-full gap-4 lg:w-[32rem] lg:grid-cols-2">
+                                <div>
+                                  <label className="mb-2 block text-sm font-semibold text-slate-700">Assigned Window</label>
+                                  <CustomSelect value={String(selectedAssignedWindowNumber)} onChange={(value) => handleWindowAccountChange(option.key, 'assigned_window_number', Number(value))} options={getActiveWindowOptions().map((windowOption) => ({ value: String(windowOption.number), label: `Window ${windowOption.number}` }))} placeholder="Select window" hasError={hasWindowConflict} />
+                                  {hasWindowConflict ? (
+                                    <p className="mt-2 text-sm font-semibold text-red-600">
+                                      Window {selectedAssignedWindowNumber} is already assigned to another assignment.
+                                    </p>
+                                  ) : null}
+                                </div>
+                                <div>
+                                  <label className="mb-2 block text-sm font-semibold text-slate-700">Assigned Service</label>
+                                  <CustomSelect value={selectedServiceWindow} onChange={(value) => handleWindowAccountChange(option.key, 'service_window', value)} options={serviceChoices.map((choice) => ({ value: choice.key, label: choice.label }))} placeholder="Select service" hasError={hasServiceConflict} />
+                                  {hasServiceConflict ? (
+                                    <p className="mt-2 text-sm font-semibold text-red-600">
+                                      {selectedServiceLabel} is already assigned to another assignment.
+                                    </p>
+                                  ) : null}
+                                </div>
+                              </div>
+                            </div>
+                            <div className={`mt-4 rounded-lg border px-4 py-3 text-sm ${
+                              assignmentConflicts.hasConflict
+                                ? 'border-red-200 bg-red-50 text-red-700'
+                                : 'border-dashed border-slate-300 bg-slate-50 text-slate-600'
+                            }`}>
+                              {assignmentConflicts.hasConflict
+                                ? `Resolve the duplicate window or service selection before saving this branch setup.`
+                                : `Login email address, temporary password, staff full name, queue-only access scope, Microsoft Authenticator MFA setup, and the configured voice announcement route for ${selectedServiceLabel} will be generated automatically.`}
+                            </div>
+                          </>
+                        )}
                       </div>
                     );
                   })}
@@ -1191,6 +1306,74 @@ const Branches = () => {
                 className="flex-1 bg-primary hover:bg-secondary text-white py-3 rounded-lg font-semibold transition duration-300 disabled:opacity-50"
               >
                 {loading ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showReassignModal && reassignBranch && (
+        <div className="fixed inset-0 z-[55] flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-8 shadow-2xl">
+            <h3 className="mb-2 text-2xl font-bold text-primary">
+              Reassign Window Services
+            </h3>
+            <p className="mb-6 text-sm text-gray-600">
+              Swap service types between existing queue windows for <span className="font-semibold">{reassignBranch.name}</span> without changing staff passwords or creating new accounts.
+            </p>
+            {reassignError && (
+              <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+                {reassignError}
+              </div>
+            )}
+            <div className="space-y-4">
+              {(reassignBranch.window_accounts || []).map((account, index) => (
+                <div key={account.assigned_window_number || index} className="rounded-xl border border-slate-200 p-4">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-600 text-sm font-bold text-white">
+                        {account.assigned_window_number || index + 1}
+                      </div>
+                      <div>
+                        <p className="text-base font-semibold text-slate-800">
+                          Window {account.assigned_window_number || index + 1}
+                        </p>
+                        <p className="text-sm text-slate-500">
+                          {account.username || 'Window account'}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="w-full lg:w-64">
+                      <label className="mb-1 block text-sm font-semibold text-slate-700">Service</label>
+                      <CustomSelect
+                        value={reassignServices[account.assigned_window_number || index + 1] || account.service_window || 'RPT'}
+                        onChange={(value) => handleReassignServiceChange(account.assigned_window_number || index + 1, value)}
+                        options={SERVICE_WINDOW_CHOICES.map((choice) => ({ value: choice.key, label: choice.label }))}
+                        placeholder="Select service"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {(reassignBranch.window_accounts || []).length === 0 && (
+                <p className="py-8 text-center text-gray-500">
+                  No active window accounts found for this branch.
+                </p>
+              )}
+            </div>
+            <div className="mt-6 flex gap-4">
+              <button
+                onClick={closeReassignModal}
+                className="flex-1 rounded-lg bg-gray-300 py-3 font-semibold text-gray-700 transition duration-300 hover:bg-gray-400"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveReassignServices}
+                disabled={loading}
+                className="flex-1 rounded-lg bg-emerald-600 py-3 font-semibold text-white transition duration-300 hover:bg-emerald-700 disabled:opacity-50"
+              >
+                Save Reassignments
               </button>
             </div>
           </div>
@@ -1288,11 +1471,12 @@ const Branches = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
           <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md w-full mx-4">
             <h3 className="text-2xl font-bold text-primary mb-3">
-              {authModal.mode === 'edit' ? 'Verify Branch Edit' : 'Verify Branch Deletion'}
+              {authModal.mode === 'edit' ? 'Verify Branch Edit' : authModal.mode === 'reassign' ? 'Verify Service Reassignment' : 'Verify Branch Deletion'}
             </h3>
             <p className="text-sm text-gray-600 mb-5">
-              Enter your {verifierLabelLower} password to {authModal.mode} the branch
-              {authModal.branchName ? ` "${authModal.branchName}"` : ''}.
+              {authModal.mode === 'reassign'
+                ? `Enter your ${verifierLabelLower} password to save service reassignments for the branch${authModal.branchName ? ` "${authModal.branchName}"` : ''}. Existing staff passwords and MFA will not be reset.`
+                : `Enter your ${verifierLabelLower} password to ${authModal.mode} the branch${authModal.branchName ? ` "${authModal.branchName}"` : ''}.`}
             </p>
             {authModalError && (
               <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">

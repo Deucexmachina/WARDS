@@ -102,6 +102,21 @@ const Accounts = () => {
   const [pendingMfaReset, setPendingMfaReset] = useState(null);
   const [accountPages, setAccountPages] = useState({});
 
+  const [showReassignModal, setShowReassignModal] = useState(false);
+  const [reassignBranchData, setReassignBranchData] = useState(null);
+  const [reassignServices, setReassignServices] = useState({});
+  const [reassignError, setReassignError] = useState('');
+  const [reassignLoading, setReassignLoading] = useState(false);
+
+  const STANDARD_SERVICE_OPTIONS = [
+    { value: 'RPT', label: 'RPT' },
+    { value: 'BUSINESS', label: 'BT' },
+    { value: 'MISC', label: 'MISC' },
+    { value: 'CTC', label: 'CTC' },
+    { value: 'PTR', label: 'PTR' },
+    { value: 'MARKET', label: 'MARKET' },
+  ];
+
   const managerEyebrow = isBranchPortal
     ? 'Branch Admin Dashboard'
     : currentManager?.internal_role === 'superadmin' || currentManager?.role === 'superadmin'
@@ -492,6 +507,82 @@ const Accounts = () => {
     });
   };
 
+  const handleReassignServices = (branchName, rows) => {
+    setError('');
+    setSuccessMessage('');
+    setReassignError('');
+    const staffAccounts = rows.filter((account) => account.role === 'branch_staff' && account.status === 'Active');
+    const branchId = staffAccounts[0]?.branch_id;
+    const services = {};
+    staffAccounts.forEach((account) => {
+      services[account.assigned_window_number || 1] = (account.service_window || 'RPT').toUpperCase();
+    });
+    setReassignBranchData({
+      id: branchId,
+      name: branchName,
+      window_accounts: staffAccounts.map((account) => ({
+        id: account.id,
+        username: account.username,
+        assigned_window_number: account.assigned_window_number || 1,
+        service_window: (account.service_window || 'RPT').toUpperCase(),
+      })),
+    });
+    setReassignServices(services);
+    setShowReassignModal(true);
+  };
+
+  const handleReassignServiceChange = (windowNumber, service) => {
+    setReassignServices((previous) => {
+      const next = { ...previous, [windowNumber]: service };
+      const counts = {};
+      Object.entries(next).forEach(([wn, svc]) => {
+        counts[svc] = (counts[svc] || 0) + 1;
+      });
+      const dupes = Object.entries(counts).filter(([, count]) => count > 1);
+      if (dupes.length > 0) {
+        const [dupService] = dupes[0];
+        const windows = Object.entries(next)
+          .filter(([, svc]) => svc === dupService)
+          .map(([wn]) => `Window ${wn}`)
+          .join(', ');
+        const label = STANDARD_SERVICE_OPTIONS.find((c) => c.value === dupService)?.label || dupService;
+        setReassignError(`${label} is already assigned to ${windows}. Each service can only be assigned to one window.`);
+      } else {
+        setReassignError('');
+      }
+      return next;
+    });
+  };
+
+  const handleSaveReassignServices = async () => {
+    if (!reassignBranchData?.id) return;
+    const usedServices = new Set();
+    const windowNumbers = Object.keys(reassignServices);
+    for (const windowNumber of windowNumbers) {
+      const service = reassignServices[windowNumber];
+      if (usedServices.has(service)) {
+        const label = STANDARD_SERVICE_OPTIONS.find((c) => c.value === service)?.label || service;
+        setReassignError(`${label} is already assigned to another window.`);
+        return;
+      }
+      usedServices.add(service);
+    }
+    setReassignError('');
+    setAuthModal({
+      mode: 'reassign',
+      account: { id: reassignBranchData.id, name: reassignBranchData.name },
+      password: '',
+    });
+    setAuthPasswordError('');
+  };
+
+  const closeReassignModal = () => {
+    setShowReassignModal(false);
+    setReassignBranchData(null);
+    setReassignServices({});
+    setReassignError('');
+  };
+
   const handleResetMfa = async (account) => {
     setError('');
     setSuccessMessage('');
@@ -606,6 +697,21 @@ const Accounts = () => {
           message: 'The selected account has been successfully deleted.',
           buttonLabel: 'OK',
         });
+        window.dispatchEvent(new Event('wards-accounts-refresh'));
+      }
+
+      if (authModal.mode === 'reassign' && reassignBranchData) {
+        const windowServices = Object.entries(reassignServices).map(([windowNumber, service]) => ({
+          assigned_window_number: Number(windowNumber),
+          service_window: service,
+        }));
+        await api.put(`/branches/${reassignBranchData.id}/reassign-services`, {
+          window_services: windowServices,
+          current_admin_password: authModal.password,
+        });
+        await fetchAccounts(pagination.page);
+        closeReassignModal();
+        setSuccessMessage('Window services reassigned successfully. Existing staff accounts kept the same login credentials.');
         window.dispatchEvent(new Event('wards-accounts-refresh'));
       }
 
@@ -843,13 +949,23 @@ const Accounts = () => {
                       {rows.length} branch account{rows.length === 1 ? '' : 's'} in this branch
                     </p>
                   </div>
-                  <div className="flex flex-wrap gap-2 text-xs font-semibold">
-                    <span className="rounded-full bg-blue-100 px-3 py-1 text-blue-800">
-                      {branchAdminCount} Branch Admin{branchAdminCount === 1 ? '' : 's'}
-                    </span>
-                    <span className="rounded-full bg-sky-100 px-3 py-1 text-sky-800">
-                      {branchStaffCount} Branch Staff
-                    </span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex flex-wrap gap-2 text-xs font-semibold">
+                      <span className="rounded-full bg-blue-100 px-3 py-1 text-blue-800">
+                        {branchAdminCount} Branch Admin{branchAdminCount === 1 ? '' : 's'}
+                      </span>
+                      <span className="rounded-full bg-sky-100 px-3 py-1 text-sky-800">
+                        {branchStaffCount} Branch Staff
+                      </span>
+                    </div>
+                    {!isBranchPortal && branchStaffCount > 0 && (
+                      <button
+                        onClick={() => handleReassignServices(branchName, rows)}
+                        className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700"
+                      >
+                        Reassign Services
+                      </button>
+                    )}
                   </div>
                 </div>
                 {renderAccountRows(rows, 'Username', `branch-${branchName}`)}
@@ -1184,6 +1300,74 @@ const Accounts = () => {
         </div>
       )}
 
+      {showReassignModal && reassignBranchData && (
+        <div className="fixed inset-0 z-[75] flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-8 shadow-2xl">
+            <h3 className="mb-2 text-2xl font-bold text-primary">
+              Reassign Window Services
+            </h3>
+            <p className="mb-6 text-sm text-gray-600">
+              Swap service types between existing queue windows for <span className="font-semibold">{reassignBranchData.name}</span> without changing staff passwords or creating new accounts.
+            </p>
+            {reassignError && (
+              <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+                {reassignError}
+              </div>
+            )}
+            <div className="space-y-4">
+              {reassignBranchData.window_accounts.map((account, index) => (
+                <div key={account.assigned_window_number || index} className="rounded-xl border border-slate-200 p-4">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-600 text-sm font-bold text-white">
+                        {account.assigned_window_number || index + 1}
+                      </div>
+                      <div>
+                        <p className="text-base font-semibold text-slate-800">
+                          Window {account.assigned_window_number || index + 1}
+                        </p>
+                        <p className="text-sm text-slate-500">
+                          {account.username || 'Window account'}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="w-full lg:w-64">
+                      <label className="mb-1 block text-sm font-semibold text-slate-700">Service</label>
+                      <CustomSelect
+                        value={reassignServices[account.assigned_window_number || index + 1] || account.service_window || 'RPT'}
+                        onChange={(value) => handleReassignServiceChange(account.assigned_window_number || index + 1, value)}
+                        options={STANDARD_SERVICE_OPTIONS.map((choice) => ({ value: choice.value, label: choice.label }))}
+                        placeholder="Select service"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {reassignBranchData.window_accounts.length === 0 && (
+                <p className="py-8 text-center text-gray-500">
+                  No active window accounts found for this branch.
+                </p>
+              )}
+            </div>
+            <div className="mt-6 flex gap-4">
+              <button
+                onClick={closeReassignModal}
+                className="flex-1 rounded-lg bg-gray-300 py-3 font-semibold text-gray-700 transition duration-300 hover:bg-gray-400"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveReassignServices}
+                disabled={reassignLoading}
+                className="flex-1 rounded-lg bg-emerald-600 py-3 font-semibold text-white transition duration-300 hover:bg-emerald-700 disabled:opacity-50"
+              >
+                Save Reassignments
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {authModal.mode && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/60 px-4 py-6">
           <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-[28px] bg-white shadow-[0_30px_80px_rgba(15,23,42,0.28)]">
@@ -1191,7 +1375,7 @@ const Accounts = () => {
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Protected Action</p>
                 <h3 className="mt-2 text-2xl font-bold text-slate-900">
-                  {authModal.mode === 'edit' ? 'Verify Account Update' : authModal.mode === 'deactivate' ? 'Verify Account Deactivation' : authModal.mode === 'activate' ? 'Verify Account Activation' : 'Verify Account Deletion'}
+                  {authModal.mode === 'edit' ? 'Verify Account Update' : authModal.mode === 'deactivate' ? 'Verify Account Deactivation' : authModal.mode === 'activate' ? 'Verify Account Activation' : authModal.mode === 'reassign' ? 'Verify Service Reassignment' : 'Verify Account Deletion'}
                 </h3>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
                   Review the change, then confirm your identity to proceed.
@@ -1267,7 +1451,7 @@ const Accounts = () => {
                   disabled={loading}
                   className="w-full rounded-2xl bg-red-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                 >
-                  {loading ? 'Verifying...' : `Confirm ${authModal.mode === 'edit' ? 'Update' : authModal.mode === 'deactivate' ? 'Deactivation' : authModal.mode === 'activate' ? 'Activation' : 'Deletion'}`}
+                  {loading ? 'Verifying...' : `Confirm ${authModal.mode === 'edit' ? 'Update' : authModal.mode === 'deactivate' ? 'Deactivation' : authModal.mode === 'activate' ? 'Activation' : authModal.mode === 'reassign' ? 'Reassignment' : 'Deletion'}`}
                 </button>
               </div>
             </div>
