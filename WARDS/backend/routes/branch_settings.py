@@ -216,7 +216,8 @@ async def get_branch_window_accounts(
     current_staff: BranchStaff = Depends(require_branch_admin()),
     db: Session = Depends(get_db),
 ):
-    """List active queue window accounts for the current branch admin's branch."""
+    """List active queue window accounts for the current branch admin's branch.
+    Only returns windows that are within the branch's configured counter count."""
     branch = get_current_staff_branch(current_staff, db)
     accounts = (
         db.query(BranchStaff)
@@ -225,21 +226,25 @@ async def get_branch_window_accounts(
             BranchStaff.role == "branch_staff",
             BranchStaff.account_scope == "queue_window",
             BranchStaff.status == "Active",
+            BranchStaff.assigned_window_number <= branch.counters,
         )
         .order_by(BranchStaff.assigned_window_number.asc(), BranchStaff.id.asc())
         .all()
     )
-    return [
-        {
-            "id": a.id,
-            "username": a.username,
-            "full_name": a.full_name,
-            "service_window": a.service_window,
-            "service_window_label": _get_window_display_label(a),
-            "assigned_window_number": a.assigned_window_number,
-        }
-        for a in accounts
-    ]
+    return {
+        "counters": branch.counters,
+        "accounts": [
+            {
+                "id": a.id,
+                "username": a.username,
+                "full_name": a.full_name,
+                "service_window": a.service_window,
+                "service_window_label": _get_window_display_label(a),
+                "assigned_window_number": a.assigned_window_number,
+            }
+            for a in accounts
+        ],
+    }
 
 
 @router.put("/window-services")
@@ -259,6 +264,9 @@ async def reassign_branch_window_services(
         detail="Incorrect password. Please try again.",
     )
 
+    if branch.counters < 1:
+        raise HTTPException(status_code=400, detail="This branch has no configured queue windows.")
+
     existing_accounts = (
         db.query(BranchStaff)
         .filter(
@@ -266,6 +274,7 @@ async def reassign_branch_window_services(
             BranchStaff.role == "branch_staff",
             BranchStaff.account_scope == "queue_window",
             BranchStaff.status == "Active",
+            BranchStaff.assigned_window_number <= branch.counters,
         )
         .all()
     )
@@ -275,6 +284,9 @@ async def reassign_branch_window_services(
     updated_accounts = []
 
     for mapping in payload.window_services:
+        if mapping.assigned_window_number < 1 or mapping.assigned_window_number > branch.counters:
+            raise HTTPException(status_code=400, detail=f"Window {mapping.assigned_window_number} is not available for this branch. Only windows 1 through {branch.counters} can be reassigned.")
+
         service_window = _normalize_service_window(mapping.service_window)
         window_label = get_default_window_label(service_window)
         if service_window in used_services:
@@ -322,10 +334,15 @@ async def reassign_branch_window_services(
             description="Service names available for public queueing and branch-facing service listings.",
         ))
 
+    branch_name = get_decrypted_or_raw(branch, "name") or branch.name
+    assignments_summary = ", ".join(
+        f"Window {a['assigned_window_number']}={a['window_label']}"
+        for a in updated_accounts
+    )
     db.add(ActivityLog(
         action="Branch Window Services Reassigned",
         user=current_staff.username,
-        details=f"Reassigned window services for {get_decrypted_or_raw(branch, 'name') or branch.name} via branch admin portal.",
+        details=f"branch_name: {branch_name} | role: branch_admin | assignments: {assignments_summary}",
         type="branch_admin",
     ))
     db.commit()

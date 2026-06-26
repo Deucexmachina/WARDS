@@ -331,7 +331,8 @@ const BranchSettings = () => {
     setPublishedSystemSettings(normalizedSystemSettings);
     setHistoryState(normalizeHistoryState(historyResponse.data));
 
-    const accounts = windowAccountsResponse.data || [];
+    const windowData = windowAccountsResponse.data || {};
+    const accounts = windowData.accounts || [];
     setWindowAccounts(accounts);
     const services = {};
     accounts.forEach((account) => {

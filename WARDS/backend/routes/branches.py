@@ -902,10 +902,15 @@ async def reassign_window_services(
         ))
 
     apply_branch_security_fields(db_branch)
+    branch_name = get_decrypted_or_raw(db_branch, "name") or db_branch.name
+    assignments_summary = ", ".join(
+        f"Window {a['assigned_window_number']}={a['window_label']}"
+        for a in updated_accounts
+    )
     db.add(ActivityLog(
         action="Branch Window Services Reassigned",
         user=current_user.username,
-        details=f"Reassigned window services for {get_decrypted_or_raw(db_branch, 'name') or db_branch.name} without creating new accounts.",
+        details=f"branch_name: {branch_name} | role: admin | assignments: {assignments_summary}",
         type="admin",
     ))
     db.commit()
