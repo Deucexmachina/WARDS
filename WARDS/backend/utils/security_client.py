@@ -2,11 +2,18 @@
 # This module proxies security engine calls to a remote Security VM when
 # SECURITY_API_URL is configured, otherwise falls back to local imports.
 import os
-import asyncio
-import httpx
 import time
+import threading
 from datetime import datetime
 from typing import Any
+
+import requests
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# Shared session for connection pooling to VM2
+_session = requests.Session()
+_session.headers.update({"Connection": "keep-alive"})
 
 SECURITY_API_URL = os.getenv("SECURITY_API_URL", "").rstrip("/")
 SECURITY_API_KEY = os.getenv("SECURITY_API_KEY", "")
@@ -14,6 +21,7 @@ TIMEOUT = 8.0
 
 # In-memory cache for VM2 read responses to avoid repeated slow calls
 _cache: dict[str, tuple[Any, float]] = {}
+_cache_lock = threading.Lock()
 _CACHE_TTL: dict[str, int] = {
     "dashboard_payload": 10,
     "list_monitored_files": 30,
@@ -29,17 +37,20 @@ _CACHE_TTL: dict[str, int] = {
 
 def _cached_fetch(cache_key: str, ttl_seconds: int, fetch_fn, default=None):
     now = time.time()
-    if cache_key in _cache:
-        value, expiry = _cache[cache_key]
-        if now < expiry:
-            return value
+    with _cache_lock:
+        if cache_key in _cache:
+            value, expiry = _cache[cache_key]
+            if now < expiry:
+                return value
     try:
         value = fetch_fn()
-        _cache[cache_key] = (value, now + ttl_seconds)
+        with _cache_lock:
+            _cache[cache_key] = (value, now + ttl_seconds)
         return value
     except Exception:
-        if cache_key in _cache:
-            return _cache[cache_key][0]
+        with _cache_lock:
+            if cache_key in _cache:
+                return _cache[cache_key][0]
         return default
 
 
@@ -47,48 +58,32 @@ def _headers() -> dict[str, str]:
     return {"X-API-Key": SECURITY_API_KEY, "Content-Type": "application/json"}
 
 
-async def _get(path: str, params: dict | None = None) -> Any:
+def _sync_post(path: str, json_data: dict | None = None, timeout: float | None = None) -> Any:
     if not SECURITY_API_URL:
         raise RuntimeError("SECURITY_API_URL is not configured")
-    async with httpx.AsyncClient(timeout=TIMEOUT, verify=False) as client:
-        r = await client.get(f"{SECURITY_API_URL}{path}", headers=_headers(), params=params)
-        r.raise_for_status()
-        return r.json()
+    url = f"{SECURITY_API_URL}{path}"
+    r = _session.post(url, headers=_headers(), json=json_data, timeout=timeout or TIMEOUT, verify=False)
+    if r.status_code == 409:
+        from SECURITY.security_engine import MissingFileConfirmationRequired
+        try:
+            body = r.json()
+            detail = body.get("detail") if isinstance(body, dict) else body
+            if not isinstance(detail, dict):
+                detail = {"message": str(detail)}
+        except Exception:
+            detail = {"message": r.text or "Confirmation required"}
+        raise MissingFileConfirmationRequired(detail)
+    r.raise_for_status()
+    return r.json()
 
 
-async def _post(path: str, json_data: dict | None = None) -> Any:
+def _sync_get(path: str, params: dict | None = None, timeout: float | None = None) -> Any:
     if not SECURITY_API_URL:
         raise RuntimeError("SECURITY_API_URL is not configured")
-    async with httpx.AsyncClient(timeout=TIMEOUT, verify=False) as client:
-        r = await client.post(f"{SECURITY_API_URL}{path}", headers=_headers(), json=json_data)
-        if r.status_code == 409:
-            from SECURITY.security_engine import MissingFileConfirmationRequired
-            try:
-                body = r.json()
-                detail = body.get("detail") if isinstance(body, dict) else body
-                if not isinstance(detail, dict):
-                    detail = {"message": str(detail)}
-            except Exception:
-                detail = {"message": r.text or "Confirmation required"}
-            raise MissingFileConfirmationRequired(detail)
-        r.raise_for_status()
-        return r.json()
-
-
-def _sync_post(path: str, json_data: dict | None = None) -> Any:
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(_post(path, json_data))
-    finally:
-        loop.close()
-
-
-def _sync_get(path: str, params: dict | None = None) -> Any:
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(_get(path, params))
-    finally:
-        loop.close()
+    url = f"{SECURITY_API_URL}{path}"
+    r = _session.get(url, headers=_headers(), params=params, timeout=timeout or TIMEOUT, verify=False)
+    r.raise_for_status()
+    return r.json()
 
 
 # ---------------------------------------------------------------------------
@@ -164,34 +159,19 @@ def source_ids_for_log_type(db, log_type: str) -> list[int]:
 
 
 def source_ids_batch(db, log_types: list[str]) -> dict[str, list[int]]:
-    """Fetch source IDs for multiple log types in parallel from VM2."""
+    """Fetch source IDs for multiple log types from VM2."""
     if not SECURITY_API_URL:
         return {lt: source_ids_for_log_type(db, lt) for lt in log_types}
 
-    async def _fetch_all():
-        async with httpx.AsyncClient(timeout=TIMEOUT, verify=False) as client:
-            tasks = [
-                client.get(f"{SECURITY_API_URL}/v1/source-ids/{lt}", headers=_headers())
-                for lt in log_types
-            ]
-            responses = await asyncio.gather(*tasks, return_exceptions=True)
-            results: dict[str, list[int]] = {}
-            for lt, resp in zip(log_types, responses):
-                if isinstance(resp, Exception):
-                    results[lt] = []
-                else:
-                    try:
-                        resp.raise_for_status()
-                        results[lt] = resp.json().get("ids", [])
-                    except Exception:
-                        results[lt] = []
-            return results
-
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(_fetch_all())
-    finally:
-        loop.close()
+    results: dict[str, list[int]] = {}
+    for lt in log_types:
+        try:
+            r = _session.get(f"{SECURITY_API_URL}/v1/source-ids/{lt}", headers=_headers(), timeout=TIMEOUT, verify=False)
+            r.raise_for_status()
+            results[lt] = r.json().get("ids", [])
+        except Exception:
+            results[lt] = []
+    return results
 
 
 def query_detections(db, keyword=None, date_from=None, date_to=None, target=None, severity=None, limit=200, sort="newest", classification=None):
@@ -323,35 +303,35 @@ def full_system_recovery(db, admin_id):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import full_system_recovery as _local
         return _local(db, admin_id)
-    return _sync_post("/v1/recover/full", {"admin_id": admin_id})
+    return _sync_post("/v1/recover/full", {"admin_id": admin_id}, timeout=30.0)
 
 
 def create_database_backup(db, admin_id):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import create_database_backup as _local
         return _local(db, admin_id)
-    return _sync_post("/v1/backup/database", {"admin_id": admin_id})
+    return _sync_post("/v1/backup/database", {"admin_id": admin_id}, timeout=30.0)
 
 
 def create_files_backup(db, admin_id):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import create_files_backup as _local
         return _local(db, admin_id)
-    return _sync_post("/v1/backup/files", {"admin_id": admin_id})
+    return _sync_post("/v1/backup/files", {"admin_id": admin_id}, timeout=30.0)
 
 
 def create_ml_backup(db, admin_id):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import create_ml_backup as _local
         return _local(db, admin_id)
-    return _sync_post("/v1/backup/ml", {"admin_id": admin_id})
+    return _sync_post("/v1/backup/ml", {"admin_id": admin_id}, timeout=30.0)
 
 
 def create_full_system_backup(db, admin_id):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import create_full_system_backup as _local
         return _local(db, admin_id)
-    return _sync_post("/v1/backup/full", {"admin_id": admin_id})
+    return _sync_post("/v1/backup/full", {"admin_id": admin_id}, timeout=30.0)
 
 
 def recover_database(db, admin_id):
@@ -396,7 +376,7 @@ def add_monitored_folder(db, path, initiated_by=None, vm_target=None):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import add_monitored_folder as _local
         return _local(db, path, initiated_by=initiated_by, vm_target=vm_target)
-    return _sync_post("/v1/folders", {"path": path, "initiated_by": initiated_by, "vm_target": vm_target})
+    return _sync_post("/v1/folders", {"path": path, "initiated_by": initiated_by, "vm_target": vm_target}, timeout=30.0)
 
 
 def remove_monitored_folder(db, path, initiated_by=None, vm_target=None):
@@ -404,9 +384,9 @@ def remove_monitored_folder(db, path, initiated_by=None, vm_target=None):
         from SECURITY.security_engine import remove_monitored_folder as _local
         return _local(db, path, initiated_by=initiated_by, vm_target=vm_target)
     try:
-        return _sync_post("/v1/folders/remove", {"path": path, "initiated_by": initiated_by, "vm_target": vm_target})
-    except httpx.HTTPStatusError as exc:
-        if exc.response.status_code == 404:
+        return _sync_post("/v1/folders/remove", {"path": path, "initiated_by": initiated_by, "vm_target": vm_target}, timeout=30.0)
+    except requests.HTTPError as exc:
+        if exc.response is not None and exc.response.status_code == 404:
             # Security API endpoint may be missing on older deployments; fall back to local
             from SECURITY.security_engine import remove_monitored_folder as _local
             return _local(db, path, initiated_by=initiated_by, vm_target=vm_target)
@@ -651,21 +631,15 @@ def fetch_system_alerts(db, limit: int = 50) -> list[dict]:
             for alert in alerts
         ]
     try:
-        import asyncio
-        async def _short_get():
-            async with httpx.AsyncClient(timeout=3.0, verify=False) as client:
-                r = await client.get(
-                    f"{SECURITY_API_URL}/v1/system-alerts",
-                    headers=_headers(),
-                    params={"limit": limit},
-                )
-                r.raise_for_status()
-                return r.json()
-        loop = asyncio.new_event_loop()
-        try:
-            return loop.run_until_complete(_short_get()).get("alerts", [])
-        finally:
-            loop.close()
+        r = _session.get(
+            f"{SECURITY_API_URL}/v1/system-alerts",
+            headers=_headers(),
+            params={"limit": limit},
+            timeout=3.0,
+            verify=False,
+        )
+        r.raise_for_status()
+        return r.json().get("alerts", [])
     except Exception:
         return []
 

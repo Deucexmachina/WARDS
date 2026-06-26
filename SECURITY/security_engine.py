@@ -23,6 +23,7 @@ from typing import Iterable
 
 import requests
 from sqlalchemy import MetaData, Table, inspect, or_, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from database.models import Admin, Alert
 from utils.log_integrity import verify_record_integrity
@@ -3737,8 +3738,12 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
     # FK safety: initiated_by may reference a VM1 admin ID that doesn't exist
     # in the security DB. Fall back to None to avoid IntegrityError.
     if initiated_by is not None:
-        admin_exists = db.query(Admin).filter(Admin.id == initiated_by).first()
-        if not admin_exists:
+        try:
+            admin_exists = db.query(Admin).filter(Admin.id == initiated_by).first()
+            if not admin_exists:
+                initiated_by = None
+        except OperationalError:
+            # VM2 security DB may not have the full admins schema (e.g. missing full_name column)
             initiated_by = None
     seed_settings(db)
     migrate_portable_monitored_files(db)
@@ -5482,16 +5487,12 @@ def remove_monitored_folder(db: Session, folder_path: str, initiated_by: int | N
     if not entries and not removed_from_vm1:
         raise ValueError("Folder is not currently monitored.")
 
-    removed = 0
-    for entry in entries:
-        # Remove related detection events
-        db.query(SecurityDetectionEvent).filter(SecurityDetectionEvent.file_id == entry.id).delete(synchronize_session=False)
-        # Remove related recovery events
-        db.query(SecurityRecoveryEvent).filter(SecurityRecoveryEvent.file_id == entry.id).delete(synchronize_session=False)
-        # Remove the monitored file entry itself
-        db.delete(entry)
-        removed += 1
-
+    removed = len(entries)
+    entry_ids = [entry.id for entry in entries]
+    if entry_ids:
+        db.query(SecurityDetectionEvent).filter(SecurityDetectionEvent.file_id.in_(entry_ids)).delete(synchronize_session=False)
+        db.query(SecurityRecoveryEvent).filter(SecurityRecoveryEvent.file_id.in_(entry_ids)).delete(synchronize_session=False)
+        db.query(SecurityMonitoredFile).filter(SecurityMonitoredFile.id.in_(entry_ids)).delete(synchronize_session=False)
     db.commit()
 
     # Clean up VM1 snapshot files for removed folders so they don't reappear in backups

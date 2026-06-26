@@ -7,6 +7,8 @@ import logging
 import os
 import sys
 import threading
+
+logger = logging.getLogger(__name__)
 import time
 from pathlib import Path
 
