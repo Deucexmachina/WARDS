@@ -1240,10 +1240,10 @@ async def upsert_tax_assessment(
     record.assessment_status = assessment_status
     record.verification_status = verification_status
     record.taxpayer_name = payload.taxpayer_name.strip()
-    record.taxpayer_email = payload.taxpayer_email or citizen_user.email
+    record.taxpayer_email = payload.taxpayer_email if payload.taxpayer_email is not None else citizen_user.email
     record.taxpayer_type = taxpayer_type
-    record.mobile_number = payload.mobile_number or citizen_user.contact_number
-    record.address = payload.address or citizen_user.address
+    record.mobile_number = payload.mobile_number if payload.mobile_number is not None else citizen_user.contact_number
+    record.address = payload.address if payload.address is not None else citizen_user.address
     record.tax_year = (payload.tax_year or "").strip() or None
     record.remarks = (payload.remarks or "").strip() or None
     record.rejection_reason = (payload.rejection_reason or "").strip() or None

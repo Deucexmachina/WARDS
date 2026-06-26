@@ -135,6 +135,8 @@ const resolvePreviewType = (mimeType, fileName) => {
   return 'unsupported';
 };
 
+const IDENTIFIER_PATTERN = /^[A-Z0-9-]{6,40}$/;
+
 const getAssessmentValidationErrors = (form) => {
   const errors = {};
   const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -154,23 +156,28 @@ const getAssessmentValidationErrors = (form) => {
     }
   }
 
-  if (form.tax_type === 'RPT') {
+  if (!form.tax_type) {
+    errors.tax_type = 'Tax type is required.';
+  } else if (form.tax_type === 'RPT') {
     if (!String(form.tdn || '').trim()) errors.tdn = 'TDN is required.';
+    else if (!IDENTIFIER_PATTERN.test(String(form.tdn).trim().toUpperCase())) errors.tdn = 'TDN must be 6–40 uppercase letters, numbers, or hyphens.';
     if (!String(form.property_type || '').trim()) errors.property_type = 'Property Type is required.';
     if (!String(form.property_address || '').trim()) errors.property_address = 'Property Address is required.';
     if (Number(form.fair_market_value || 0) <= 0) errors.fair_market_value = 'Fair Market Value must be greater than 0.';
     if (Number(form.assessment_level || 0) <= 0 || Number(form.assessment_level || 0) > 1) errors.assessment_level = 'Assessment Level must be between 0.01 and 1.';
     if (Number(form.discount_rate || 0) < 0 || Number(form.discount_rate || 0) > 1) errors.discount_rate = 'Discount Rate must be between 0 and 1.';
-  }
-
-  if (form.tax_type === 'BT') {
+  } else if (form.tax_type === 'BT') {
     if (form.taxpayer_type !== 'Business Owner') errors.taxpayer_type = 'Business Tax assessments require Business Owner.';
     if (!String(form.mayor_permit_number || '').trim()) errors.mayor_permit_number = "Mayor's Permit Number is required.";
+    else if (!IDENTIFIER_PATTERN.test(String(form.mayor_permit_number).trim().toUpperCase())) errors.mayor_permit_number = "Permit number must be 6–40 uppercase letters, numbers, or hyphens.";
     if (!String(form.sec_dti_cda_number || '').trim()) errors.sec_dti_cda_number = 'SEC/DTI/CDA Number is required.';
+    else if (!IDENTIFIER_PATTERN.test(String(form.sec_dti_cda_number).trim().toUpperCase())) errors.sec_dti_cda_number = 'Registration number must be 6–40 uppercase letters, numbers, or hyphens.';
     if (!String(form.business_name || '').trim()) errors.business_name = 'Business Name is required.';
     if (!String(form.business_type || '').trim()) errors.business_type = 'Business Type is required.';
     if (Number(form.annual_gross_sales || 0) <= 0) errors.annual_gross_sales = 'Annual Gross Sales must be greater than 0.';
     if (Number(form.business_tax_rate || 0) <= 0 || Number(form.business_tax_rate || 0) > 1) errors.business_tax_rate = 'Business Tax Rate must be between 0.0001 and 1.';
+  } else {
+    errors.tax_type = 'Unsupported tax type.';
   }
 
   return errors;
@@ -564,7 +571,19 @@ const TaxAssessment = () => {
       citizen_user_id: assessment.citizen_user_id || '',
       submission_id: assessment.submission_id || '',
       branch_id: assessment.branch_id || '',
+      taxpayer_email: assessment.taxpayer_email || '',
       mobile_number: normalizeMobileNumber(assessment.mobile_number),
+      address: assessment.address || '',
+      tdn: assessment.tdn || '',
+      property_type: assessment.property_type || '',
+      property_address: assessment.property_address || '',
+      mayor_permit_number: assessment.mayor_permit_number || '',
+      sec_dti_cda_number: assessment.sec_dti_cda_number || '',
+      business_name: assessment.business_name || '',
+      business_type: assessment.business_type || '',
+      tax_year: assessment.tax_year || '',
+      remarks: assessment.remarks || '',
+      rejection_reason: assessment.rejection_reason || '',
     });
     setMessage('');
     setError('');
@@ -617,7 +636,16 @@ const TaxAssessment = () => {
       }));
       await loadPageData();
     } catch (saveError) {
-      setError(saveError.response?.data?.detail || 'Failed to save tax assessment.');
+      const errorDetail = saveError.response?.data?.detail;
+      let errorMessage = 'Failed to save tax assessment.';
+      if (Array.isArray(errorDetail)) {
+        errorMessage = errorDetail.map((item) => item.msg || item.message || JSON.stringify(item)).join(' ');
+      } else if (typeof errorDetail === 'string') {
+        errorMessage = errorDetail;
+      } else if (errorDetail && typeof errorDetail === 'object') {
+        errorMessage = errorDetail.message || errorDetail.error || JSON.stringify(errorDetail);
+      }
+      setError(errorMessage);
     } finally {
       setSavingAssessment(false);
     }
