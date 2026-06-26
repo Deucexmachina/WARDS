@@ -337,9 +337,24 @@ const AccountManagement = () => {
 
   const handleIdentifierChange = (event) => {
     const { name, value, files } = event.target;
+    const file = name === 'supporting_file' ? files?.[0] || null : null;
+    if (file && name === 'supporting_file') {
+      const filename = file.name || '';
+      const lastDot = filename.lastIndexOf('.');
+      const beforeLastExt = lastDot > 0 ? filename.slice(0, lastDot) : filename;
+      const dangerousInner = ['.php', '.exe', '.js', '.sh', '.bat', '.cmd', '.vbs', '.jar', '.dll', '.py', '.rb', '.pl', '.scr', '.com', '.hta', '.wsf', '.ps1', '.reg', '.msi'];
+      const hasDangerousInner = dangerousInner.some((ext) => beforeLastExt.toLowerCase().endsWith(ext));
+      if (hasDangerousInner) {
+        setIdentifierErrors((current) => ({ ...current, supporting_file: `Invalid filename "${filename}". Suspicious embedded extension detected. Rename the file to a single valid extension and re-upload.` }));
+        setIdentifierForm((current) => ({ ...current, supporting_file: null }));
+        setMessage('');
+        setError('');
+        return;
+      }
+    }
     setIdentifierForm((current) => ({
       ...current,
-      [name]: name === 'supporting_file' ? files?.[0] || null : value,
+      [name]: name === 'supporting_file' ? file : value,
       taxpayer_type: name === 'submission_type' && value === 'RPT' ? profile.taxpayer_type : current.taxpayer_type,
     }));
     setIdentifierErrors((current) => ({ ...current, [name]: '' }));

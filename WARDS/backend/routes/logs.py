@@ -140,6 +140,8 @@ async def get_activity_logs(
     def _resolve_role(user_identifier: str) -> str | None:
         if not user_identifier:
             return None
+        if user_identifier.lower() == "system":
+            return "system"
         admin = db.query(Admin).filter(Admin.username == user_identifier).first()
         if admin:
             return admin.role
@@ -147,6 +149,9 @@ async def get_activity_logs(
         if staff:
             return staff.role
         if "@" in user_identifier:
+            citizen = db.query(CitizenUser).filter(CitizenUser.email == user_identifier).first()
+            if citizen and citizen.role:
+                return citizen.role
             return "citizen"
         return None
 
@@ -156,11 +161,19 @@ async def get_activity_logs(
         # Try standard ip: prefix first
         match = re.search(r"ip\s*:\s*([^|,;\s]+)", details, flags=re.IGNORECASE)
         if match:
-            return match.group(1).strip()
-        # Fallback: look for IP address patterns in the text
+            candidate = match.group(1).strip()
+            if _is_ip_like(candidate):
+                return candidate
+        # Fallback: look for explicit IP labels
         match = re.search(r"(?:IP|client ip|remote ip)\s*[:=]\s*([^|,;\s]+)", details, flags=re.IGNORECASE)
         if match:
-            return match.group(1).strip()
+            candidate = match.group(1).strip()
+            if _is_ip_like(candidate):
+                return candidate
+        # Broad fallback: find any IPv4-like pattern in the text
+        match = re.search(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", details)
+        if match:
+            return match.group(0)
         return None
 
     items = [
@@ -188,3 +201,10 @@ async def get_activity_logs(
         "total_pages": total_pages,
         "earliest_record_date": earliest_record_date,
     }
+
+
+def _is_ip_like(value: str) -> bool:
+    """Quick heuristic to check if a string looks like an IP address."""
+    if not value or value.lower() in {"unknown", "none", "not recorded", "n/a"}:
+        return False
+    return bool(re.match(r"^(?:\d{1,3}\.){3}\d{1,3}$", value))

@@ -135,6 +135,18 @@ def validate_upload_file(
     
     extension = Path(filename).suffix.lower()
     
+    # Reject double-extension attack patterns like "sample.php.png"
+    stem = Path(filename).stem
+    if "." in stem:
+        inner_ext = Path(stem).suffix.lower()
+        dangerous_inner = {".php", ".exe", ".js", ".sh", ".bat", ".cmd", ".vbs", ".jar", ".dll", ".py", ".rb", ".pl", ".scr", ".com", ".hta", ".wsf", ".ps1", ".reg", ".msi"}
+        if inner_ext in dangerous_inner:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid filename '{filename}'. Suspicious embedded extension '{inner_ext}' detected. "
+                       "Rename the file to a single valid extension and re-upload.",
+            )
+    
     # Check extension allowlist
     if extension not in allowed_extensions:
         allowed_list = ", ".join(sorted(ext.lstrip(".") for ext in allowed_extensions))
