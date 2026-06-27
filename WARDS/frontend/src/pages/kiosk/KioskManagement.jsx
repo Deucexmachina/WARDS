@@ -22,7 +22,7 @@ export default function KioskManagement() {
     },
     regenerate: {
       title: 'Regenerate URL',
-      description: 'This will invalidate the current tablet URL and generate a new one. You will need to update the tablet with the new link.',
+      description: 'This will invalidate the current tablet URL and generate a new one. You will need to update the tablet with the new link. All waiting, serving, and completed queues remain intact.',
       confirmText: 'Regenerate URL',
       confirmClass: 'bg-amber-600 hover:bg-amber-700',
       icon: (
