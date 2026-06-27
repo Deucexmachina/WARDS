@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
-import { getEmailValidationMessage } from '../../utils/validation';
+import { getEmailValidationMessage, censorEmail } from '../../utils/validation';
 
 import { API_HOST } from '../../services/api';
 const PASSWORD_RULE_MESSAGE = 'Password must be more than 12 characters long and include at least one uppercase letter, one lowercase letter, and at least one number or special character.';
@@ -72,8 +72,9 @@ const ForgotPassword = () => {
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token') || '';
   const portal = searchParams.get('portal') || 'default';
+  const urlEmail = searchParams.get('email') || '';
   const copy = portalCopy[portal] || portalCopy.default;
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(urlEmail);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -96,6 +97,8 @@ const ForgotPassword = () => {
 
     return getEmailValidationMessage(value, { required: false }).replace('Please enter a valid email address.', 'Please enter a valid Email Address.');
   };
+
+  const isEmailFromUrlValid = Boolean(urlEmail) && !getEmailValidationMessage(urlEmail, { required: false });
 
   const getNewPasswordError = (value) => {
     if (!String(value || '')) {
@@ -132,7 +135,11 @@ const ForgotPassword = () => {
         email,
         portal: portal === 'default' ? undefined : portal,
       });
-      setSuccessMessage(response.data.message || 'If the email exists, a password reset link has been sent.');
+      setSuccessMessage(
+        response.data.message
+          ? `${response.data.message} Sent to ${censorEmail(email)}.`
+          : `If the email exists, a password reset link has been sent to ${censorEmail(email)}.`,
+      );
     } catch (requestError) {
       setError(requestError.response?.data?.detail || 'Unable to send the password reset email right now.');
     } finally {
@@ -284,32 +291,41 @@ const ForgotPassword = () => {
           </form>
         ) : !token ? (
           <form onSubmit={handleRequestReset} noValidate className="space-y-5">
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">Registered Email</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(event) => {
-                  setEmail(event.target.value);
-                  setEmailError(getForgotPasswordEmailError(event.target.value));
-                  setError('');
-                }}
-                aria-invalid={emailError ? 'true' : 'false'}
-                className={`w-full px-4 py-3 border-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-                  emailError ? 'border-red-500 bg-red-50' : 'border-gray-200'
-                }`}
-                placeholder="name@example.com"
-                autoComplete="email"
-                required
-              />
-              {emailError ? (
-                <p className="mt-2 text-sm font-semibold text-red-600">{emailError}</p>
-              ) : null}
-            </div>
+            {isEmailFromUrlValid ? (
+              <div className="bg-blue-50 border border-blue-200 text-blue-800 px-4 py-4 rounded-xl">
+                <p className="text-sm font-medium">
+                  Send password reset link to:
+                </p>
+                <p className="text-lg font-bold mt-1">{censorEmail(urlEmail)}</p>
+              </div>
+            ) : (
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Registered Email</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(event) => {
+                    setEmail(event.target.value);
+                    setEmailError(getForgotPasswordEmailError(event.target.value));
+                    setError('');
+                  }}
+                  aria-invalid={emailError ? 'true' : 'false'}
+                  className={`w-full px-4 py-3 border-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                    emailError ? 'border-red-500 bg-red-50' : 'border-gray-200'
+                  }`}
+                  placeholder="name@example.com"
+                  autoComplete="email"
+                  required
+                />
+                {emailError ? (
+                  <p className="mt-2 text-sm font-semibold text-red-600">{emailError}</p>
+                ) : null}
+              </div>
+            )}
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || (isEmailFromUrlValid ? false : Boolean(getForgotPasswordEmailError(email)))}
               className={`w-full ${copy.button} text-white py-3 rounded-xl font-semibold transition disabled:opacity-50`}
             >
               {loading ? 'Sending reset link...' : 'Send Password Reset Email'}

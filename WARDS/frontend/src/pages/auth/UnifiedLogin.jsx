@@ -110,6 +110,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
   const [totpError, setTotpError] = useState('');
   const [recoveryOtpCode, setRecoveryOtpCode] = useState('');
   const [recoveryOtpError, setRecoveryOtpError] = useState('');
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -553,6 +554,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
         recaptcha_token: recaptchaToken || undefined,
       });
 
+      setShowForgotPassword(false);
       lockDetectedPortal(response.data.portal);
 
       if (response.data.requires_mfa) {
@@ -604,6 +606,8 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
         setError('Please complete the security check to continue.');
         return;
       }
+
+      setShowForgotPassword(true);
 
       lockDetectedPortal(portal);
       const backendLockout = getBackendLockout(err.response?.data);
@@ -870,14 +874,16 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
                   )}
                 </div>
                 {passwordError && <p className="mt-1.5 text-xs font-medium text-red-600">{passwordError}</p>}
-                <div className="mt-2 text-right">
-                  <Link
-                    to={`/forgot-password${getActivePortal() ? `?portal=${getActivePortal()}` : ''}`}
-                    className="text-xs font-semibold text-blue-600 hover:text-blue-700"
-                  >
-                    Forgot Password?
-                  </Link>
-                </div>
+                {showForgotPassword && (
+                  <div className="mt-2 text-right">
+                    <Link
+                      to={`/forgot-password?${getActivePortal() ? `portal=${getActivePortal()}&` : ''}email=${encodeURIComponent(identifier)}`}
+                      className="text-xs font-semibold text-blue-600 hover:text-blue-700"
+                    >
+                      Forgot Password?
+                    </Link>
+                  </div>
+                )}
               </div>
 
               {requiresCaptcha && RECAPTCHA_SITE_KEY && (

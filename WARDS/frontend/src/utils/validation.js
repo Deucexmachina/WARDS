@@ -14,6 +14,16 @@ export const TIN_DIGITS_PATTERN = /^\d{9,12}$/;
 
 export const isValidEmail = (value) => EMAIL_PATTERN.test(String(value || '').trim());
 
+export const censorEmail = (email) => {
+  if (!email) return '';
+  const [local, domain] = email.split('@');
+  if (!domain) return email;
+  const visibleCount = Math.min(6, Math.max(2, local.length - 2));
+  const prefix = local.slice(0, visibleCount);
+  const maskedLocal = prefix + '*'.repeat(Math.max(2, local.length - visibleCount));
+  return `${maskedLocal}@${domain}`;
+};
+
 export const getEmailValidationMessage = (value, { required = true } = {}) => {
   const trimmedValue = String(value || '').trim();
 
