@@ -21,6 +21,7 @@ const isBranchApiRequest = (url = '') => (
   url.includes('/branch/auth')
   || url.includes('/branch/')
   || url.includes('/discrepancies/branch')
+  || url.includes('/kiosk/')
 );
 
 const isAdminApiRequest = (url = '') => (
