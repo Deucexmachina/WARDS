@@ -294,6 +294,7 @@ def start_security_monitor_if_enabled():
             now_utc,
             scan_all_files,
             seed_settings,
+            set_deployment_mode,
             set_setting,
         )
 
@@ -311,6 +312,7 @@ def start_security_monitor_if_enabled():
                     raise RuntimeError(event.error_message or "Startup baseline backup failed")
                 set_setting(startup_db, "monitoring_enabled", "true", "system_startup")
                 set_setting(startup_db, "startup_baseline_status", "complete", "system")
+                set_deployment_mode(startup_db, False, "system_startup")
                 print("[SECURITY MONITOR] startup baseline backup refreshed")
                 break
             except Exception as exc:

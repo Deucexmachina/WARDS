@@ -19,4 +19,3 @@ phishing_form	SentinelBehaviorInfo	Credential harvesting	OWASP	Rule-Based
 malicious_redirect	SentinelBehaviorInfo	Forced redirects	OWASP	Rule-Based
 destructive_script	SentinelBehaviorInfo	Client-side disruption	MITRE T1059	Rule-Based
 style_takeover	SentinelBehaviorInfo	Visual defacement	MITRE T1491	Rule-Based
-
