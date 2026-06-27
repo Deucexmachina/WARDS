@@ -30,11 +30,12 @@ from utils.field_crypto import (
     hash_optional_value,
     queue_value,
     apply_queue_security,
+    hash_aware_any,
+    hash_aware_match,
 )
 from utils.security_validation import normalize_citizen_full_name, normalize_ph_contact_number
 from utils.branch_system_settings import get_branch_setting_value
 from utils.branch_window_config import (
-    get_branch_configured_service_names,
     get_service_window_display_label,
     infer_service_window,
     normalize_service_window,
@@ -47,16 +48,15 @@ from utils.branch_appointment_settings import (
 from routes.public import (
     generate_next_queue_number,
     calculate_immediate_wait_metrics,
+    get_branch_configured_service_names,
     get_service_processing_time_minutes,
     get_window_scoped_queue_snapshot,
+    ACTIVE_PUBLIC_QUEUE_STATUSES,
 )
 from routes.branch_portal import (
     ensure_branch_queue_operations_enabled,
     log_branch_action,
     serialize_branch_queue,
-    ACTIVE_PUBLIC_QUEUE_STATUSES,
-    hash_aware_any,
-    hash_aware_match,
 )
 
 router = APIRouter()
@@ -342,7 +342,7 @@ async def get_kiosk_services(
 
     result = []
     for svc in services:
-        display = get_service_window_display_label(db, branch_id, svc)
+        display = get_service_window_display_label(svc)
         result.append({
             "service_type": svc,
             "label": display or normalize_service_window(svc),
