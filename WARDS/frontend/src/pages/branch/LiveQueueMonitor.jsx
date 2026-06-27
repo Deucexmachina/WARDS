@@ -348,7 +348,7 @@ const LiveQueueMonitor = () => {
                   .sort(([, a], [, b]) => (a.assigned_window_number || 0) - (b.assigned_window_number || 0))
                   .map(([windowKey, windowData]) => {
                   const currentServing = windowData.serving?.[0] || null;
-                  const waitingQueues = windowData.waiting?.slice(0, isUltraDenseLayout ? 1 : (isDenseLayout ? 2 : 2)) || [];
+                  const waitingQueues = windowData.waiting?.slice(0, isUltraDenseLayout ? 2 : 3) || [];
                   const remainingWaitingCount = Math.max(0, (windowData.waiting?.length || 0) - waitingQueues.length);
                   
                   return (
