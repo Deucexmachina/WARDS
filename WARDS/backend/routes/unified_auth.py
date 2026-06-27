@@ -566,9 +566,9 @@ def log_activity(db: Session, action: str, user: str, details: str, log_type: st
     if account is not None:
         role = role or getattr(account, "role", None)
         branch = branch or getattr(account, "branch", None)
-        # If branch is a SQLAlchemy model object, extract its name string
+        # If branch is a SQLAlchemy model object, extract its decrypted name
         if branch is not None and not isinstance(branch, str):
-            branch_name = getattr(branch, "name", None)
+            branch_name = get_decrypted_or_raw(branch, "name")
             if branch_name:
                 branch = branch_name
         email = email or getattr(account, "email", None)

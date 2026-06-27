@@ -18,6 +18,7 @@ from slowapi.util import get_remote_address
 limiter = Limiter(key_func=get_remote_address)
 from auth import get_current_branch_staff, require_window_staff, verify_account_password
 from services.email_service import send_account_change_notification_email
+from utils.field_crypto import get_decrypted_or_raw
 from utils.field_crypto import find_citizen_by_contact_number
 from utils.security_validation import (
     ensure_email_is_unique,
@@ -85,7 +86,7 @@ def _log(db: Session, action: str, username: str, details: str, *, staff=None, r
         role = getattr(staff, "role", None) or "branch_staff"
         meta_parts.append(f"role: {role}")
         branch_obj = getattr(staff, "branch", None)
-        branch_name = getattr(branch_obj, "name", None) if branch_obj else f"Branch {staff.branch_id}"
+        branch_name = get_decrypted_or_raw(branch_obj, "name") if branch_obj else f"Branch {staff.branch_id}"
         meta_parts.append(f"branch: {branch_name}")
     else:
         meta_parts.append("role: branch_staff")
