@@ -144,24 +144,27 @@ export default function KioskPage() {
                 <p className="text-xl">No windows available at this time.</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
                 {services.map((svc) => (
                   <button
                     key={svc.service_type}
                     onClick={() => handleSelectService(svc.service_type)}
                     disabled={loading}
-                    className="relative p-6 bg-white hover:bg-blue-50 border-2 border-slate-200 hover:border-[#0f2f5f] rounded-2xl text-left transition-all disabled:opacity-50 active:scale-[0.98] shadow-sm"
+                    className="relative flex flex-col justify-between p-6 bg-white hover:bg-blue-50 border-2 border-slate-200 hover:border-[#0f2f5f] rounded-2xl text-left transition-all disabled:opacity-50 active:scale-[0.98] shadow-sm h-full"
                   >
-                    {/* Window number badge */}
-                    <div className="absolute top-4 right-4 bg-[#0f2f5f] text-white text-xs font-bold px-3 py-1 rounded-full">
-                      Window {svc.assigned_window_number || '–'}
+                    {/* Top row: label + window badge */}
+                    <div className="flex items-start justify-between gap-3 mb-3">
+                      <div>
+                        <div className="text-2xl font-bold text-[#0f2f5f]">{svc.label}</div>
+                        <div className="text-slate-500 text-sm mt-0.5">{svc.service_type}</div>
+                      </div>
+                      <div className="shrink-0 bg-[#0f2f5f] text-white text-xs font-bold px-3 py-1 rounded-full">
+                        Window {svc.assigned_window_number || '–'}
+                      </div>
                     </div>
 
-                    <div className="text-2xl font-bold text-[#0f2f5f] mb-1">{svc.label}</div>
-                    <div className="text-slate-500 text-sm mb-3">{svc.service_type}</div>
-
-                    {/* Live counts */}
-                    <div className="flex flex-wrap gap-2 mt-2">
+                    {/* Bottom: live counts always at same position */}
+                    <div className="flex flex-wrap gap-2 mt-auto pt-2">
                       <span className="inline-flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-full px-3 py-1 text-xs font-semibold text-amber-800">
                         <span className="relative flex h-2 w-2">
                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
