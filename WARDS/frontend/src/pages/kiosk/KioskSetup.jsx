@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { API_HOST } from '../services/api';
+import { API_HOST } from '../../services/api';
 
 export default function KioskSetup() {
   const [pairingCode, setPairingCode] = useState('');
