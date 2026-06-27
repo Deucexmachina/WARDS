@@ -529,7 +529,16 @@ def verify_recaptcha(token: str, client_ip: str) -> bool:
         return False
 
 
-def log_activity(db: Session, action: str, user: str, details: str, log_type: str = "auth", *, request=None, role=None, branch=None, email=None):
+def log_activity(db: Session, action: str, user: str, details: str, log_type: str = "auth", *, request=None, role=None, branch=None, email=None, account=None):
+    if account is not None:
+        role = role or getattr(account, "role", None)
+        branch = branch or getattr(account, "branch", None)
+        if branch is None:
+            branch_obj = getattr(account, "branch", None)
+            branch_name = getattr(branch_obj, "name", None) if branch_obj else None
+            if branch_name:
+                branch = branch_name
+        email = email or getattr(account, "email", None)
     meta_parts = []
     if role:
         meta_parts.append(f"role: {role}")
@@ -1018,6 +1027,22 @@ async def unified_logout(request: Request, db: Session = Depends(get_db)):
                 stored = r.get(f"wards:session:{portal}:{user_id}")
                 if stored == sid:
                     r.delete(f"wards:session:{portal}:{user_id}")
+
+        if portal:
+            user_identifier = payload.get("sub", "unknown") if 'payload' in locals() else "unknown"
+            try:
+                _, account = find_account_for_portal(db, user_identifier, portal)
+            except Exception:
+                account = None
+            log_activity(
+                db,
+                "Account Logout",
+                user_identifier,
+                f"Portal: {portal}",
+                "auth",
+                request=request,
+                account=account,
+            )
     return {"message": "Logged out successfully"}
 
 
@@ -1102,8 +1127,10 @@ async def unified_setup_mfa(request: Request, credentials: UnifiedSetupMFAReques
             db,
             "Failed Unified MFA Setup",
             credentials.identifier,
-            f"Portal: {portal}, IP: {client_ip}",
+            f"Portal: {portal}",
             "security",
+            request=request,
+            account=account,
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -1130,8 +1157,10 @@ async def unified_setup_mfa(request: Request, credentials: UnifiedSetupMFAReques
         db,
         "Unified MFA Setup Initiated",
         credentials.identifier,
-        f"Portal: {portal}, IP: {client_ip}",
+        f"Portal: {portal}",
         "security",
+        request=request,
+        account=account,
     )
     return generate_mfa_payload(portal, mfa_username, secret)
 
@@ -1192,8 +1221,10 @@ async def unified_verify_mfa_setup(
         db,
         "Unified MFA Setup Verified",
         credentials.identifier,
-        f"Portal: {portal}, IP: {client_ip}",
+        f"Portal: {portal}",
         "security",
+        request=request,
+        account=account,
     )
     return {"message": "MFA enabled successfully", "portal": portal}
 
@@ -1223,8 +1254,10 @@ async def unified_request_password_reset(
             db,
             "Password Reset Requested",
             email,
-            f"Portal: {portal}, IP: {request.client.host}",
+            f"Portal: {portal}",
             "security",
+            request=request,
+            account=account,
         )
 
     return {
@@ -1271,8 +1304,10 @@ async def unified_reset_password(
         db,
         "Password Reset Completed",
         email,
-        f"Portal: {portal}, IP: {request.client.host}",
+        f"Portal: {portal}",
         "security",
+        request=request,
+        account=account,
     )
 
     return {"message": "Password reset successful. You can now sign in with your new password."}
@@ -1299,8 +1334,10 @@ async def unified_mfa_recovery_send_otp(
             db,
             "Failed MFA Recovery OTP Request",
             credentials.identifier,
-            f"Portal: {portal}, IP: {client_ip}",
+            f"Portal: {portal}",
             "security",
+            request=request,
+            account=account,
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -1336,8 +1373,10 @@ async def unified_mfa_recovery_send_otp(
         db,
         "MFA Recovery OTP Sent",
         credentials.identifier,
-        f"Portal: {portal}, IP: {client_ip}",
+        f"Portal: {portal}",
         "security",
+        request=request,
+        account=account,
     )
 
     return {
@@ -1436,8 +1475,10 @@ async def unified_mfa_recovery_verify_otp(
         db,
         "MFA Recovery Completed — Old MFA Reset",
         credentials.identifier,
-        f"Portal: {portal}, IP: {client_ip}",
+        f"Portal: {portal}",
         "security",
+        request=request,
+        account=account,
     )
 
     return generate_mfa_payload(portal, mfa_username, secret)
@@ -1492,8 +1533,10 @@ async def unified_setup_mfa_authenticated(request: Request, db: Session = Depend
         db,
         "Authenticated MFA Setup Initiated",
         get_account_identifier(portal, account),
-        f"Portal: {portal}, IP: {client_ip}",
+        f"Portal: {portal}",
         "security",
+        request=request,
+        account=account,
     )
     return generate_mfa_payload(portal, mfa_username, secret)
 
@@ -1665,6 +1708,8 @@ async def unified_register(
         email,
         f"New citizen user registered. Email verification pending.",
         "auth",
+        request=request,
+        account=citizen,
     )
 
     return {
@@ -1883,6 +1928,8 @@ async def unified_invite_register(
         email,
         f"Registered via invite. Portal: {portal}",
         "auth",
+        request=request,
+        account=account,
     )
 
     user_response = build_user_response(
@@ -2235,7 +2282,7 @@ async def branch_staff_change_password(
         subject="WARDS Security Notification: Password Changed",
     )
     if email_result.get("sent"):
-        log_activity(db, "Window Staff Password Changed", current_staff.username, "Security notification email sent after password change.")
+        log_activity(db, "Window Staff Password Changed", current_staff.username, "Security notification email sent after password change.", request=request, account=current_staff)
 
     return {"message": "Password changed successfully.", "email_sent": email_result.get("sent", False)}
 
@@ -2306,7 +2353,7 @@ async def branch_staff_verify_mfa(
         subject="WARDS Security Notification: MFA Settings Updated",
     )
     if email_result.get("sent"):
-        log_activity(db, "Window Staff MFA Configured", current_staff.username, "Security notification email sent after MFA reset.")
+        log_activity(db, "Window Staff MFA Configured", current_staff.username, "Security notification email sent after MFA reset.", request=request, account=current_staff)
 
     return {"message": "MFA configured successfully.", "email_sent": email_result.get("sent", False)}
 

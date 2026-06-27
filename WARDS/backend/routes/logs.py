@@ -9,7 +9,7 @@ from typing import Optional
 
 from database.models import ActivityLog, Branch, BranchStaff, Admin, CitizenUser, get_db
 from sqlalchemy import func
-from utils.field_crypto import get_decrypted_or_raw
+from utils.field_crypto import find_citizen_by_email, get_decrypted_or_raw
 from auth import get_current_admin_user, get_current_branch_staff
 from utils.log_integrity import verify_record_integrity
 from utils.rbac import require_permission
@@ -149,7 +149,7 @@ async def get_activity_logs(
         if staff:
             return staff.role
         if "@" in user_identifier:
-            citizen = db.query(CitizenUser).filter(CitizenUser.email == user_identifier).first()
+            citizen = find_citizen_by_email(db, CitizenUser, user_identifier)
             if citizen and citizen.role:
                 return citizen.role
             return "citizen"
