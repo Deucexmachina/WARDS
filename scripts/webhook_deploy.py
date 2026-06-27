@@ -23,6 +23,7 @@ import json
 import subprocess
 import logging
 import time
+import threading
 
 import httpx
 from fastapi import FastAPI, Request, HTTPException
@@ -213,6 +214,12 @@ async def github_webhook(request: Request):
         if vm2_pushed_pause:
             if _unpause_vm2():
                 deployment_resumed = True
+
+        # --- Step 9: Restart webhook process to load updated code ---
+        # The running Python process still has the OLD code in memory.
+        # Schedule an execv replacement so the next webhook uses new code.
+        logger.info("Scheduling webhook self-restart in 2s to load updated code")
+        threading.Thread(target=lambda: (time.sleep(2), os.execv(sys.executable, [sys.executable] + sys.argv)), daemon=True).start()
 
     except Exception as e:
         logger.exception("Deploy failed")
