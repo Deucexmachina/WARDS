@@ -391,7 +391,7 @@ const LiveQueueMonitor = () => {
                             <>
                               {waitingQueues.map((queue, index) => (
                                 <div
-                                  key={index}
+                                  key={queue.queue_number || index}
                                   className={`flex flex-wrap items-center justify-between gap-3 rounded-lg border border-yellow-200 bg-yellow-50 ${
                                     isUltraDenseLayout ? 'p-2.5' : isDenseLayout ? 'p-3' : isSingleWindow ? 'p-4' : 'p-4 sm:p-5'
                                   }`}
