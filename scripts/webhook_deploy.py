@@ -67,12 +67,13 @@ def _unpause_vm2() -> bool:
         return False
     for attempt in range(5):
         try:
-            httpx.post(
+            resp = httpx.post(
                 f"https://{VM2_HOST}/internal/deployment-mode",
                 headers={"X-API-Key": VM2_API_KEY},
                 json={"in_progress": False},
                 timeout=10.0,
             )
+            resp.raise_for_status()
             logger.info("VM2 deployment mode cleared")
             return True
         except Exception as e:
