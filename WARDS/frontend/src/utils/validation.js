@@ -1,4 +1,4 @@
-export const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const EMAIL_PATTERN = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 export const CITIZEN_NAME_PATTERN = /^[A-Za-z ]+$/;
 export const PH_CONTACT_DIGITS_PATTERN = /^9\d{9}$/;
 export const REAL_EMAIL_RULE_MESSAGE = 'Please enter a valid email address.';

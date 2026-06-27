@@ -1614,7 +1614,7 @@ async def unified_register(
         except Exception:
             pass
 
-    email = normalize_identifier(payload.email)
+    email = normalize_email(payload.email)
 
     existing = find_citizen_by_email(db, CitizenUser, email)
     if existing:
@@ -1693,7 +1693,7 @@ async def unified_verification_request(
     payload: VerificationRequest,
     db: Session = Depends(get_db),
 ):
-    email = normalize_identifier(payload.email)
+    email = normalize_email(payload.email)
     citizen = find_citizen_by_email(db, CitizenUser, email)
     if not citizen:
         raise HTTPException(
@@ -1755,7 +1755,7 @@ async def unified_verification_confirm(
     payload: VerificationConfirmRequest,
     db: Session = Depends(get_db),
 ):
-    email = normalize_identifier(payload.email)
+    email = normalize_email(payload.email)
     citizen = find_citizen_by_email(db, CitizenUser, email)
     if not citizen:
         raise HTTPException(
@@ -1793,7 +1793,7 @@ async def unified_invite_register(
     payload: InviteRegisterRequest,
     db: Session = Depends(get_db),
 ):
-    email = normalize_identifier(payload.email)
+    email = normalize_email(payload.email)
 
     invite = find_invite_by_token(db, Invite, payload.invite_token)
     if not invite or invite.used or is_expired_at(invite.expires_at):
