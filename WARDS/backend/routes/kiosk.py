@@ -211,7 +211,7 @@ async def create_kiosk_ticket(
         branch_id=branch_id,
         service_type=req.service_type,
         taxpayer_name=taxpayer_name,
-        queue_type="kiosk",
+        queue_type="immediate",
         status="Waiting",
         estimated_wait_time=wait_metrics["estimated_wait_time"],
         recommended_arrival=wait_metrics["recommended_arrival"],
