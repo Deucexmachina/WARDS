@@ -115,6 +115,15 @@ export default function KioskPage() {
     return () => clearInterval(interval);
   }, [step]);
 
+  // Auto-refresh services data every 10 seconds while on services screen
+  useEffect(() => {
+    if (step !== 'services') return;
+    const interval = setInterval(() => {
+      loadServices();
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [step, token]);
+
   if (step === 'loading') {
     return (
       <div className="flex items-center justify-center min-h-screen bg-slate-50">
