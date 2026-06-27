@@ -37,7 +37,7 @@ else:
 
 from routes import branches, reports, announcements, memos, alerts, logs, backup, users, payments, receipts, settings, policies, privacy, rbac_routes, dashboard, public, admin_users, branch_portal, branch_settings, unified_auth, discrepancies, tax_assessment, security_dashboard, public_content, window_staff_account, kiosk
 from services import ocr_routes
-from database.models import Base, engine, SessionLocal, Admin, Announcement, AnnouncementAttachment, Branch, BusinessRegistry, BusinessTaxApplication, CollectionAccount, DiscrepancyReport, EmailOTP, EmailVerificationToken, FAQ, Invite, Memo, MemoView, MFASecret, Payment, Queue, QueueActivity, ReceiptRecord, ReceiptRequest, ReceiptRequestHistory, Remittance, RemittanceItem, RPTPropertyRecord, Service, ServiceWindowConfig, TaxpayerGuide
+from database.models import Base, engine, SessionLocal, Admin, Announcement, AnnouncementAttachment, Branch, BusinessRegistry, BusinessTaxApplication, CollectionAccount, DiscrepancyReport, EmailOTP, EmailVerificationToken, FAQ, Invite, KioskDevice, Memo, MemoView, MFASecret, Payment, Queue, QueueActivity, ReceiptRecord, ReceiptRequest, ReceiptRequestHistory, Remittance, RemittanceItem, RPTPropertyRecord, Service, ServiceWindowConfig, TaxpayerGuide
 from utils.field_crypto import apply_citizen_user_security, apply_collection_account_security, apply_discrepancy_report_security, apply_email_otp_security, apply_email_verification_token_security, apply_faq_security, apply_invite_security, apply_memo_security, apply_memo_view_security, apply_mfa_secret_security, apply_payment_security, apply_queue_activity_security, apply_queue_security, apply_receipt_record_security, apply_receipt_request_history_security, apply_receipt_request_security, apply_remittance_item_security, apply_remittance_security, apply_rpt_property_record_security, apply_service_security, apply_service_window_config_security, apply_system_setting_security, apply_tax_assessment_record_security, apply_taxpayer_guide_security, apply_taxpayer_identifier_submission_security, build_redacted_text, get_decrypted_or_raw, hash_optional_value, set_encrypted_hash_companions
 from utils import log_integrity  # noqa: F401 - registers tamper-evident log signing hooks
 from utils.log_sanitization import install_uvicorn_reload_path_filter
@@ -384,6 +384,27 @@ def ensure_auth_extensions():
             admin_columns = {column["name"] for column in inspector.get_columns("admins")}
             if "full_name" not in admin_columns:
                 conn.execute(text("ALTER TABLE admins ADD COLUMN full_name VARCHAR(255)"))
+
+        if "branches" in table_names:
+            branch_columns = {column["name"] for column in inspector.get_columns("branches")}
+            if "kiosk_pin" not in branch_columns:
+                conn.execute(text("ALTER TABLE branches ADD COLUMN kiosk_pin VARCHAR(10)"))
+
+        if "kiosk_devices" not in table_names:
+            conn.execute(text(f"""
+                CREATE TABLE kiosk_devices (
+                    id VARCHAR(36) PRIMARY KEY,
+                    branch_id INTEGER,
+                    name VARCHAR(100) DEFAULT 'Kiosk',
+                    pairing_code_hash VARCHAR(255),
+                    device_token_hash VARCHAR(255),
+                    status VARCHAR(20) DEFAULT 'active',
+                    paired_at DATETIME,
+                    last_heartbeat DATETIME,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (branch_id) REFERENCES branches(id)
+                )
+            """))
 
         if "backups" in table_names:
             backup_columns = {column["name"] for column in inspector.get_columns("backups")}
