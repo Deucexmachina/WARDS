@@ -6,6 +6,32 @@ export default function KioskManagement() {
   const [kioskUrl, setKioskUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ text: '', type: '' });
+  const [confirmAction, setConfirmAction] = useState(null); // 'disable' | 'regenerate' | null
+
+  const confirmConfig = {
+    disable: {
+      title: 'Disable Kiosk',
+      description: 'This will immediately stop all tablets from working. Citizens will no longer be able to queue from the kiosk.',
+      confirmText: 'Disable Kiosk',
+      confirmClass: 'bg-red-600 hover:bg-red-700',
+      icon: (
+        <svg className="w-10 h-10 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+        </svg>
+      ),
+    },
+    regenerate: {
+      title: 'Regenerate URL',
+      description: 'This will invalidate the current tablet URL and generate a new one. You will need to update the tablet with the new link.',
+      confirmText: 'Regenerate URL',
+      confirmClass: 'bg-amber-600 hover:bg-amber-700',
+      icon: (
+        <svg className="w-10 h-10 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+      ),
+    },
+  };
 
   useEffect(() => {
     loadStatus();
@@ -35,30 +61,26 @@ export default function KioskManagement() {
     }
   };
 
-  const handleDisable = async () => {
-    if (!window.confirm('Disable kiosk? This will immediately stop all tablets from working.')) return;
-    setLoading(true);
-    try {
-      await api.post('/kiosk/admin/disable');
-      setKioskEnabled(false);
-      setKioskUrl('');
-      setMessage({ text: 'Kiosk disabled.', type: 'success' });
-    } catch (err) {
-      setMessage({ text: err.response?.data?.detail || 'Failed to disable kiosk', type: 'error' });
-    } finally {
-      setLoading(false);
-    }
-  };
+  const handleDisable = () => setConfirmAction('disable');
+  const handleRegenerate = () => setConfirmAction('regenerate');
 
-  const handleRegenerate = async () => {
-    if (!window.confirm('Regenerate token? This will invalidate the current tablet URL.')) return;
+  const executeConfirmedAction = async () => {
+    if (!confirmAction) return;
+    setConfirmAction(null);
     setLoading(true);
     try {
-      const res = await api.post('/kiosk/admin/regenerate');
-      setKioskUrl(res.data.kiosk_url);
-      setMessage({ text: 'New kiosk URL generated. Update the tablet with the new URL.', type: 'success' });
+      if (confirmAction === 'disable') {
+        await api.post('/kiosk/admin/disable');
+        setKioskEnabled(false);
+        setKioskUrl('');
+        setMessage({ text: 'Kiosk disabled.', type: 'success' });
+      } else if (confirmAction === 'regenerate') {
+        const res = await api.post('/kiosk/admin/regenerate');
+        setKioskUrl(res.data.kiosk_url);
+        setMessage({ text: 'New kiosk URL generated. Update the tablet with the new URL.', type: 'success' });
+      }
     } catch (err) {
-      setMessage({ text: err.response?.data?.detail || 'Failed to regenerate token', type: 'error' });
+      setMessage({ text: err.response?.data?.detail || `Failed to ${confirmAction} kiosk`, type: 'error' });
     } finally {
       setLoading(false);
     }
@@ -160,6 +182,40 @@ export default function KioskManagement() {
               </svg>
               Open Kiosk in New Tab
             </a>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal */}
+      {confirmAction && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div className="p-6 text-center">
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-slate-100">
+                {confirmConfig[confirmAction].icon}
+              </div>
+              <h3 className="text-lg font-bold text-slate-800 mb-2">
+                {confirmConfig[confirmAction].title}
+              </h3>
+              <p className="text-sm text-slate-500 leading-relaxed">
+                {confirmConfig[confirmAction].description}
+              </p>
+            </div>
+            <div className="flex gap-3 border-t border-slate-100 p-4">
+              <button
+                onClick={() => setConfirmAction(null)}
+                className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-medium hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={executeConfirmedAction}
+                disabled={loading}
+                className={`flex-1 px-4 py-2.5 rounded-xl text-white font-medium transition-colors disabled:bg-slate-400 disabled:cursor-not-allowed ${confirmConfig[confirmAction].confirmClass}`}
+              >
+                {loading ? 'Processing...' : confirmConfig[confirmAction].confirmText}
+              </button>
+            </div>
           </div>
         </div>
       )}
