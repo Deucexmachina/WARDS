@@ -311,6 +311,7 @@ const BackupRecovery = () => {
     incidents: { page: 1, page_size: 10, total: 0, total_pages: 1 },
   });
   const historyPagesRef = useRef(historyPages);
+  const scanIntervalSavedAtRef = useRef(0);
   const [openRows, setOpenRows] = useState({});
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
@@ -885,7 +886,14 @@ const BackupRecovery = () => {
     if (!Number.isFinite(seconds) || seconds < 5) {
       throw new Error('Scan interval must be at least 5 seconds.');
     }
-    return api.put('/security/scan-interval', { seconds }).then((response) => { setControls((current) => ({ ...current, scanInterval: String(seconds), scanIntervalDirty: false })); return response; });
+    return api.put('/security/scan-interval', { seconds }).then((response) => {
+      setControls((current) => ({ ...current, scanInterval: String(seconds), scanIntervalDirty: true }));
+      scanIntervalSavedAtRef.current = Date.now();
+      setTimeout(() => {
+        setControls((current) => ({ ...current, scanIntervalDirty: false }));
+      }, 5000);
+      return { ...response, skipRefresh: true };
+    });
   };
 
   const toggleMonitoring = async () => {

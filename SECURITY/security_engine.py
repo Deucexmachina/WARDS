@@ -3605,24 +3605,26 @@ def record_detection(db: Session, file_entry: SecurityMonitoredFile, change_type
     db.commit()
     db.refresh(detection)
 
-    if not is_legitimate and should_create_incident(change_type, prediction, flags, classification):
+    if not is_legitimate:
         quarantine_path = quarantine_file(portable_monitored_path(file_entry), detection.id)
         incident = create_incident(db, detection, classification, flags, changed, quarantine_path)
         recovery = None
-        if change_type in {"content_modified", "file_deleted"}:
+
+        # Auto-recovery only for web/code files or high/critical severity
+        suffix = Path(file_entry.relative_path).suffix.lower()
+        is_web_code_file = suffix in {".html", ".htm", ".jsx", ".js", ".py", ".css", ".php"}
+        is_high_severity = classification.get("severity_level") in {"high", "critical"}
+        if change_type in {"content_modified", "file_deleted"} and (is_web_code_file or is_high_severity):
             recovery = restore_from_backup(db, file_entry, detection.id, "automatic", None, quarantine_path)
             incident.response_action = "auto_recovered_pending_review" if recovery.status == "success" else "escalated"
             db.add(incident)
             db.commit()
+        else:
+            incident.response_action = "manual_review_required"
+            db.add(incident)
+            db.commit()
+
         create_incident_system_alert(db, incident, detection, recovery)
-    elif not is_legitimate:
-        create_system_alert(
-            db,
-            "detection_logged",
-            f"Detection #{detection.id}: {detection.trigger_summary}",
-            detection.severity_level or "low",
-            dedupe_key=f"Detection #{detection.id}",
-        )
     return detection
 
 
@@ -5805,37 +5807,45 @@ def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type
     db.refresh(detection)
 
     # Always create a security incident for VM1 file changes; auto-recovery is controlled separately
-    quarantine_path = _quarantine_vm1_snapshot(entry, detection.id)
-    # Determine auto-recovery eligibility
-    suffix = Path(entry.relative_path).suffix.lower()
-    rules = context.get("ai_rules") or DEFAULT_AI_RULES
-    high_risk_exts = set(rules.get("file_type_risk", {}).get("config", {}).get("high_risk_extensions", [".html", ".jsx", ".js", ".py"]))
-    is_auto_recover = suffix in high_risk_exts or classification.get("severity_level") in {"high", "critical"}
-    if is_auto_recover:
-        # Auto-recovery: restore immediately and mark incident resolved
-        _create_vm1_restore_command(db, entry, detection.id)
-        incident = create_incident(db, detection, classification, flags, changed, quarantine_path)
-        incident.status = "resolved"
-        incident.resolved_at = now_utc()
-        incident.resolved_by = None
-        incident.response_action = "auto_recovered"
-        cleanup_quarantine_paths(json_loads(incident.quarantine_paths_json, []))
-        db.add(incident)
-        db.commit()
-        create_system_alert(
-            db,
-            "incident_resolved",
-            f"SEC-{incident.id}: Auto-recovered {entry.relative_path} (high-risk / high-severity).",
-            incident.severity_level or "low",
-            dedupe_key=f"SEC-{incident.id}",
-        )
-    else:
-        # Manual review required; do not queue restore command yet
-        incident = create_incident(db, detection, classification, flags, changed, quarantine_path)
-        incident.response_action = "vm1_restore_pending"
-        db.add(incident)
-        db.commit()
-        create_incident_system_alert(db, incident, detection, None)
+    try:
+        quarantine_path = _quarantine_vm1_snapshot(entry, detection.id)
+    except Exception as exc:
+        quarantine_path = None
+        logger.warning("VM1 quarantine failed for %s: %s", entry.relative_path, exc)
+
+    try:
+        # Determine auto-recovery eligibility
+        suffix = Path(entry.relative_path).suffix.lower()
+        rules = context.get("ai_rules") or DEFAULT_AI_RULES
+        high_risk_exts = set(rules.get("file_type_risk", {}).get("config", {}).get("high_risk_extensions", [".html", ".jsx", ".js", ".py"]))
+        is_auto_recover = suffix in high_risk_exts or classification.get("severity_level") in {"high", "critical"}
+        if is_auto_recover:
+            # Auto-recovery: restore immediately and mark incident resolved
+            _create_vm1_restore_command(db, entry, detection.id)
+            incident = create_incident(db, detection, classification, flags, changed, quarantine_path)
+            incident.status = "resolved"
+            incident.resolved_at = now_utc()
+            incident.resolved_by = None
+            incident.response_action = "auto_recovered"
+            cleanup_quarantine_paths(json_loads(incident.quarantine_paths_json, []))
+            db.add(incident)
+            db.commit()
+            create_system_alert(
+                db,
+                "incident_resolved",
+                f"SEC-{incident.id}: Auto-recovered {entry.relative_path} (high-risk / high-severity).",
+                incident.severity_level or "low",
+                dedupe_key=f"SEC-{incident.id}",
+            )
+        else:
+            # Manual review required; do not queue restore command yet
+            incident = create_incident(db, detection, classification, flags, changed, quarantine_path)
+            incident.response_action = "vm1_restore_pending"
+            db.add(incident)
+            db.commit()
+            create_incident_system_alert(db, incident, detection, None)
+    except Exception as exc:
+        logger.exception("Failed to create security incident for VM1 detection %s: %s", detection.id, exc)
     return detection
 
 
