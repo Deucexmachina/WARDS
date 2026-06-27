@@ -46,7 +46,7 @@ from utils.field_crypto import (
     hash_optional_value,
     serialize_citizen_user,
 )
-from utils.security_validation import normalize_email
+from utils.security_validation import censor_email, normalize_email
 from utils.system_settings import get_setting_value
 from auth import (
     ALGORITHM,
@@ -1341,7 +1341,7 @@ async def unified_mfa_recovery_send_otp(
     )
 
     return {
-        "message": f"A verification code was sent to {email}.",
+        "message": f"A verification code was sent to {censor_email(email)}.",
         "resend_available_in_seconds": resend_wait,
         "expires_in_seconds": max(int((otp_record.expires_at - datetime.utcnow()).total_seconds()), 0),
     }

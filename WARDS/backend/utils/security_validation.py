@@ -40,6 +40,16 @@ def _coerce_qev_bool(value) -> bool:
     return bool(value)
 
 
+def censor_email(email: str) -> str:
+    if not email or "@" not in email:
+        return email or ""
+    local, domain = email.split("@", 1)
+    visible_count = min(6, max(2, len(local) - 2))
+    prefix = local[:visible_count]
+    masked_local = prefix + "*" * max(2, len(local) - visible_count)
+    return f"{masked_local}@{domain}"
+
+
 def normalize_email(email: str, *, check_deliverability: bool = False) -> str:
     try:
         validated = validate_email(email.strip(), check_deliverability=check_deliverability)
