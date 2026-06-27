@@ -146,8 +146,9 @@ export default function KioskPage() {
   if (step === 'services') {
     const allWaitingTickets = services
       .flatMap((svc) =>
-        (svc.waiting_queue_numbers || []).map((qn) => ({
-          queueNumber: qn,
+        (svc.waiting_queue_numbers || []).map((item) => ({
+          queueNumber: item.queue_number || item,
+          taxpayerName: item.taxpayer_name || '',
           label: svc.label,
           windowNumber: svc.assigned_window_number,
         }))
@@ -273,8 +274,13 @@ export default function KioskPage() {
                         key={ticket.queueNumber}
                         className="flex items-center justify-between rounded-xl border border-yellow-200 bg-yellow-50 px-4 py-3"
                       >
-                        <span className="font-bold text-slate-800 text-base">{ticket.queueNumber}</span>
-                        <span className="text-sm text-slate-500 font-medium">
+                        <div className="min-w-0">
+                          <span className="font-bold text-slate-800 text-base block">{ticket.queueNumber}</span>
+                          {ticket.taxpayerName && (
+                            <span className="text-xs text-slate-500 truncate block">{ticket.taxpayerName}</span>
+                          )}
+                        </div>
+                        <span className="text-sm text-slate-500 font-medium shrink-0 ml-3">
                           {ticket.label}
                         </span>
                       </div>

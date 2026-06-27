@@ -143,7 +143,13 @@ def get_window_scoped_queue_snapshot(db: Session, branch_id: int, service_type: 
         **metadata,
         "waiting_count": len(waiting_queues),
         "serving_count": len(active_queues),
-        "waiting_queue_numbers": [queue_value(queue, "queue_number") for queue in waiting_queues],
+        "waiting_queue_numbers": [
+            {
+                "queue_number": queue_value(queue, "queue_number"),
+                "taxpayer_name": queue_value(queue, "taxpayer_name") or "",
+            }
+            for queue in waiting_queues
+        ],
         "current_serving_queue_number": queue_value(current_queue, "queue_number") if current_queue else None,
         "current_serving_status": queue_value(current_queue, "status") if current_queue else None,
     }
