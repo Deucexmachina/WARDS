@@ -147,6 +147,7 @@ async def get_kiosk_services(
             "label": display or infer_service_window(svc),
             "description": STANDARD_SERVICE_DESCRIPTIONS.get(svc, display or infer_service_window(svc)),
             "waiting_count": snapshot["waiting_count"],
+            "waiting_queue_numbers": snapshot.get("waiting_queue_numbers", []),
             "serving_count": snapshot["serving_count"],
             "current_serving_queue_number": snapshot["current_serving_queue_number"],
             "assigned_window_number": snapshot["assigned_window_number"],

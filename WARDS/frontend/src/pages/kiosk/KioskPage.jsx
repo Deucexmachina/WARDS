@@ -143,6 +143,16 @@ export default function KioskPage() {
   }
 
   if (step === 'services') {
+    const allWaitingTickets = services
+      .flatMap((svc) =>
+        (svc.waiting_queue_numbers || []).map((qn) => ({
+          queueNumber: qn,
+          label: svc.label,
+          windowNumber: svc.assigned_window_number,
+        }))
+      )
+      .sort((a, b) => a.queueNumber.localeCompare(b.queueNumber));
+
     return (
       <div className="flex flex-col min-h-screen bg-slate-50 overflow-hidden">
         <header className="bg-white border-b border-slate-200 py-6 px-6 shadow-sm">
@@ -151,62 +161,98 @@ export default function KioskPage() {
         </header>
 
         <main className="flex-1 flex items-center justify-center p-6 overflow-hidden">
-          <div className="w-full max-w-5xl overflow-hidden">
-            {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm mb-4 text-center font-medium">
-                {error}
-              </div>
-            )}
+          <div className="w-full max-w-6xl h-full flex flex-col md:flex-row gap-6 overflow-hidden">
+            {/* Left: Window cards */}
+            <div className="flex-1 overflow-hidden">
+              {error && (
+                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm mb-4 text-center font-medium">
+                  {error}
+                </div>
+              )}
 
-            {services.length === 0 ? (
-              <div className="text-center text-slate-500 bg-white rounded-xl p-8 border border-slate-200 shadow-sm">
-                <p className="text-xl">No windows available at this time.</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
-                {services.map((svc) => (
-                  <button
-                    key={svc.service_type}
-                    onClick={() => handleSelectService(svc.service_type)}
-                    disabled={loading}
-                    className="relative flex flex-col overflow-hidden bg-white hover:bg-blue-50 border-2 border-slate-200 hover:border-[#0f2f5f] rounded-2xl text-left transition-all disabled:opacity-50 active:scale-[0.98] shadow-sm h-full"
-                  >
-                    {/* Blue banner header — matches Live Monitor */}
-                    <div className="bg-[#0f2f5f] text-white px-4 py-3 flex items-center justify-between">
-                      <span className="text-lg font-bold">{svc.label}</span>
-                      <span className="text-xs font-bold bg-white/20 px-2.5 py-1 rounded-full">
-                        Window {svc.assigned_window_number || '–'}
-                      </span>
-                    </div>
-
-                    {/* Body */}
-                    <div className="flex-1 flex flex-col p-5">
-                      {/* Description */}
-                      <p className="text-slate-500 text-sm mb-4 leading-relaxed">
-                        {svc.description || svc.service_type}
-                      </p>
-
-                      {/* Waiting count badge — matches monitor yellow card style */}
-                      <div className="mt-auto flex flex-wrap gap-2">
-                        <span className="inline-flex items-center gap-2 rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2 text-sm font-semibold text-yellow-800">
-                          <span className="relative flex h-2.5 w-2.5">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-yellow-500"></span>
-                          </span>
-                          {svc.waiting_count} waiting
+              {services.length === 0 ? (
+                <div className="text-center text-slate-500 bg-white rounded-xl p-8 border border-slate-200 shadow-sm">
+                  <p className="text-xl">No windows available at this time.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
+                  {services.map((svc) => (
+                    <button
+                      key={svc.service_type}
+                      onClick={() => handleSelectService(svc.service_type)}
+                      disabled={loading}
+                      className="relative flex flex-col overflow-hidden bg-white hover:bg-blue-50 border-2 border-slate-200 hover:border-[#0f2f5f] rounded-2xl text-left transition-all disabled:opacity-50 active:scale-[0.98] shadow-sm h-full"
+                    >
+                      {/* Blue banner header — matches Live Monitor */}
+                      <div className="bg-[#0f2f5f] text-white px-4 py-3 flex items-center justify-between">
+                        <span className="text-lg font-bold">{svc.label}</span>
+                        <span className="text-xs font-bold bg-white/20 px-2.5 py-1 rounded-full">
+                          Window {svc.assigned_window_number || '–'}
                         </span>
-                        {svc.serving_count > 0 && (
-                          <span className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">
-                            <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-                            {svc.serving_count} serving
-                          </span>
-                        )}
                       </div>
+
+                      {/* Body */}
+                      <div className="flex-1 flex flex-col p-5">
+                        {/* Description */}
+                        <p className="text-slate-500 text-sm mb-4 leading-relaxed">
+                          {svc.description || svc.service_type}
+                        </p>
+
+                        {/* Waiting count badge — matches monitor yellow card style */}
+                        <div className="mt-auto flex flex-wrap gap-2">
+                          <span className="inline-flex items-center gap-2 rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2 text-sm font-semibold text-yellow-800">
+                            <span className="relative flex h-2.5 w-2.5">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-yellow-500"></span>
+                            </span>
+                            {svc.waiting_count} waiting
+                          </span>
+                          {svc.serving_count > 0 && (
+                            <span className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">
+                              <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                              {svc.serving_count} serving
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Right: Currently Waiting panel */}
+            <div className="w-full md:w-64 shrink-0">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm h-full flex flex-col overflow-hidden">
+                <div className="bg-[#0f2f5f] text-white px-4 py-3 text-center">
+                  <h3 className="font-bold text-sm uppercase tracking-wide">Currently Waiting</h3>
+                </div>
+                <div className="flex-1 overflow-y-auto p-3">
+                  {allWaitingTickets.length === 0 ? (
+                    <p className="text-center text-slate-400 text-sm py-6">No tickets waiting</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {allWaitingTickets.map((ticket) => (
+                        <div
+                          key={ticket.queueNumber}
+                          className="flex items-center justify-between rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2"
+                        >
+                          <span className="font-bold text-slate-800 text-sm">{ticket.queueNumber}</span>
+                          <span className="text-xs text-slate-500 font-medium">
+                            {ticket.label}
+                          </span>
+                        </div>
+                      ))}
                     </div>
-                  </button>
-                ))}
+                  )}
+                </div>
+                <div className="border-t border-slate-100 px-4 py-2 text-center">
+                  <span className="text-xs text-slate-400 font-medium">
+                    {allWaitingTickets.length} in line
+                  </span>
+                </div>
               </div>
-            )}
+            </div>
           </div>
         </main>
 
