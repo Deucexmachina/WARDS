@@ -1593,9 +1593,9 @@ async def call_next_queue(
 
 
 class WalkInRegistration(BaseModel):
-    service_type: str
-    taxpayer_name: str
-    contact_number: Optional[str] = None
+    service_type: str = Field(..., max_length=100)
+    taxpayer_name: str = Field(..., max_length=255)
+    contact_number: Optional[str] = Field(None, max_length=50)
 
 
 @router.post("/queue/walk-in")

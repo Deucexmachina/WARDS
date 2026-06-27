@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_
 from sqlalchemy.exc import IntegrityError
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime, timedelta, timezone
 import random
@@ -308,12 +308,12 @@ def ensure_queue_operations_manageable(db: Session, branch_id: int | None = None
 
 class QueueRegistration(BaseModel):
     branch_id: int
-    service_type: str
-    taxpayer_name: Optional[str] = None
-    contact_number: Optional[str] = None
-    email: Optional[str] = None
-    queue_type: str = "immediate"  # immediate or appointment
-    appointment_time: Optional[str] = None
+    service_type: str = Field(..., max_length=100)
+    taxpayer_name: Optional[str] = Field(None, max_length=255)
+    contact_number: Optional[str] = Field(None, max_length=50)
+    email: Optional[str] = Field(None, max_length=255)
+    queue_type: str = Field("immediate", max_length=20)  # immediate or appointment
+    appointment_time: Optional[str] = Field(None, max_length=50)
 
 
 def normalize_queue_type(raw_value: Optional[str]) -> str:
