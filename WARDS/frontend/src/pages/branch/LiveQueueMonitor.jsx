@@ -361,7 +361,7 @@ const LiveQueueMonitor = () => {
                       </div>
                       
                       {/* NOW SERVING Section */}
-                      <div className={`shrink-0 flex items-center justify-center border-b border-gray-200 ${isUltraDenseLayout ? 'p-2.5 sm:p-3' : isDenseLayout ? 'p-3 sm:p-4' : isSingleWindow ? 'p-6' : 'p-4 sm:p-5 lg:p-6'}`}>
+                      <div className={`flex items-center justify-center border-b border-gray-200 ${isUltraDenseLayout ? 'p-2.5 sm:p-3' : isDenseLayout ? 'p-3 sm:p-4' : isSingleWindow ? 'p-6' : 'p-4 sm:p-5 lg:p-6'}`}>
                         <div className="text-center">
                           <p className={`font-semibold text-gray-700 ${isUltraDenseLayout ? 'mb-2 text-xs sm:text-sm' : isDenseLayout ? 'mb-3 text-sm sm:text-base' : isSingleWindow ? 'mb-2 text-sm' : 'mb-4 text-base sm:text-lg'}`}>NOW SERVING</p>
                           {currentServing ? (
@@ -381,12 +381,12 @@ const LiveQueueMonitor = () => {
                       </div>
                       
                       {/* WAITING QUEUE Section */}
-                      <div className={`flex-1 min-h-0 flex flex-col border-b border-gray-200 ${isUltraDenseLayout ? 'p-2.5 sm:p-3' : isDenseLayout ? 'p-3 sm:p-4' : isSingleWindow ? 'p-4' : 'p-4 sm:p-5 lg:p-6'}`}>
+                      <div className={`min-h-0 border-b border-gray-200 ${isUltraDenseLayout ? 'p-2.5 sm:p-3' : isDenseLayout ? 'p-3 sm:p-4' : isSingleWindow ? 'p-4' : 'p-4 sm:p-5 lg:p-6'}`}>
                         <div className={isUltraDenseLayout ? 'mb-2' : isDenseLayout ? 'mb-3' : 'mb-4'}>
                           <p className={`font-semibold text-gray-700 ${isUltraDenseLayout ? 'text-xs sm:text-sm' : isDenseLayout ? 'text-sm sm:text-base' : isSingleWindow ? 'text-sm' : 'text-base sm:text-lg'}`}>Waiting Queue</p>
                           <p className={`text-gray-500 ${isUltraDenseLayout ? 'text-[11px] sm:text-xs' : isDenseLayout ? 'text-xs sm:text-sm' : 'text-sm'}`}>{windowData.waiting?.length || 0} in line</p>
                         </div>
-                        <div className={`flex-1 min-h-0 space-y-2 ${isDenseLayout ? 'max-h-full overflow-hidden' : 'overflow-y-auto'}`}>
+                        <div className={`space-y-2 ${isDenseLayout ? 'max-h-full overflow-hidden' : ''}`}>
                           {waitingQueues.length > 0 ? (
                             <>
                               {waitingQueues.map((queue, index) => (
@@ -420,7 +420,7 @@ const LiveQueueMonitor = () => {
                               ) : null}
                             </>
                           ) : (
-                            <div className={`flex-1 flex items-center justify-center text-center ${isDenseLayout ? 'py-3' : 'py-6'}`}>
+                            <div className={`text-center ${isDenseLayout ? 'py-3' : 'py-6'}`}>
                               <p className={`text-gray-500 ${isDenseLayout ? 'text-xs sm:text-sm' : 'text-sm'}`}>No queues waiting</p>
                             </div>
                           )}
