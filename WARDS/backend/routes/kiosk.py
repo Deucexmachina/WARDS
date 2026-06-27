@@ -133,7 +133,7 @@ async def get_kiosk_services(
     branch: Branch = Depends(_require_kiosk_token),
     db: Session = Depends(get_db),
 ):
-    """List available queue services for the kiosk (protected by token)."""
+    """List available windows/services with live queue counts."""
     services = get_branch_configured_service_names(db, branch.id)
     if not services:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Queue services are not enabled for this branch.")
@@ -141,9 +141,15 @@ async def get_kiosk_services(
     result = []
     for svc in services:
         display = get_service_window_display_label(svc)
+        snapshot = get_window_scoped_queue_snapshot(db, branch.id, svc)
         result.append({
             "service_type": svc,
             "label": display or infer_service_window(svc),
+            "waiting_count": snapshot["waiting_count"],
+            "serving_count": snapshot["serving_count"],
+            "current_serving_queue_number": snapshot["current_serving_queue_number"],
+            "assigned_window_number": snapshot["assigned_window_number"],
+            "window_label": snapshot["window_label"],
         })
     return {"branch_id": branch.id, "branch_name": get_decrypted_or_raw(branch, "name") or branch.name, "services": result}
 
@@ -204,7 +210,11 @@ async def create_kiosk_ticket(
         serving_count=queue_snapshot["serving_count"],
     )
 
-    taxpayer_name = normalize_citizen_full_name(req.taxpayer_name) if req.taxpayer_name else "Kiosk User"
+    taxpayer_name = ""
+    if req.taxpayer_name:
+        taxpayer_name = normalize_citizen_full_name(req.taxpayer_name)
+    if not taxpayer_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Full name is required. Please enter your name using letters and spaces only.")
 
     new_queue = Queue(
         queue_number=queue_number,
