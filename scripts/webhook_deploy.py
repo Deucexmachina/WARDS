@@ -76,6 +76,7 @@ async def github_webhook(request: Request):
     if not ref.endswith("/main"):
         return PlainTextResponse("Ignored non-main branch", status_code=200)
 
+    vm2_pushed_pause = False
     try:
         # Pause VM2 monitoring before any file changes
         if VM2_HOST and VM2_API_KEY:
@@ -87,6 +88,7 @@ async def github_webhook(request: Request):
                     timeout=10.0,
                 )
                 logger.info("VM2 deployment mode enabled")
+                vm2_pushed_pause = True
             except Exception as e:
                 logger.warning("Could not pause VM2 monitoring before deploy: %s", e)
 
@@ -96,7 +98,7 @@ async def github_webhook(request: Request):
         run_cmd(["git", "reset", "--hard", "origin/main"], cwd=DEPLOY_DIR)
         run_cmd(["docker", "compose", "up", "-d", "--build"], cwd=DEPLOY_DIR)
 
-        # Deploy VM2 via authenticated HTTPS trigger
+        # Deploy VM2 via authenticated HTTPS trigger (best effort)
         if VM2_HOST and VM2_API_KEY:
             logger.info("Triggering VM2 deploy at %s", VM2_HOST)
             try:
@@ -109,7 +111,7 @@ async def github_webhook(request: Request):
                 logger.info("VM2 deploy triggered: %s", resp.json())
             except Exception as e:
                 logger.error("VM2 deploy trigger failed: %s", e)
-                raise RuntimeError(f"VM2 deploy trigger failed: {e}") from e
+                # Do not raise — let the finally block unpause so monitoring resumes
 
             # Wait for VM2 to come back up and finish its startup baseline
             logger.info("Waiting for VM2 to finish startup baseline...")
@@ -131,7 +133,6 @@ async def github_webhook(request: Request):
                 logger.warning("VM2 did not become ready within timeout; proceeding anyway")
 
             # Give the monitor loop time to run its startup baseline backup
-            # (it clears deployment mode automatically after baseline completes)
             time.sleep(10)
 
             # Trigger post-deploy backup on VM2 so new files have a trusted baseline
@@ -146,9 +147,12 @@ async def github_webhook(request: Request):
             except Exception as e:
                 logger.error("VM2 post-deploy backup trigger failed: %s", e)
 
-            # Deployment mode is cleared automatically by VM2 monitor_loop
-            # after startup baseline backup completes. If for some reason it
-            # is still active, clear it now so monitoring resumes.
+    except Exception as e:
+        logger.exception("Deploy failed")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        # ALWAYS unpause VM2 if we successfully paused it, regardless of deploy success/failure
+        if vm2_pushed_pause:
             try:
                 httpx.post(
                     f"https://{VM2_HOST}/internal/deployment-mode",
@@ -156,15 +160,11 @@ async def github_webhook(request: Request):
                     json={"in_progress": False},
                     timeout=10.0,
                 )
-                logger.info("VM2 deployment mode cleared (fallback)")
+                logger.info("VM2 deployment mode cleared")
             except Exception as e:
-                logger.warning("Could not clear VM2 deployment mode after deploy: %s", e)
+                logger.warning("Could not clear VM2 deployment mode: %s", e)
 
-        return PlainTextResponse("Deployed VM1 and VM2", status_code=200)
-
-    except Exception as e:
-        logger.exception("Deploy failed")
-        raise HTTPException(status_code=500, detail=str(e))
+    return PlainTextResponse("Deployed VM1 and VM2", status_code=200)
 
 
 @app.get("/health")
