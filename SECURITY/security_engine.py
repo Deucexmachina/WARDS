@@ -4527,6 +4527,47 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
             if incident.status == "resolved" and incident.response_action == "auto_recovered":
                 # Already auto-recovered; just ensure quarantine is cleaned up
                 cleanup_quarantine_paths(json_loads(incident.quarantine_paths_json, []))
+            elif incident.response_action == "auto_recovered_pending_review":
+                # Auto-recovery was already queued at detection time; admin now confirms resolution
+                cleanup_quarantine_paths(json_loads(incident.quarantine_paths_json, []))
+                # Update snapshot to clean (original) content for baseline consistency
+                quarantine_paths = json_loads(incident.quarantine_paths_json, [])
+                quarantine_path = quarantine_paths[0] if quarantine_paths else None
+                safe_quarantine = safe_quarantine_path(quarantine_path) if quarantine_path else None
+                if safe_quarantine and safe_quarantine.exists():
+                    try:
+                        original_bytes = safe_quarantine.read_bytes()
+                        snapshot = VM1_SNAPSHOT_ROOT / file_entry.relative_path
+                        snapshot.parent.mkdir(parents=True, exist_ok=True)
+                        snapshot.write_bytes(original_bytes)
+                        clean_hash = hashlib.sha256(original_bytes).hexdigest()
+                        file_entry.baseline_hash = clean_hash
+                        file_entry.current_hash = clean_hash
+                    except Exception:
+                        pass
+                file_entry.status = "clean"
+                file_entry.last_checked = now_utc()
+                db.add(file_entry)
+                if create_event:
+                    recovery = SecurityRecoveryEvent(
+                        detection_event_id=detection.id if detection else None,
+                        file_id=file_entry.id,
+                        recovery_type="vm1_restore_confirmed",
+                        initiated_by=_valid_admin_id(db, admin_id),
+                        status="success",
+                        quarantine_path=str(safe_quarantine) if safe_quarantine else None,
+                        summary=f"Admin resolved: auto-recovery confirmed for {file_entry.relative_path}.",
+                        completed_at=now_utc(),
+                    )
+                    db.add(recovery)
+                    db.commit()
+                # Trigger a post-resolve backup so the restored state becomes the trusted baseline
+                try:
+                    post_resolve_backup = create_manual_backup(db, initiated_by=_valid_admin_id(db, admin_id), label="post_resolve")
+                    if post_resolve_backup.status == "success":
+                        incident.response_action = "resolved_clean_backup_refreshed"
+                except Exception as backup_exc:
+                    logger.warning("Post-resolve backup failed: %s", backup_exc)
             else:
                 # Manual resolve: read original from quarantine, queue restore command
                 quarantine_paths = json_loads(incident.quarantine_paths_json, [])
@@ -4693,8 +4734,8 @@ def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_ba
             file_entry.status = "clean"
             file_entry.last_checked = now_utc()
             db.add(file_entry)
-            if incident.response_action == "auto_recovered":
-                # Auto-recovery already ran; push the defaced snapshot back to VM1
+            if incident.response_action in {"auto_recovered", "auto_recovered_pending_review"}:
+                # Auto-recovery already ran (or was queued); push the defaced snapshot back to VM1
                 defaced_snapshot = VM1_DEFACED_SNAPSHOT_ROOT / file_entry.relative_path
                 defaced_bytes = None
                 if defaced_snapshot.exists():
@@ -5806,6 +5847,15 @@ def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type
     db.commit()
     db.refresh(detection)
 
+    # Deduplication: skip if an open incident already exists for this file and change type
+    existing_incident = db.query(SecurityIncident).join(SecurityDetectionEvent).filter(
+        SecurityDetectionEvent.file_id == entry.id,
+        SecurityDetectionEvent.change_type == change_type,
+        SecurityIncident.status.in_(["open", "investigating"]),
+    ).first()
+    if existing_incident:
+        return detection
+
     # Always create a security incident for VM1 file changes; auto-recovery is controlled separately
     try:
         quarantine_path = _quarantine_vm1_snapshot(entry, detection.id)
@@ -5820,20 +5870,17 @@ def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type
         high_risk_exts = set(rules.get("file_type_risk", {}).get("config", {}).get("high_risk_extensions", [".html", ".jsx", ".js", ".py"]))
         is_auto_recover = suffix in high_risk_exts or classification.get("severity_level") in {"high", "critical"}
         if is_auto_recover:
-            # Auto-recovery: restore immediately and mark incident resolved
+            # Auto-recovery: queue restore command but keep incident OPEN for admin review
             _create_vm1_restore_command(db, entry, detection.id)
             incident = create_incident(db, detection, classification, flags, changed, quarantine_path)
-            incident.status = "resolved"
-            incident.resolved_at = now_utc()
-            incident.resolved_by = None
-            incident.response_action = "auto_recovered"
-            cleanup_quarantine_paths(json_loads(incident.quarantine_paths_json, []))
+            incident.status = "open"
+            incident.response_action = "auto_recovered_pending_review"
             db.add(incident)
             db.commit()
             create_system_alert(
                 db,
-                "incident_resolved",
-                f"SEC-{incident.id}: Auto-recovered {entry.relative_path} (high-risk / high-severity).",
+                "incident_auto_recovery",
+                f"SEC-{incident.id}: Auto-recovery queued for {entry.relative_path} (high-risk / high-severity). Admin review required.",
                 incident.severity_level or "low",
                 dedupe_key=f"SEC-{incident.id}",
             )

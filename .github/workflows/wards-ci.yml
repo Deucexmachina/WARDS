@@ -86,7 +86,7 @@ jobs:
           BACKUP_INTEGRITY_SECRET: ci-test-backup-integrity-secret
           RECAPTCHA_SECRET_KEY: ci-test-recaptcha-secret
           PAYMONGO_WEBHOOK_SECRET: ci-test-webhook-secret
-        run: pytest -q tests/test_security_engine_core.py tests/test_vm1_recovery.py
+        run: pytest -q tests/test_security_engine_core.py tests/test_security_engine.py tests/test_incident_resolution.py tests/test_vm1_recovery.py
       - name: Run blocking/restriction tests (IP blocklist, temporary user restrictions)
         env:
           PYTHONPATH: ${{ github.workspace }}/WARDS/backend:${{ github.workspace }}
