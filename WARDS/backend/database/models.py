@@ -275,7 +275,6 @@ class Branch(Base):
     dashboard_url_enc = Column(Text, nullable=True)
     counters = Column(Integer)
     status = Column(String, default="Active")
-    kiosk_pin = Column(String(10), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class Payment(Base):
@@ -1350,21 +1349,6 @@ class QueueHistory(Base):
     archived_at = Column(DateTime, default=datetime.utcnow)
 
     branch = relationship("Branch", backref="queue_history_entries")
-
-class KioskDevice(Base):
-    __tablename__ = "kiosk_devices"
-
-    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    branch_id = Column(Integer, ForeignKey("branches.id"))
-    name = Column(String(100), default="Kiosk")
-    pairing_code_hash = Column(String(255), nullable=True)
-    device_token_hash = Column(String(255), nullable=True)
-    status = Column(String(20), default="active")
-    paired_at = Column(DateTime, default=datetime.utcnow)
-    last_heartbeat = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-    branch = relationship("Branch", backref="kiosk_devices")
 
 class Service(Base):
     __tablename__ = "services"

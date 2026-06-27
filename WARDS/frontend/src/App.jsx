@@ -32,9 +32,6 @@ import BranchSystemSettingsLogin from './pages/branch/BranchSystemSettingsLogin'
 import BranchActivityLogs from './pages/branch/BranchActivityLogs'
 import LiveQueueMonitor from './pages/branch/LiveQueueMonitor'
 import WindowStaffAccount from './pages/branch/WindowStaffAccount'
-import KioskSetup from './pages/kiosk/KioskSetup'
-import KioskInterface from './pages/kiosk/KioskInterface'
-import KioskManagement from './pages/kiosk/KioskManagement'
 import PayTaxes from './pages/public/PayTaxes'
 import PayTaxesRPT from './pages/public/PayTaxesRPT'
 import PayTaxesBT from './pages/public/PayTaxesBT'
@@ -101,10 +98,6 @@ function App() {
         <Route path="/payment/failed" element={<PaymentFailed />} />
         <Route path="/mobile-receipt-upload/:token" element={<MobileReceiptUpload />} />
         
-        {/* Kiosk Routes */}
-        <Route path="/kiosk-setup" element={<KioskSetup />} />
-        <Route path="/kiosk/:branchId" element={<KioskInterface />} />
-        
         <Route path="/login" element={<UnifiedLogin />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/user/login" element={<UnifiedLogin preferredPortal="public" />} />
@@ -126,7 +119,6 @@ function App() {
           <Route path="payments" element={<BranchPaymentManagement />} />
           <Route path="accounts" element={<Accounts />} />
           <Route path="account-management" element={<WindowStaffAccount />} />
-          <Route path="kiosks" element={<KioskManagement />} />
           <Route path="memos" element={<BranchMemos />} />
           <Route path="reports" element={<BranchReports />} />
           <Route path="announcements" element={<BranchAnnouncements />} />
