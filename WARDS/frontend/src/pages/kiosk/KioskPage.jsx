@@ -15,6 +15,7 @@ export default function KioskPage() {
   const [taxpayerName, setTaxpayerName] = useState('');
   const [nameError, setNameError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [countdown, setCountdown] = useState(10);
 
   const branchId = branchIdParam || searchParams.get('branch');
   const token = searchParams.get('token') || localStorage.getItem('kiosk_token');
@@ -92,8 +93,26 @@ export default function KioskPage() {
     setTaxpayerName('');
     setNameError('');
     setError('');
+    setCountdown(10);
     setStep('services');
   };
+
+  // Auto-return to services after 10 seconds on ticket screen
+  useEffect(() => {
+    if (step !== 'ticket') return;
+    setCountdown(10);
+    const interval = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          handleRestart();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [step]);
 
   if (step === 'loading') {
     return (
@@ -317,6 +336,9 @@ export default function KioskPage() {
 
         <div className="mt-6 text-slate-400 text-sm">
           Please wait for your number to be called.
+        </div>
+        <div className="mt-2 text-slate-400 text-xs">
+          Returning to start in {countdown} second{countdown !== 1 ? 's' : ''}...
         </div>
       </div>
     );
