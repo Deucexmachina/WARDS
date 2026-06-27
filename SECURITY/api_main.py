@@ -312,7 +312,9 @@ def start_security_monitor_if_enabled():
                     raise RuntimeError(event.error_message or "Startup baseline backup failed")
                 set_setting(startup_db, "monitoring_enabled", "true", "system_startup")
                 set_setting(startup_db, "startup_baseline_status", "complete", "system")
-                set_deployment_mode(startup_db, False, "system_startup")
+                # Note: do NOT clear deployment_in_progress here.
+                # The VM1 webhook's finally block handles unpause after deploy.
+                # Clearing it here would cause false detections during deployment.
                 print("[SECURITY MONITOR] startup baseline backup refreshed")
                 break
             except Exception as exc:
@@ -786,7 +788,8 @@ def api_internal_deploy():
             )
             if docker.returncode == 0:
                 logger.info("Docker compose restart succeeded")
-                # Post-deploy backup + clear deployment mode handled by monitor_loop startup
+                # Post-deploy backup is triggered by VM1 webhook after VM2 is back up.
+                # Deployment mode is cleared by the VM1 webhook's finally block.
                 return
             logger.warning("docker compose exited %d: %s", docker.returncode, docker.stderr)
         except FileNotFoundError:

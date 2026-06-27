@@ -5949,6 +5949,8 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
                         last_checked=now_utc(),
                     )
                 )
+            # Store the snapshot during deployment so future diffs have a proper baseline
+            _store_vm1_snapshot(rel_path, f.get("content_b64"))
         db.commit()
         return {"detections": [], "changed": 0, "registered": len(files)}
 
