@@ -169,39 +169,52 @@ export default function KioskPage() {
                     key={svc.service_type}
                     onClick={() => handleSelectService(svc.service_type)}
                     disabled={loading}
-                    className="relative flex flex-col justify-between p-6 bg-white hover:bg-blue-50 border-2 border-slate-200 hover:border-[#0f2f5f] rounded-2xl text-left transition-all disabled:opacity-50 active:scale-[0.98] shadow-sm h-full"
+                    className="relative flex flex-col overflow-hidden bg-white hover:bg-blue-50 border-2 border-slate-200 hover:border-[#0f2f5f] rounded-2xl text-left transition-all disabled:opacity-50 active:scale-[0.98] shadow-sm h-full"
                   >
-                    {/* Top row: label + window badge */}
-                    <div className="flex items-start justify-between gap-3 mb-3">
-                      <div>
-                        <div className="text-2xl font-bold text-[#0f2f5f]">{svc.label}</div>
-                        <div className="text-slate-500 text-sm mt-0.5">{svc.description || svc.service_type}</div>
-                      </div>
-                      <div className="shrink-0 bg-[#0f2f5f] text-white text-xs font-bold px-3 py-1 rounded-full">
+                    {/* Blue banner header — matches Live Monitor */}
+                    <div className="bg-[#0f2f5f] text-white px-4 py-3 flex items-center justify-between">
+                      <span className="text-lg font-bold">{svc.label}</span>
+                      <span className="text-xs font-bold bg-white/20 px-2.5 py-1 rounded-full">
                         Window {svc.assigned_window_number || '–'}
-                      </div>
+                      </span>
                     </div>
 
-                    {/* Bottom: live counts always at same position */}
-                    <div className="flex flex-wrap gap-2 mt-auto pt-2">
-                      <span className="inline-flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-full px-3 py-1 text-xs font-semibold text-amber-800">
-                        <span className="relative flex h-2 w-2">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                    {/* Body */}
+                    <div className="flex-1 flex flex-col p-5">
+                      {/* Description */}
+                      <p className="text-slate-500 text-sm mb-4 leading-relaxed">
+                        {svc.description || svc.service_type}
+                      </p>
+
+                      {/* NOW SERVING section */}
+                      <div className="text-center mb-4">
+                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Now Serving</p>
+                        {svc.current_serving_queue_number ? (
+                          <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 border border-emerald-200 px-4 py-1.5">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                            <span className="text-emerald-800 font-bold text-sm">{svc.current_serving_queue_number}</span>
+                          </div>
+                        ) : (
+                          <span className="text-slate-400 font-semibold text-sm">NO QUEUE</span>
+                        )}
+                      </div>
+
+                      {/* Waiting count badge — matches monitor yellow card style */}
+                      <div className="mt-auto flex flex-wrap gap-2">
+                        <span className="inline-flex items-center gap-2 rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2 text-sm font-semibold text-yellow-800">
+                          <span className="relative flex h-2.5 w-2.5">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-yellow-500"></span>
+                          </span>
+                          {svc.waiting_count} waiting
                         </span>
-                        {svc.waiting_count} waiting
-                      </span>
-                      {svc.serving_count > 0 && (
-                        <span className="inline-flex items-center gap-1.5 bg-blue-50 border border-blue-200 rounded-full px-3 py-1 text-xs font-semibold text-blue-800">
-                          <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-                          {svc.serving_count} serving
-                        </span>
-                      )}
-                      {svc.current_serving_queue_number && (
-                        <span className="inline-flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 rounded-full px-3 py-1 text-xs font-semibold text-emerald-800">
-                          Now: {svc.current_serving_queue_number}
-                        </span>
-                      )}
+                        {svc.serving_count > 0 && (
+                          <span className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">
+                            <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                            {svc.serving_count} serving
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </button>
                 ))}
