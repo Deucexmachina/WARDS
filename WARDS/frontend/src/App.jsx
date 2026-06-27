@@ -101,7 +101,7 @@ function App() {
         <Route path="/mobile-receipt-upload/:token" element={<MobileReceiptUpload />} />
         
         {/* Kiosk Route */}
-        <Route path="/kiosk" element={<KioskPage />} />
+        <Route path="/kiosk/:branchId" element={<KioskPage />} />
         
         <Route path="/login" element={<UnifiedLogin />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />

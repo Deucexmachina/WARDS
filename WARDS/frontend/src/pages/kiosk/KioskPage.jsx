@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useParams } from 'react-router-dom';
 import axios from 'axios';
 import { API_HOST } from '../../services/api';
 
 export default function KioskPage() {
   const [searchParams] = useSearchParams();
+  const { branchId: branchIdParam } = useParams();
   const [step, setStep] = useState('loading'); // loading, error, services, ticket
   const [services, setServices] = useState([]);
   const [branchName, setBranchName] = useState('');
@@ -13,7 +14,7 @@ export default function KioskPage() {
   const [selectedService, setSelectedService] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  const branchId = searchParams.get('branch');
+  const branchId = branchIdParam || searchParams.get('branch');
   const token = searchParams.get('token') || localStorage.getItem('kiosk_token');
 
   useEffect(() => {
