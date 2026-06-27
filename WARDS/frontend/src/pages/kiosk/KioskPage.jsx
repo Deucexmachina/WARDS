@@ -175,7 +175,7 @@ export default function KioskPage() {
                     <div className="flex items-start justify-between gap-3 mb-3">
                       <div>
                         <div className="text-2xl font-bold text-[#0f2f5f]">{svc.label}</div>
-                        <div className="text-slate-500 text-sm mt-0.5">{svc.service_type}</div>
+                        <div className="text-slate-500 text-sm mt-0.5">{svc.description || svc.service_type}</div>
                       </div>
                       <div className="shrink-0 bg-[#0f2f5f] text-white text-xs font-bold px-3 py-1 rounded-full">
                         Window {svc.assigned_window_number || '–'}

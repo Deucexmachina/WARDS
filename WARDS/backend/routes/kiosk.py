@@ -30,7 +30,7 @@ from utils.branch_appointment_settings import (
     get_branch_immediate_queue_availability,
     get_window_capacity_snapshot,
 )
-from utils.branch_window_config import infer_service_window, get_service_window_display_label
+from utils.branch_window_config import infer_service_window, get_service_window_display_label, STANDARD_SERVICE_DESCRIPTIONS
 from routes.public import (
     ACTIVE_PUBLIC_QUEUE_STATUSES,
     calculate_immediate_wait_metrics,
@@ -145,6 +145,7 @@ async def get_kiosk_services(
         result.append({
             "service_type": svc,
             "label": display or infer_service_window(svc),
+            "description": STANDARD_SERVICE_DESCRIPTIONS.get(svc, display or infer_service_window(svc)),
             "waiting_count": snapshot["waiting_count"],
             "serving_count": snapshot["serving_count"],
             "current_serving_queue_number": snapshot["current_serving_queue_number"],
