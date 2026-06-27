@@ -348,7 +348,7 @@ const LiveQueueMonitor = () => {
                   .sort(([, a], [, b]) => (a.assigned_window_number || 0) - (b.assigned_window_number || 0))
                   .map(([windowKey, windowData]) => {
                   const currentServing = windowData.serving?.[0] || null;
-                  const waitingQueues = windowData.waiting?.slice(0, isUltraDenseLayout ? 1 : (isDenseLayout ? 2 : 2)) || [];
+                  const waitingQueues = windowData.waiting?.slice(0, isUltraDenseLayout ? 2 : 3) || [];
                   const remainingWaitingCount = Math.max(0, (windowData.waiting?.length || 0) - waitingQueues.length);
                   
                   return (
@@ -391,7 +391,7 @@ const LiveQueueMonitor = () => {
                             <>
                               {waitingQueues.map((queue, index) => (
                                 <div
-                                  key={index}
+                                  key={queue.queue_number || index}
                                   className={`flex flex-wrap items-center justify-between gap-3 rounded-lg border border-yellow-200 bg-yellow-50 ${
                                     isUltraDenseLayout ? 'p-2.5' : isDenseLayout ? 'p-3' : isSingleWindow ? 'p-4' : 'p-4 sm:p-5'
                                   }`}
