@@ -60,6 +60,34 @@ def run_cmd(cmd: list[str], cwd: str | None = None) -> str:
     return result.stdout.strip()
 
 
+def _unpause_vm2() -> bool:
+    """Clear VM2 deployment pause with retries. Returns True on success."""
+    if not VM2_HOST or not VM2_API_KEY:
+        return False
+    for attempt in range(5):
+        try:
+            httpx.post(
+                f"https://{VM2_HOST}/internal/deployment-mode",
+                headers={"X-API-Key": VM2_API_KEY},
+                json={"in_progress": False},
+                timeout=10.0,
+            )
+            logger.info("VM2 deployment mode cleared")
+            return True
+        except Exception as e:
+            logger.warning(
+                "Could not clear VM2 deployment mode (attempt %d/5): %s",
+                attempt + 1, e,
+            )
+            if attempt < 4:
+                time.sleep(2 ** attempt)
+    logger.error(
+        "CRITICAL: Failed to clear VM2 deployment mode after 5 attempts. "
+        "VM2 will auto-clear the stale pause after 10 minutes."
+    )
+    return False
+
+
 @app.post("/webhook")
 async def github_webhook(request: Request):
     body = await request.body()
@@ -77,9 +105,34 @@ async def github_webhook(request: Request):
     if not ref.endswith("/main"):
         return PlainTextResponse("Ignored non-main branch", status_code=200)
 
+    target_commit = payload.get("after", "")
+    logger.info("Webhook push target commit: %s", target_commit)
+
     vm2_pushed_pause = False
+    deployment_resumed = False  # True only after successful commit verification + unpause
+
+    def _get_vm1_commit() -> str:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, cwd=DEPLOY_DIR,
+        )
+        return result.stdout.strip() if result.returncode == 0 else ""
+
+    def _get_vm2_commit() -> str | None:
+        try:
+            resp = httpx.get(
+                f"https://{VM2_HOST}/internal/deploy-status",
+                headers={"X-API-Key": VM2_API_KEY},
+                timeout=5.0,
+            )
+            if resp.status_code == 200:
+                return resp.json().get("commit", "")
+        except Exception:
+            pass
+        return None
+
     try:
-        # Pause VM2 monitoring before any file changes
+        # --- Step 1: Pause VM2 monitoring ---
         if VM2_HOST and VM2_API_KEY:
             try:
                 httpx.post(
@@ -93,13 +146,21 @@ async def github_webhook(request: Request):
             except Exception as e:
                 logger.warning("Could not pause VM2 monitoring before deploy: %s", e)
 
-        # Deploy VM1
+        # --- Step 2: Deploy VM1 ---
         logger.info("Deploying VM1 from %s", DEPLOY_DIR)
         run_cmd(["git", "fetch", "origin", "main"], cwd=DEPLOY_DIR)
         run_cmd(["git", "reset", "--hard", "origin/main"], cwd=DEPLOY_DIR)
         run_cmd(["docker", "compose", "up", "-d", "--build"], cwd=DEPLOY_DIR)
 
-        # Deploy VM2 via authenticated HTTPS trigger (best effort)
+        # --- Step 3: Verify VM1 is on target commit ---
+        vm1_commit = _get_vm1_commit()
+        if target_commit and vm1_commit != target_commit:
+            raise RuntimeError(
+                f"VM1 commit verification failed: expected={target_commit}, got={vm1_commit}"
+            )
+        logger.info("VM1 commit verified: %s", vm1_commit)
+
+        # --- Step 4: Deploy VM2 ---
         if VM2_HOST and VM2_API_KEY:
             logger.info("Triggering VM2 deploy at %s", VM2_HOST)
             try:
@@ -111,32 +172,31 @@ async def github_webhook(request: Request):
                 resp.raise_for_status()
                 logger.info("VM2 deploy triggered: %s", resp.json())
             except Exception as e:
-                logger.error("VM2 deploy trigger failed: %s", e)
-                # Do not raise — let the finally block unpause so monitoring resumes
+                raise RuntimeError(f"VM2 deploy trigger failed: {e}")
 
-            # Wait for VM2 to come back up and finish its startup baseline
+            # --- Step 5: Wait for VM2 to restart ---
             logger.info("Waiting for VM2 to finish startup baseline...")
-            import time
+            vm2_commit = None
             for attempt in range(30):
                 time.sleep(2)
-                try:
-                    status_resp = httpx.get(
-                        f"https://{VM2_HOST}/internal/deploy-status",
-                        headers={"X-API-Key": VM2_API_KEY},
-                        timeout=5.0,
-                    )
-                    if status_resp.status_code == 200:
-                        logger.info("VM2 is back up: %s", status_resp.json())
-                        break
-                except Exception:
-                    pass
+                vm2_commit = _get_vm2_commit()
+                if vm2_commit and vm2_commit != "unknown":
+                    logger.info("VM2 is back up: commit=%s", vm2_commit)
+                    break
             else:
-                logger.warning("VM2 did not become ready within timeout; proceeding anyway")
+                raise RuntimeError("VM2 did not become ready within timeout")
 
-            # Give the monitor loop time to run its startup baseline backup
+            # --- Step 6: Verify VM2 is on target commit ---
+            if target_commit and vm2_commit != target_commit:
+                raise RuntimeError(
+                    f"VM2 commit verification failed: expected={target_commit}, got={vm2_commit}"
+                )
+            logger.info("VM2 commit verified: %s", vm2_commit)
+
+            # Give monitor loop time to run startup baseline
             time.sleep(10)
 
-            # Trigger post-deploy backup on VM2 so new files have a trusted baseline
+            # --- Step 7: Trigger post-deploy backup ---
             try:
                 backup_resp = httpx.post(
                     f"https://{VM2_HOST}/v1/backup/full",
@@ -147,38 +207,22 @@ async def github_webhook(request: Request):
                 logger.info("VM2 post-deploy backup triggered: %s", backup_resp.json())
             except Exception as e:
                 logger.error("VM2 post-deploy backup trigger failed: %s", e)
+                # Non-fatal: backup failure should not block unpause
+
+        # --- Step 8: Resume monitoring (success path) ---
+        if vm2_pushed_pause:
+            if _unpause_vm2():
+                deployment_resumed = True
 
     except Exception as e:
         logger.exception("Deploy failed")
         raise HTTPException(status_code=500, detail=str(e))
+
     finally:
-        # ALWAYS unpause VM2 if we successfully paused it, regardless of deploy success/failure
-        if vm2_pushed_pause:
-            _unpause_ok = False
-            for attempt in range(5):
-                try:
-                    httpx.post(
-                        f"https://{VM2_HOST}/internal/deployment-mode",
-                        headers={"X-API-Key": VM2_API_KEY},
-                        json={"in_progress": False},
-                        timeout=10.0,
-                    )
-                    logger.info("VM2 deployment mode cleared")
-                    _unpause_ok = True
-                    break
-                except Exception as e:
-                    logger.warning(
-                        "Could not clear VM2 deployment mode (attempt %d/5): %s",
-                        attempt + 1, e,
-                    )
-                    if attempt < 4:
-                        time.sleep(2 ** attempt)
-            if not _unpause_ok:
-                logger.error(
-                    "CRITICAL: Failed to clear VM2 deployment mode after 5 attempts. "
-                    "VM2 will auto-clear the stale pause after 10 minutes, "
-                    "or run manually: curl -X POST .../internal/deployment-mode -d '{\"in_progress\": false}'"
-                )
+        # Safety net: unpause VM2 if we paused it but never resumed (failure case)
+        if vm2_pushed_pause and not deployment_resumed:
+            logger.warning("Deploy failed or incomplete — running safety-net unpause")
+            _unpause_vm2()
 
     return PlainTextResponse("Deployed VM1 and VM2", status_code=200)
 
