@@ -93,6 +93,8 @@ class KioskTicketResponse(BaseModel):
     queue_number: str
     service_type: str
     estimated_wait_minutes: Optional[int]
+    waiting_count: int
+    serving_count: int
     branch_name: str
     created_at: datetime
 
@@ -244,6 +246,8 @@ async def create_kiosk_ticket(
         "queue_number": queue_value(new_queue, "queue_number"),
         "service_type": req.service_type,
         "estimated_wait_minutes": wait_metrics["estimated_wait_time"],
+        "waiting_count": queue_snapshot["waiting_count"],
+        "serving_count": queue_snapshot["serving_count"],
         "branch_name": branch_name,
         "created_at": new_queue.created_at,
     }

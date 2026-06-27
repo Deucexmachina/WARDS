@@ -13,6 +13,7 @@ export default function KioskPage() {
   const [ticket, setTicket] = useState(null);
   const [selectedService, setSelectedService] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [liveAhead, setLiveAhead] = useState(null);
 
   const branchId = branchIdParam || searchParams.get('branch');
   const token = searchParams.get('token') || localStorage.getItem('kiosk_token');
@@ -53,6 +54,7 @@ export default function KioskPage() {
         { headers: { 'X-Kiosk-Token': token, 'Content-Type': 'application/json' } }
       );
       setTicket(res.data);
+      setLiveAhead(res.data.waiting_count);
       setStep('ticket');
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to generate ticket. Please try again.');
@@ -66,26 +68,30 @@ export default function KioskPage() {
     setTicket(null);
     setSelectedService(null);
     setError('');
+    setLiveAhead(null);
     setStep('services');
   };
 
   if (step === 'loading') {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-slate-900 text-white">
-        <div className="text-2xl animate-pulse">Loading...</div>
+      <div className="flex items-center justify-center min-h-screen bg-slate-50">
+        <div className="text-center">
+          <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-4 border-[#0f2f5f] border-t-transparent"></div>
+          <p className="text-slate-600 text-lg font-medium">Loading...</p>
+        </div>
       </div>
     );
   }
 
   if (step === 'error') {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-slate-900 text-white p-4">
-        <div className="text-center max-w-md">
-          <div className="text-red-400 text-4xl mb-4">⚠</div>
-          <p className="text-lg mb-4">{error}</p>
+      <div className="flex items-center justify-center min-h-screen bg-slate-50 p-6">
+        <div className="text-center max-w-md bg-white rounded-2xl p-8 shadow-lg border border-slate-200">
+          <div className="text-red-500 text-5xl mb-4">⚠</div>
+          <p className="text-slate-700 text-lg font-medium mb-6">{error}</p>
           <button
             onClick={() => window.location.reload()}
-            className="px-6 py-3 bg-blue-600 rounded-lg hover:bg-blue-700"
+            className="px-8 py-3 bg-[#0f2f5f] text-white rounded-xl font-semibold hover:bg-slate-800 transition-colors"
           >
             Retry
           </button>
@@ -96,35 +102,35 @@ export default function KioskPage() {
 
   if (step === 'services') {
     return (
-      <div className="flex flex-col min-h-screen bg-slate-900 text-white">
-        <header className="bg-slate-800 border-b border-slate-700 py-8 px-8">
-          <h1 className="text-4xl font-bold text-center">{branchName}</h1>
-          <p className="text-center text-slate-400 mt-2 text-lg">Tap a service to get your queue number</p>
+      <div className="flex flex-col min-h-screen bg-slate-50">
+        <header className="bg-white border-b border-slate-200 py-6 px-6 shadow-sm">
+          <h1 className="text-3xl font-bold text-center text-[#0f2f5f]">{branchName}</h1>
+          <p className="text-center text-slate-500 mt-1 text-base">Select a service to get your queue number</p>
         </header>
 
-        <main className="flex-1 flex items-center justify-center p-8">
+        <main className="flex-1 flex items-center justify-center p-6">
           <div className="w-full max-w-5xl">
             {error && (
-              <div className="bg-red-900/30 border border-red-500/30 text-red-200 px-4 py-3 rounded-lg text-sm mb-6 text-center">
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm mb-4 text-center font-medium">
                 {error}
               </div>
             )}
 
             {services.length === 0 ? (
-              <div className="text-center text-slate-400">
-                <p className="text-xl">No services available.</p>
+              <div className="text-center text-slate-500 bg-white rounded-xl p-8 border border-slate-200 shadow-sm">
+                <p className="text-xl">No services available at this time.</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {services.map((svc) => (
                   <button
                     key={svc.service_type}
                     onClick={() => handleGetTicket(svc.service_type)}
                     disabled={loading}
-                    className="p-10 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-2xl text-left transition-colors disabled:opacity-50 active:scale-[0.98]"
+                    className="p-8 bg-white hover:bg-blue-50 border-2 border-slate-200 hover:border-[#0f2f5f] rounded-2xl text-left transition-all disabled:opacity-50 active:scale-[0.98] shadow-sm"
                   >
-                    <div className="text-3xl font-semibold mb-2">{svc.label}</div>
-                    <div className="text-slate-400 text-sm">{svc.service_type}</div>
+                    <div className="text-2xl font-bold text-[#0f2f5f] mb-1">{svc.label}</div>
+                    <div className="text-slate-500 text-sm">{svc.service_type}</div>
                   </button>
                 ))}
               </div>
@@ -132,7 +138,7 @@ export default function KioskPage() {
           </div>
         </main>
 
-        <footer className="bg-slate-800 border-t border-slate-700 py-4 px-8 text-center text-slate-500 text-sm">
+        <footer className="bg-white border-t border-slate-200 py-3 px-6 text-center text-slate-400 text-sm">
           WARDS Queue Kiosk
         </footer>
       </div>
@@ -140,34 +146,63 @@ export default function KioskPage() {
   }
 
   if (step === 'ticket') {
+    const aheadCount = ticket?.waiting_count ?? 0;
+    const servingCount = ticket?.serving_count ?? 0;
+    const estimatedWait = ticket?.estimated_wait_minutes;
+
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-slate-900 text-white p-4">
-        <div className="w-full max-w-2xl bg-slate-800 rounded-3xl p-12 shadow-2xl border border-slate-700 text-center">
-          <div className="text-slate-400 text-xl mb-4">Your Queue Number</div>
-          <div className="text-8xl font-bold text-blue-400 mb-8 tracking-wider">
+      <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 p-6">
+        <div className="w-full max-w-2xl bg-white rounded-3xl p-8 md:p-12 shadow-xl border border-slate-200 text-center">
+          <div className="text-slate-500 text-lg font-medium mb-2">Your Queue Number</div>
+          <div className="text-7xl md:text-8xl font-black text-[#0f2f5f] mb-6 tracking-wider">
             {ticket?.queue_number}
           </div>
 
-          <div className="space-y-3 mb-10">
-            <div className="text-2xl">{ticket?.branch_name}</div>
-            <div className="text-slate-400">{services.find(s => s.service_type === selectedService)?.label || selectedService}</div>
-            {ticket?.estimated_wait_minutes !== null && (
-              <div className="text-slate-300 text-lg">
-                Estimated wait: <span className="text-white font-semibold">{ticket?.estimated_wait_minutes} minutes</span>
+          {/* Live status badges */}
+          <div className="flex flex-wrap items-center justify-center gap-3 mb-6">
+            <div className="inline-flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-full px-5 py-2.5">
+              <span className="relative flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
+              </span>
+              <span className="text-amber-800 font-semibold text-sm">
+                {aheadCount} {aheadCount === 1 ? 'person' : 'people'} ahead
+              </span>
+            </div>
+            {servingCount > 0 && (
+              <div className="inline-flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-full px-5 py-2.5">
+                <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                <span className="text-blue-800 font-semibold text-sm">
+                  {servingCount} {servingCount === 1 ? 'window' : 'windows'} serving
+                </span>
               </div>
             )}
           </div>
 
-          <button
-            onClick={handleRestart}
-            disabled={loading}
-            className="px-10 py-5 bg-blue-600 hover:bg-blue-700 rounded-xl font-semibold text-xl transition-colors"
-          >
-            Get Another Ticket
-          </button>
+          <div className="space-y-2 mb-8">
+            <div className="text-xl font-semibold text-slate-700">{ticket?.branch_name}</div>
+            <div className="text-slate-500">
+              {services.find(s => s.service_type === selectedService)?.label || selectedService}
+            </div>
+            {estimatedWait !== null && estimatedWait !== undefined && (
+              <div className="text-slate-600 text-base">
+                Estimated wait: <span className="text-[#0f2f5f] font-bold">{estimatedWait} minutes</span>
+              </div>
+            )}
+          </div>
+
+          <div className="border-t border-slate-200 pt-8">
+            <button
+              onClick={handleRestart}
+              disabled={loading}
+              className="px-10 py-4 bg-[#0f2f5f] text-white hover:bg-slate-800 rounded-2xl font-bold text-lg transition-colors shadow-md"
+            >
+              Get Another Ticket
+            </button>
+          </div>
         </div>
 
-        <div className="mt-8 text-slate-500 text-sm">
+        <div className="mt-6 text-slate-400 text-sm">
           Please wait for your number to be called.
         </div>
       </div>
