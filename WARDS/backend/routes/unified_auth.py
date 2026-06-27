@@ -529,6 +529,21 @@ def verify_recaptcha(token: str, client_ip: str) -> bool:
         return False
 
 
+def get_client_ip(request) -> str:
+    """Extract real client IP, respecting reverse-proxy headers."""
+    if request is None:
+        return "unknown"
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        return real_ip.strip()
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
 def log_activity(db: Session, action: str, user: str, details: str, log_type: str = "auth", *, request=None, role=None, branch=None, email=None, account=None):
     if account is not None:
         role = role or getattr(account, "role", None)
@@ -539,15 +554,15 @@ def log_activity(db: Session, action: str, user: str, details: str, log_type: st
             if branch_name:
                 branch = branch_name
         email = email or getattr(account, "email", None)
+    role = role or "unknown"
     meta_parts = []
-    if role:
-        meta_parts.append(f"role: {role}")
+    meta_parts.append(f"role: {role}")
     if branch:
         meta_parts.append(f"branch: {branch}")
     if email:
         meta_parts.append(f"email: {email}")
-    if request and request.client and request.client.host:
-        meta_parts.append(f"ip: {request.client.host}")
+    client_ip = get_client_ip(request)
+    meta_parts.append(f"ip: {client_ip}")
     full_details = details
     if meta_parts:
         separator = " | " if " | " in details else "; "
@@ -998,11 +1013,14 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
 @router.post("/logout")
 async def unified_logout(request: Request, db: Session = Depends(get_db)):
     auth_header = request.headers.get("Authorization", "")
+    portal = None
+    user_identifier = "unknown"
+    token = None
     if auth_header.startswith("Bearer "):
         token = auth_header.split(" ", 1)[1]
-        portal = None
         user_id = None
         sid = None
+        payload = None
         for candidate_portal, config in PORTAL_CONFIG.items():
             if candidate_portal == "unknown":
                 continue
@@ -1011,6 +1029,7 @@ async def unified_logout(request: Request, db: Session = Depends(get_db)):
                 portal = payload.get("portal") or candidate_portal
                 user_id = payload.get("user_id")
                 sid = payload.get("sid")
+                user_identifier = payload.get("sub", "unknown")
                 break
             except Exception:
                 continue
@@ -1028,21 +1047,22 @@ async def unified_logout(request: Request, db: Session = Depends(get_db)):
                 if stored == sid:
                     r.delete(f"wards:session:{portal}:{user_id}")
 
-        if portal:
-            user_identifier = payload.get("sub", "unknown") if 'payload' in locals() else "unknown"
-            try:
-                _, account = find_account_for_portal(db, user_identifier, portal)
-            except Exception:
-                account = None
-            log_activity(
-                db,
-                "Account Logout",
-                user_identifier,
-                f"Portal: {portal}",
-                "auth",
-                request=request,
-                account=account,
-            )
+    account = None
+    if portal:
+        try:
+            _, account = find_account_for_portal(db, user_identifier, portal)
+        except Exception:
+            account = None
+
+    log_activity(
+        db,
+        "Account Logout",
+        user_identifier,
+        f"Portal: {portal or 'unknown'}",
+        "auth",
+        request=request,
+        account=account,
+    )
     return {"message": "Logged out successfully"}
 
 

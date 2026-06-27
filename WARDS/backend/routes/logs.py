@@ -137,9 +137,9 @@ async def get_activity_logs(
         match = re.search(rf"{re.escape(label)}\s*:\s*([^|,]+)", details, flags=re.IGNORECASE)
         return match.group(1).strip() if match else None
 
-    def _resolve_role(user_identifier: str) -> str | None:
+    def _resolve_role(user_identifier: str) -> str:
         if not user_identifier:
-            return None
+            return "unknown"
         if user_identifier.lower() == "system":
             return "system"
         admin = db.query(Admin).filter(Admin.username == user_identifier).first()
@@ -153,7 +153,7 @@ async def get_activity_logs(
             if citizen and citizen.role:
                 return citizen.role
             return "citizen"
-        return None
+        return "unknown"
 
     def _extract_ip(details: str | None) -> str | None:
         if not details:
@@ -183,9 +183,9 @@ async def get_activity_logs(
             "action": log.action,
             "user": log.user,
             "email": log.user if "@" in (log.user or "") else detail_value(log.details, "email"),
-            "role": detail_value(log.details, "role") or detail_value(log.details, "portal") or _resolve_role(log.user) or "not recorded",
+            "role": detail_value(log.details, "role") or detail_value(log.details, "portal") or _resolve_role(log.user) or "unknown",
             "branch": detail_value(log.details, "branch") or detail_value(log.details, "branch_name"),
-            "ip": _extract_ip(log.details) or "not recorded",
+            "ip": _extract_ip(log.details) or "unknown",
             "details": log.details,
             "type": log.type,
             "created_at": log.created_at.isoformat() if log.created_at else None,

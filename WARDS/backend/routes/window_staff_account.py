@@ -47,12 +47,40 @@ class ContactNumberCheckRequest(BaseModel):
     exclude_staff_id: Optional[int] = None
 
 
+def get_client_ip(request) -> str:
+    """Extract real client IP, respecting reverse-proxy headers."""
+    if request is None:
+        return "unknown"
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        return real_ip.strip()
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _log(db: Session, action: str, username: str, details: str):
-    db.add(ActivityLog(action=action, user=username, details=details, type="branch_account"))
+def _log(db: Session, action: str, username: str, details: str, *, staff=None, request=None):
+    meta_parts = []
+    if staff is not None:
+        role = getattr(staff, "role", None) or "branch_staff"
+        meta_parts.append(f"role: {role}")
+        branch_obj = getattr(staff, "branch", None)
+        branch_name = getattr(branch_obj, "name", None) if branch_obj else f"Branch {staff.branch_id}"
+        meta_parts.append(f"branch: {branch_name}")
+    else:
+        meta_parts.append("role: branch_staff")
+    ip = get_client_ip(request) if request else "unknown"
+    meta_parts.append(f"ip: {ip}")
+    separator = " | "
+    full_details = f"{' | '.join(meta_parts)} | {details}"
+    db.add(ActivityLog(action=action, user=username, details=full_details, type="branch_account"))
     db.commit()
 
 
@@ -161,8 +189,7 @@ async def update_own_profile(
     current_staff.contact_number = normalized_contact
     db.commit()
 
-    client_ip = request.client.host if request.client else "unknown"
-    _log(db, "Window Staff Profile Updated", current_staff.username, f"IP: {client_ip}")
+    _log(db, "Window Staff Profile Updated", current_staff.username, "Profile information updated", staff=current_staff, request=request)
 
     email_result = send_account_change_notification_email(
         recipient_email=normalized_email,
@@ -173,7 +200,7 @@ async def update_own_profile(
         subject="WARDS Security Notification: Profile Information Updated",
     )
     if email_result.get("sent"):
-        _log(db, "Window Staff Profile Updated", current_staff.username, "Security notification email sent after profile update.")
+        _log(db, "Window Staff Profile Updated", current_staff.username, "Security notification email sent after profile update.", staff=current_staff, request=request)
     else:
         logger.warning("Profile update notification email not sent for %s: %s", current_staff.username, email_result.get("message"))
 
