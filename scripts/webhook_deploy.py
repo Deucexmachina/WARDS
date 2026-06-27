@@ -22,6 +22,7 @@ import hashlib
 import json
 import subprocess
 import logging
+import time
 
 import httpx
 from fastapi import FastAPI, Request, HTTPException
@@ -153,16 +154,31 @@ async def github_webhook(request: Request):
     finally:
         # ALWAYS unpause VM2 if we successfully paused it, regardless of deploy success/failure
         if vm2_pushed_pause:
-            try:
-                httpx.post(
-                    f"https://{VM2_HOST}/internal/deployment-mode",
-                    headers={"X-API-Key": VM2_API_KEY},
-                    json={"in_progress": False},
-                    timeout=10.0,
+            _unpause_ok = False
+            for attempt in range(5):
+                try:
+                    httpx.post(
+                        f"https://{VM2_HOST}/internal/deployment-mode",
+                        headers={"X-API-Key": VM2_API_KEY},
+                        json={"in_progress": False},
+                        timeout=10.0,
+                    )
+                    logger.info("VM2 deployment mode cleared")
+                    _unpause_ok = True
+                    break
+                except Exception as e:
+                    logger.warning(
+                        "Could not clear VM2 deployment mode (attempt %d/5): %s",
+                        attempt + 1, e,
+                    )
+                    if attempt < 4:
+                        time.sleep(2 ** attempt)
+            if not _unpause_ok:
+                logger.error(
+                    "CRITICAL: Failed to clear VM2 deployment mode after 5 attempts. "
+                    "VM2 will auto-clear the stale pause after 10 minutes, "
+                    "or run manually: curl -X POST .../internal/deployment-mode -d '{\"in_progress\": false}'"
                 )
-                logger.info("VM2 deployment mode cleared")
-            except Exception as e:
-                logger.warning("Could not clear VM2 deployment mode: %s", e)
 
     return PlainTextResponse("Deployed VM1 and VM2", status_code=200)
 
