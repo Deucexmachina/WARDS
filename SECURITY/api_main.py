@@ -184,9 +184,9 @@ def api_detections_context(payload: dict = {}, db=Depends(get_db)):
     from SECURITY.security_engine import record_context_detection
     return record_context_detection(
         db,
-        payload["target_name"],
-        payload["actor"],
-        payload["change_type"],
+        target_name=payload["target_name"],
+        actor=payload["actor"],
+        change_type=payload["change_type"],
         context=payload.get("context", {}),
     )
 
