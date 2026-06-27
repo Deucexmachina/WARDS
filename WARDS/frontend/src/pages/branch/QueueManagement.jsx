@@ -979,7 +979,7 @@ const WindowMonitoringSection = ({
                           <div className="mt-5 flex flex-wrap gap-2">
                             <button
                               onClick={() => onWindowCallNext(window.service_window)}
-                              disabled={queueUnavailable || !nextQueue || isAnnouncementPlaying || callingNext}
+                              disabled={queueUnavailable || !nextQueue || isAnnouncementPlaying || callingNext || Boolean(activeQueue)}
                               className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-secondary disabled:opacity-50"
                             >
                               {callingNext ? 'Calling...' : isAnnouncementPlaying ? 'Announcing...' : 'Call Next'}

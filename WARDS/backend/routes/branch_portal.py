@@ -1512,6 +1512,17 @@ async def call_next_queue(
             )
     for attempt in range(2):
         try:
+            # Block if this window already has an active (Called/Serving) queue
+            if requested_service_window:
+                window_active_queues = get_active_branch_queues(
+                    db, current_staff.branch_id, service_window=requested_service_window
+                )
+                if window_active_queues:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Window {requested_service_window} already has an active queue ({queue_value(window_active_queues[0], 'queue_number')}). Complete or skip it before calling the next one."
+                    )
+
             if is_queue_window_staff(current_staff):
                 active_queue, recovered_state = reconcile_active_queue_state(db, current_staff, service_window=requested_service_window, ip=request.client.host)
                 if active_queue:
