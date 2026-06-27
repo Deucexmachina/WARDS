@@ -144,26 +144,26 @@ export default function KioskPage() {
 
   if (step === 'services') {
     return (
-      <div className="flex flex-col h-screen overflow-hidden bg-slate-50">
-        <header className="shrink-0 bg-white border-b border-slate-200 py-4 px-6 shadow-sm">
-          <h1 className="text-2xl md:text-3xl font-bold text-center text-[#0f2f5f]">{branchName}</h1>
-          <p className="text-center text-slate-500 mt-1 text-sm md:text-base">Select a window to get your queue number</p>
+      <div className="flex flex-col min-h-screen bg-slate-50">
+        <header className="bg-white border-b border-slate-200 py-6 px-6 shadow-sm">
+          <h1 className="text-3xl font-bold text-center text-[#0f2f5f]">{branchName}</h1>
+          <p className="text-center text-slate-500 mt-1 text-base">Select a window to get your queue number</p>
         </header>
 
-        <main className="flex-1 min-h-0 p-3 md:p-4">
-          <div className="w-full h-full max-w-5xl mx-auto flex flex-col">
+        <main className="flex-1 flex items-center justify-center p-6">
+          <div className="w-full max-w-5xl">
             {error && (
-              <div className="shrink-0 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm mb-3 text-center font-medium">
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm mb-4 text-center font-medium">
                 {error}
               </div>
             )}
 
             {services.length === 0 ? (
-              <div className="flex-1 flex items-center justify-center text-center text-slate-500 bg-white rounded-xl p-8 border border-slate-200 shadow-sm">
+              <div className="text-center text-slate-500 bg-white rounded-xl p-8 border border-slate-200 shadow-sm">
                 <p className="text-xl">No windows available at this time.</p>
               </div>
             ) : (
-              <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
                 {services.map((svc) => (
                   <button
                     key={svc.service_type}
@@ -172,45 +172,45 @@ export default function KioskPage() {
                     className="relative flex flex-col overflow-hidden bg-white hover:bg-blue-50 border-2 border-slate-200 hover:border-[#0f2f5f] rounded-2xl text-left transition-all disabled:opacity-50 active:scale-[0.98] shadow-sm h-full"
                   >
                     {/* Blue banner header — matches Live Monitor */}
-                    <div className="shrink-0 bg-[#0f2f5f] text-white px-4 py-2 md:py-3 flex items-center justify-between">
-                      <span className="text-base md:text-lg font-bold">{svc.label}</span>
+                    <div className="bg-[#0f2f5f] text-white px-4 py-3 flex items-center justify-between">
+                      <span className="text-lg font-bold">{svc.label}</span>
                       <span className="text-xs font-bold bg-white/20 px-2.5 py-1 rounded-full">
                         Window {svc.assigned_window_number || '–'}
                       </span>
                     </div>
 
                     {/* Body */}
-                    <div className="flex-1 min-h-0 flex flex-col p-3 md:p-5">
+                    <div className="flex-1 flex flex-col p-5">
                       {/* Description */}
-                      <p className="text-slate-500 text-xs md:text-sm mb-2 md:mb-4 leading-relaxed line-clamp-2">
+                      <p className="text-slate-500 text-sm mb-4 leading-relaxed">
                         {svc.description || svc.service_type}
                       </p>
 
                       {/* NOW SERVING section */}
-                      <div className="text-center mb-2 md:mb-4">
-                        <p className="text-[10px] md:text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Now Serving</p>
+                      <div className="text-center mb-4">
+                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Now Serving</p>
                         {svc.current_serving_queue_number ? (
-                          <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 border border-emerald-200 px-3 md:px-4 py-1">
+                          <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 border border-emerald-200 px-4 py-1.5">
                             <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                            <span className="text-emerald-800 font-bold text-xs md:text-sm">{svc.current_serving_queue_number}</span>
+                            <span className="text-emerald-800 font-bold text-sm">{svc.current_serving_queue_number}</span>
                           </div>
                         ) : (
-                          <span className="text-slate-400 font-semibold text-xs md:text-sm">NO QUEUE</span>
+                          <span className="text-slate-400 font-semibold text-sm">NO QUEUE</span>
                         )}
                       </div>
 
                       {/* Waiting count badge — matches monitor yellow card style */}
                       <div className="mt-auto flex flex-wrap gap-2">
-                        <span className="inline-flex items-center gap-1.5 md:gap-2 rounded-lg border border-yellow-200 bg-yellow-50 px-2 md:px-3 py-1 md:py-2 text-xs md:text-sm font-semibold text-yellow-800">
-                          <span className="relative flex h-2 w-2 md:h-2.5 md:w-2.5">
+                        <span className="inline-flex items-center gap-2 rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2 text-sm font-semibold text-yellow-800">
+                          <span className="relative flex h-2.5 w-2.5">
                             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2 w-2 md:h-2.5 md:w-2.5 bg-yellow-500"></span>
+                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-yellow-500"></span>
                           </span>
                           {svc.waiting_count} waiting
                         </span>
                         {svc.serving_count > 0 && (
-                          <span className="inline-flex items-center gap-1.5 md:gap-2 rounded-lg border border-blue-200 bg-blue-50 px-2 md:px-3 py-1 md:py-2 text-xs md:text-sm font-semibold text-blue-800">
-                            <span className="w-1.5 h-1.5 md:w-2 md:h-2 rounded-full bg-blue-500"></span>
+                          <span className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">
+                            <span className="w-2 h-2 rounded-full bg-blue-500"></span>
                             {svc.serving_count} serving
                           </span>
                         )}
@@ -223,7 +223,7 @@ export default function KioskPage() {
           </div>
         </main>
 
-        <footer className="shrink-0 bg-white border-t border-slate-200 py-2 px-6 text-center text-slate-400 text-sm">
+        <footer className="bg-white border-t border-slate-200 py-3 px-6 text-center text-slate-400 text-sm">
           WARDS Queue Kiosk
         </footer>
       </div>
