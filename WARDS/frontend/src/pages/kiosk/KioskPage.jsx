@@ -144,14 +144,14 @@ export default function KioskPage() {
 
   if (step === 'services') {
     return (
-      <div className="flex flex-col min-h-screen bg-slate-50">
+      <div className="flex flex-col min-h-screen bg-slate-50 overflow-hidden">
         <header className="bg-white border-b border-slate-200 py-6 px-6 shadow-sm">
           <h1 className="text-3xl font-bold text-center text-[#0f2f5f]">{branchName}</h1>
           <p className="text-center text-slate-500 mt-1 text-base">Select a window to get your queue number</p>
         </header>
 
-        <main className="flex-1 flex items-center justify-center p-6">
-          <div className="w-full max-w-5xl">
+        <main className="flex-1 flex items-center justify-center p-6 overflow-hidden">
+          <div className="w-full max-w-5xl overflow-hidden">
             {error && (
               <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm mb-4 text-center font-medium">
                 {error}
@@ -185,19 +185,6 @@ export default function KioskPage() {
                       <p className="text-slate-500 text-sm mb-4 leading-relaxed">
                         {svc.description || svc.service_type}
                       </p>
-
-                      {/* NOW SERVING section */}
-                      <div className="text-center mb-4">
-                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Now Serving</p>
-                        {svc.current_serving_queue_number ? (
-                          <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 border border-emerald-200 px-4 py-1.5">
-                            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                            <span className="text-emerald-800 font-bold text-sm">{svc.current_serving_queue_number}</span>
-                          </div>
-                        ) : (
-                          <span className="text-slate-400 font-semibold text-sm">NO QUEUE</span>
-                        )}
-                      </div>
 
                       {/* Waiting count badge — matches monitor yellow card style */}
                       <div className="mt-auto flex flex-wrap gap-2">
