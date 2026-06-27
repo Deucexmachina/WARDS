@@ -89,8 +89,8 @@ def _require_kiosk_token(request: Request, db: Session = Depends(get_db)) -> Bra
 # ---------------------------------------------------------------------------
 
 class KioskTicketRequest(BaseModel):
-    service_type: str = Field(..., min_length=1)
-    taxpayer_name: Optional[str] = Field(default=None)
+    service_type: str = Field(..., min_length=1, max_length=100)
+    taxpayer_name: Optional[str] = Field(default=None, max_length=255)
 
 
 class KioskTicketResponse(BaseModel):
