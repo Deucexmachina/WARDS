@@ -275,6 +275,8 @@ class Branch(Base):
     dashboard_url_enc = Column(Text, nullable=True)
     counters = Column(Integer)
     status = Column(String, default="Active")
+    kiosk_enabled = Column(Boolean, default=False)
+    kiosk_token = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class Payment(Base):

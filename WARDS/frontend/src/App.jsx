@@ -32,6 +32,8 @@ import BranchSystemSettingsLogin from './pages/branch/BranchSystemSettingsLogin'
 import BranchActivityLogs from './pages/branch/BranchActivityLogs'
 import LiveQueueMonitor from './pages/branch/LiveQueueMonitor'
 import WindowStaffAccount from './pages/branch/WindowStaffAccount'
+import KioskPage from './pages/kiosk/KioskPage'
+import KioskManagement from './pages/kiosk/KioskManagement'
 import PayTaxes from './pages/public/PayTaxes'
 import PayTaxesRPT from './pages/public/PayTaxesRPT'
 import PayTaxesBT from './pages/public/PayTaxesBT'
@@ -98,6 +100,9 @@ function App() {
         <Route path="/payment/failed" element={<PaymentFailed />} />
         <Route path="/mobile-receipt-upload/:token" element={<MobileReceiptUpload />} />
         
+        {/* Kiosk Route */}
+        <Route path="/kiosk" element={<KioskPage />} />
+        
         <Route path="/login" element={<UnifiedLogin />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/user/login" element={<UnifiedLogin preferredPortal="public" />} />
@@ -126,6 +131,7 @@ function App() {
           <Route path="discrepancies" element={<BranchDiscrepancies />} />
           <Route path="policies" element={<BranchPolicies />} />
           <Route path="activity-logs" element={<BranchActivityLogs />} />
+          <Route path="kiosks" element={<KioskManagement />} />
           <Route path="settings" element={<BranchSystemSettingsProtectedRoute><BranchSettings /></BranchSystemSettingsProtectedRoute>} />
         </Route>
         {/* Dedicated Live Monitor Route - No Layout */}
