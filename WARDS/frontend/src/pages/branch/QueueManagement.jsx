@@ -1489,7 +1489,11 @@ const QueueManagement = () => {
   };
 
   const applyQueueSnapshot = (nextQueues) => {
-    const normalizedQueues = Array.isArray(nextQueues) ? nextQueues : [];
+    let normalizedQueues = Array.isArray(nextQueues) ? nextQueues : [];
+    normalizedQueues = normalizedQueues.map((q) => ({
+      ...q,
+      queue_type: q.queue_type === 'kiosk' ? 'immediate' : q.queue_type,
+    }));
     setQueues(normalizedQueues);
     dispatchQueueStateUpdate(normalizedQueues);
     return normalizedQueues;
