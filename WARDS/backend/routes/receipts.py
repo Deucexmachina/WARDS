@@ -3257,7 +3257,11 @@ async def create_receipt_request(
 
 
 @router.get("/request/{request_id}")
-async def get_request_status(request_id: str, db: Session = Depends(get_db)):
+async def get_request_status(
+    request_id: str,
+    db: Session = Depends(get_db),
+    current_citizen: CitizenUser | None = Depends(get_optional_current_user),
+):
     normalized_request_id = (request_id or "").strip()
     receipt_request = db.query(ReceiptRequest).filter(ReceiptRequest.request_id == normalized_request_id).first()
     if not receipt_request:
@@ -3266,6 +3270,8 @@ async def get_request_status(request_id: str, db: Session = Depends(get_db)):
         receipt_request = db.query(ReceiptRequest).filter(hash_aware_match(ReceiptRequest, "request_id", normalized_request_id)).first()
     if not receipt_request:
         raise HTTPException(status_code=404, detail="Request not found")
+    if current_citizen and receipt_request.citizen_user_id and receipt_request.citizen_user_id != current_citizen.id:
+        raise HTTPException(status_code=403, detail="Access denied")
     ensure_receipt_requests_enabled(db, receipt_request.branch_id)
     return serialize_receipt_request(receipt_request, db) | {"fee": RECEIPT_REQUEST_FEE}
 
@@ -3277,10 +3283,13 @@ async def pay_request_fee(
     request_id: str,
     payment_data: ReceiptFeePaymentRequest,
     db: Session = Depends(get_db),
+    current_citizen: CitizenUser | None = Depends(get_optional_current_user),
 ):
     receipt_request = resolve_receipt_request_for_payment(db, request_id, payment_data)
     if not receipt_request:
         raise HTTPException(status_code=404, detail="Request not found")
+    if current_citizen and receipt_request.citizen_user_id and receipt_request.citizen_user_id != current_citizen.id:
+        raise HTTPException(status_code=403, detail="Access denied")
     ensure_receipt_requests_enabled(db, receipt_request.branch_id)
     resolved_request_id = receipt_request_value(receipt_request, "request_id")
     normalized_payment_method = normalize_receipt_payment_method(payment_data.paymentMethod)
