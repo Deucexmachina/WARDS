@@ -65,6 +65,37 @@ def _kiosk_log(db: Session, branch_id: int, action: str, details: str):
     db.commit()
 
 
+def _is_branch_currently_open(db: Session, branch_id: int) -> tuple[bool, str]:
+    """Check if branch is currently open based on Philippines operating hours."""
+    from database.models import BranchOperatingHours
+
+    PH_TIMEZONE = timezone(timedelta(hours=8))
+    now_ph = datetime.now(PH_TIMEZONE)
+    today_name = now_ph.strftime("%A")
+
+    hours = db.query(BranchOperatingHours).filter(
+        BranchOperatingHours.branch_id == branch_id,
+        BranchOperatingHours.day_of_week == today_name,
+    ).first()
+
+    if not hours or not hours.is_open:
+        return False, f"Branch is closed today ({today_name})."
+
+    try:
+        current_time = now_ph.time()
+        opening_time = datetime.strptime(hours.opening_time, "%H:%M").time()
+        closing_time = datetime.strptime(hours.closing_time, "%H:%M").time()
+    except (ValueError, TypeError):
+        return True, ""
+
+    if current_time < opening_time:
+        return False, f"Branch opens at {hours.opening_time}. Please come back during operating hours."
+    if current_time >= closing_time:
+        return False, f"Branch closed at {hours.closing_time}. Please come back during operating hours."
+
+    return True, ""
+
+
 def _require_kiosk_token(request: Request, db: Session = Depends(get_db)) -> Branch:
     """Dependency: validate kiosk token from X-Kiosk-Token header."""
     token = request.headers.get("X-Kiosk-Token", "").strip()
@@ -77,6 +108,11 @@ def _require_kiosk_token(request: Request, db: Session = Depends(get_db)) -> Bra
     ).first()
     if not branch:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or disabled kiosk token.")
+
+    is_open, closed_msg = _is_branch_currently_open(db, branch.id)
+    if not is_open:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Kiosk is currently unavailable: {closed_msg}")
+
     return branch
 
 
