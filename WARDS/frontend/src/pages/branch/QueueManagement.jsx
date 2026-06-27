@@ -688,6 +688,7 @@ const WindowMonitoringSection = ({
   onWindowComplete,
   onWindowRecallSkipped,
   isAnnouncementPlaying,
+  callingNext,
   onDeleteRequest,
 }) => {
   const queueTypeEntries = Object.entries(windowsByQueueType);
@@ -978,10 +979,10 @@ const WindowMonitoringSection = ({
                           <div className="mt-5 flex flex-wrap gap-2">
                             <button
                               onClick={() => onWindowCallNext(window.service_window)}
-                              disabled={queueUnavailable || !nextQueue || isAnnouncementPlaying}
+                              disabled={queueUnavailable || !nextQueue || isAnnouncementPlaying || callingNext}
                               className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-secondary disabled:opacity-50"
                             >
-                              {isAnnouncementPlaying ? 'Announcing...' : 'Call Next'}
+                              {callingNext ? 'Calling...' : isAnnouncementPlaying ? 'Announcing...' : 'Call Next'}
                             </button>
                           </div>
                         )}
@@ -1419,6 +1420,7 @@ const QueueManagement = () => {
   const [windowFilter, setWindowFilter] = useState('all');
   const [queueNumberFilter, setQueueNumberFilter] = useState('');
   const [isAnnouncementPlaying, setIsAnnouncementPlaying] = useState(false);
+  const [callingNext, setCallingNext] = useState(false);
   const [searchFilter, setSearchFilter] = useState('');
   const [historySearch, setHistorySearch] = useState({
     RPT: '',
@@ -1846,6 +1848,7 @@ const QueueManagement = () => {
 
     try {
       if (action === 'call-next') {
+        setCallingNext(true);
         let response;
         try {
           response = await api.post('/branch/queue/call-next', null, buildCallNextRequestConfig());
@@ -1958,7 +1961,9 @@ const QueueManagement = () => {
     } catch (err) {
       setError(err.response?.data?.detail || `Failed to ${action.replace('-', ' ')} queue.`);
     } finally {
-      if (action === 'delete') {
+      if (action === 'call-next') {
+        setCallingNext(false);
+      } else if (action === 'delete') {
         setDeletingQueueId(null);
       } else if (action === 'delete-history') {
         setDeletingHistoryId(null);
@@ -2005,6 +2010,7 @@ const QueueManagement = () => {
       setError(systemStatus?.disabledMessage || DEFAULT_DISABLED_MESSAGE);
       return;
     }
+    setCallingNext(true);
     try {
       let response;
       try {
@@ -2056,6 +2062,8 @@ const QueueManagement = () => {
       }
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to call next queue.');
+    } finally {
+      setCallingNext(false);
     }
   };
 
@@ -2601,10 +2609,10 @@ const QueueManagement = () => {
             <div className="flex flex-col gap-3 sm:flex-row">
               <button
                 onClick={() => performAction('call-next')}
-                disabled={queueUnavailable || Boolean(activeQueue) || isAnnouncementPlaying}
+                disabled={queueUnavailable || Boolean(activeQueue) || isAnnouncementPlaying || callingNext}
                 className="rounded-xl bg-primary px-6 py-3 font-semibold text-white transition hover:bg-secondary disabled:opacity-50"
               >
-                {isAnnouncementPlaying ? 'Announcing...' : 'Call Next'}
+                {callingNext ? 'Calling...' : isAnnouncementPlaying ? 'Announcing...' : 'Call Next'}
               </button>
               <button
                 onClick={() => performAction('recall')}
@@ -2717,6 +2725,7 @@ const QueueManagement = () => {
           onWindowComplete={handleWindowComplete}
           onWindowRecallSkipped={handleWindowRecallSkipped}
           isAnnouncementPlaying={isAnnouncementPlaying}
+          callingNext={callingNext}
           onDeleteRequest={openDeleteModal}
         />
       ) : null}
