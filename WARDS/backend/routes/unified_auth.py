@@ -566,9 +566,9 @@ def log_activity(db: Session, action: str, user: str, details: str, log_type: st
     if account is not None:
         role = role or getattr(account, "role", None)
         branch = branch or getattr(account, "branch", None)
-        if branch is None:
-            branch_obj = getattr(account, "branch", None)
-            branch_name = getattr(branch_obj, "name", None) if branch_obj else None
+        # If branch is a SQLAlchemy model object, extract its name string
+        if branch is not None and not isinstance(branch, str):
+            branch_name = getattr(branch, "name", None)
             if branch_name:
                 branch = branch_name
         email = email or getattr(account, "email", None)
@@ -860,7 +860,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
             f"Portal: {portal}",
             "security",
             request=request,
-            role=getattr(account, 'role', 'citizen' if portal == 'public' else portal),
+            account=account,
         )
         info = _lockout_info(portal, credentials.identifier)
         return JSONResponse(
@@ -1009,7 +1009,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
         f"Portal: {portal}",
         "security",
         request=request,
-        role=getattr(account, 'role', 'citizen' if portal == 'public' else portal),
+        account=account,
     )
     log_unified_security_context(db, portal=portal, actor=get_mfa_username(portal, account), client_ip=client_ip, account=account)
 
