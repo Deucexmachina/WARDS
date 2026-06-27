@@ -151,6 +151,17 @@ async def get_kiosk_services(
             "assigned_window_number": snapshot["assigned_window_number"],
             "window_label": snapshot["window_label"],
         })
+
+    def _window_sort_key(item):
+        num = item.get("assigned_window_number")
+        if num is None:
+            return (1, 0)
+        try:
+            return (0, int(num))
+        except (ValueError, TypeError):
+            return (0, str(num))
+
+    result.sort(key=_window_sort_key)
     return {"branch_id": branch.id, "branch_name": get_decrypted_or_raw(branch, "name") or branch.name, "services": result}
 
 
