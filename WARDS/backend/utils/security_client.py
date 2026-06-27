@@ -17,7 +17,7 @@ _session.headers.update({"Connection": "keep-alive"})
 
 SECURITY_API_URL = os.getenv("SECURITY_API_URL", "").rstrip("/")
 SECURITY_API_KEY = os.getenv("SECURITY_API_KEY", "")
-TIMEOUT = 8.0
+TIMEOUT = 30.0
 
 # In-memory cache for VM2 read responses to avoid repeated slow calls
 _cache: dict[str, tuple[Any, float]] = {}
