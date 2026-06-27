@@ -14,6 +14,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from database.models import ActivityLog, Branch, BranchStaff, Queue, Service, get_db
 from auth import get_current_branch_staff
@@ -42,6 +44,8 @@ from routes.public import (
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+limiter = Limiter(key_func=get_remote_address)
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +118,9 @@ class KioskAdminResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.get("/status/{branch_id}", response_model=KioskStatusResponse)
+@limiter.limit("60/minute")
 async def get_kiosk_status(
+    request: Request,
     branch_id: int,
     db: Session = Depends(get_db),
 ):
@@ -129,7 +135,9 @@ async def get_kiosk_status(
 
 
 @router.get("/services")
+@limiter.limit("60/minute")
 async def get_kiosk_services(
+    request: Request,
     branch: Branch = Depends(_require_kiosk_token),
     db: Session = Depends(get_db),
 ):
@@ -168,7 +176,9 @@ async def get_kiosk_services(
 
 
 @router.post("/ticket", response_model=KioskTicketResponse)
+@limiter.limit("10/minute")
 async def create_kiosk_ticket(
+    request: Request,
     req: KioskTicketRequest,
     branch: Branch = Depends(_require_kiosk_token),
     db: Session = Depends(get_db),
@@ -281,7 +291,9 @@ async def create_kiosk_ticket(
 # ---------------------------------------------------------------------------
 
 @router.get("/admin", response_model=KioskAdminResponse)
+@limiter.limit("30/minute")
 async def get_kiosk_admin(
+    request: Request,
     current_staff: BranchStaff = Depends(get_current_branch_staff),  # noqa: F811
     db: Session = Depends(get_db),
 ):
@@ -302,7 +314,9 @@ async def get_kiosk_admin(
 
 
 @router.post("/admin/enable")
+@limiter.limit("10/minute")
 async def enable_kiosk(
+    request: Request,
     current_staff: BranchStaff = Depends(get_current_branch_staff),  # noqa: F811
     db: Session = Depends(get_db),
 ):
@@ -325,7 +339,9 @@ async def enable_kiosk(
 
 
 @router.post("/admin/disable")
+@limiter.limit("10/minute")
 async def disable_kiosk(
+    request: Request,
     current_staff: BranchStaff = Depends(get_current_branch_staff),  # noqa: F811
     db: Session = Depends(get_db),
 ):
@@ -344,7 +360,9 @@ async def disable_kiosk(
 
 
 @router.post("/admin/regenerate")
+@limiter.limit("10/minute")
 async def regenerate_kiosk_token(
+    request: Request,
     current_staff: BranchStaff = Depends(get_current_branch_staff),  # noqa: F811
     db: Session = Depends(get_db),
 ):
