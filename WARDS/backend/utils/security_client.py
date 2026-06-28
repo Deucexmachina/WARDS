@@ -210,7 +210,10 @@ def scan_single_file(db, file_entry, context=None, commit_clean=True):
         "context": context or {},
         "commit_clean": commit_clean,
     }
-    return _sync_post("/v1/scan/file", payload)
+    resp = _sync_post("/v1/scan/file", payload)
+    # VM2 wraps the detection in {"detection": ...}; unwrap it so callers
+    # get the same shape as the local function (detection object/dict or None).
+    return resp.get("detection") if isinstance(resp, dict) else resp
 
 
 def scan_all_files(db, context=None):
@@ -538,6 +541,22 @@ def is_database_entry(file_entry) -> bool:
         return _local(file_entry)
     rp = getattr(file_entry, "relative_path", "")
     return "database" in str(rp).lower() or "snapshot" in str(rp).lower()
+
+
+def is_vm1_file(file_entry) -> bool:
+    if not SECURITY_API_URL:
+        from SECURITY.security_engine import is_vm1_file as _local
+        return _local(file_entry)
+    rp = getattr(file_entry, "relative_path", "")
+    fp = getattr(file_entry, "file_path", "")
+    return str(rp).startswith("VM1_") or str(fp).startswith("vm1://")
+
+
+def _scan_vm1_snapshot(db, file_entry, context=None):
+    if not SECURITY_API_URL:
+        from SECURITY.security_engine import _scan_vm1_snapshot as _local
+        return _local(db, file_entry, context=context)
+    return None
 
 
 def normalize_database_monitor_entry(db, reset_baseline=False, ensure_snapshot=True):

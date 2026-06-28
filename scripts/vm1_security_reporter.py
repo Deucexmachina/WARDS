@@ -19,6 +19,7 @@ Environment variables:
 import base64
 import hashlib
 import os
+import subprocess
 import sys
 import time
 from datetime import datetime, timezone
@@ -37,7 +38,7 @@ MONITORED_ROOTS = {
     "OCR": Path(os.getenv("VM1_OCR_DIR", "/OCR")),
 }
 
-SCAN_INTERVAL = max(5, int(os.getenv("VM1_REPORT_INTERVAL", "30")))
+SCAN_INTERVAL = max(5, int(os.getenv("VM1_REPORT_INTERVAL", "10")))
 HEARTBEAT_INTERVAL = max(5, int(os.getenv("VM1_HEARTBEAT_INTERVAL", "10")))
 RESTORE_POLL_INTERVAL = max(3, int(os.getenv("VM1_RESTORE_POLL_INTERVAL", "5")))
 SNAPSHOT_DIR = Path(os.getenv("VM1_SNAPSHOT_DIR", "/app/.vm1_snapshots"))
@@ -73,10 +74,62 @@ def file_content_b64(path: Path) -> str | None:
         return None
 
 
+def _git_info_for_root(root_path: Path) -> tuple[Path | None, set[str], set[str]]:
+    """Return (git_root, tracked_files, modified_files) for a monitored root.
+
+    If the root is not inside a git repo, returns (None, set(), set()).
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=root_path,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return None, set(), set()
+        git_root = Path(result.stdout.strip())
+    except Exception:
+        return None, set(), set()
+
+    tracked_files: set[str] = set()
+    modified_files: set[str] = set()
+
+    try:
+        r = subprocess.run(
+            ["git", "ls-files"],
+            cwd=git_root,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if r.returncode == 0:
+            tracked_files = set(r.stdout.strip().splitlines())
+    except Exception:
+        pass
+
+    try:
+        r = subprocess.run(
+            ["git", "diff", "--name-only", "HEAD"],
+            cwd=git_root,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if r.returncode == 0:
+            modified_files = set(r.stdout.strip().splitlines())
+    except Exception:
+        pass
+
+    return git_root, tracked_files, modified_files
+
+
 def _iter_root_files(root_name: str, root_path: Path):
     if not root_path.exists():
         log(f"WARNING: root path does not exist: {root_path}")
         return
+    git_root, tracked_files, modified_files = _git_info_for_root(root_path)
     for path in root_path.rglob("*"):
         if not path.is_file():
             continue
@@ -84,6 +137,14 @@ def _iter_root_files(root_name: str, root_path: Path):
         if path.name.lower() == ".env":
             continue
         rel = str(path.relative_to(root_path)).replace("\\", "/")
+        git_head_match = False
+        if git_root:
+            try:
+                rel_to_git = str(path.relative_to(git_root)).replace("\\", "/")
+                if rel_to_git in tracked_files and rel_to_git not in modified_files:
+                    git_head_match = True
+            except ValueError:
+                pass  # path is outside git_root
         yield {
             "relative_path": f"{root_name}/{rel}",
             "folder_root": f"VM1_{root_name}",
@@ -91,6 +152,7 @@ def _iter_root_files(root_name: str, root_path: Path):
             "size_bytes": path.stat().st_size,
             "current_hash": sha256_file(path),
             "content_b64": file_content_b64(path),
+            "git_head_match": git_head_match,
         }
 
 
@@ -285,13 +347,8 @@ def apply_restore_command(cmd: dict) -> bool:
             with open(target, "wb") as f:
                 f.write(data)
         else:
-            snapshot = SNAPSHOT_DIR / rel_path
-            if snapshot.exists():
-                import shutil
-                shutil.copy2(snapshot, target)
-            else:
-                log(f"No snapshot or content for restore: {rel_path}")
-                return False
+            log(f"Restore command for {rel_path} has no content_b64; skipping (local snapshot would be defaced).")
+            return False
 
         actual_hash = sha256_file(target)
         if expected_hash and actual_hash != expected_hash:
@@ -369,6 +426,9 @@ def main_loop():
             if cfg:
                 new_interval = cfg.get("scan_interval_seconds")
                 if new_interval and isinstance(new_interval, int):
+                    # Allow VM2 to control scan rate for demo/deployment flexibility.
+                    # Floor at 5s to prevent hammering; no ceiling so longer intervals
+                    # (e.g. 300s) can be used to delay detection during demonstrations.
                     DYNAMIC_SCAN_INTERVAL = max(5, new_interval)
                 custom = cfg.get("vm1_custom_folders", [])
                 CUSTOM_FOLDERS = [Path(p) for p in custom if p]

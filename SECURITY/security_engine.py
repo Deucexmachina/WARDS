@@ -162,7 +162,7 @@ SUSPICIOUS_PATTERNS = {
     "iframe_injection": ("<iframe",),
     "defacement_keywords": ("hacked", "defaced", "owned", "pwned"),
     "credential_access": ("password=", "token=", "secret=", "api_key"),
-    "sql_injection": ("' or '1'='1", "union select", "drop table", "--"),
+    "sql_injection": ("' or '1'='1", "union select", "drop table"),
 }
 
 BEHAVIOR_LABELS = {
@@ -2536,7 +2536,7 @@ def retrain_ai(db: Session, initiated_by: str = "system") -> dict:
     return state
 
 
-def content_flags(content: str, context: dict | None = None) -> list[str]:
+def content_flags(content: str, context: dict | None = None, path: Path | None = None) -> list[str]:
     context = context or {}
     lowered = (content or "").lower()
     flags = []
@@ -2602,9 +2602,13 @@ def content_flags(content: str, context: dict | None = None) -> list[str]:
         admin_actions_per_minute = 0
     if context.get("rapid_admin_actions") or admin_actions_per_minute > 12:
         flags.append("rapid_admin_actions")
-    for key, patterns in SUSPICIOUS_PATTERNS.items():
-        if any(pattern in lowered for pattern in patterns):
-            flags.append(key)
+    # Skip content-based injection/defacement pattern matching for documentation
+    # files (.md, .txt) that legitimately contain example payloads.
+    is_doc_file = path is not None and path.suffix.lower() in {".md", ".txt", ".rst"}
+    if not is_doc_file:
+        for key, patterns in SUSPICIOUS_PATTERNS.items():
+            if any(pattern in lowered for pattern in patterns):
+                flags.append(key)
     if context.get("rapid_change"):
         flags.append("rapid_change")
     return sorted(set(flags))
@@ -2612,7 +2616,7 @@ def content_flags(content: str, context: dict | None = None) -> list[str]:
 
 def ai_predict(path: Path, old_content: str, new_content: str, context: dict | None = None) -> AIPrediction:
     context = context or {}
-    flags = content_flags(new_content, context)
+    flags = content_flags(new_content, context, path=path)
     rules = context.get("ai_rules") or DEFAULT_AI_RULES
 
     def enabled(rule_name: str) -> bool:
@@ -3561,7 +3565,7 @@ def scan_single_file(db: Session, file_entry: SecurityMonitoredFile, context: di
     context = context or {}
     if is_database_entry(file_entry):
         return scan_database_entry(db, file_entry, context=context, commit_clean=commit_clean)
-    if is_vm1_file(file_entry):
+    if is_vm1_file(file_entry) and not context.get("scan_vm1_local"):
         return None
     # Skip environment files that change frequently and are environment-specific
     if Path(file_entry.file_path or "").name.lower() == ".env":
@@ -3636,6 +3640,100 @@ def scan_single_file(db: Session, file_entry: SecurityMonitoredFile, context: di
     return None
 
 
+def _scan_vm1_snapshot(db: Session, file_entry: SecurityMonitoredFile, context: dict | None = None) -> SecurityDetectionEvent | None:
+    """Scan a VM1 file by comparing its locally-stored snapshot to the baseline hash.
+
+    This allows manual/interval scans on VM2 to detect VM1 file changes even when
+    the manifest endpoint hasn't been triggered yet, or when bulk-change detection
+    suppressed a detection.
+    """
+    snapshot = VM1_SNAPSHOT_ROOT / file_entry.relative_path
+    if not snapshot.exists():
+        return None
+
+    current_hash = sha256_file(snapshot)
+    file_entry.current_hash = current_hash
+    file_entry.last_checked = now_utc()
+
+    if not file_entry.baseline_hash or current_hash == file_entry.baseline_hash:
+        file_entry.status = "clean"
+        db.add(file_entry)
+        return None
+
+    if _has_open_incident(db, file_entry, "vm1_content_modified"):
+        file_entry.status = "modified"
+        db.add(file_entry)
+        return None
+
+    if _has_pending_vm1_restore_for_file(db, file_entry.relative_path):
+        file_entry.status = "modified"
+        db.add(file_entry)
+        return None
+
+    # Safety-net: if the most recent incident for this file was resolved or
+    # false-positive with the SAME hash, update baseline and skip.
+    recent_incident = (
+        db.query(SecurityIncident)
+        .join(SecurityDetectionEvent)
+        .filter(SecurityDetectionEvent.file_id == file_entry.id)
+        .order_by(SecurityIncident.created_at.desc())
+        .first()
+    )
+    if recent_incident and recent_incident.status in ("resolved", "false_positive"):
+        recent_detection = db.query(SecurityDetectionEvent).filter(
+            SecurityDetectionEvent.id == recent_incident.detection_event_id
+        ).first()
+        if recent_detection and recent_detection.new_hash == current_hash:
+            file_entry.baseline_hash = current_hash
+            file_entry.status = "clean"
+            db.add(file_entry)
+            db.commit()
+            logger.info(
+                "VM1 safety-net (_scan_vm1_snapshot): suppressed re-detection for %s (hash %s...%s) "
+                "because incident SEC-%s was already %s.",
+                file_entry.relative_path, current_hash[:8], current_hash[-8:],
+                recent_incident.id, recent_incident.status,
+            )
+            return None
+
+    # Attempt to recover the clean (baseline) content for diff and restore.
+    original_content_bytes = None
+    old_content = ""
+    for root in all_backup_roots(db):
+        candidate = backup_file_path(root, file_entry.relative_path)
+        if candidate.exists() and candidate.is_file():
+            if file_entry.baseline_hash and sha256_file(candidate) == file_entry.baseline_hash:
+                try:
+                    original_content_bytes = candidate.read_bytes()
+                    old_content = read_text(candidate)
+                    break
+                except Exception:
+                    pass
+
+    # Fallback: check restore-content store for a previously captured clean copy
+    if original_content_bytes is None and VM1_RESTORE_CONTENT_ROOT.exists():
+        for content_file in VM1_RESTORE_CONTENT_ROOT.glob("*.b64"):
+            try:
+                content = base64.b64decode(content_file.read_bytes())
+                if hashlib.sha256(content).hexdigest() == file_entry.baseline_hash:
+                    original_content_bytes = content
+                    old_content = content.decode("utf-8", errors="replace")
+                    break
+            except Exception:
+                pass
+
+    file_entry.status = "modified"
+    db.add(file_entry)
+    db.commit()
+
+    new_content = read_text(snapshot)
+    return _record_vm1_detection(
+        db, file_entry, "vm1_content_modified", current_hash,
+        old_content=old_content, new_content=new_content,
+        original_content_bytes=original_content_bytes,
+    )
+
+
 def record_detection(db: Session, file_entry: SecurityMonitoredFile, change_type: str, old_hash: str | None, new_hash: str | None, old_content: str, new_content: str, context: dict | None = None) -> SecurityDetectionEvent:
     # Safety-net: skip if an open incident already exists for this file and change type
     existing_incident = db.query(SecurityIncident).join(SecurityDetectionEvent).filter(
@@ -3658,7 +3756,7 @@ def record_detection(db: Session, file_entry: SecurityMonitoredFile, change_type
     context.setdefault("ai_rules", get_ai_rules(db))
 
     prediction = ai_predict(portable_monitored_path(file_entry), old_content, new_content, context)
-    flags = content_flags(new_content, context)
+    flags = content_flags(new_content, context, path=portable_monitored_path(file_entry))
     classification = classify(change_type, prediction, flags, context)
     if is_legitimate:
         prediction = AIPrediction("normal", 0.02, 0.98, "Valid admin token and registered admin file-change event.")
@@ -3705,11 +3803,12 @@ def record_detection(db: Session, file_entry: SecurityMonitoredFile, change_type
         incident = create_incident(db, detection, classification, flags, changed, quarantine_path)
         recovery = None
 
-        # Auto-recovery only for web/code files or high/critical severity
+        # Auto-recovery for web/code files, high/critical severity, or database unauthorized changes
         suffix = Path(file_entry.relative_path).suffix.lower()
         is_web_code_file = suffix in {".html", ".htm", ".jsx", ".js", ".py", ".css", ".php"}
         is_high_severity = classification.get("severity_level") in {"high", "critical"}
-        if change_type in {"content_modified", "file_deleted"} and (is_web_code_file or is_high_severity):
+        is_database_unauthorized = is_database_entry(file_entry) and context.get("database_unauthorized_audit_changes")
+        if change_type in {"content_modified", "file_deleted"} and (is_web_code_file or is_high_severity or is_database_unauthorized):
             recovery = restore_from_backup(db, file_entry, detection.id, "automatic", None, quarantine_path)
             incident.response_action = "auto_recovered_pending_review" if recovery.status == "success" else "escalated"
             db.add(incident)
@@ -3798,6 +3897,10 @@ def scan_all_files(db: Session, context: dict | None = None) -> list[SecurityDet
 
     for file_entry in file_entries:
         if is_vm1_file(file_entry):
+            if context and context.get("manual_scan"):
+                detection = _scan_vm1_snapshot(db, file_entry, context=context)
+                if detection:
+                    detections.append(detection)
             continue
         if is_database_entry(file_entry) and database_entry and file_entry.id != database_entry.id:
             file_entry.status = "clean"
@@ -4781,12 +4884,13 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                     snapshot.write_bytes(original_bytes)
                     clean_hash = hashlib.sha256(original_bytes).hexdigest()
                     file_entry.baseline_hash = clean_hash
+                    file_entry.current_hash = clean_hash
                     file_entry.status = "clean"
-                    # Do NOT update current_hash here; leave it as the defaced hash so
-                    # subsequent scans see previous_hash == current_hash and skip
-                    # re-detection while the VM1 restore command is pending.
                 else:
-                    file_entry.status = "modified"
+                    # No clean backup found — accept the current state as the new baseline
+                    # so the file stops getting re-detected on every scan.
+                    file_entry.baseline_hash = file_entry.current_hash
+                    file_entry.status = "clean"
                 file_entry.last_checked = now_utc()
                 db.add(file_entry)
                 if detection and original_bytes is not None:
@@ -4804,6 +4908,7 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                         )
                         db.add(recovery)
                         db.commit()
+                    cleanup_quarantine_paths(quarantine_paths)
                     # Trigger a post-resolve backup so the restored state becomes the trusted baseline
                     incident_id = incident.id
                     def _post_resolve_backup():
@@ -4980,38 +5085,58 @@ def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_ba
         file_entry.status = "clean"
         file_entry.last_checked = now_utc()
         db.add(file_entry)
-        if has_quarantine_copy and incident.response_action in {"auto_recovered", "auto_recovered_pending_review"}:
-            # Auto-recovery already ran (or was queued); push the defaced snapshot back to VM1
-            defaced_snapshot = VM1_DEFACED_SNAPSHOT_ROOT / file_entry.relative_path
-            defaced_bytes = None
-            if defaced_snapshot.exists():
-                try:
-                    defaced_bytes = defaced_snapshot.read_bytes()
-                except Exception:
-                    pass
-            if defaced_bytes is not None:
-                # Update VM2 snapshot to defaced so backup baseline matches
-                snapshot = VM1_SNAPSHOT_ROOT / file_entry.relative_path
-                snapshot.parent.mkdir(parents=True, exist_ok=True)
-                snapshot.write_bytes(defaced_bytes)
-                defaced_hash = hashlib.sha256(defaced_bytes).hexdigest()
-                file_entry.baseline_hash = defaced_hash
-                file_entry.current_hash = defaced_hash
-                db.add(file_entry)
-            _create_vm1_restore_command(db, file_entry, incident.detection_event_id, original_content_bytes=defaced_bytes)
-            if create_event:
-                false_positive_recovery = SecurityRecoveryEvent(
-                    detection_event_id=incident.detection_event_id,
-                    file_id=file_entry.id,
-                    recovery_type="reverted",
-                    initiated_by=_valid_admin_id(db, admin_id),
-                    status="success",
-                    quarantine_path=str(safe_source),
-                    summary=f"False positive: auto-recovery reverted for {file_entry.relative_path}.",
-                    completed_at=now_utc(),
-                )
-                db.add(false_positive_recovery)
-                db.commit()
+        if has_quarantine_copy:
+            if incident.response_action in {"auto_recovered", "auto_recovered_pending_review"}:
+                # Auto-recovery already ran (or was queued); push the defaced snapshot back to VM1
+                defaced_snapshot = VM1_DEFACED_SNAPSHOT_ROOT / file_entry.relative_path
+                defaced_bytes = None
+                if defaced_snapshot.exists():
+                    try:
+                        defaced_bytes = defaced_snapshot.read_bytes()
+                    except Exception:
+                        pass
+                if defaced_bytes is not None:
+                    # Update VM2 snapshot to defaced so backup baseline matches
+                    snapshot = VM1_SNAPSHOT_ROOT / file_entry.relative_path
+                    snapshot.parent.mkdir(parents=True, exist_ok=True)
+                    snapshot.write_bytes(defaced_bytes)
+                    defaced_hash = hashlib.sha256(defaced_bytes).hexdigest()
+                    file_entry.baseline_hash = defaced_hash
+                    file_entry.current_hash = defaced_hash
+                    db.add(file_entry)
+                _create_vm1_restore_command(db, file_entry, incident.detection_event_id, original_content_bytes=defaced_bytes)
+                if create_event:
+                    false_positive_recovery = SecurityRecoveryEvent(
+                        detection_event_id=incident.detection_event_id,
+                        file_id=file_entry.id,
+                        recovery_type="reverted",
+                        initiated_by=_valid_admin_id(db, admin_id),
+                        status="success",
+                        quarantine_path=str(safe_source),
+                        summary=f"False positive: auto-recovery reverted for {file_entry.relative_path}.",
+                        completed_at=now_utc(),
+                    )
+                    db.add(false_positive_recovery)
+                    db.commit()
+            else:
+                # Non-priority VM1 file: copy quarantined copy to snapshot so VM2 baseline matches
+                target = VM1_SNAPSHOT_ROOT / file_entry.relative_path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(safe_source, target)
+                if create_event:
+                    false_positive_recovery = SecurityRecoveryEvent(
+                        detection_event_id=incident.detection_event_id,
+                        file_id=file_entry.id,
+                        recovery_type="reverted",
+                        initiated_by=_valid_admin_id(db, admin_id),
+                        status="success",
+                        quarantine_path=str(safe_source),
+                        summary=f"False positive: quarantined copy restored to snapshot for {file_entry.relative_path}.",
+                        completed_at=now_utc(),
+                    )
+                    db.add(false_positive_recovery)
+                    db.commit()
+            cleanup_quarantine_paths(quarantine_paths)
     elif has_quarantine_copy:
         false_positive_recovery = restore_quarantined_copy_to_original(
             db,
@@ -5023,6 +5148,7 @@ def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_ba
         )
         if false_positive_recovery and false_positive_recovery.status != "reverted":
             raise RuntimeError(false_positive_recovery.error_message or "Unable to restore the quarantined file")
+        cleanup_quarantine_paths(quarantine_paths)
     if detection:
         detection.is_legitimate = True
         detection.ai_prediction = "normal"
@@ -5971,14 +6097,56 @@ def _quarantine_vm1_snapshot(entry: SecurityMonitoredFile, detection_id: int) ->
 
 
 def _create_vm1_restore_command(db: Session, entry: SecurityMonitoredFile, detection_id: int, *, original_content_bytes: bytes | None = None):
+    content_bytes = None
     if original_content_bytes is not None:
-        content_bytes = original_content_bytes
-    else:
+        # Verify the provided bytes actually match the expected baseline hash
+        provided_hash = hashlib.sha256(original_content_bytes).hexdigest()
+        if provided_hash == entry.baseline_hash:
+            content_bytes = original_content_bytes
+        else:
+            logger.warning(
+                "VM1 provided original_content_bytes hash mismatch for %s (provided=%s baseline=%s); "
+                "falling back to snapshot/backups.",
+                entry.relative_path, provided_hash, entry.baseline_hash,
+            )
+
+    # Fallback 1: snapshot on VM2
+    if content_bytes is None:
         snapshot = VM1_SNAPSHOT_ROOT / entry.relative_path
-        content_bytes = None
         if snapshot.exists():
             try:
-                content_bytes = snapshot.read_bytes()
+                snapshot_hash = sha256_file(snapshot)
+                if snapshot_hash == entry.baseline_hash:
+                    content_bytes = snapshot.read_bytes()
+                else:
+                    logger.warning(
+                        "VM1 snapshot hash mismatch for %s (snapshot=%s baseline=%s); "
+                        "skipping snapshot-based restore content.",
+                        entry.relative_path, snapshot_hash, entry.baseline_hash,
+                    )
+            except Exception:
+                pass
+
+    # Fallback 2: backup roots (clean copies from before the incident)
+    if content_bytes is None:
+        for root in all_backup_roots(db):
+            candidate = backup_file_path(root, entry.relative_path)
+            if candidate.exists() and candidate.is_file():
+                try:
+                    if sha256_file(candidate) == entry.baseline_hash:
+                        content_bytes = candidate.read_bytes()
+                        break
+                except Exception:
+                    pass
+
+    # Fallback 3: previously stored restore-content files
+    if content_bytes is None and VM1_RESTORE_CONTENT_ROOT.exists():
+        for content_file in VM1_RESTORE_CONTENT_ROOT.glob("*.b64"):
+            try:
+                decoded = base64.b64decode(content_file.read_bytes())
+                if hashlib.sha256(decoded).hexdigest() == entry.baseline_hash:
+                    content_bytes = decoded
+                    break
             except Exception:
                 pass
 
@@ -6061,8 +6229,7 @@ def acknowledge_vm1_restore_command(db: Session, command_id: str, success: bool)
     if success:
         for cmd in removed:
             rel_path = cmd.get("relative_path")
-            content_file = cmd.get("restore_content_file")
-            if not rel_path or not content_file:
+            if not rel_path:
                 continue
             file_entry = (
                 db.query(SecurityMonitoredFile)
@@ -6072,13 +6239,21 @@ def acknowledge_vm1_restore_command(db: Session, command_id: str, success: bool)
             if not file_entry:
                 continue
             try:
-                content_path = Path(content_file)
-                if content_path.exists():
-                    clean_bytes = base64.b64decode(content_path.read_bytes())
-                    clean_hash = hashlib.sha256(clean_bytes).hexdigest()
-                    snapshot = VM1_SNAPSHOT_ROOT / rel_path
-                    snapshot.parent.mkdir(parents=True, exist_ok=True)
-                    snapshot.write_bytes(clean_bytes)
+                clean_hash = None
+                content_file = cmd.get("restore_content_file")
+                if content_file:
+                    content_path = Path(content_file)
+                    if content_path.exists():
+                        clean_bytes = base64.b64decode(content_path.read_bytes())
+                        clean_hash = hashlib.sha256(clean_bytes).hexdigest()
+                        snapshot = VM1_SNAPSHOT_ROOT / rel_path
+                        snapshot.parent.mkdir(parents=True, exist_ok=True)
+                        snapshot.write_bytes(clean_bytes)
+                if not clean_hash:
+                    expected_hash = cmd.get("expected_hash")
+                    if expected_hash:
+                        clean_hash = expected_hash
+                if clean_hash:
                     file_entry.baseline_hash = clean_hash
                     file_entry.current_hash = clean_hash
                     file_entry.status = "clean"
@@ -6107,7 +6282,7 @@ def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type
         "source_ip": "vm1_internal",
     }
     prediction = ai_predict(Path(entry.relative_path), old_content, new_content, context)
-    flags = content_flags(new_content, context)
+    flags = content_flags(new_content, context, path=Path(entry.relative_path))
     classification = classify(change_type, prediction, flags, context)
     is_legitimate = False
     context.setdefault("admin_session_valid", False)
@@ -6465,6 +6640,26 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
                 continue
             # Suppress only if a restore command is already pending for this file
             has_pending_restore = _has_pending_vm1_restore_for_file(db, entry.relative_path)
+            # If the VM1 reporter says this file matches git HEAD, it was changed
+            # through the legitimate GitHub workflow. Cancel any stale pending
+            # restores (they would revert a legitimate state) and update baseline.
+            if f.get("git_head_match"):
+                if has_pending_restore:
+                    # Remove stale restore commands for this file so they don't revert
+                    # the legitimate git state on the next poll.
+                    all_cmds = json_loads(get_setting(db, "vm1_restore_commands", "[]"), [])
+                    filtered = [c for c in all_cmds if c.get("relative_path") != entry.relative_path]
+                    if len(filtered) != len(all_cmds):
+                        set_setting(db, "vm1_restore_commands", json_dumps(filtered), "vm2_monitor")
+                        logger.info(
+                            "VM1 git workflow: cancelled %s stale restore command(s) for %s",
+                            len(all_cmds) - len(filtered), entry.relative_path,
+                        )
+                entry.baseline_hash = current_hash
+                entry.status = "clean"
+                db.add(entry)
+                _store_vm1_snapshot(rel_path, f.get("content_b64"))
+                continue
             if not has_pending_restore:
                 # Resolve any existing open incidents for this file before creating a new one
                 for old_incident in db.query(SecurityIncident).join(SecurityDetectionEvent).filter(
@@ -6476,6 +6671,45 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
                     old_incident.resolved_by = None
                     old_incident.response_action = "superseded_by_new_detection"
                     db.add(old_incident)
+                # Safety-net: if the most recent incident for this file was resolved or
+                # false-positive with the SAME hash, treat as a re-detection of a known
+                # state and update baseline instead of flooding new incidents.
+                # This prevents git-workflow loops where Resolve reverts baseline to old
+                # content and the next manifest re-triggers the same detection.
+                recent_incident = (
+                    db.query(SecurityIncident)
+                    .join(SecurityDetectionEvent)
+                    .filter(SecurityDetectionEvent.file_id == entry.id)
+                    .order_by(SecurityIncident.created_at.desc())
+                    .first()
+                )
+                if recent_incident and recent_incident.status in ("resolved", "false_positive"):
+                    recent_detection = db.query(SecurityDetectionEvent).filter(
+                        SecurityDetectionEvent.id == recent_incident.detection_event_id
+                    ).first()
+                    if recent_detection and recent_detection.new_hash == current_hash:
+                        entry.baseline_hash = current_hash
+                        entry.status = "clean"
+                        db.add(entry)
+                        db.commit()
+                        logger.info(
+                            "VM1 safety-net: suppressed re-detection for %s (hash %s...%s) "
+                            "because incident SEC-%s was already %s.",
+                            entry.relative_path, current_hash[:8], current_hash[-8:],
+                            recent_incident.id, recent_incident.status,
+                        )
+                        continue
+                # Fallback: if baseline is missing, set it and skip instead of flooding
+                if not entry.baseline_hash:
+                    entry.baseline_hash = current_hash
+                    entry.status = "clean"
+                    db.add(entry)
+                    db.commit()
+                    logger.warning(
+                        "VM1 baseline missing for %s; updated to %s and skipping detection.",
+                        entry.relative_path, current_hash,
+                    )
+                    continue
                 entry.status = "modified"
                 changed += 1
                 db.add(entry)

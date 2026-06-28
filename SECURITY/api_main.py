@@ -57,6 +57,8 @@ from SECURITY.security_engine import (
     bulk_update_incidents,
     get_setting,
     set_setting,
+    is_vm1_file,
+    _scan_vm1_snapshot,
     serialize_detection,
     serialize_file,
     serialize_incident,
@@ -207,23 +209,17 @@ def api_scan_file(payload: ScanFileRequest, db=Depends(get_db)):
         file_entry = db.query(SecurityMonitoredFile).filter(SecurityMonitoredFile.relative_path == payload.relative_path).first()
     if not file_entry:
         raise HTTPException(status_code=404, detail="Monitored file not found")
-    detection = scan_single_file(db, file_entry, context=payload.context, commit_clean=payload.commit_clean)
+    if is_vm1_file(file_entry):
+        detection = _scan_vm1_snapshot(db, file_entry, context=payload.context)
+    else:
+        detection = scan_single_file(db, file_entry, context=payload.context, commit_clean=payload.commit_clean)
     return {"detection": serialize_detection(detection) if detection else None}
 
 
 @app.post("/v1/scan/all", dependencies=[Depends(require_api_key)])
 @rate_limit("scan_all", max_requests=3, window_seconds=60)
 def api_scan_all(payload: dict = {}, request: Request = None, db=Depends(get_db)):
-    # scan_all_files expects a list of file entries; we scan all active monitored files
-    register_initial_files(db, refresh_existing=False, incremental=False)
-    from SECURITY.security_engine import active_monitored_files_query
-    files = active_monitored_files_query(db).all()
-    detections = []
-    for file_entry in files:
-        detection = scan_single_file(db, file_entry, context=payload.get("context", {}), commit_clean=False)
-        if detection:
-            detections.append(detection)
-    db.commit()
+    detections = scan_all_files(db, context=payload.get("context", {}))
     return {"detections": [serialize_detection(d) for d in detections]}
 
 

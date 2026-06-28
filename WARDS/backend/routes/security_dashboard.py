@@ -49,8 +49,10 @@ from utils.security_client import (
     get_ai_rules,
     get_ai_sensitivity,
     is_database_entry,
+    is_vm1_file,
     list_monitored_files,
     manual_recover_file,
+    _scan_vm1_snapshot,
     mark_stale_backup_events_failed,
     mark_admin_change,
     mark_false_positive,
@@ -293,9 +295,14 @@ def list_files(db: Session = Depends(get_db), _=Depends(current_admin)):
 
 @router.post("/files/{file_id}/scan")
 def scan_file(file_id: int, request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
-    from types import SimpleNamespace
-    file_entry = SimpleNamespace(id=file_id, relative_path=None)
-    detection = scan_single_file(db, file_entry, context={"manual_scan": True})
+    from SECURITY.security_models import SecurityMonitoredFile
+    file_entry = db.query(SecurityMonitoredFile).filter(SecurityMonitoredFile.id == file_id).first()
+    if not file_entry:
+        raise HTTPException(status_code=404, detail="File not found")
+    if is_vm1_file(file_entry):
+        detection = scan_single_file(db, file_entry, context={"manual_scan": True, "scan_vm1_local": True})
+    else:
+        detection = scan_single_file(db, file_entry, context={"manual_scan": True})
     db.add(ActivityLog(
         action="Security File Scan",
         user=admin.username,
@@ -532,6 +539,13 @@ def _run_scan_all_files_sync(job_id: str) -> list:
                 file_entry.status = "clean"
                 file_entry.last_checked = now_utc()
                 db.add(file_entry)
+                continue
+            if is_vm1_file(file_entry):
+                detection = scan_single_file(db, file_entry, context={"manual_scan": True, "scan_vm1_local": True}, commit_clean=False)
+                if detection:
+                    detections.append(detection)
+                progress = 10 + int((idx / total) * 80) if total else 50
+                job_manager.update_progress(job_id, progress, f"scanning {file_entry.relative_path}")
                 continue
             if not portable_monitored_path(file_entry).exists():
                 replacement_path = replacement_path_for(file_entry, hash_index)
@@ -1042,6 +1056,25 @@ def save_scan_interval(payload: ScanIntervalRequest, db: Session = Depends(get_d
         raise HTTPException(status_code=400, detail="Scan interval must be 3600 seconds or less.")
     set_setting(db, "scan_interval_seconds", str(payload.seconds), admin.username)
     update_backend_env({"SECURITY_SCAN_INTERVAL_SECONDS": str(payload.seconds)})
+    # In 2-VM mode the VM1 reporter fetches config from VM2, so mirror the
+    # setting there so the reporter picks it up on its next poll.
+    if SECURITY_API_URL:
+        try:
+            httpx.post(
+                f"{SECURITY_API_URL}/v1/settings/set",
+                headers={
+                    "X-API-Key": os.getenv("SECURITY_API_KEY", ""),
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "key": "scan_interval_seconds",
+                    "value": str(payload.seconds),
+                    "actor": admin.username,
+                },
+                timeout=10,
+            )
+        except Exception:
+            pass
     return {"scan_interval_seconds": payload.seconds, "env_updated": True}
 
 
