@@ -4766,6 +4766,7 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                 # Auto-recovery already ran at detection time; admin now confirms resolution
                 file_entry.status = "clean"
                 file_entry.last_checked = now_utc()
+                file_entry.baseline_hash = file_entry.current_hash or file_entry.baseline_hash
                 db.add(file_entry)
                 if create_event:
                     recovery = SecurityRecoveryEvent(
@@ -4825,8 +4826,14 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                     file_entry.status = "clean" if current_hash == file_entry.baseline_hash else "modified"
                     file_entry.size_bytes = target.stat().st_size
                 else:
-                    file_entry.current_hash = None
-                    file_entry.status = "clean" if confirm_missing_files else "missing"
+                    # For VM1 files the local target may not exist on VM2; accept the current
+                    # snapshot hash as clean when the admin confirms missing files.
+                    if confirm_missing_files and file_entry.current_hash:
+                        file_entry.baseline_hash = file_entry.current_hash
+                        file_entry.status = "clean"
+                    else:
+                        file_entry.current_hash = None
+                        file_entry.status = "missing"
                 file_entry.last_checked = now_utc()
                 db.add(file_entry)
     incident.status = "resolved"
@@ -6305,6 +6312,19 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
                         new_content = base64.b64decode(content_b64).decode("utf-8", errors="replace")
                     except Exception:
                         pass
+                # Skip detection when both contents are empty (no meaningful diff possible).
+                # This typically happens for large files where content_b64 is not sent.
+                if not old_content.strip() and not new_content.strip():
+                    logger.warning(
+                        "VM1 file %s hash changed but both old/new content are empty "
+                        "(snapshot/content_b64 missing); updating baseline to %s and skipping detection.",
+                        rel_path, current_hash,
+                    )
+                    entry.baseline_hash = current_hash
+                    entry.status = "clean"
+                    db.add(entry)
+                    db.commit()
+                    continue
                 detection = _record_vm1_detection(db, entry, "vm1_content_modified", current_hash, old_content=old_content, new_content=new_content)
                 # Store the new snapshot so future changes have a baseline
                 _store_vm1_snapshot(rel_path, content_b64)
