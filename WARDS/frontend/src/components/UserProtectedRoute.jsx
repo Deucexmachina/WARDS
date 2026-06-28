@@ -63,17 +63,16 @@ const UserProtectedRoute = ({ children }) => {
         sessionStorage.setItem('redirectAfterLogin', location.pathname);
       }
     } catch (error) {
+      if (error.code === 'ECONNABORTED' || !error.response) {
+        console.warn('Public auth verification network error:', error);
+        return;
+      }
       setIsAuthenticated(false);
       localStorage.removeItem('userToken');
       clearStoredPublicUser();
       localStorage.removeItem('userAuthenticatedAt');
       sessionStorage.setItem('redirectAfterLogin', location.pathname);
-      sessionStorage.setItem(
-        'loginMessage',
-        error.code === 'ECONNABORTED' || !error.response
-          ? 'Unable to reach the backend. Please make sure the API server is running.'
-          : 'Please login to continue'
-      );
+      sessionStorage.setItem('loginMessage', 'Please login to continue');
     } finally {
       setIsLoading(false);
     }
@@ -90,7 +89,7 @@ const UserProtectedRoute = ({ children }) => {
     );
   }
 
-  if (!isAuthenticated) {
+  if (isAuthenticated === false) {
     // Store login required message
     sessionStorage.setItem('loginMessage', 'Please login to continue');
     return <Navigate to="/login" state={{ from: location.pathname }} replace />;

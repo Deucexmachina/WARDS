@@ -70,6 +70,10 @@ const BranchProtectedRoute = ({ children }) => {
         sessionStorage.setItem('loginMessage', 'Please login with your branch account to continue.');
       }
     } catch (error) {
+      if (error.code === 'ECONNABORTED' || !error.response) {
+        console.warn('Branch auth verification network error:', error);
+        return;
+      }
       setIsAuthenticated(false);
       localStorage.removeItem('branchToken');
       localStorage.removeItem('branchUser');
@@ -77,12 +81,7 @@ const BranchProtectedRoute = ({ children }) => {
       clearBranchSettingsSession();
       sessionStorage.setItem('redirectAfterLogin', location.pathname);
       sessionStorage.setItem('loginPortal', 'branch');
-      sessionStorage.setItem(
-        'loginMessage',
-        error.code === 'ECONNABORTED' || !error.response
-          ? 'Unable to reach the backend. Please make sure the API server is running.'
-          : 'Please login with your branch account to continue.'
-      );
+      sessionStorage.setItem('loginMessage', 'Please login with your branch account to continue.');
     } finally {
       setIsLoading(false);
     }
@@ -99,7 +98,7 @@ const BranchProtectedRoute = ({ children }) => {
     );
   }
 
-  if (!isAuthenticated) {
+  if (isAuthenticated === false) {
     return <Navigate to="/login?portal=branch" state={{ from: location.pathname }} replace />;
   }
 

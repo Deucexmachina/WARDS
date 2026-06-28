@@ -84,15 +84,14 @@ const ProtectedRoute = ({ children }) => {
         setAdminLoginRedirectState('Please login with your admin account to continue.');
       }
     } catch (error) {
+      if (error.code === 'ECONNABORTED' || !error.response) {
+        console.warn('Admin auth verification network error:', error);
+        return;
+      }
       console.error('Token verification failed:', error);
       setIsAuthenticated(false);
       clearAdminSession();
-      const isBackendUnavailable = error.code === 'ECONNABORTED' || !error.response;
-      setAdminLoginRedirectState(
-        isBackendUnavailable
-          ? 'Unable to reach the backend. Please make sure the API server is running.'
-          : 'Please login with your admin account to continue.'
-      );
+      setAdminLoginRedirectState('Please login with your admin account to continue.');
     } finally {
       setIsLoading(false);
     }
@@ -109,7 +108,7 @@ const ProtectedRoute = ({ children }) => {
     );
   }
 
-  if (!isAuthenticated) {
+  if (isAuthenticated === false) {
     return <Navigate to="/login?portal=admin" replace />;
   }
 

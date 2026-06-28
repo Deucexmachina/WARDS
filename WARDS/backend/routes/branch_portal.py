@@ -1393,7 +1393,8 @@ async def delete_branch_queue_history(
 
     queue_number = queue_history.queue_number
     db.delete(queue_history)
-    log_branch_action(db, current_staff, "Completed Queue History Deleted", f"Deleted completed queue history {queue_number}", request.client.host)
+    client_ip = request.client.host if request.client else None
+    log_branch_action(db, current_staff, "Completed Queue History Deleted", f"Deleted completed queue history {queue_number}", client_ip)
     db.commit()
     return {"success": True, "historyId": history_id, "queueNumber": queue_number}
 
