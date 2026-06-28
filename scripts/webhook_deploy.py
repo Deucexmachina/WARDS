@@ -39,6 +39,14 @@ WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "").encode()
 DEPLOY_DIR = os.environ.get("DEPLOY_DIR", "/opt/wards/app")
 VM2_HOST = os.environ.get("VM2_HOST", "")
 VM2_API_KEY = os.environ.get("VM2_API_KEY", "")
+VM2_ADMIN_SECRET = os.environ.get("VM2_ADMIN_SECRET", "")
+
+
+def _vm2_headers() -> dict[str, str]:
+    headers = {"X-API-Key": VM2_API_KEY}
+    if VM2_ADMIN_SECRET:
+        headers["X-Admin-Secret"] = VM2_ADMIN_SECRET
+    return headers
 
 
 def verify_signature(body: bytes, signature: str) -> bool:
@@ -69,7 +77,7 @@ def _unpause_vm2() -> bool:
         try:
             resp = httpx.post(
                 f"https://{VM2_HOST}/internal/deployment-mode",
-                headers={"X-API-Key": VM2_API_KEY},
+                headers=_vm2_headers(),
                 json={"in_progress": False},
                 timeout=10.0,
             )
@@ -124,7 +132,7 @@ async def github_webhook(request: Request):
         try:
             resp = httpx.get(
                 f"https://{VM2_HOST}/internal/deploy-status",
-                headers={"X-API-Key": VM2_API_KEY},
+                headers=_vm2_headers(),
                 timeout=5.0,
             )
             if resp.status_code == 200:
@@ -139,7 +147,7 @@ async def github_webhook(request: Request):
             try:
                 httpx.post(
                     f"https://{VM2_HOST}/internal/deployment-mode",
-                    headers={"X-API-Key": VM2_API_KEY},
+                    headers=_vm2_headers(),
                     json={"in_progress": True},
                     timeout=10.0,
                 )
@@ -168,7 +176,7 @@ async def github_webhook(request: Request):
             try:
                 resp = httpx.post(
                     f"https://{VM2_HOST}/internal/deploy",
-                    headers={"X-API-Key": VM2_API_KEY},
+                    headers=_vm2_headers(),
                     timeout=30.0,
                 )
                 resp.raise_for_status()
@@ -202,7 +210,7 @@ async def github_webhook(request: Request):
             try:
                 backup_resp = httpx.post(
                     f"https://{VM2_HOST}/v1/backup/full",
-                    headers={"X-API-Key": VM2_API_KEY},
+                    headers=_vm2_headers(),
                     timeout=120.0,
                 )
                 backup_resp.raise_for_status()
@@ -258,7 +266,7 @@ async def vm2_deploy_status():
     try:
         resp = httpx.get(
             f"https://{VM2_HOST}/internal/deploy-status",
-            headers={"X-API-Key": VM2_API_KEY},
+            headers=_vm2_headers(),
             timeout=10.0,
         )
         resp.raise_for_status()
