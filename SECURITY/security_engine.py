@@ -2536,7 +2536,7 @@ def retrain_ai(db: Session, initiated_by: str = "system") -> dict:
     return state
 
 
-def content_flags(content: str, context: dict | None = None) -> list[str]:
+def content_flags(content: str, context: dict | None = None, path: Path | None = None) -> list[str]:
     context = context or {}
     lowered = (content or "").lower()
     flags = []
@@ -2602,9 +2602,13 @@ def content_flags(content: str, context: dict | None = None) -> list[str]:
         admin_actions_per_minute = 0
     if context.get("rapid_admin_actions") or admin_actions_per_minute > 12:
         flags.append("rapid_admin_actions")
-    for key, patterns in SUSPICIOUS_PATTERNS.items():
-        if any(pattern in lowered for pattern in patterns):
-            flags.append(key)
+    # Skip content-based injection/defacement pattern matching for documentation
+    # files (.md, .txt) that legitimately contain example payloads.
+    is_doc_file = path is not None and path.suffix.lower() in {".md", ".txt", ".rst"}
+    if not is_doc_file:
+        for key, patterns in SUSPICIOUS_PATTERNS.items():
+            if any(pattern in lowered for pattern in patterns):
+                flags.append(key)
     if context.get("rapid_change"):
         flags.append("rapid_change")
     return sorted(set(flags))
@@ -2612,7 +2616,7 @@ def content_flags(content: str, context: dict | None = None) -> list[str]:
 
 def ai_predict(path: Path, old_content: str, new_content: str, context: dict | None = None) -> AIPrediction:
     context = context or {}
-    flags = content_flags(new_content, context)
+    flags = content_flags(new_content, context, path=path)
     rules = context.get("ai_rules") or DEFAULT_AI_RULES
 
     def enabled(rule_name: str) -> bool:
@@ -3726,7 +3730,7 @@ def record_detection(db: Session, file_entry: SecurityMonitoredFile, change_type
     context.setdefault("ai_rules", get_ai_rules(db))
 
     prediction = ai_predict(portable_monitored_path(file_entry), old_content, new_content, context)
-    flags = content_flags(new_content, context)
+    flags = content_flags(new_content, context, path=portable_monitored_path(file_entry))
     classification = classify(change_type, prediction, flags, context)
     if is_legitimate:
         prediction = AIPrediction("normal", 0.02, 0.98, "Valid admin token and registered admin file-change event.")
@@ -6194,7 +6198,7 @@ def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type
         "source_ip": "vm1_internal",
     }
     prediction = ai_predict(Path(entry.relative_path), old_content, new_content, context)
-    flags = content_flags(new_content, context)
+    flags = content_flags(new_content, context, path=Path(entry.relative_path))
     classification = classify(change_type, prediction, flags, context)
     is_legitimate = False
     context.setdefault("admin_session_valid", False)
