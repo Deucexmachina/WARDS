@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import random
+import shlex
 import shutil
 import subprocess
 import sys
@@ -5342,10 +5343,16 @@ def reload_wazuh_if_configured() -> bool:
     command = (os.getenv("WAZUH_RELOAD_COMMAND") or "").strip()
     if not command:
         return False
+    # Only allow simple whitelisted reload commands to prevent shell injection
+    allowed_prefixes = ("/var/ossec/bin/wazuh-control", "systemctl", "service")
+    if not any(command.startswith(p) for p in allowed_prefixes):
+        logger.warning("Wazuh reload command rejected: does not start with an allowed prefix.")
+        return False
     try:
-        exit_code = os.system(command)
-        if exit_code != 0:
-            logger.warning("Wazuh reload command exited with status %s.", exit_code)
+        args = shlex.split(command)
+        result = subprocess.run(args, capture_output=True, check=False)
+        if result.returncode != 0:
+            logger.warning("Wazuh reload command exited with status %s. stderr: %s", result.returncode, result.stderr.decode("utf-8", errors="replace")[:200])
             return False
         return True
     except Exception:
@@ -5980,17 +5987,32 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
     # vm1_custom_monitored_folders, but their manifests must still be accepted.
     allowed_vm1_roots |= set(MONITORED_ROOTS.keys())
 
+    def _valid_hash(value) -> str:
+        if not isinstance(value, str) or len(value) != 64 or not all(c in "0123456789abcdefABCDEF" for c in value):
+            return ""
+        return value.lower()
+
+    def _valid_size(value) -> int:
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            return 0
+
     if is_deployment_in_progress(db):
         logger.info("Deployment in progress — skipping VM1 file change detections.")
         # Still register or update files so the baseline is correct post-deploy
         for f in files:
-            rel_path = f["relative_path"]
-            folder_root = f["folder_root"]
+            if not isinstance(f, dict):
+                continue
+            rel_path = str(f.get("relative_path") or "").strip()
+            folder_root = str(f.get("folder_root") or "").strip()
             # Normalize legacy CUSTOM_ prefix from older VM1 reporters
             folder_root = _clean_folder_root(folder_root)
             rel_path = _clean_folder_root(rel_path)
-            current_hash = f["current_hash"]
-            size_bytes = f["size_bytes"]
+            if not rel_path or ".." in rel_path.replace("\\", "/"):
+                continue
+            current_hash = _valid_hash(f.get("current_hash"))
+            size_bytes = _valid_size(f.get("size_bytes"))
             if Path(rel_path).name.lower() == ".env":
                 continue
             entry = (
@@ -6032,18 +6054,22 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
     registered = 0
 
     for f in files:
-        rel_path = f["relative_path"]
-        folder_root = f["folder_root"]
+        if not isinstance(f, dict):
+            continue
+        rel_path = str(f.get("relative_path") or "").strip()
+        folder_root = str(f.get("folder_root") or "").strip()
         # Normalize legacy CUSTOM_ prefix from older VM1 reporters
         folder_root = _clean_folder_root(folder_root)
         rel_path = _clean_folder_root(rel_path)
+        if not rel_path or ".." in rel_path.replace("\\", "/"):
+            continue
 
         # Skip files from folders that are no longer in the VM1 monitored list
         if folder_root not in allowed_vm1_roots:
             continue
 
-        current_hash = f["current_hash"]
-        size_bytes = f["size_bytes"]
+        current_hash = _valid_hash(f.get("current_hash"))
+        size_bytes = _valid_size(f.get("size_bytes"))
 
         # Skip environment files — they change as part of normal operations
         if Path(rel_path).name.lower() == ".env":

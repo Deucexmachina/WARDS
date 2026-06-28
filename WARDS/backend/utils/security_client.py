@@ -17,6 +17,7 @@ _session.headers.update({"Connection": "keep-alive"})
 
 SECURITY_API_URL = os.getenv("SECURITY_API_URL", "").rstrip("/")
 SECURITY_API_KEY = os.getenv("SECURITY_API_KEY", "")
+SECURITY_ADMIN_SECRET = os.getenv("SECURITY_ADMIN_SECRET", "")
 TIMEOUT = 30.0
 
 # In-memory cache for VM2 read responses to avoid repeated slow calls
@@ -55,7 +56,10 @@ def _cached_fetch(cache_key: str, ttl_seconds: int, fetch_fn, default=None):
 
 
 def _headers() -> dict[str, str]:
-    return {"X-API-Key": SECURITY_API_KEY, "Content-Type": "application/json"}
+    headers = {"X-API-Key": SECURITY_API_KEY, "Content-Type": "application/json"}
+    if SECURITY_ADMIN_SECRET:
+        headers["X-Admin-Secret"] = SECURITY_ADMIN_SECRET
+    return headers
 
 
 def _sync_post(path: str, json_data: dict | None = None, timeout: float | None = None) -> Any:

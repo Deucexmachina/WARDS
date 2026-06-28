@@ -905,6 +905,31 @@ def remove_folder(payload: AddFolderRequest, db: Session = Depends(get_db), admi
 def folder_browser(path: str | None = Query(None), _=Depends(current_admin)):
     try:
         from SECURITY.security_engine import stored_path_value
+        _ALLOWED_BROWSE_ROOTS = {
+            MASTER_ROOT,
+            MASTER_ROOT / "WARDS",
+            MASTER_ROOT / "OCR",
+            MASTER_ROOT / "SECURITY",
+            MASTER_ROOT / "SECURITY" / "local_backups",
+        }
+        if Path("/opt/wards/app").exists():
+            _ALLOWED_BROWSE_ROOTS.add(Path("/opt/wards/app"))
+        if Path("/opt/wards/security").exists():
+            _ALLOWED_BROWSE_ROOTS.add(Path("/opt/wards/security"))
+        home_dir = Path.home()
+        if home_dir.exists() and str(home_dir) != "/":
+            _ALLOWED_BROWSE_ROOTS.add(home_dir)
+
+        def _is_under_allowed(target: Path) -> bool:
+            target_resolved = target.resolve()
+            for root in _ALLOWED_BROWSE_ROOTS:
+                try:
+                    target_resolved.relative_to(root.resolve())
+                    return True
+                except ValueError:
+                    continue
+            return False
+
         if not path or path in {".", "./"}:
             current = MASTER_ROOT
         else:
@@ -913,7 +938,7 @@ def folder_browser(path: str | None = Query(None), _=Depends(current_admin)):
                 current = (MASTER_ROOT / expanded).resolve()
             else:
                 current = expanded.resolve()
-        if not current.exists() or not current.is_dir():
+        if not current.exists() or not current.is_dir() or not _is_under_allowed(current):
             current = MASTER_ROOT
         directories = []
         for item in current.iterdir():

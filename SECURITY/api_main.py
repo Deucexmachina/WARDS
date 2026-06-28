@@ -17,7 +17,7 @@ MASTER_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(MASTER_ROOT))
 sys.path.insert(0, str(MASTER_ROOT / "WARDS" / "backend"))
 
-from fastapi import FastAPI, HTTPException, Header, Depends, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Header, Depends, BackgroundTasks, Request
 from starlette.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import inspect
@@ -91,6 +91,51 @@ if not API_KEY or API_KEY in ("change-me", ""):
     import warnings
     warnings.warn("APP_API_KEY is not set or is using a default value. Set a strong key before production use.")
 
+ADMIN_SECRET = os.getenv("SECURITY_ADMIN_SECRET", "")
+if not ADMIN_SECRET:
+    import warnings
+    warnings.warn("SECURITY_ADMIN_SECRET is not set. Destructive endpoints rely on APP_API_KEY only.")
+
+# Simple in-memory rate limiter for VM2 API endpoints
+_rate_limit_store: dict[str, dict] = {}
+
+
+def _rate_limit_key(endpoint: str, request) -> str:
+    client_ip = request.client.host if request.client else "unknown"
+    return f"{endpoint}:{client_ip}"
+
+
+def rate_limit(endpoint_name: str, max_requests: int = 5, window_seconds: float = 60.0):
+    """Decorator to rate-limit an endpoint by client IP."""
+    def decorator(func):
+        from functools import wraps
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            request = None
+            for arg in args:
+                if hasattr(arg, "client"):
+                    request = arg
+                    break
+            if request is None:
+                for v in kwargs.values():
+                    if hasattr(v, "client"):
+                        request = v
+                        break
+            if request:
+                key = _rate_limit_key(endpoint_name, request)
+                now = time.time()
+                bucket = _rate_limit_store.setdefault(key, {"count": 0, "reset_at": now + window_seconds})
+                if now > bucket["reset_at"]:
+                    bucket["count"] = 0
+                    bucket["reset_at"] = now + window_seconds
+                bucket["count"] += 1
+                if bucket["count"] > max_requests:
+                    raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again later.")
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
 app = FastAPI(title="WARDS Security API", version="1.0.0")
 Base.metadata.create_all(bind=engine)
 
@@ -106,6 +151,11 @@ async def missing_file_confirmation_handler(request, exc):
 def require_api_key(x_api_key: str = Header(..., alias="X-API-Key")):
     if x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key")
+
+
+def require_admin_secret(x_admin_secret: str = Header(..., alias="X-Admin-Secret")):
+    if ADMIN_SECRET and x_admin_secret != ADMIN_SECRET:
+        raise HTTPException(status_code=403, detail="Admin secret required")
 
 
 def get_db():
@@ -162,7 +212,8 @@ def api_scan_file(payload: ScanFileRequest, db=Depends(get_db)):
 
 
 @app.post("/v1/scan/all", dependencies=[Depends(require_api_key)])
-def api_scan_all(payload: dict = {}, db=Depends(get_db)):
+@rate_limit("scan_all", max_requests=3, window_seconds=60)
+def api_scan_all(payload: dict = {}, request: Request = None, db=Depends(get_db)):
     # scan_all_files expects a list of file entries; we scan all active monitored files
     register_initial_files(db, refresh_existing=False, incremental=False)
     from SECURITY.security_engine import active_monitored_files_query
@@ -464,12 +515,14 @@ def api_vm1_config(db=Depends(get_db)):
 # Backup & Recovery
 # ---------------------------------------------------------------------------
 @app.post("/v1/backup/manual", dependencies=[Depends(require_api_key)])
-def api_backup_manual(payload: dict = {}, db=Depends(get_db)):
+@rate_limit("backup_manual", max_requests=3, window_seconds=60)
+def api_backup_manual(payload: dict = {}, request: Request = None, db=Depends(get_db)):
     event = create_manual_backup(db, _resolve_admin_id(db, payload.get("admin_id")), label=payload.get("label", "manual"))
     return serialize_recovery(event)
 
 
-@app.post("/v1/backup/location", dependencies=[Depends(require_api_key)])
+@app.post("/v1/backup/location", dependencies=[Depends(require_api_key), Depends(require_admin_secret)])
+@rate_limit("backup_location", max_requests=5, window_seconds=60)
 def api_backup_location(payload: dict = {}, db=Depends(get_db)):
     return set_backup_location(
         db,
@@ -480,7 +533,8 @@ def api_backup_location(payload: dict = {}, db=Depends(get_db)):
 
 
 @app.post("/v1/recover/full", dependencies=[Depends(require_api_key)])
-def api_recover_full(payload: dict = {}, background_tasks: BackgroundTasks = None, db=Depends(get_db)):
+@rate_limit("recover_full", max_requests=2, window_seconds=300)
+def api_recover_full(payload: dict = {}, background_tasks: BackgroundTasks = None, request: Request = None, db=Depends(get_db)):
     admin_id = _resolve_admin_id(db, payload.get("admin_id"))
 
     def _run_recovery():
@@ -557,8 +611,8 @@ def api_add_folder(payload: dict = {}, db=Depends(get_db)):
             raise HTTPException(status_code=409, detail=detail)
         raise HTTPException(status_code=400, detail=detail)
     except Exception as exc:
-        logger.error("api_add_folder error: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to add monitored folder: {exc}")
+        logger.error("api_add_folder error: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to add monitored folder.")
 
 
 @app.post("/v1/folders/remove", dependencies=[Depends(require_api_key)])
@@ -570,6 +624,9 @@ def api_remove_folder(payload: dict = {}, db=Depends(get_db)):
         if "not currently monitored" in detail.lower():
             raise HTTPException(status_code=404, detail=detail)
         raise HTTPException(status_code=400, detail=detail)
+    except Exception as exc:
+        logger.error("api_remove_folder error: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to remove monitored folder.")
 
 
 # ---------------------------------------------------------------------------
@@ -745,8 +802,9 @@ def api_deployment_mode(payload: dict = {}, db: Session = Depends(get_db)):
 # ---------------------------------------------------------------------------
 # Internal deploy trigger (called by VM1 webhook deployer)
 # ---------------------------------------------------------------------------
-@app.post("/internal/deploy", dependencies=[Depends(require_api_key)])
-def api_internal_deploy():
+@app.post("/internal/deploy", dependencies=[Depends(require_api_key), Depends(require_admin_secret)])
+@rate_limit("internal_deploy", max_requests=2, window_seconds=300)
+def api_internal_deploy(request: Request = None):
     import subprocess
     import threading
     import signal
@@ -823,8 +881,9 @@ def api_internal_deploy_status():
     return {"vm": "vm2", "commit": commit, "deploy_dir": app_dir}
 
 
-@app.post("/v1/admin/clear-all-logs", dependencies=[Depends(require_api_key)])
-def api_clear_all_logs(db=Depends(get_db)):
+@app.post("/v1/admin/clear-all-logs", dependencies=[Depends(require_api_key), Depends(require_admin_secret)])
+@rate_limit("clear_logs", max_requests=2, window_seconds=300)
+def api_clear_all_logs(request: Request = None, db=Depends(get_db)):
     """Admin-only: wipe every detection, recovery, and incident row."""
     from sqlalchemy import text
     db.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
