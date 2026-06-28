@@ -891,12 +891,13 @@ def api_internal_deploy_status():
 @app.post("/v1/admin/clear-all-logs", dependencies=[Depends(require_api_key), Depends(require_admin_secret)])
 @rate_limit("clear_logs", max_requests=2, window_seconds=300)
 def api_clear_all_logs(request: Request = None, db=Depends(get_db)):
-    """Admin-only: wipe every detection, recovery, and incident row."""
+    """Admin-only: wipe detection, recovery, incident, and monitored-file rows."""
     from sqlalchemy import text
     db.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
     deleted_recoveries = db.execute(text("DELETE FROM security_recovery_events")).rowcount
     deleted_incidents = db.execute(text("DELETE FROM security_incidents")).rowcount
     deleted_detections = db.execute(text("DELETE FROM security_detection_events")).rowcount
+    deleted_monitored = db.execute(text("DELETE FROM security_monitored_files")).rowcount
     db.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
     db.commit()
     return {
@@ -904,6 +905,7 @@ def api_clear_all_logs(request: Request = None, db=Depends(get_db)):
         "incidents_deleted": deleted_incidents,
         "detections_deleted": deleted_detections,
         "recoveries_deleted": deleted_recoveries,
+        "monitored_files_deleted": deleted_monitored,
     }
 
 

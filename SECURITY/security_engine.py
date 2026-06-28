@@ -6092,6 +6092,18 @@ def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type
     return detection
 
 
+def _vm1_file_monitorable(rel_path: str) -> bool:
+    lower_name = Path(rel_path).name.lower()
+    suffix = Path(rel_path).suffix.lower()
+    if suffix in MONITORED_SUFFIXES:
+        return True
+    if lower_name in MONITORED_SPECIAL_FILENAMES:
+        return True
+    if any(lower_name.endswith(item) for item in MONITORED_SPECIAL_NAME_SUFFIXES):
+        return True
+    return False
+
+
 def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
     # Build the set of currently allowed VM1 folder roots so stale manifests
     # from reporters that haven't refreshed config yet don't recreate entries.
@@ -6101,6 +6113,8 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
     }
     # Standard VM1 roots (WARDS, OCR) are hardcoded on VM1 and not stored in
     # vm1_custom_monitored_folders, but their manifests must still be accepted.
+    # Note: OCR root is no longer in MONITORED_ROOTS, but legacy manifests may
+    # still reference it; those files are dropped below by excluded-dirs check.
     allowed_vm1_roots |= set(MONITORED_ROOTS.keys())
 
     def _valid_hash(value) -> str:
@@ -6131,6 +6145,8 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
             size_bytes = _valid_size(f.get("size_bytes"))
             if Path(rel_path).name.lower() == ".env":
                 continue
+            # Skip non-monitorable file types during deployment — only update
+            # existing entries, don't create new ones for e.g. images/audio.
             entry = (
                 db.query(SecurityMonitoredFile)
                 .filter(SecurityMonitoredFile.relative_path == rel_path)
@@ -6146,7 +6162,7 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
                 entry.status = "clean"
                 entry.baseline_hash = current_hash
                 db.add(entry)
-            else:
+            elif _vm1_file_monitorable(rel_path):
                 db.add(
                     SecurityMonitoredFile(
                         file_path=f"vm1://{rel_path}",
@@ -6187,6 +6203,10 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
         # Skip files in excluded directories (e.g. OCR, build outputs)
         rel_path_parts = set(Path(rel_path).parts)
         if rel_path_parts.intersection({item.lower() for item in DEFAULT_EXCLUDED_DIRS}):
+            continue
+
+        # Skip non-monitorable file types (images, audio, etc.)
+        if not _vm1_file_monitorable(rel_path):
             continue
 
         current_hash = _valid_hash(f.get("current_hash"))
