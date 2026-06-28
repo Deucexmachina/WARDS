@@ -2,8 +2,6 @@ import { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import { appendLanguageParam, resolvePublicLanguage, setPublicLanguage } from '../../utils/publicLanguage';
-
-import { API_BASE_URL } from '../../services/api';
 const FAILED_STATUSES = new Set(['failed', 'declined', 'cancelled', 'canceled']);
 const EXPIRED_STATUSES = new Set(['expired']);
 const SUCCESS_STATUSES = new Set(['confirmed', 'verified', 'paid', 'succeeded', 'successful', 'success']);
@@ -57,7 +55,7 @@ const PaymentFailed = () => {
 
       try {
         const tokenQuery = accessToken ? `?token=${encodeURIComponent(accessToken)}` : '';
-        const response = await api.get(`${API_BASE_URL}/payments/paymongo/status/${refNumber}${tokenQuery}`);
+        const response = await api.get(`/payments/paymongo/status/${refNumber}${tokenQuery}`);
         setPayment(response.data);
         setLoading(false);
 

@@ -136,7 +136,7 @@ const PaymentStatus = () => {
 
       try {
         const tokenQuery = accessToken ? `?token=${encodeURIComponent(accessToken)}` : '';
-        const response = await api.get(`${API_BASE_URL}/payments/paymongo/status/${refNumber}${tokenQuery}`);
+        const response = await api.get(`/payments/paymongo/status/${refNumber}${tokenQuery}`);
         const paymentData = response.data;
         setPayment(paymentData);
         setLoading(false);
@@ -207,7 +207,7 @@ const PaymentStatus = () => {
 
       try {
         const tokenQuery = accessToken ? `?token=${encodeURIComponent(accessToken)}` : '';
-        const response = await api.get(`${API_BASE_URL}/payments/paymongo/status/${refNumber}${tokenQuery}`);
+        const response = await api.get(`/payments/paymongo/status/${refNumber}${tokenQuery}`);
         setPayment(response.data);
         setError('');
       } catch (err) {
