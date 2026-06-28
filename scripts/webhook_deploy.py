@@ -177,6 +177,7 @@ async def github_webhook(request: Request):
                 resp = httpx.post(
                     f"https://{VM2_HOST}/internal/deploy",
                     headers=_vm2_headers(),
+                    json={},
                     timeout=30.0,
                 )
                 resp.raise_for_status()
