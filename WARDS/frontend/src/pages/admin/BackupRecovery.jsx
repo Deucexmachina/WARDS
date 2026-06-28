@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CustomSelect, CustomDatePicker } from '../../components/FormControls';
 import { useNavigate } from 'react-router-dom';
+import PublicBrandLogo from '../../components/PublicBrandLogo';
 import api from '../../services/api';
 
 const tabs = ['Dashboard', 'File Status', 'Backup History', 'Detection History', 'Recovery History', 'Security Incidents', 'Manual Controls'];
@@ -1003,18 +1004,13 @@ const BackupRecovery = () => {
         onOpen={(path) => openFolderPicker(folderPicker.mode, folderPicker.title, path)}
       />
       <header className="sticky top-0 z-40 bg-primary px-4 py-3 shadow-lg md:px-8">
-        <div className="mx-auto flex max-w-[90rem] items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-white/20 shadow-sm">
-              <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-              </svg>
-            </div>
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/70">WARDS</p>
-              <h1 className="text-base font-bold text-white">Security Dashboard</h1>
-            </div>
-          </div>
+        <div className="flex w-full items-center justify-between">
+          <PublicBrandLogo
+            clickable={false}
+            compact
+            title="Security Dashboard"
+            subtitle="WARDS Threat Monitoring"
+          />
           <button onClick={returnToAdmin} className="rounded-lg bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/20">
             Return to {adminLabel} Dashboard
           </button>
