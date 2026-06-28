@@ -127,6 +127,7 @@ def test_record_detection_creates_incident_and_quarantine(monkeypatch):
         id=7,
         file_path="C:/repo/suspicious.py",
         relative_path="sigma/suspicious.py",
+        folder_root=None,
     )
     calls = {"incident": 0, "alert": 0, "recovery": 0}
 
@@ -203,6 +204,7 @@ def test_record_detection_logs_alert_when_no_incident(monkeypatch):
         id=4,
         file_path="C:/repo/note.txt",
         relative_path="sigma/note.txt",
+        folder_root=None,
     )
     alert_calls = []
 
