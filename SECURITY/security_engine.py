@@ -4662,22 +4662,42 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                 cleanup_quarantine_paths(json_loads(incident.quarantine_paths_json, []))
             elif incident.response_action == "auto_recovered_pending_review":
                 # Auto-recovery was already queued at detection time; admin now confirms resolution
-                cleanup_quarantine_paths(json_loads(incident.quarantine_paths_json, []))
-                # Update snapshot to clean (original) content for baseline consistency
                 quarantine_paths = json_loads(incident.quarantine_paths_json, [])
+                cleanup_quarantine_paths(quarantine_paths)
                 quarantine_path = quarantine_paths[0] if quarantine_paths else None
                 safe_quarantine = safe_quarantine_path(quarantine_path) if quarantine_path else None
-                if safe_quarantine and safe_quarantine.exists():
-                    try:
-                        original_bytes = safe_quarantine.read_bytes()
-                        snapshot = VM1_SNAPSHOT_ROOT / file_entry.relative_path
-                        snapshot.parent.mkdir(parents=True, exist_ok=True)
-                        snapshot.write_bytes(original_bytes)
-                        clean_hash = hashlib.sha256(original_bytes).hexdigest()
-                        file_entry.baseline_hash = clean_hash
-                        file_entry.current_hash = clean_hash
-                    except Exception:
-                        pass
+                # Find the restore command created during auto-recovery and use its clean
+                # content to update the snapshot and baseline. Do NOT use quarantine
+                # (it contains the defaced version).
+                clean_hash = None
+                detection_id = detection.id if detection else None
+                if detection_id:
+                    commands = json_loads(get_setting(db, "vm1_restore_commands", "[]"), [])
+                    cmd = next((c for c in commands if c.get("detection_id") == detection_id), None)
+                    if cmd:
+                        content_file = cmd.get("restore_content_file")
+                        if content_file:
+                            try:
+                                content_path = Path(content_file)
+                                if content_path.exists():
+                                    clean_bytes = base64.b64decode(content_path.read_bytes())
+                                    snapshot = VM1_SNAPSHOT_ROOT / file_entry.relative_path
+                                    snapshot.parent.mkdir(parents=True, exist_ok=True)
+                                    snapshot.write_bytes(clean_bytes)
+                                    clean_hash = hashlib.sha256(clean_bytes).hexdigest()
+                            except Exception:
+                                pass
+                if not clean_hash:
+                    # Fallback: use current snapshot if already clean
+                    snapshot = VM1_SNAPSHOT_ROOT / file_entry.relative_path
+                    if snapshot.exists():
+                        try:
+                            clean_hash = sha256_file(snapshot)
+                        except Exception:
+                            pass
+                if clean_hash:
+                    file_entry.baseline_hash = clean_hash
+                    file_entry.current_hash = clean_hash
                 file_entry.status = "clean"
                 file_entry.last_checked = now_utc()
                 db.add(file_entry)

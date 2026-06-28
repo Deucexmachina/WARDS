@@ -163,6 +163,27 @@ def fetch_vm2_config() -> dict:
     return {}
 
 
+def _trigger_docker_rebuild(rel_path: str):
+    """Restart frontend container if a restored file affects the built output."""
+    lower = rel_path.lower()
+    if not any(p in lower for p in ("/frontend/", "/public/", "index.html")):
+        return
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["docker", "compose", "restart", "frontend"],
+            capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode == 0:
+            log(f"Frontend container restarted after restoring {rel_path}")
+        else:
+            log(f"Frontend restart failed: {result.stderr.strip()}")
+    except FileNotFoundError:
+        pass  # docker not available inside container
+    except Exception as exc:
+        log(f"Frontend restart exception: {exc}")
+
+
 def apply_restore_command(cmd: dict) -> bool:
     rel_path = cmd.get("relative_path", "")
     expected_hash = cmd.get("expected_hash")
@@ -216,6 +237,7 @@ def apply_restore_command(cmd: dict) -> bool:
             return False
 
         log(f"Restored {rel_path} (hash: {actual_hash})")
+        _trigger_docker_rebuild(rel_path)
         return True
     except Exception as exc:
         log(f"Restore failed for {rel_path}: {exc}")

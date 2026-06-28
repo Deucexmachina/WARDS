@@ -92,8 +92,9 @@ services:
       - ./scripts/vm1_security_reporter.py:/app/vm1_security_reporter.py:ro
       - vm1_snapshots:/app/.vm1_snapshots
       - .:/opt/wards/app
+      - /var/run/docker.sock:/var/run/docker.sock
     command: >
-      sh -c "pip install --no-cache-dir requests && python3 /app/vm1_security_reporter.py"
+      sh -c "apt-get update -qq && apt-get install -y -qq docker.io >/dev/null 2>&1 || true; pip install --no-cache-dir requests; python3 /app/vm1_security_reporter.py"
     depends_on:
       - backend
 
