@@ -60,4 +60,3 @@ CORS_ORIGINS=https://your-domain.example
 5. Add rate limiting for `/api/auth/*` and `/api/security/*`.
 
 Do not expose MySQL publicly. Restrict it to the app host or DigitalOcean private networking.
-
