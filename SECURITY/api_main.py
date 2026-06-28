@@ -780,7 +780,14 @@ def api_files_migrate(db=Depends(get_db)):
 
 @app.post("/v1/files/admin-change", dependencies=[Depends(require_api_key)])
 def api_admin_change(payload: dict = {}, db=Depends(get_db)):
-    return mark_admin_change(db, payload["file_path"], payload["admin_id"])
+    return mark_admin_change(
+        db,
+        admin_id=payload.get("admin_id"),
+        file_path=payload.get("file_path"),
+        token_id=payload.get("token_id"),
+        ip=payload.get("ip"),
+        user_agent=payload.get("user_agent"),
+    )
 
 
 @app.post("/v1/backups/mark-stale", dependencies=[Depends(require_api_key)])

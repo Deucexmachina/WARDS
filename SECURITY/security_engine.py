@@ -106,12 +106,10 @@ if _vm2_app_dir:
     _deploy_root = Path(_vm2_app_dir)
     MONITORED_ROOTS = {
         "WARDS": _deploy_root / "WARDS",
-        "OCR": _deploy_root / "OCR",
     }
 else:
     MONITORED_ROOTS = {
         "WARDS": MASTER_ROOT / "WARDS",
-        "OCR": MASTER_ROOT / "OCR",
     }
 
 DEFAULT_EXCLUDED_DIRS = {
@@ -127,6 +125,7 @@ DEFAULT_EXCLUDED_DIRS = {
     "SECURITY",
     "QUARANTINE",
     "DEFACEMENT",
+    "OCR",
 }
 
 MONITORED_SUFFIXES = {
@@ -561,6 +560,9 @@ def system_alert_email_recipients(db: Session) -> list[str]:
     return sorted(recipients)
 
 
+_ALERT_EMAIL_COOLDOWN_SECONDS = 60
+_last_alert_email_times: dict[str, float] = {}
+
 def dispatch_system_alert_email(
     db: Session,
     alert: Alert,
@@ -576,6 +578,14 @@ def dispatch_system_alert_email(
         return None
     if alert.type not in IMPORTANT_SYSTEM_ALERT_KEYS:
         return None
+    # Rate-limit incident-related alert emails to prevent spam during bulk detections
+    if alert.type in {"incident_created", "incident_auto_recovery", "incident_resolved", "incident_false_positive"}:
+        now = time.time()
+        last_sent = _last_alert_email_times.get(alert.type, 0)
+        if now - last_sent < _ALERT_EMAIL_COOLDOWN_SECONDS:
+            logger.info("Rate-limiting %s alert email (last sent %.0fs ago)", alert.type, now - last_sent)
+            return None
+        _last_alert_email_times[alert.type] = now
     recipients = system_alert_email_recipients(db)
     incident_payload = incident or {
         "id": alert.id,
@@ -3433,28 +3443,6 @@ def create_incident(db: Session, detection: SecurityDetectionEvent, classificati
     db.add(incident)
     db.commit()
     db.refresh(incident)
-    try:
-        from services.email_service import send_security_incident_alert_email
-        recipients = system_alert_email_recipients(db)
-        if not recipients:
-            logger.warning("No admin recipients found for incident alert email (detection %s)", detection.id)
-        recoveries = [
-            serialize_recovery(item)
-            for item in db.query(SecurityRecoveryEvent)
-            .filter(SecurityRecoveryEvent.detection_event_id == detection.id)
-            .order_by(SecurityRecoveryEvent.started_at.desc())
-            .all()
-        ]
-        result = send_security_incident_alert_email(recipients, serialize_incident(incident), serialize_detection(detection), recoveries)
-        if result and not result.get("sent"):
-            logger.warning("Incident alert email skipped for detection %s: %s", detection.id, result.get("message", "unknown reason"))
-    except (RuntimeError, ImportError) as exc:
-        if any(k in str(exc) for k in ("ADMIN_SECRET_KEY", "SECRET_KEY", "DATA_ENCRYPTION_SECRET", "Missing required environment")):
-            logger.warning("Skipping incident alert email: required env/config missing (%s)", exc)
-        else:
-            logger.exception("Failed to dispatch incident alert email for detection %s", detection.id)
-    except Exception:
-        logger.exception("Failed to dispatch incident alert email for detection %s", detection.id)
     return incident
 
 
@@ -4541,7 +4529,7 @@ def full_system_recovery(db: Session, admin_id: int) -> dict:
     }
 
 
-def mark_admin_change(db: Session, admin_id: int, file_path: str, token_id: str | None, ip: str | None, user_agent: str | None) -> SecurityAdminFileChange:
+def mark_admin_change(db: Session, admin_id: int, file_path: str, token_id: str | None = None, ip: str | None = None, user_agent: str | None = None) -> SecurityAdminFileChange:
     change = SecurityAdminFileChange(
         admin_id=admin_id,
         file_path=file_path,
@@ -6194,6 +6182,11 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
 
         # Skip files from folders that are no longer in the VM1 monitored list
         if folder_root not in allowed_vm1_roots:
+            continue
+
+        # Skip files in excluded directories (e.g. OCR, build outputs)
+        rel_path_parts = set(Path(rel_path).parts)
+        if rel_path_parts.intersection({item.lower() for item in DEFAULT_EXCLUDED_DIRS}):
             continue
 
         current_hash = _valid_hash(f.get("current_hash"))
