@@ -618,14 +618,9 @@ const BackupRecovery = () => {
     const timer = setInterval(() => {
       refreshDashboard();
       refreshUnreadCounts();
-      if (activeTab === 'File Status') refreshFiles();
-      if (activeTab === 'Detection History') refreshDetections();
-      if (activeTab === 'Recovery History') refreshRecoveries();
-      if (activeTab === 'Security Incidents') refreshIncidents();
-      if (activeTab === 'Backup History') refreshBackups();
-    }, 3000);
+    }, 10000);
     return () => clearInterval(timer);
-  }, [activeTab, detectionFilters, recoveryFilters, incidentFilters, backupFilters]);
+  }, [activeTab]);
 
   useEffect(() => {
     if (activeTab === 'Backup History') {
@@ -715,9 +710,6 @@ const BackupRecovery = () => {
     refreshActiveTab(tab, 1).catch((error) => {
       setNotice(error.response?.data?.detail || `Unable to load ${tab}.`);
     });
-    if (tab === 'Detection History') markAllSeen('detections');
-    if (tab === 'Recovery History') markAllSeen('recoveries');
-    if (tab === 'Backup History') markAllSeen('backups');
   };
 
   const visibleDetectionKey = detections.map((item) => item.id).join(',');
