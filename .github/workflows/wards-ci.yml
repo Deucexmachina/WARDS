@@ -155,7 +155,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 10
+          fetch-depth: 0
       - name: Wait for VMs to sync
         run: |
           START=$(date +%s)
