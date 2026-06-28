@@ -3960,9 +3960,17 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
                 root_name = str(entry.folder_root or "").removeprefix("VM1_").removeprefix("CUSTOM_")
                 if root_name:
                     backed_up_roots.add(root_name)
-            entry.baseline_hash = file_hash
-            entry.current_hash = file_hash
-            entry.status = "clean"
+            is_local_file = not is_database_entry(entry)
+            has_open_incident = is_local_file and (
+                _has_open_incident(db, entry, "content_modified") or _has_open_incident(db, entry, "file_deleted")
+            )
+            if not has_open_incident:
+                entry.baseline_hash = file_hash
+                entry.current_hash = file_hash
+                entry.status = "clean"
+            else:
+                entry.current_hash = file_hash
+                entry.status = "modified"
             entry.file_type = file_type(path)
             entry.size_bytes = path.stat().st_size
             entry.last_checked = now_utc()
@@ -4260,9 +4268,16 @@ def create_files_backup(
                 "size_bytes": path.stat().st_size,
                 "sha256": file_hash,
             })
-            entry.baseline_hash = file_hash
-            entry.current_hash = file_hash
-            entry.status = "clean"
+            has_open_incident = (
+                _has_open_incident(db, entry, "content_modified") or _has_open_incident(db, entry, "file_deleted")
+            )
+            if not has_open_incident:
+                entry.baseline_hash = file_hash
+                entry.current_hash = file_hash
+                entry.status = "clean"
+            else:
+                entry.current_hash = file_hash
+                entry.status = "modified"
             entry.file_type = file_type(path)
             entry.size_bytes = path.stat().st_size
             entry.last_checked = now_utc()
@@ -4735,41 +4750,71 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                             bg_db.close()
                     _run_async_backup(_post_resolve_backup)
         else:
-            # Local file: restore from backup if missing or modified
-            backup_root = latest_backup_root(db)
-            backup_source = backup_file_path(backup_root, file_entry.relative_path) if backup_root and file_entry.relative_path else None
-            if backup_source and backup_source.exists() and backup_source.is_file():
-                if not target.exists() or not target.is_file() or sha256_file(target) != file_entry.baseline_hash:
-                    started = time.time()
-                    if create_event:
-                        recovery = SecurityRecoveryEvent(
-                            detection_event_id=incident.detection_event_id,
-                            file_id=file_entry.id,
-                            recovery_type="automatic",
-                            initiated_by=_valid_admin_id(db, admin_id),
-                            status="success",
-                            backup_path=str(backup_source),
-                            summary=f"Resolved incident restored trusted file for {file_entry.relative_path}.",
-                        )
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(backup_source, target)
-                    if create_event:
-                        recovery.completed_at = now_utc()
-                        recovery.recovery_duration_ms = int((time.time() - started) * 1000)
-                        db.add(recovery)
-                    restored_from_backup = True
-            if target.exists() and target.is_file():
-                current_hash = sha256_file(target)
-                file_entry.current_hash = current_hash
-                if restored_from_backup:
-                    file_entry.baseline_hash = current_hash
-                file_entry.status = "clean" if current_hash == file_entry.baseline_hash else "modified"
-                file_entry.size_bytes = target.stat().st_size
+            # Local file handling
+            if incident.response_action == "auto_recovered_pending_review":
+                # Auto-recovery already ran at detection time; admin now confirms resolution
+                file_entry.status = "clean"
+                file_entry.last_checked = now_utc()
+                db.add(file_entry)
+                if create_event:
+                    recovery = SecurityRecoveryEvent(
+                        detection_event_id=detection.id if detection else None,
+                        file_id=file_entry.id,
+                        recovery_type="auto_recovery_confirmed",
+                        initiated_by=_valid_admin_id(db, admin_id),
+                        status="success",
+                        summary=f"Admin resolved: auto-recovery confirmed for {file_entry.relative_path}.",
+                        completed_at=now_utc(),
+                    )
+                    db.add(recovery)
+                    db.commit()
             else:
-                file_entry.current_hash = None
-                file_entry.status = "clean" if confirm_missing_files else "missing"
-            file_entry.last_checked = now_utc()
-            db.add(file_entry)
+                # Manual resolve: search all backups and prefer one matching the trusted baseline
+                backup_source = None
+                backup_root = None
+                expected_hash = file_entry.baseline_hash
+                for root in all_backup_roots(db):
+                    candidate = backup_file_path(root, file_entry.relative_path)
+                    if candidate.exists() and candidate.is_file():
+                        if expected_hash and sha256_file(candidate) == expected_hash:
+                            backup_source = candidate
+                            backup_root = root
+                            break
+                        if backup_source is None:
+                            backup_source = candidate
+                            backup_root = root
+                if backup_source and backup_source.exists() and backup_source.is_file():
+                    if not target.exists() or not target.is_file() or sha256_file(target) != file_entry.baseline_hash:
+                        started = time.time()
+                        if create_event:
+                            recovery = SecurityRecoveryEvent(
+                                detection_event_id=incident.detection_event_id,
+                                file_id=file_entry.id,
+                                recovery_type="resolve",
+                                initiated_by=_valid_admin_id(db, admin_id),
+                                status="success",
+                                backup_path=str(backup_source),
+                                summary=f"Resolved incident restored trusted file for {file_entry.relative_path}.",
+                            )
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(backup_source, target)
+                        if create_event:
+                            recovery.completed_at = now_utc()
+                            recovery.recovery_duration_ms = int((time.time() - started) * 1000)
+                            db.add(recovery)
+                        restored_from_backup = True
+                if target.exists() and target.is_file():
+                    current_hash = sha256_file(target)
+                    file_entry.current_hash = current_hash
+                    if restored_from_backup:
+                        file_entry.baseline_hash = current_hash
+                    file_entry.status = "clean" if current_hash == file_entry.baseline_hash else "modified"
+                    file_entry.size_bytes = target.stat().st_size
+                else:
+                    file_entry.current_hash = None
+                    file_entry.status = "clean" if confirm_missing_files else "missing"
+                file_entry.last_checked = now_utc()
+                db.add(file_entry)
     incident.status = "resolved"
     incident.resolved_at = now_utc()
     incident.resolved_by = _valid_admin_id(db, admin_id)
