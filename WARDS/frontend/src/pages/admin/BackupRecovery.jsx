@@ -104,7 +104,7 @@ const toDateInputMin = () => {
 };
 
 const Section = ({ title, children, actions, className = '' }) => (
-  <section className={`rounded-[1.5rem] border border-slate-200 bg-white p-6 shadow-sm md:p-8 ${className}`.trim()}>
+  <section className={`rounded-lg border border-slate-200 bg-white p-6 shadow md:p-8 ${className}`.trim()}>
     <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
       <h2 className="text-xl font-bold text-slate-900">{title}</h2>
       {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
@@ -137,7 +137,7 @@ const Filters = ({ filters, setFilters, showType, showStatus, showClassification
   const todayStr = new Date().toISOString().split('T')[0];
   return (
     <div className="grid w-full gap-3 md:ml-auto md:w-[min(100%,64rem)] md:grid-cols-6">
-      <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Search keyword" value={filters.keyword} onChange={(e) => setFilters({ ...filters, keyword: e.target.value })} />
+      <input className="rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="Search keyword" value={filters.keyword} onChange={(e) => setFilters({ ...filters, keyword: e.target.value })} />
       <CustomDatePicker name="date_from" max={todayStr} value={filters.date_from} onChange={(e) => setFilters({ ...filters, date_from: e.target.value })} />
       <CustomDatePicker name="date_to" max={todayStr} value={filters.date_to} onChange={(e) => setFilters({ ...filters, date_to: e.target.value })} />
     {showType ? (
@@ -181,22 +181,22 @@ const PaginationFooter = ({ state, onPage }) => {
           max={totalPages}
           value={jumpPage}
           onChange={(event) => setJumpPage(event.target.value)}
-          className="w-24 rounded-xl border border-slate-200 px-3 py-2 text-sm"
+          className="w-24 rounded-lg border border-slate-200 px-3 py-2 text-sm"
           placeholder={String(currentPage)}
         />
-        <button type="submit" className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700">Go</button>
+        <button type="submit" className="rounded-lg bg-gray-800 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-700">Go</button>
       </form>
       <button
         onClick={() => goToPage(currentPage - 1)}
         disabled={currentPage <= 1}
-        className="rounded-xl bg-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-300 disabled:cursor-not-allowed disabled:opacity-60"
+        className="rounded-lg bg-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-300 disabled:cursor-not-allowed disabled:opacity-60"
       >
         Previous
       </button>
       <button
         onClick={() => goToPage(currentPage + 1)}
         disabled={currentPage >= totalPages}
-        className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
+        className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
       >
         Next
       </button>
@@ -230,8 +230,8 @@ const ConfirmModal = ({ confirm, onCancel, onConfirm, busy }) => {
         <h3 className="mt-2 text-xl font-bold text-slate-900">{confirm.title}</h3>
         <p className="mt-3 text-sm leading-6 text-slate-600">{confirm.message}</p>
         <div className="mt-6 flex justify-end gap-3">
-          <button className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-200" onClick={onCancel}>Cancel</button>
-          <button className="rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-60" onClick={onConfirm} disabled={busy}>{busy ? 'Working...' : confirm.confirmText || 'Confirm'}</button>
+          <button className="rounded-lg bg-gray-200 px-4 py-2 text-sm font-bold text-gray-700 transition hover:bg-gray-300" onClick={onCancel}>Cancel</button>
+          <button className="rounded-lg bg-red-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-red-700 disabled:opacity-60" onClick={onConfirm} disabled={busy}>{busy ? 'Working...' : confirm.confirmText || 'Confirm'}</button>
         </div>
       </div>
     </div>
@@ -251,7 +251,7 @@ const FolderPicker = ({ picker, onClose, onSelect, onOpen }) => {
               <h3 className="mt-2 text-xl font-bold text-slate-900">{picker.title}</h3>
               <p className="mt-1 break-all text-sm text-slate-600">{picker.current || 'Loading folders...'}</p>
             </div>
-            <button className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-700" onClick={onClose}>Close</button>
+            <button className="rounded-lg bg-gray-200 px-3 py-2 text-sm font-bold text-gray-700 transition hover:bg-gray-300" onClick={onClose}>Close</button>
           </div>
         </div>
 
@@ -259,7 +259,7 @@ const FolderPicker = ({ picker, onClose, onSelect, onOpen }) => {
           <div className="space-y-2">
             <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Quick roots</p>
             {[...(picker.quickRoots || []), ...(picker.drives || [])].map((item) => (
-              <button key={item.path} className="w-full rounded-xl bg-slate-50 px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-blue-50 hover:text-primary" onClick={() => onOpen(item.path)}>
+              <button key={item.path} className="w-full rounded-lg bg-slate-50 px-3 py-2 text-left text-sm font-semibold text-slate-700 transition hover:bg-blue-50 hover:text-blue-600" onClick={() => onOpen(item.path)}>
                 {item.name}
               </button>
             ))}
@@ -268,15 +268,15 @@ const FolderPicker = ({ picker, onClose, onSelect, onOpen }) => {
           <div className="min-h-0">
             <div className="mb-3 flex flex-wrap gap-2">
               {picker.parent && (
-                <button className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700" onClick={() => onOpen(picker.parent)}>
+                <button className="rounded-lg bg-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-300" onClick={() => onOpen(picker.parent)}>
                   Go up one folder
                 </button>
               )}
-              <button className="rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-white" onClick={() => onSelect(picker.current)}>
+              <button className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700" onClick={() => onSelect(picker.current)}>
                 Select this folder
               </button>
             </div>
-            <div className="max-h-[46vh] overflow-auto rounded-xl border border-slate-200">
+            <div className="max-h-[46vh] overflow-auto rounded-lg border border-slate-200">
               {(picker.directories || []).map((item) => (
                 <button key={item.path} className="flex w-full items-center justify-between border-b border-slate-100 px-4 py-3 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50" onClick={() => onOpen(item.path)}>
                   <span className="truncate">{item.name}</span>
@@ -1022,7 +1022,7 @@ const BackupRecovery = () => {
               <h1 className="text-base font-bold text-slate-900">Security Dashboard</h1>
             </div>
           </div>
-          <button onClick={returnToAdmin} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700">
+          <button onClick={returnToAdmin} className="rounded-lg bg-gray-800 px-4 py-2 text-sm font-semibold text-white transition hover:bg-gray-700">
             Return to {adminLabel} Dashboard
           </button>
         </div>
@@ -1058,13 +1058,13 @@ const BackupRecovery = () => {
         </section>
 
           {notice && (
-            <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-800">
+            <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-800">
               {notice}
             </div>
           )}
 
           {busy && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
               {busyLabel || 'Working on the requested security operation...'}
             </div>
           )}
@@ -1126,7 +1126,7 @@ const BackupRecovery = () => {
               <Section title="System Health">
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-3 lg:grid-cols-5">
                   {Object.entries(dashboard?.health || {}).filter(([key]) => key !== 'backup_location').map(([key, value]) => (
-                    <div key={key} className="min-w-0 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                    <div key={key} className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/80 p-4">
                       <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">{key.replaceAll('_', ' ')}</p>
                       <p className="mt-2 overflow-hidden break-words text-sm font-bold text-slate-900">{value}</p>
                     </div>
@@ -1141,14 +1141,14 @@ const BackupRecovery = () => {
               title="Monitored Files"
               actions={(
                 <input
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-sm md:w-80"
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm shadow-sm md:w-80"
                   placeholder="Search files by keyword"
                   value={fileKeyword}
                   onChange={(e) => setFileKeyword(e.target.value)}
                 />
               )}
             >
-              <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <div className="overflow-x-auto rounded-lg border border-slate-200">
                 <table className="w-full text-left text-sm min-w-[56rem]">
                   <thead className="border-b border-slate-200 bg-slate-50 text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
                     <tr>
@@ -1204,7 +1204,7 @@ const BackupRecovery = () => {
                   const key = `b-${item.id}`;
                   const unseen = !item.is_viewed;
                   return (
-                    <div key={item.id} className="relative overflow-hidden rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300">
+                    <div key={item.id} className="relative overflow-hidden rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300">
                       {unseen && <span className="absolute right-3 top-3 rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-bold text-white">New</span>}
                       <button className="grid w-full gap-3 pr-12 text-left md:grid-cols-[minmax(0,1fr)_auto] md:items-center" onClick={() => toggleBackupRow(key, item.id)}>
                         <div className="min-w-0">
@@ -1218,12 +1218,12 @@ const BackupRecovery = () => {
                         </div>
                       </button>
                       {openRows[key] && (
-                        <pre className="mt-4 max-h-64 overflow-auto rounded-xl border border-slate-100 bg-slate-50 p-4 text-xs text-slate-700">{JSON.stringify(item, null, 2)}</pre>
+                        <pre className="mt-4 max-h-64 overflow-auto rounded-lg border border-slate-100 bg-slate-50 p-4 text-xs text-slate-700">{JSON.stringify(item, null, 2)}</pre>
                       )}
                     </div>
                   );
                 })}
-                {!backups.length && <p className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">No backup history matched the current filters.</p>}
+                {!backups.length && <p className="rounded-lg border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">No backup history matched the current filters.</p>}
               </div>
               <PaginationFooter state={historyPages.backups} onPage={refreshBackups} />
             </Section>
@@ -1236,7 +1236,7 @@ const BackupRecovery = () => {
                   const key = `d-${item.id}`;
                   const unseen = !item.is_legitimate && !item.is_viewed;
                   return (
-                    <div key={item.id} className="relative overflow-hidden rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300">
+                    <div key={item.id} className="relative overflow-hidden rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300">
                       {unseen && <span className="absolute right-3 top-3 rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-bold text-white">New</span>}
                       <button className="grid w-full gap-3 pr-12 text-left md:grid-cols-[minmax(0,1fr)_auto] md:items-center" onClick={() => toggleDetectionRow(key, item.id)}>
                         <div className="min-w-0">
@@ -1258,7 +1258,7 @@ const BackupRecovery = () => {
                             <p className="mt-3 text-sm font-bold text-slate-800">Behaviors</p>
                             <p className="mt-1 text-sm text-slate-600">{(item.behaviors || []).map(humanize).join(', ') || 'No extra behavior flags'}</p>
                           </div>
-                          <pre className="max-h-64 overflow-auto rounded-xl border border-slate-100 bg-slate-50 p-4 text-xs text-slate-700">{JSON.stringify(item.changed_lines, null, 2)}</pre>
+                          <pre className="max-h-64 overflow-auto rounded-lg border border-slate-100 bg-slate-50 p-4 text-xs text-slate-700">{JSON.stringify(item.changed_lines, null, 2)}</pre>
                         </div>
                       )}
                     </div>
@@ -1276,7 +1276,7 @@ const BackupRecovery = () => {
                   const key = `r-${item.id}`;
                   const unseen = !item.is_viewed;
                   return (
-                    <div key={item.id} className="relative overflow-hidden rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300">
+                    <div key={item.id} className="relative overflow-hidden rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300">
                       {unseen && <span className="absolute right-3 top-3 rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-bold text-white">New</span>}
                       <button className="grid w-full gap-3 pr-12 text-left md:grid-cols-[minmax(0,1fr)_auto] md:items-center" onClick={() => toggleRecoveryRow(key, item.id)}>
                         <div className="min-w-0">
@@ -1290,7 +1290,7 @@ const BackupRecovery = () => {
                         </div>
                       </button>
                       {openRows[key] && (
-                        <pre className="mt-4 max-h-64 overflow-auto rounded-xl border border-slate-100 bg-slate-50 p-4 text-xs text-slate-700">{JSON.stringify(item, null, 2)}</pre>
+                        <pre className="mt-4 max-h-64 overflow-auto rounded-lg border border-slate-100 bg-slate-50 p-4 text-xs text-slate-700">{JSON.stringify(item, null, 2)}</pre>
                       )}
                     </div>
                   );
@@ -1305,7 +1305,7 @@ const BackupRecovery = () => {
               title="Security Incidents"
               actions={
                 <div className="grid w-full gap-3 md:ml-auto md:w-[min(100%,64rem)] md:grid-cols-6">
-                  <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-sm" placeholder="Search incidents" value={incidentFilters.keyword} onChange={(e) => setIncidentFilters({ ...incidentFilters, keyword: e.target.value })} />
+                  <input className="rounded-lg border border-slate-200 px-3 py-2 text-sm shadow-sm" placeholder="Search incidents" value={incidentFilters.keyword} onChange={(e) => setIncidentFilters({ ...incidentFilters, keyword: e.target.value })} />
                   <CustomDatePicker name="date_from" max={todayStr} value={incidentFilters.date_from} onChange={(e) => setIncidentFilters({ ...incidentFilters, date_from: e.target.value })} />
                   <CustomDatePicker name="date_to" max={todayStr} value={incidentFilters.date_to} onChange={(e) => setIncidentFilters({ ...incidentFilters, date_to: e.target.value })} />
                   <CustomSelect value={incidentFilters.status} onChange={(value) => setIncidentFilters({ ...incidentFilters, status: value })} options={[{ value: '', label: 'All statuses' }, ...['open', 'investigating', 'resolved', 'false_positive'].map((item) => ({ value: item, label: badgeText(item) }))]} placeholder="All statuses" />
@@ -1315,16 +1315,16 @@ const BackupRecovery = () => {
               }
             >
               <div className="mb-4 flex flex-wrap gap-2">
-                <button disabled={busy} className={`rounded-xl bg-green-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-green-700${disabledButtonClass}`} onClick={() => askConfirm('Mark all unresolved incidents as resolved?', 'This will close every open or investigating incident and delete their quarantine folders. Logs will remain. The backup will not be changed because resolved incidents keep the current clean files.', bulkIncidentAction('resolve'), 'All unresolved incidents marked as resolved.', 'Resolve all')}>Mark all as resolved</button>
-                <button disabled={busy} className={`rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-amber-600${disabledButtonClass}`} onClick={() => askConfirm('Mark all unresolved incidents as false positives?', 'This will accept every open or investigating quarantined file as authorized, update the backup, and delete quarantine folders. Logs will remain.', bulkIncidentAction('false_positive'), 'All unresolved incidents marked as false positive.', 'Mark all False+')}>Mark all as False+</button>
-                <button disabled={busy} className={`rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700${disabledButtonClass}`} onClick={() => askConfirm('Mark all open incidents as investigating?', 'This will move every open incident into investigating status so your team can review them. No files will be restored or deleted.', bulkIncidentAction('investigating'), 'All open incidents marked as investigating.', 'Mark investigating')}>Mark all as investigating</button>
+                <button disabled={busy} className={`rounded-lg bg-green-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-green-700${disabledButtonClass}`} onClick={() => askConfirm('Mark all unresolved incidents as resolved?', 'This will close every open or investigating incident and delete their quarantine folders. Logs will remain. The backup will not be changed because resolved incidents keep the current clean files.', bulkIncidentAction('resolve'), 'All unresolved incidents marked as resolved.', 'Resolve all')}>Mark all as resolved</button>
+                <button disabled={busy} className={`rounded-lg bg-amber-500 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-amber-600${disabledButtonClass}`} onClick={() => askConfirm('Mark all unresolved incidents as false positives?', 'This will accept every open or investigating quarantined file as authorized, update the backup, and delete quarantine folders. Logs will remain.', bulkIncidentAction('false_positive'), 'All unresolved incidents marked as false positive.', 'Mark all False+')}>Mark all as False+</button>
+                <button disabled={busy} className={`rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700${disabledButtonClass}`} onClick={() => askConfirm('Mark all open incidents as investigating?', 'This will move every open incident into investigating status so your team can review them. No files will be restored or deleted.', bulkIncidentAction('investigating'), 'All open incidents marked as investigating.', 'Mark investigating')}>Mark all as investigating</button>
               </div>
               <div className="space-y-3">
                 {incidents.map((item) => {
                   const key = `i-${item.id}`;
                   const unresolved = ['open', 'investigating'].includes(String(item.status).toLowerCase());
                   return (
-                    <div key={item.id} className="relative overflow-hidden rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300">
+                    <div key={item.id} className="relative overflow-hidden rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300">
                       {unresolved && <span className="absolute right-3 top-3 rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-bold text-white">Open</span>}
                       <button className="grid w-full gap-3 pr-12 text-left md:grid-cols-[minmax(0,1fr)_auto] md:items-center" onClick={() => toggleRow(key)}>
                         <div className="min-w-0">
@@ -1341,13 +1341,13 @@ const BackupRecovery = () => {
                       {openRows[key] && (
                         <div className="mt-4 space-y-4 border-t border-slate-100 pt-4">
                           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                            <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4"><p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">NIST</p><p className="mt-1 text-sm font-semibold text-slate-900">{item.nist_category}</p></div>
-                            <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4"><p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">ENISA</p><p className="mt-1 text-sm font-semibold text-slate-900">{item.enisa_threat_type}</p></div>
-                            <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4"><p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Action</p><p className="mt-1 text-sm font-semibold text-slate-900">{item.response_action}</p></div>
+                            <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-4"><p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">NIST</p><p className="mt-1 text-sm font-semibold text-slate-900">{item.nist_category}</p></div>
+                            <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-4"><p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">ENISA</p><p className="mt-1 text-sm font-semibold text-slate-900">{item.enisa_threat_type}</p></div>
+                            <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-4"><p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Action</p><p className="mt-1 text-sm font-semibold text-slate-900">{item.response_action}</p></div>
                           </div>
                           <p className="text-sm text-slate-700"><strong>Behaviors:</strong> {(item.behaviors || []).map(humanize).join(', ') || 'None'}</p>
                           <p className="text-sm text-slate-700"><strong>Affected files:</strong> {(item.affected_files || []).join(', ') || 'None'}</p>
-                          <pre className="max-h-64 overflow-auto rounded-xl border border-slate-100 bg-slate-50 p-4 text-xs text-slate-700">{JSON.stringify(item.changed_lines, null, 2)}</pre>
+                          <pre className="max-h-64 overflow-auto rounded-lg border border-slate-100 bg-slate-50 p-4 text-xs text-slate-700">{JSON.stringify(item.changed_lines, null, 2)}</pre>
                           {unresolved && (
                             <div className="flex flex-wrap gap-2">
                               <button disabled={busy} className={`rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-green-700${disabledButtonClass}`} onClick={(event) => { event.stopPropagation(); askConfirm('Resolve this incident?', 'WARDS will keep the restored clean file and delete this incident quarantine folder. The log remains. The backup will not be changed.', incidentStatusAction(item.id, 'resolve'), 'Incident resolved and quarantine cleared.', 'Resolve'); }}>Resolve</button>
@@ -1368,11 +1368,11 @@ const BackupRecovery = () => {
             <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
               <Section title="Integrity and Recovery">
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                  <button disabled={busy} className="rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Manual system scan?', 'WARDS will scan every monitored file and create logs for any changes it finds.', () => api.post('/security/scan'), (result) => result?.data?.summary || 'Full system integrity scan complete.', 'Start scan')}>Manual System Scan</button>
-                  <button disabled={busy} className="rounded-xl bg-primary px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Full system backup?', 'WARDS will back up VM1 database and all VM2 components (database, files, ML).', () => api.post('/security/backup/full'), 'Full system backup created.', 'Full backup')}>Full System Backup</button>
+                  <button disabled={busy} className={`rounded-lg bg-gray-800 px-4 py-2 text-sm font-semibold text-white transition hover:bg-gray-700 disabled:opacity-60${disabledButtonClass}`} onClick={() => askConfirm('Manual system scan?', 'WARDS will scan every monitored file and create logs for any changes it finds.', () => api.post('/security/scan'), (result) => result?.data?.summary || 'Full system integrity scan complete.', 'Start scan')}>Manual System Scan</button>
+                  <button disabled={busy} className={`rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60${disabledButtonClass}`} onClick={() => askConfirm('Full system backup?', 'WARDS will back up VM1 database and all VM2 components (database, files, ML).', () => api.post('/security/backup/full'), 'Full system backup created.', 'Full backup')}>Full System Backup</button>
                   <button
                     disabled={busy}
-                    className="rounded-xl bg-red-600 px-4 py-3 font-semibold text-white disabled:opacity-60"
+                    className={`rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-60${disabledButtonClass}`}
                     onClick={() => askConfirm('Full system recovery?', 'Are you sure you want to manually restore the system while it is deployed? You will be logged out.', async () => {
                           await api.post('/security/recover/full');
                           localStorage.removeItem('adminToken');
@@ -1392,8 +1392,8 @@ const BackupRecovery = () => {
               <Section title="Scheduled Backups">
                 <div className="space-y-3">
                   <div className="grid gap-3 md:grid-cols-[1fr_auto]">
-                    <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" type="datetime-local" min={toDateInputMin()} value={controls.backupDate} onChange={(e) => setControls({ ...controls, backupDate: e.target.value })} />
-                    <button disabled={busy} className={`rounded-xl bg-slate-900 px-4 py-2 font-semibold text-white${disabledButtonClass}`} onClick={() => {
+                    <input className="rounded-lg border border-slate-200 px-3 py-2 text-sm" type="datetime-local" min={toDateInputMin()} value={controls.backupDate} onChange={(e) => setControls({ ...controls, backupDate: e.target.value })} />
+                    <button disabled={busy} className={`rounded-lg bg-gray-800 px-4 py-2 text-sm font-semibold text-white transition hover:bg-gray-700${disabledButtonClass}`} onClick={() => {
                       if (!controls.backupDate || new Date(controls.backupDate) <= new Date()) {
                         setNotice('Choose a future date and time for the scheduled backup.');
                         return;
@@ -1408,46 +1408,46 @@ const BackupRecovery = () => {
                     }}>Schedule Automatic Backups</button>
                   </div>
                   <div className="grid gap-3">
-                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
                       <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Current backup location</p>
                       <p className="mt-1 break-all text-sm font-semibold text-slate-800">{showBackupPath ? (controls.backupPath || 'No folder selected yet.') : 'File path hidden for security.'}</p>
                     </div>
-                    <button disabled={busy} className={`rounded-xl bg-blue-50 px-4 py-3 font-semibold text-primary${disabledButtonClass}`} onClick={() => setShowBackupPath((value) => !value)}>{showBackupPath ? 'Hide file path' : 'Show file path'}</button>
+                    <button disabled={busy} className={`rounded-lg bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-100${disabledButtonClass}`} onClick={() => setShowBackupPath((value) => !value)}>{showBackupPath ? 'Hide file path' : 'Show file path'}</button>
                     <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={controls.deletePrevious} onChange={(e) => setControls({ ...controls, deletePrevious: e.target.checked })} /> Delete backups from previous folder after changing location</label>
-                    <button disabled={busy} className={`rounded-xl bg-slate-100 px-4 py-3 font-semibold text-slate-800${disabledButtonClass}`} onClick={() => openFolderPicker('backup', 'Choose backup location', controls.backupPath)}>Backup Location</button>
+                    <button disabled={busy} className={`rounded-lg bg-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-300${disabledButtonClass}`} onClick={() => openFolderPicker('backup', 'Choose backup location', controls.backupPath)}>Backup Location</button>
                   </div>
                 </div>
               </Section>
 
               <Section title="Granular Backups">
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <button disabled={busy} className="rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Backup VM1 database?', 'WARDS will create a full dump of the VM1 business database.', () => api.post('/security/backup/vm1-database'), 'VM1 database backup created.', 'Backup VM1 DB')}>VM1 Database Backup</button>
-                  <button disabled={busy} className="rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Backup VM2 database?', 'WARDS will snapshot the VM2 security database.', () => api.post('/security/backup/vm2-database'), 'VM2 database backup created.', 'Backup VM2 DB')}>VM2 Database Backup</button>
-                  <button disabled={busy} className="rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Backup files?', 'WARDS will back up monitored WARDS and OCR files.', () => api.post('/security/backup/files'), 'Files backup created.', 'Backup files')}>Files Backup</button>
-                  <button disabled={busy} className="rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Backup ML artifacts?', 'WARDS will back up ML model state and metadata.', () => api.post('/security/backup/ml'), 'ML backup created.', 'Backup ML')}>ML Backup</button>
+                  <button disabled={busy} className={`rounded-lg bg-gray-800 px-4 py-2 text-sm font-semibold text-white transition hover:bg-gray-700 disabled:opacity-60${disabledButtonClass}`} onClick={() => askConfirm('Backup VM1 database?', 'WARDS will create a full dump of the VM1 business database.', () => api.post('/security/backup/vm1-database'), 'VM1 database backup created.', 'Backup VM1 DB')}>VM1 Database Backup</button>
+                  <button disabled={busy} className={`rounded-lg bg-gray-800 px-4 py-2 text-sm font-semibold text-white transition hover:bg-gray-700 disabled:opacity-60${disabledButtonClass}`} onClick={() => askConfirm('Backup VM2 database?', 'WARDS will snapshot the VM2 security database.', () => api.post('/security/backup/vm2-database'), 'VM2 database backup created.', 'Backup VM2 DB')}>VM2 Database Backup</button>
+                  <button disabled={busy} className={`rounded-lg bg-gray-800 px-4 py-2 text-sm font-semibold text-white transition hover:bg-gray-700 disabled:opacity-60${disabledButtonClass}`} onClick={() => askConfirm('Backup files?', 'WARDS will back up monitored WARDS and OCR files.', () => api.post('/security/backup/files'), 'Files backup created.', 'Backup files')}>Files Backup</button>
+                  <button disabled={busy} className={`rounded-lg bg-gray-800 px-4 py-2 text-sm font-semibold text-white transition hover:bg-gray-700 disabled:opacity-60${disabledButtonClass}`} onClick={() => askConfirm('Backup ML artifacts?', 'WARDS will back up ML model state and metadata.', () => api.post('/security/backup/ml'), 'ML backup created.', 'Backup ML')}>ML Backup</button>
                 </div>
               </Section>
 
               <Section title="Granular Recovery">
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <button disabled={busy} className="rounded-xl bg-red-600 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Recover VM1 database?', 'Are you sure? This will restore the VM1 business database from the latest backup and log you out.', async () => { await api.post('/security/recover/vm1-database'); localStorage.removeItem('adminToken'); localStorage.removeItem('adminUser'); localStorage.removeItem('securityAuthenticated'); sessionStorage.removeItem('securityAuthenticated'); sessionStorage.removeItem('securityAuthenticatedAt'); navigate('/admin/backup/login'); return { skipRefresh: true }; }, 'VM1 database recovery complete.', 'Recover VM1 DB')}>VM1 Database Recovery</button>
-                  <button disabled={busy} className="rounded-xl bg-red-600 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Recover VM2 database?', 'WARDS will restore the VM2 security database from the latest backup.', () => api.post('/security/recover/vm2-database'), 'VM2 database recovery complete.', 'Recover VM2 DB')}>VM2 Database Recovery</button>
-                  <button disabled={busy} className="rounded-xl bg-red-600 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Recover files?', 'WARDS will restore monitored files from the latest backup.', () => api.post('/security/recover/files'), 'Files recovery complete.', 'Recover files')}>Files Recovery</button>
-                  <button disabled={busy} className="rounded-xl bg-red-600 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Recover ML artifacts?', 'WARDS will restore ML model state from the latest backup.', () => api.post('/security/recover/ml'), 'ML recovery complete.', 'Recover ML')}>ML Recovery</button>
+                  <button disabled={busy} className={`rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-60${disabledButtonClass}`} onClick={() => askConfirm('Recover VM1 database?', 'Are you sure? This will restore the VM1 business database from the latest backup and log you out.', async () => { await api.post('/security/recover/vm1-database'); localStorage.removeItem('adminToken'); localStorage.removeItem('adminUser'); localStorage.removeItem('securityAuthenticated'); sessionStorage.removeItem('securityAuthenticated'); sessionStorage.removeItem('securityAuthenticatedAt'); navigate('/admin/backup/login'); return { skipRefresh: true }; }, 'VM1 database recovery complete.', 'Recover VM1 DB')}>VM1 Database Recovery</button>
+                  <button disabled={busy} className={`rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-60${disabledButtonClass}`} onClick={() => askConfirm('Recover VM2 database?', 'WARDS will restore the VM2 security database from the latest backup.', () => api.post('/security/recover/vm2-database'), 'VM2 database recovery complete.', 'Recover VM2 DB')}>VM2 Database Recovery</button>
+                  <button disabled={busy} className={`rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-60${disabledButtonClass}`} onClick={() => askConfirm('Recover files?', 'WARDS will restore monitored files from the latest backup.', () => api.post('/security/recover/files'), 'Files recovery complete.', 'Recover files')}>Files Recovery</button>
+                  <button disabled={busy} className={`rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-60${disabledButtonClass}`} onClick={() => askConfirm('Recover ML artifacts?', 'WARDS will restore ML model state from the latest backup.', () => api.post('/security/recover/ml'), 'ML recovery complete.', 'Recover ML')}>ML Recovery</button>
                 </div>
               </Section>
 
               <Section title="Monitoring">
                 <div className="space-y-3">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <div className="mb-4 flex flex-col gap-3 rounded-xl bg-white p-3 md:flex-row md:items-center md:justify-between">
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                    <div className="mb-4 flex flex-col gap-3 rounded-lg bg-white p-3 shadow-sm md:flex-row md:items-center md:justify-between">
                       <div>
                         <p className="text-sm font-bold text-slate-900">Automatic deployment scans</p>
                         <p className="text-xs leading-5 text-slate-500">Current status: {controls.monitoringEnabled ? 'Enabled' : 'Disabled'}</p>
                       </div>
                       <button
                         disabled={busy}
-                        className={`rounded-xl px-4 py-3 font-semibold text-white ${controls.monitoringEnabled ? 'bg-orange-500' : 'bg-green-600'}${disabledButtonClass}`}
+                        className={`rounded-lg px-4 py-2 text-sm font-semibold text-white transition ${controls.monitoringEnabled ? 'bg-orange-500 hover:bg-orange-600' : 'bg-green-600 hover:bg-green-700'}${disabledButtonClass}`}
                         onClick={() => askConfirm(
                           controls.monitoringEnabled ? 'Turn off automatic scans?' : 'Turn on automatic scans?',
                           controls.monitoringEnabled
@@ -1467,7 +1467,7 @@ const BackupRecovery = () => {
                       <label className="text-sm font-semibold text-slate-700">
                         Automatic file scan interval in seconds
                         <input
-                          className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                          className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                           type="number"
                           min="5"
                           max="3600"
@@ -1475,7 +1475,7 @@ const BackupRecovery = () => {
                           onChange={(e) => setControls({ ...controls, scanInterval: e.target.value, scanIntervalDirty: true })}
                         />
                       </label>
-                      <button disabled={busy} className={`rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white${disabledButtonClass}`} onClick={() => askConfirm('Save scan interval?', `Automatic scans will run every ${Number(controls.scanInterval || 0)} seconds while monitoring is enabled.`, saveScanInterval, 'Automatic scan interval saved.', 'Save interval')}>Save Scan Interval</button>
+                      <button disabled={busy} className={`rounded-lg bg-gray-800 px-4 py-2 text-sm font-semibold text-white transition hover:bg-gray-700${disabledButtonClass}`} onClick={() => askConfirm('Save scan interval?', `Automatic scans will run every ${Number(controls.scanInterval || 0)} seconds while monitoring is enabled.`, saveScanInterval, 'Automatic scan interval saved.', 'Save interval')}>Save Scan Interval</button>
                     </div>
                     <p className="mt-2 text-xs leading-5 text-slate-500">Default is 30 seconds. Lower values detect faster but use more backend resources.</p>
                   </div>
@@ -1486,30 +1486,30 @@ const BackupRecovery = () => {
                 <div className="space-y-3">
                   <div className="grid gap-3 md:grid-cols-3">
                     <CustomSelect value={controls.aiDay} onChange={(value) => setControls({ ...controls, aiDay: value })} options={['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((item) => ({ value: item, label: item }))} placeholder="Select day" />
-                    <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" type="time" value={controls.aiTime} onChange={(e) => setControls({ ...controls, aiTime: e.target.value })} />
-                    <button disabled={busy} className={`rounded-xl bg-slate-900 px-4 py-2 font-semibold text-white${disabledButtonClass}`} onClick={() => askConfirm('Save AI retraining schedule?', `WARDS will retrain the anomaly model every ${controls.aiDay} at ${controls.aiTime}.`, () => api.post('/security/ai/schedule', { day: controls.aiDay, time: controls.aiTime }), 'AI retraining schedule saved.', 'Save AI schedule')}>Scheduled AI Retrain</button>
+                    <input className="rounded-lg border border-slate-200 px-3 py-2 text-sm" type="time" value={controls.aiTime} onChange={(e) => setControls({ ...controls, aiTime: e.target.value })} />
+                    <button disabled={busy} className={`rounded-lg bg-gray-800 px-4 py-2 text-sm font-semibold text-white transition hover:bg-gray-700${disabledButtonClass}`} onClick={() => askConfirm('Save AI retraining schedule?', `WARDS will retrain the anomaly model every ${controls.aiDay} at ${controls.aiTime}.`, () => api.post('/security/ai/schedule', { day: controls.aiDay, time: controls.aiTime }), 'AI retraining schedule saved.', 'Save AI schedule')}>Scheduled AI Retrain</button>
                   </div>
-                  <button disabled={busy} className="w-full rounded-xl bg-primary px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Retrain AI model?', 'WARDS will retrain using historical validated behavior and the newest verified activity.', () => api.post('/security/ai/retrain'), 'AI model retrained with historical and recent validated data.', 'Retrain AI')}>Manual AI Retrain</button>
-                  <button disabled={busy} className={`w-full rounded-xl bg-slate-100 px-4 py-3 font-semibold text-slate-800${disabledButtonClass}`} onClick={loadWeeklyAiData}>Show this week's data</button>
+                  <button disabled={busy} className={`w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60${disabledButtonClass}`} onClick={() => askConfirm('Retrain AI model?', 'WARDS will retrain using historical validated behavior and the newest verified activity.', () => api.post('/security/ai/retrain'), 'AI model retrained with historical and recent validated data.', 'Retrain AI')}>Manual AI Retrain</button>
+                  <button disabled={busy} className={`w-full rounded-lg bg-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-300 disabled:opacity-60${disabledButtonClass}`} onClick={loadWeeklyAiData}>Show this week's data</button>
                   {weeklyAiData && (
-                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
                       <p className="font-bold text-slate-900">Behavior data since {formatDateTime(weeklyAiData.since)}</p>
                       <p className="mt-2 text-sm leading-6 text-slate-600">{weeklyAiData.summary}</p>
                       <div className="mt-3 grid gap-2 md:grid-cols-3">
-                        <div className="rounded-lg bg-white p-3"><p className="text-xs font-bold uppercase text-slate-500">Approved changes</p><p className="text-lg font-bold">{weeklyAiData.admin_changes}</p></div>
-                        <div className="rounded-lg bg-white p-3"><p className="text-xs font-bold uppercase text-slate-500">Admin users</p><p className="text-lg font-bold">{weeklyAiData.users}</p></div>
-                        <div className="rounded-lg bg-white p-3"><p className="text-xs font-bold uppercase text-slate-500">Security reviews</p><p className="text-lg font-bold">{weeklyAiData.detections_reviewed}</p></div>
+                        <div className="rounded-lg bg-white p-3 shadow-sm"><p className="text-xs font-bold uppercase text-slate-500">Approved changes</p><p className="text-lg font-bold">{weeklyAiData.admin_changes}</p></div>
+                        <div className="rounded-lg bg-white p-3 shadow-sm"><p className="text-xs font-bold uppercase text-slate-500">Admin users</p><p className="text-lg font-bold">{weeklyAiData.users}</p></div>
+                        <div className="rounded-lg bg-white p-3 shadow-sm"><p className="text-xs font-bold uppercase text-slate-500">Security reviews</p><p className="text-lg font-bold">{weeklyAiData.detections_reviewed}</p></div>
                       </div>
                       <div className="mt-3 space-y-2">
                         {Object.entries(weeklyAiData.behaviors || {}).map(([label, count]) => (
-                          <div key={label} className="flex items-center justify-between rounded-lg bg-white px-3 py-2 text-sm">
+                          <div key={label} className="flex items-center justify-between rounded-lg bg-white px-3 py-2 text-sm shadow-sm">
                             <span className="font-semibold text-slate-700">{titleize(label)}</span>
-                            <span className="font-bold text-primary">{count}</span>
+                            <span className="font-bold text-blue-600">{count}</span>
                           </div>
                         ))}
                       </div>
-                      <details className="mt-3 rounded-lg bg-white p-3">
-                        <summary className="cursor-pointer text-sm font-bold text-primary">Advanced view</summary>
+                      <details className="mt-3 rounded-lg bg-white p-3 shadow-sm">
+                        <summary className="cursor-pointer text-sm font-bold text-blue-600">Advanced view</summary>
                         <div className="mt-3 grid gap-3 xl:grid-cols-2">
                           <div>
                             <p className="mb-2 text-xs font-bold uppercase text-slate-500">Approved admin activity</p>
@@ -1546,7 +1546,7 @@ const BackupRecovery = () => {
               <Section
                 title="Behavioral Anomaly Rules"
                 actions={(
-                  <button disabled={busy} className={`rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white${disabledButtonClass}`} onClick={() => setShowAiRules((value) => !value)}>
+                  <button disabled={busy} className={`rounded-lg bg-gray-800 px-4 py-2 text-sm font-semibold text-white transition hover:bg-gray-700${disabledButtonClass}`} onClick={() => setShowAiRules((value) => !value)}>
                     Manage AI Rules
                   </button>
                 )}
@@ -1557,7 +1557,7 @@ const BackupRecovery = () => {
                   </p>
                   {showAiRules ? (
                     <>
-                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
                         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                           <div>
                             <p className="text-sm font-bold text-slate-900">Global AI Sensitivity</p>
@@ -1565,21 +1565,21 @@ const BackupRecovery = () => {
                           </div>
                           <div className="flex items-center gap-3">
                             <CustomSelect value={controls.aiSensitivity} onChange={(value) => setControls({ ...controls, aiSensitivity: value })} options={[{ value: 'low', label: 'Low - 0.85 threshold' }, { value: 'medium', label: 'Medium - 0.70 threshold' }, { value: 'high', label: 'High - 0.55 threshold' }, { value: 'very_high', label: 'Very High - 0.40 threshold' }]} placeholder="Select sensitivity" />
-                            <button disabled={busy} className={`rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white${disabledButtonClass}`} onClick={() => askConfirm('Save AI sensitivity?', 'WARDS will update the global AI sensitivity threshold used by anomaly scoring.', saveAiSensitivity, 'Global AI sensitivity saved.', 'Save sensitivity')}>Save</button>
+                            <button disabled={busy} className={`rounded-lg bg-gray-800 px-4 py-2 text-sm font-semibold text-white transition hover:bg-gray-700${disabledButtonClass}`} onClick={() => askConfirm('Save AI sensitivity?', 'WARDS will update the global AI sensitivity threshold used by anomaly scoring.', saveAiSensitivity, 'Global AI sensitivity saved.', 'Save sensitivity')}>Save</button>
                           </div>
                         </div>
                       </div>
-                      <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
+                      <div className="rounded-lg border border-blue-100 bg-blue-50 p-4">
                         <p className="text-sm font-bold text-blue-950">Add approved defacement rule</p>
                         <p className="mt-1 text-xs leading-5 text-blue-900">Only predefined rules based on the defacement dictionary can be added, so every new rule stays compatible with the AI scoring model and receives initial sample patterns.</p>
                         <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto]">
                           <CustomSelect value={controls.aiRuleTemplate} onChange={(value) => setControls({ ...controls, aiRuleTemplate: value })} options={[{ value: '', label: 'Select an approved rule' }, ...aiRuleTemplates.filter((item) => !item.already_added).map((item) => ({ value: item.key, label: item.label }))]} placeholder="Select an approved rule" />
-                          <button disabled={busy} className={`rounded-xl bg-primary px-4 py-2 text-sm font-bold text-white${disabledButtonClass}`} onClick={() => askConfirm('Add AI rule?', 'WARDS will add this approved rule to anomaly scoring with its initial sample configuration.', addSelectedAiRule, 'AI rule added with initial samples.', 'Add rule')}>Add AI Rule</button>
+                          <button disabled={busy} className={`rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-blue-700${disabledButtonClass}`} onClick={() => askConfirm('Add AI rule?', 'WARDS will add this approved rule to anomaly scoring with its initial sample configuration.', addSelectedAiRule, 'AI rule added with initial samples.', 'Add rule')}>Add AI Rule</button>
                         </div>
                       </div>
                       <div className="grid gap-3">
                         {Object.entries(aiRules).map(([key, rule]) => (
-                          <div key={key} className="rounded-xl border border-slate-200 p-4">
+                          <div key={key} className="rounded-lg border border-slate-200 p-4">
                             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                               <label className="flex items-start gap-3">
                                 <input className="mt-1" type="checkbox" checked={Boolean(rule.enabled)} onChange={(e) => updateRule(key, { enabled: e.target.checked })} />
@@ -1590,9 +1590,9 @@ const BackupRecovery = () => {
                               </label>
                             </div>
                             <details className="mt-3">
-                              <summary className="cursor-pointer text-sm font-bold text-primary">Advanced configuration</summary>
+                              <summary className="cursor-pointer text-sm font-bold text-blue-600">Advanced configuration</summary>
                               <textarea
-                                className="mt-3 min-h-24 w-full rounded-xl border border-slate-200 px-3 py-2 font-mono text-xs"
+                                className="mt-3 min-h-24 w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-xs"
                                 value={rule.configText || '{}'}
                                 onChange={(e) => updateRule(key, { configText: e.target.value })}
                               />
@@ -1600,10 +1600,10 @@ const BackupRecovery = () => {
                           </div>
                         ))}
                       </div>
-                      <button disabled={busy} className="w-full rounded-xl bg-primary px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Save AI rules?', 'WARDS will update the enabled rules and advanced rule configuration used by anomaly scoring.', saveAiRules, 'AI behavioral rules saved.', 'Save rules')}>Save AI Rules</button>
+                      <button disabled={busy} className={`w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60${disabledButtonClass}`} onClick={() => askConfirm('Save AI rules?', 'WARDS will update the enabled rules and advanced rule configuration used by anomaly scoring.', saveAiRules, 'AI behavioral rules saved.', 'Save rules')}>Save AI Rules</button>
                     </>
                   ) : (
-                    <button disabled={busy} className={`rounded-xl bg-blue-50 px-4 py-3 text-sm font-bold text-primary${disabledButtonClass}`} onClick={() => setShowAiRules(true)}>
+                    <button disabled={busy} className={`rounded-lg bg-blue-50 px-4 py-2 text-sm font-bold text-blue-700 transition hover:bg-blue-100${disabledButtonClass}`} onClick={() => setShowAiRules(true)}>
                       Open Manage AI Rules
                     </button>
                   )}
@@ -1615,20 +1615,20 @@ const BackupRecovery = () => {
                   <p className="text-sm leading-6 text-slate-600">
                     View permanent IP blocks and manage account-based temporary restrictions. Rate-limit enforcement now targets accounts instead of shared IP addresses.
                   </p>
-                  
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
                     <p className="mb-3 text-sm font-bold text-slate-900">Temporary User Restriction</p>
                     <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
-                      <input className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="Account ID" value={restrictionInput.account_id} onChange={(e) => setRestrictionInput({ ...restrictionInput, account_id: e.target.value })} />
+                      <input className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="Account ID" value={restrictionInput.account_id} onChange={(e) => setRestrictionInput({ ...restrictionInput, account_id: e.target.value })} />
                       <CustomSelect value={restrictionInput.account_type} onChange={(value) => setRestrictionInput({ ...restrictionInput, account_type: value })} options={[{ value: 'citizen', label: 'Citizen' }, { value: 'branch', label: 'Branch Admin' }, { value: 'admin', label: 'Main Admin' }, { value: 'superadmin', label: 'Super Admin' }]} placeholder="Select account type" />
                       <CustomSelect value={restrictionInput.scope} onChange={(value) => setRestrictionInput({ ...restrictionInput, scope: value })} options={[{ value: 'manual', label: 'Manual' }, { value: 'general', label: 'General' }, { value: 'search', label: 'Search' }, { value: 'registration', label: 'Registration' }, { value: 'admin_general', label: 'Admin General' }, { value: 'password_reset', label: 'Password Reset' }]} placeholder="Select scope" />
-                      <input className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" type="number" min="60" max="604800" placeholder="Duration (seconds)" value={restrictionInput.duration} onChange={(e) => setRestrictionInput({ ...restrictionInput, duration: e.target.value })} />
-                      <button disabled={busy} className={`w-full whitespace-nowrap rounded-xl bg-red-600 px-4 py-3 font-semibold text-white${disabledButtonClass}`} onClick={() => askConfirm('Temporarily restrict this account?', `WARDS will restrict ${restrictionInput.account_type}:${restrictionInput.account_id || 'the entered account'} for ${restrictionInput.duration} seconds.`, restrictUser, 'Temporary user restriction added.', 'Restrict user')}>Restrict User</button>
+                      <input className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" type="number" min="60" max="604800" placeholder="Duration (seconds)" value={restrictionInput.duration} onChange={(e) => setRestrictionInput({ ...restrictionInput, duration: e.target.value })} />
+                      <button disabled={busy} className={`w-full whitespace-nowrap rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700${disabledButtonClass}`} onClick={() => askConfirm('Temporarily restrict this account?', `WARDS will restrict ${restrictionInput.account_type}:${restrictionInput.account_id || 'the entered account'} for ${restrictionInput.duration} seconds.`, restrictUser, 'Temporary user restriction added.', 'Restrict user')}>Restrict User</button>
                     </div>
-                    <input className="mt-3 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Reason" value={restrictionInput.reason} onChange={(e) => setRestrictionInput({ ...restrictionInput, reason: e.target.value })} />
+                    <input className="mt-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="Reason" value={restrictionInput.reason} onChange={(e) => setRestrictionInput({ ...restrictionInput, reason: e.target.value })} />
                   </div>
 
-                  <div className="max-h-60 overflow-x-auto rounded-xl border border-slate-200 bg-white md:overflow-auto">
+                  <div className="max-h-60 overflow-x-auto rounded-lg border border-slate-200 bg-white md:overflow-auto">
                     {userRestrictions.length > 0 ? (
                       <table className="w-full text-left text-sm min-w-[28rem]">
                         <thead className="border-b border-slate-200 bg-slate-50 text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
@@ -1654,7 +1654,7 @@ const BackupRecovery = () => {
                   </div>
 
                   {blockedIps.filter((item) => !item.is_permanent).length > 0 && (
-                    <div className="max-h-80 overflow-x-auto rounded-xl border border-slate-200 bg-white md:overflow-auto">
+                    <div className="max-h-80 overflow-x-auto rounded-lg border border-slate-200 bg-white md:overflow-auto">
                       <table className="w-full text-left text-sm min-w-[28rem]">
                         <thead className="border-b border-slate-200 bg-slate-50 text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
                           <tr>
@@ -1686,7 +1686,7 @@ const BackupRecovery = () => {
                     </div>
                   )}
 
-                  <div className="rounded-xl border border-orange-200 bg-orange-50 p-4">
+                  <div className="rounded-lg border border-orange-200 bg-orange-50 p-4">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm font-bold text-orange-900">Permanent Blocklist</p>
@@ -1694,7 +1694,7 @@ const BackupRecovery = () => {
                       </div>
                       <button
                         disabled={busy}
-                        className={`rounded-xl bg-orange-600 px-4 py-2 text-sm font-semibold text-white${disabledButtonClass}`}
+                        className={`rounded-lg bg-orange-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-orange-700${disabledButtonClass}`}
                         onClick={() => setShowPermanentBlocks((value) => !value)}
                       >
                         {showPermanentBlocks ? 'Hide' : 'Show'}
@@ -1703,12 +1703,12 @@ const BackupRecovery = () => {
                   </div>
 
                   {showPermanentBlocks && (
-                    <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="space-y-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
                       <div className="grid gap-3 md:grid-cols-[1fr_auto]">
                         <div>
                           <label className="text-sm font-semibold text-slate-700">IP Address</label>
                           <input
-                            className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                            className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                             type="text"
                             placeholder="e.g., 192.168.1.100"
                             value={permanentBlockInput}
@@ -1716,7 +1716,7 @@ const BackupRecovery = () => {
                           />
                         </div>
                         <div className="flex items-end">
-                          <button disabled={busy} className={`rounded-xl bg-red-700 px-4 py-2 font-semibold text-white${disabledButtonClass}`} onClick={() => askConfirm('Permanently block this IP?', `Only manual controls can create permanent blocks. WARDS will permanently block ${permanentBlockInput || 'the entered IP'} until an admin removes it.`, addPermanentBlock, 'Permanent IP block added.', 'Permanent block')}>
+                          <button disabled={busy} className={`rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-800${disabledButtonClass}`} onClick={() => askConfirm('Permanently block this IP?', `Only manual controls can create permanent blocks. WARDS will permanently block ${permanentBlockInput || 'the entered IP'} until an admin removes it.`, addPermanentBlock, 'Permanent IP block added.', 'Permanent block')}>
                             Add Permanent Block
                           </button>
                         </div>
@@ -1724,7 +1724,7 @@ const BackupRecovery = () => {
                       <div>
                         <label className="text-sm font-semibold text-slate-700">Reason</label>
                         <input
-                          className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                          className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                           type="text"
                           placeholder="e.g., Repeat brute force attacks"
                           value={permanentBlockReason}
@@ -1732,7 +1732,7 @@ const BackupRecovery = () => {
                         />
                       </div>
 
-                      <div className="max-h-60 overflow-x-auto rounded-xl border border-slate-200 bg-white md:overflow-auto">
+                      <div className="max-h-60 overflow-x-auto rounded-lg border border-slate-200 bg-white md:overflow-auto">
                         {permanentBlocks.length > 0 ? (
                           <table className="w-full text-left text-sm min-w-[28rem]">
                             <thead className="border-b border-slate-200 bg-slate-50 text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
