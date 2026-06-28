@@ -19,6 +19,7 @@ from auth.jwt_utils import (
 )
 
 BINDING_STRICT_MODE = os.getenv("TOKEN_BINDING_STRICT", "true").lower() == "true"
+BINDING_CHECK_UA = os.getenv("TOKEN_BINDING_UA", "false").lower() == "true"
 
 
 def _validate_token_binding(request: Request, payload: dict) -> None:
@@ -35,7 +36,7 @@ def _validate_token_binding(request: Request, payload: dict) -> None:
             detail="Session binding mismatch (IP). Please log in again.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    if token_ua and token_ua != user_agent:
+    if BINDING_CHECK_UA and token_ua and token_ua != user_agent:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Session binding mismatch (device). Please log in again.",
