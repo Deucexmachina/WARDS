@@ -1793,9 +1793,9 @@ def is_deployment_in_progress(db: Session) -> bool:
     setting = db.query(SecuritySetting).filter(SecuritySetting.key == "deployment_in_progress").first()
     if not setting or not setting.value or setting.value.lower() != "true":
         return False
-    # Auto-clear stale deployment pause (> 10 minutes) so a failed webhook unpause
+    # Auto-clear stale deployment pause (> 30 minutes) so a failed webhook unpause
     # doesn't leave monitoring disabled forever.
-    stale_threshold = 600  # seconds
+    stale_threshold = 1800  # seconds
     if setting.updated_at and (now_utc() - setting.updated_at).total_seconds() > stale_threshold:
         logger.warning(
             "Deployment pause is stale (updated_at=%s, threshold=%ds). Auto-clearing.",
@@ -3011,7 +3011,7 @@ def restore_from_backup(db: Session, file_entry: SecurityMonitoredFile, detectio
             recovery.backup_path = stored_path_value(source) or str(source)
             recovery.completed_at = now_utc()
             recovery.recovery_duration_ms = int((time.time() - started) * 1000)
-            recovery.summary = f"Auto-recovery queued for {file_entry.relative_path} from {backup_root.name}."
+            recovery.summary = f"Auto-recovery applied for {file_entry.relative_path} from {backup_root.name}; pending admin verification."
             db.add(file_entry)
             db.add(recovery)
             db.commit()
@@ -3945,9 +3945,19 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
                         root_name = _clean_folder_root(str(entry.folder_root or ""))
                         if root_name:
                             backed_up_roots.add(root_name)
-                    entry.baseline_hash = file_hash
-                    entry.current_hash = file_hash
-                    entry.status = "clean"
+                    else:
+                        file_hash = entry.current_hash or entry.baseline_hash
+                    has_open_incident = (
+                        _has_open_incident(db, entry, "vm1_content_modified")
+                        or _has_open_incident(db, entry, "file_deleted")
+                    )
+                    if not has_open_incident:
+                        entry.baseline_hash = file_hash
+                        entry.current_hash = file_hash
+                        entry.status = "clean"
+                    else:
+                        entry.current_hash = file_hash
+                        entry.status = "modified"
                     entry.file_type = file_type(snapshot) if snapshot.exists() else entry.file_type
                     entry.size_bytes = snapshot.stat().st_size if snapshot.exists() else entry.size_bytes
                     entry.last_checked = now_utc()
@@ -4662,22 +4672,45 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                 cleanup_quarantine_paths(json_loads(incident.quarantine_paths_json, []))
             elif incident.response_action == "auto_recovered_pending_review":
                 # Auto-recovery was already queued at detection time; admin now confirms resolution
-                cleanup_quarantine_paths(json_loads(incident.quarantine_paths_json, []))
-                # Update snapshot to clean (original) content for baseline consistency
                 quarantine_paths = json_loads(incident.quarantine_paths_json, [])
+                cleanup_quarantine_paths(quarantine_paths)
                 quarantine_path = quarantine_paths[0] if quarantine_paths else None
                 safe_quarantine = safe_quarantine_path(quarantine_path) if quarantine_path else None
-                if safe_quarantine and safe_quarantine.exists():
-                    try:
-                        original_bytes = safe_quarantine.read_bytes()
-                        snapshot = VM1_SNAPSHOT_ROOT / file_entry.relative_path
-                        snapshot.parent.mkdir(parents=True, exist_ok=True)
-                        snapshot.write_bytes(original_bytes)
-                        clean_hash = hashlib.sha256(original_bytes).hexdigest()
-                        file_entry.baseline_hash = clean_hash
-                        file_entry.current_hash = clean_hash
-                    except Exception:
-                        pass
+                # Find the restore command created during auto-recovery and use its clean
+                # content to update the snapshot and baseline. Do NOT use quarantine
+                # (it contains the defaced version).
+                clean_hash = None
+                detection_id = detection.id if detection else None
+                if detection_id:
+                    commands = json_loads(get_setting(db, "vm1_restore_commands", "[]"), [])
+                    cmd = next((c for c in commands if c.get("detection_id") == detection_id), None)
+                    if cmd:
+                        content_file = cmd.get("restore_content_file")
+                        if content_file:
+                            try:
+                                content_path = Path(content_file)
+                                if content_path.exists():
+                                    clean_bytes = base64.b64decode(content_path.read_bytes())
+                                    snapshot = VM1_SNAPSHOT_ROOT / file_entry.relative_path
+                                    snapshot.parent.mkdir(parents=True, exist_ok=True)
+                                    snapshot.write_bytes(clean_bytes)
+                                    clean_hash = hashlib.sha256(clean_bytes).hexdigest()
+                            except Exception:
+                                pass
+                if not clean_hash:
+                    # Fallback: use current snapshot only if it matches the existing
+                    # baseline (meaning it wasn't overwritten by a defaced version).
+                    snapshot = VM1_SNAPSHOT_ROOT / file_entry.relative_path
+                    if snapshot.exists():
+                        try:
+                            snapshot_hash = sha256_file(snapshot)
+                            if snapshot_hash == file_entry.baseline_hash:
+                                clean_hash = snapshot_hash
+                        except Exception:
+                            pass
+                if clean_hash:
+                    file_entry.baseline_hash = clean_hash
+                    file_entry.current_hash = clean_hash
                 file_entry.status = "clean"
                 file_entry.last_checked = now_utc()
                 db.add(file_entry)
@@ -6023,6 +6056,38 @@ def acknowledge_vm1_restore_command(db: Session, command_id: str, success: bool)
     commands = [c for c in commands if c.get("command_id") != command_id]
     set_setting(db, "vm1_restore_commands", json_dumps(commands), "vm1_reporter")
 
+    # Update the monitored file baseline when a restore succeeds so the clean
+    # state is trusted immediately and doesn't trigger a re-detection.
+    if success:
+        for cmd in removed:
+            rel_path = cmd.get("relative_path")
+            content_file = cmd.get("restore_content_file")
+            if not rel_path or not content_file:
+                continue
+            file_entry = (
+                db.query(SecurityMonitoredFile)
+                .filter(SecurityMonitoredFile.relative_path == rel_path)
+                .first()
+            )
+            if not file_entry:
+                continue
+            try:
+                content_path = Path(content_file)
+                if content_path.exists():
+                    clean_bytes = base64.b64decode(content_path.read_bytes())
+                    clean_hash = hashlib.sha256(clean_bytes).hexdigest()
+                    snapshot = VM1_SNAPSHOT_ROOT / rel_path
+                    snapshot.parent.mkdir(parents=True, exist_ok=True)
+                    snapshot.write_bytes(clean_bytes)
+                    file_entry.baseline_hash = clean_hash
+                    file_entry.current_hash = clean_hash
+                    file_entry.status = "clean"
+                    file_entry.last_checked = now_utc()
+                    db.add(file_entry)
+                    db.commit()
+            except Exception:
+                pass
+
     # Clean up external content files to prevent disk bloat
     for c in removed:
         content_file = c.get("restore_content_file")
@@ -6034,7 +6099,7 @@ def acknowledge_vm1_restore_command(db: Session, command_id: str, success: bool)
     return True
 
 
-def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type: str, new_hash: str | None, old_content: str = "", new_content: str = "") -> SecurityDetectionEvent | None:
+def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type: str, new_hash: str | None, old_content: str = "", new_content: str = "", original_content_bytes: bytes | None = None) -> SecurityDetectionEvent | None:
     old_hash = entry.baseline_hash
     context = {
         "host_vm": "vm1",
@@ -6101,16 +6166,28 @@ def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type
         is_auto_recover = suffix in high_risk_exts or classification.get("severity_level") in {"high", "critical"}
         if is_auto_recover:
             # Auto-recovery: queue restore command but keep incident OPEN for admin review
-            _create_vm1_restore_command(db, entry, detection.id)
+            _create_vm1_restore_command(db, entry, detection.id, original_content_bytes=original_content_bytes)
             incident = create_incident(db, detection, classification, flags, changed, quarantine_path)
             incident.status = "open"
             incident.response_action = "auto_recovered_pending_review"
             db.add(incident)
             db.commit()
+            recovery = SecurityRecoveryEvent(
+                detection_event_id=detection.id,
+                file_id=entry.id,
+                recovery_type="automatic",
+                initiated_by=None,
+                status="success",
+                quarantine_path=quarantine_path,
+                summary=f"Auto-recovery applied for {entry.relative_path}; pending admin verification.",
+                completed_at=now_utc(),
+            )
+            db.add(recovery)
+            db.commit()
             create_system_alert(
                 db,
                 "incident_auto_recovery",
-                f"SEC-{incident.id}: Auto-recovery queued for {entry.relative_path} (high-risk / high-severity). Admin review required.",
+                f"SEC-{incident.id}: Auto-recovery applied for {entry.relative_path} (high-risk / high-severity). Admin review required.",
                 incident.severity_level or "low",
                 dedupe_key=f"SEC-{incident.id}",
             )
@@ -6214,6 +6291,69 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
             _store_vm1_snapshot(rel_path, f.get("content_b64"))
         db.commit()
         return {"detections": [], "changed": 0, "registered": len(files)}
+
+    # --- Bulk change detection ---
+    # If many existing monitored files change at once with no open incidents,
+    # treat as a deployment and update baselines instead of flooding detections.
+    changed_entries: list[tuple[SecurityMonitoredFile, dict, str]] = []
+    for f in files:
+        if not isinstance(f, dict):
+            continue
+        rel_path = str(f.get("relative_path") or "").strip()
+        folder_root = str(f.get("folder_root") or "").strip()
+        folder_root = _clean_folder_root(folder_root)
+        rel_path = _clean_folder_root(rel_path)
+        if not rel_path or ".." in rel_path.replace("\\", "/"):
+            continue
+        if folder_root not in allowed_vm1_roots:
+            continue
+        rel_path_parts = set(Path(rel_path).parts)
+        if rel_path_parts.intersection({item.lower() for item in DEFAULT_EXCLUDED_DIRS}):
+            continue
+        if not _vm1_file_monitorable(rel_path):
+            continue
+        current_hash = _valid_hash(f.get("current_hash"))
+        if Path(rel_path).name.lower() == ".env":
+            continue
+        entry = (
+            db.query(SecurityMonitoredFile)
+            .filter(SecurityMonitoredFile.relative_path == rel_path)
+            .filter(SecurityMonitoredFile.folder_root == folder_root)
+            .first()
+        )
+        if entry and entry.baseline_hash and current_hash and entry.baseline_hash != current_hash:
+            changed_entries.append((entry, f, current_hash))
+
+    BULK_CHANGE_THRESHOLD = 5
+    if len(changed_entries) >= BULK_CHANGE_THRESHOLD:
+        has_open_incidents = any(
+            db.query(SecurityIncident)
+            .join(SecurityDetectionEvent)
+            .filter(SecurityDetectionEvent.file_id == entry.id)
+            .filter(SecurityIncident.status.in_(["open", "investigating"]))
+            .first()
+            is not None
+            for entry, _, _ in changed_entries
+        )
+        if not has_open_incidents:
+            logger.info(
+                "Bulk VM1 file change detected (%d files) — treating as deployment, updating baselines.",
+                len(changed_entries),
+            )
+            for entry, f, current_hash in changed_entries:
+                entry.current_hash = current_hash
+                entry.baseline_hash = current_hash
+                entry.status = "clean"
+                entry.last_checked = now_utc()
+                db.add(entry)
+                _store_vm1_snapshot(entry.relative_path, f.get("content_b64"))
+            db.commit()
+            return {
+                "registered": 0,
+                "changed": len(changed_entries),
+                "detections": 0,
+                "deployment_detected": True,
+            }
 
     detections = []
     changed = 0
@@ -6329,9 +6469,16 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
                 changed += 1
                 db.add(entry)
                 db.commit()
-                # Read previous snapshot content for diff
+                # Read previous snapshot content for diff AND capture raw bytes
+                # before _store_vm1_snapshot overwrites it.
                 snapshot_path = VM1_SNAPSHOT_ROOT / entry.relative_path
                 old_content = read_text(snapshot_path) if snapshot_path.exists() else ""
+                old_snapshot_bytes = None
+                if snapshot_path.exists():
+                    try:
+                        old_snapshot_bytes = snapshot_path.read_bytes()
+                    except Exception:
+                        pass
                 new_content = ""
                 content_b64 = f.get("content_b64")
                 if content_b64:
@@ -6352,7 +6499,11 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
                     db.add(entry)
                     db.commit()
                     continue
-                detection = _record_vm1_detection(db, entry, "vm1_content_modified", current_hash, old_content=old_content, new_content=new_content)
+                detection = _record_vm1_detection(
+                    db, entry, "vm1_content_modified", current_hash,
+                    old_content=old_content, new_content=new_content,
+                    original_content_bytes=old_snapshot_bytes,
+                )
                 # Store the new snapshot so future changes have a baseline
                 _store_vm1_snapshot(rel_path, content_b64)
                 # Keep a copy of the defaced snapshot for false-positive revert
@@ -6378,11 +6529,15 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
     db.commit()
     set_setting(db, "vm1_last_heartbeat_at", now_utc().isoformat(), "vm1_reporter")
     set_setting(db, "vm1_last_heartbeat_status", "success", "vm1_reporter")
+    # Include pending restore commands in the response so the VM1 reporter can
+    # apply them immediately instead of waiting for the next poll cycle.
+    restore_commands = get_pending_vm1_restore_commands(db)
     return {
         "registered": registered,
         "changed": changed,
         "detections": len(detections),
         "detection_ids": [d.id for d in detections],
+        "restore_commands": restore_commands,
     }
 
 

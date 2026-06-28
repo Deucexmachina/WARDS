@@ -39,7 +39,7 @@ MONITORED_ROOTS = {
 
 SCAN_INTERVAL = max(5, int(os.getenv("VM1_REPORT_INTERVAL", "30")))
 HEARTBEAT_INTERVAL = max(5, int(os.getenv("VM1_HEARTBEAT_INTERVAL", "10")))
-RESTORE_POLL_INTERVAL = max(5, int(os.getenv("VM1_RESTORE_POLL_INTERVAL", "15")))
+RESTORE_POLL_INTERVAL = max(3, int(os.getenv("VM1_RESTORE_POLL_INTERVAL", "5")))
 SNAPSHOT_DIR = Path(os.getenv("VM1_SNAPSHOT_DIR", "/app/.vm1_snapshots"))
 MAX_FILE_SNAPSHOT_BYTES = int(os.getenv("VM1_MAX_SNAPSHOT_BYTES", "2097152"))  # 2 MB
 
@@ -120,6 +120,24 @@ def send_manifest(files: list[dict]) -> bool:
                 f"Manifest uploaded: registered={data.get('registered', 0)} "
                 f"changed={data.get('changed', 0)} detections={data.get('detections', 0)}"
             )
+            # Apply any restore commands returned immediately to avoid poll delay
+            for cmd in data.get("restore_commands", []):
+                success = apply_restore_command(cmd)
+                # Ack immediately so VM2 can update the baseline without waiting
+                # for the next poll cycle.
+                try:
+                    requests.post(
+                        f"{SECURITY_API_URL}/v1/vm1/restore-ack",
+                        headers={"X-API-Key": API_KEY, "Content-Type": "application/json"},
+                        json={
+                            "command_id": cmd.get("command_id"),
+                            "success": success,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        },
+                        timeout=10,
+                    )
+                except Exception:
+                    pass
             return True
         log(f"Manifest upload failed: HTTP {resp.status_code} {resp.text[:200]}")
         return False
@@ -158,6 +176,74 @@ def fetch_vm2_config() -> dict:
     except Exception as exc:
         log(f"Config fetch exception: {exc}")
     return {}
+
+
+def _trigger_docker_rebuild(rel_path: str):
+    """Rebuild and restart frontend container if a restored file affects the built output."""
+    lower = rel_path.lower()
+    if not any(p in lower for p in ("/frontend/", "/public/", "index.html")):
+        return
+
+    # Find a directory that contains docker-compose.yml so the build
+    # uses the correct compose definition and build context.
+    compose_dirs = ["/opt/wards/app", "/wards", "/app", "/"]
+    cwd = None
+    for d in compose_dirs:
+        if Path(d).joinpath("docker-compose.yml").exists():
+            cwd = d
+            break
+
+    try:
+        import subprocess
+        # Try rebuilding the image first — a simple restart won’t pick up
+        # restored source files because nginx serves static assets baked
+        # into the image at build time.
+        kwargs = {"capture_output": True, "text": True, "timeout": 300}
+        if cwd:
+            kwargs["cwd"] = cwd
+
+        # docker compose (new plugin) vs docker-compose (legacy standalone)
+        rebuild_cmds = [
+            ["docker", "compose", "up", "-d", "--build", "frontend"],
+            ["docker-compose", "up", "-d", "--build", "frontend"],
+        ]
+        result = None
+        for cmd in rebuild_cmds:
+            try:
+                result = subprocess.run(cmd, **kwargs)
+                if result.returncode == 0:
+                    log(f"Frontend rebuilt and restarted after restoring {rel_path}")
+                    return
+                break  # command exists but failed; don't try the other variant
+            except FileNotFoundError:
+                continue  # try next variant
+
+        if result is not None and result.returncode != 0:
+            err = result.stderr.strip() if result.stderr else "(no stderr)"
+            log(f"Frontend rebuild failed: {err}")
+
+        # Fallback: at least restart so any volume-mounted changes are picked up
+        restart_cmds = [
+            ["docker", "compose", "restart", "frontend"],
+            ["docker-compose", "restart", "frontend"],
+        ]
+        for cmd in restart_cmds:
+            try:
+                fb = subprocess.run(
+                    cmd,
+                    **{k: v for k, v in kwargs.items() if k != "timeout"},
+                    timeout=60,
+                )
+                if fb.returncode == 0:
+                    log(f"Frontend restart fallback succeeded")
+                    return
+                break
+            except FileNotFoundError:
+                continue
+
+        log("Docker not available inside vm1-reporter; frontend will not auto-rebuild")
+    except Exception as exc:
+        log(f"Frontend rebuild exception: {exc}")
 
 
 def apply_restore_command(cmd: dict) -> bool:
@@ -213,6 +299,7 @@ def apply_restore_command(cmd: dict) -> bool:
             return False
 
         log(f"Restored {rel_path} (hash: {actual_hash})")
+        _trigger_docker_rebuild(rel_path)
         return True
     except Exception as exc:
         log(f"Restore failed for {rel_path}: {exc}")
@@ -300,6 +387,9 @@ def main_loop():
             files = list(iter_monitored_files())
             snapshot_files(files)
             send_manifest(files)
+            # Immediately poll for any restore commands created from this manifest
+            # instead of waiting for the next restore-poll interval.
+            poll_restore_commands()
             last_scan = now
 
         if now - last_restore_poll >= RESTORE_POLL_INTERVAL:

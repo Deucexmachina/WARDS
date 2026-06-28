@@ -85,15 +85,16 @@ services:
       VM1_OCR_DIR: /OCR
       VM1_REPORT_INTERVAL: "30"
       VM1_HEARTBEAT_INTERVAL: "10"
-      VM1_RESTORE_POLL_INTERVAL: "15"
+      VM1_RESTORE_POLL_INTERVAL: "5"
     volumes:
       - ./WARDS:/WARDS
       - ./OCR:/OCR
       - ./scripts/vm1_security_reporter.py:/app/vm1_security_reporter.py:ro
       - vm1_snapshots:/app/.vm1_snapshots
       - .:/opt/wards/app
+      - /var/run/docker.sock:/var/run/docker.sock
     command: >
-      sh -c "pip install --no-cache-dir requests && python3 /app/vm1_security_reporter.py"
+      sh -c "apt-get update -qq && apt-get install -y -qq docker.io docker-compose >/dev/null 2>&1 || true; pip install --no-cache-dir requests; python3 /app/vm1_security_reporter.py"
     depends_on:
       - backend
 
