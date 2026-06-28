@@ -3546,6 +3546,7 @@ async def check_paymongo_status(
     ref_number: str,
     token: str | None = Query(None),
     db: Session = Depends(get_db),
+    current_user: CitizenUser = Depends(get_current_user),
 ):
     """
     Check payment status from PayMongo and update local database
