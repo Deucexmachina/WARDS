@@ -3762,7 +3762,7 @@ def mark_stale_backup_events_failed(db: Session, max_age_minutes: int = 10) -> i
     return len(stale_events)
 
 
-def create_manual_backup(db: Session, initiated_by: int | None, label: str = "manual") -> SecurityRecoveryEvent:
+def create_manual_backup(db: Session, initiated_by: int | None, label: str = "manual", skip_database_snapshot: bool = False) -> SecurityRecoveryEvent:
     # FK safety: initiated_by may reference a VM1 admin ID that doesn't exist
     # in the security DB. Fall back to None to avoid IntegrityError.
     if initiated_by is not None:
@@ -3802,7 +3802,7 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
     logger.info("Backup %s started for label '%s' at '%s'.", event_id, label, backup_root)
     try:
         backup_root.mkdir(parents=True, exist_ok=True)
-        database_entry = normalize_database_monitor_entry(db, reset_baseline=False, ensure_snapshot=True)
+        database_entry = normalize_database_monitor_entry(db, reset_baseline=False, ensure_snapshot=not skip_database_snapshot)
         manifest_files: list[dict[str, object]] = []
         backed_up_roots: set[str] = set()
         # Clear any pending state from the setup functions to avoid
@@ -3822,16 +3822,20 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
             if is_database_entry(entry):
                 checksum_path = create_database_checksum_manifest(db, path)
                 snapshot_target = backup_file_path(backup_root, DATABASE_BACKUP_RELATIVE_PATH)
-                create_database_snapshot(db, snapshot_target)
+                if not skip_database_snapshot:
+                    create_database_snapshot(db, snapshot_target)
+                elif DATABASE_SNAPSHOT_PATH.exists():
+                    shutil.copy2(DATABASE_SNAPSHOT_PATH, snapshot_target)
                 checksum_target = backup_file_path(backup_root, DATABASE_CHECKSUM_RELATIVE_PATH)
                 checksum_target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(checksum_path, checksum_target)
                 file_hash = sha256_file(checksum_path)
-                manifest_files.append({
-                    "path": DATABASE_BACKUP_RELATIVE_PATH,
-                    "size_bytes": snapshot_target.stat().st_size,
-                    "sha256": sha256_file(snapshot_target),
-                })
+                if not skip_database_snapshot:
+                    manifest_files.append({
+                        "path": DATABASE_BACKUP_RELATIVE_PATH,
+                        "size_bytes": snapshot_target.stat().st_size,
+                        "sha256": sha256_file(snapshot_target),
+                    })
                 manifest_files.append({
                     "path": DATABASE_CHECKSUM_RELATIVE_PATH,
                     "size_bytes": checksum_target.stat().st_size,
@@ -4591,7 +4595,7 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                 def _post_resolve_backup():
                     bg_db = SessionLocal()
                     try:
-                        post_resolve_backup = create_manual_backup(bg_db, initiated_by=_valid_admin_id(bg_db, admin_id), label="post_resolve")
+                        post_resolve_backup = create_manual_backup(bg_db, initiated_by=_valid_admin_id(bg_db, admin_id), label="post_resolve", skip_database_snapshot=True)
                         if post_resolve_backup.status == "success":
                             bg_incident = bg_db.query(SecurityIncident).filter(SecurityIncident.id == incident.id).first()
                             if bg_incident:
@@ -4644,7 +4648,7 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                     def _post_resolve_backup():
                         bg_db = SessionLocal()
                         try:
-                            post_resolve_backup = create_manual_backup(bg_db, initiated_by=_valid_admin_id(bg_db, admin_id), label="post_resolve")
+                            post_resolve_backup = create_manual_backup(bg_db, initiated_by=_valid_admin_id(bg_db, admin_id), label="post_resolve", skip_database_snapshot=True)
                             if post_resolve_backup.status == "success":
                                 bg_incident = bg_db.query(SecurityIncident).filter(SecurityIncident.id == incident.id).first()
                                 if bg_incident:
@@ -4871,7 +4875,7 @@ def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_ba
                 def _fp_backup():
                     bg_db = SessionLocal()
                     try:
-                        backup_event = create_manual_backup(bg_db, _valid_admin_id(bg_db, admin_id), label="false_positive")
+                        backup_event = create_manual_backup(bg_db, _valid_admin_id(bg_db, admin_id), label="false_positive", skip_database_snapshot=True)
                         if backup_event.status == "success":
                             bg_incident = bg_db.query(SecurityIncident).filter(SecurityIncident.id == incident.id).first()
                             if bg_incident:
@@ -4942,7 +4946,7 @@ def bulk_update_incidents(db: Session, action: str, admin_id: int, confirm_missi
         def _bulk_fp_backup():
             bg_db = SessionLocal()
             try:
-                create_manual_backup(bg_db, _valid_admin_id(bg_db, admin_id), label="false_positive_bulk")
+                create_manual_backup(bg_db, _valid_admin_id(bg_db, admin_id), label="false_positive_bulk", skip_database_snapshot=True)
             except Exception as exc:
                 logger.warning("Bulk false-positive background backup failed: %s", exc)
             finally:
