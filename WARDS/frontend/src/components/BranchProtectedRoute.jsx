@@ -5,7 +5,7 @@ import { clearBranchSettingsSession } from '../utils/settingsSecurity';
 
 const AUTH_VERIFY_TIMEOUT_MS = 8000;
 
-const BranchProtectedRoute = ({ children }) => {
+const BranchProtectedRoute = ({ children, requiredInternalRole = null }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const location = useLocation();
@@ -53,6 +53,12 @@ const BranchProtectedRoute = ({ children }) => {
       }
 
       if (response.data.valid && response.data.user?.role === 'branch') {
+        const userRole = response.data.user?.internal_role || response.data.user?.role;
+        if (requiredInternalRole && userRole !== requiredInternalRole) {
+          setIsAuthenticated(false);
+          setIsLoading(false);
+          return;
+        }
         setIsAuthenticated(true);
         const existing = JSON.parse(localStorage.getItem('branchUser') || '{}');
         localStorage.setItem('branchUser', JSON.stringify({ ...existing, ...response.data.user }));

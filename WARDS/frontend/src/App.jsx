@@ -122,7 +122,7 @@ function App() {
           <Route path="queue/live-monitor" element={<LiveQueueMonitor />} />
           <Route path="receipts" element={<BranchReceiptManagement />} />
           <Route path="payments" element={<BranchPaymentManagement />} />
-          <Route path="accounts" element={<Accounts />} />
+          <Route path="accounts" element={<BranchProtectedRoute requiredInternalRole="branch_admin"><Accounts /></BranchProtectedRoute>} />
           <Route path="account-management" element={<WindowStaffAccount />} />
           <Route path="memos" element={<BranchMemos />} />
           <Route path="reports" element={<BranchReports />} />
@@ -130,8 +130,8 @@ function App() {
           <Route path="alerts" element={<Alerts />} />
           <Route path="discrepancies" element={<BranchDiscrepancies />} />
           <Route path="policies" element={<BranchPolicies />} />
-          <Route path="activity-logs" element={<BranchActivityLogs />} />
-          <Route path="kiosks" element={<KioskManagement />} />
+          <Route path="activity-logs" element={<BranchProtectedRoute requiredInternalRole="branch_admin"><BranchActivityLogs /></BranchProtectedRoute>} />
+          <Route path="kiosks" element={<BranchProtectedRoute requiredInternalRole="branch_admin"><KioskManagement /></BranchProtectedRoute>} />
           <Route path="settings" element={<BranchSystemSettingsProtectedRoute><BranchSettings /></BranchSystemSettingsProtectedRoute>} />
         </Route>
         {/* Dedicated Live Monitor Route - No Layout */}
