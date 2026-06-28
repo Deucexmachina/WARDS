@@ -41,6 +41,11 @@ from SECURITY.security_models import (
 MASTER_ROOT = Path(__file__).resolve().parents[1]
 logger = logging.getLogger(__name__)
 
+# Cache last-run timestamps for expensive housekeeping operations so they
+# do not run on every incident mutation.
+_last_migrate_at: float = 0.0
+_last_dedupe_at: float = 0.0
+
 
 def _run_async_backup(fn):
     """Run a backup operation in a background daemon thread to avoid blocking the HTTP response."""
@@ -1010,6 +1015,9 @@ def merge_monitored_file_entry(db: Session, source: SecurityMonitoredFile, targe
 
 
 def migrate_portable_monitored_files(db: Session) -> int:
+    global _last_migrate_at
+    if time.time() - _last_migrate_at < 300:
+        return 0
     changed = 0
     entries = db.query(SecurityMonitoredFile).order_by(SecurityMonitoredFile.id.asc()).all()
     by_path: dict[str, SecurityMonitoredFile] = {}
@@ -1081,10 +1089,14 @@ def migrate_portable_monitored_files(db: Session) -> int:
             by_relative[relative_key] = entry
     if changed:
         db.flush()
+    _last_migrate_at = time.time()
     return changed
 
 
 def dedupe_monitored_files_by_relative_path(db: Session) -> int:
+    global _last_dedupe_at
+    if time.time() - _last_dedupe_at < 300:
+        return 0
     changed = 0
     rows = db.query(SecurityMonitoredFile).order_by(SecurityMonitoredFile.id.asc()).all()
     groups: dict[str, list[SecurityMonitoredFile]] = {}
@@ -1105,6 +1117,7 @@ def dedupe_monitored_files_by_relative_path(db: Session) -> int:
                 changed += 1
     if changed:
         db.flush()
+    _last_dedupe_at = time.time()
     return changed
 
 
@@ -3762,7 +3775,7 @@ def mark_stale_backup_events_failed(db: Session, max_age_minutes: int = 10) -> i
     return len(stale_events)
 
 
-def create_manual_backup(db: Session, initiated_by: int | None, label: str = "manual", skip_database_snapshot: bool = False) -> SecurityRecoveryEvent:
+def create_manual_backup(db: Session, initiated_by: int | None, label: str = "manual", skip_database_snapshot: bool = False, skip_file_registration: bool = False) -> SecurityRecoveryEvent:
     # FK safety: initiated_by may reference a VM1 admin ID that doesn't exist
     # in the security DB. Fall back to None to avoid IntegrityError.
     if initiated_by is not None:
@@ -3777,8 +3790,11 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
     migrate_portable_monitored_files(db)
     dedupe_monitored_files_by_relative_path(db)
     mark_stale_backup_events_failed(db)
-    register_count = register_initial_files(db, ensure_backup=False, refresh_existing=False)
-    dedupe_monitored_files_by_relative_path(db)
+    if not skip_file_registration:
+        register_count = register_initial_files(db, ensure_backup=False, refresh_existing=False)
+        dedupe_monitored_files_by_relative_path(db)
+    else:
+        register_count = 0
     removal_summary = reconcile_trusted_file_removals(db, actor=f"{label}_backup")
     backup_location = writable_backup_location(db)
     previous_backup_root = latest_backup_root(db)
@@ -4595,7 +4611,7 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                 def _post_resolve_backup():
                     bg_db = SessionLocal()
                     try:
-                        post_resolve_backup = create_manual_backup(bg_db, initiated_by=_valid_admin_id(bg_db, admin_id), label="post_resolve", skip_database_snapshot=True)
+                        post_resolve_backup = create_manual_backup(bg_db, initiated_by=_valid_admin_id(bg_db, admin_id), label="post_resolve", skip_database_snapshot=True, skip_file_registration=True)
                         if post_resolve_backup.status == "success":
                             bg_incident = bg_db.query(SecurityIncident).filter(SecurityIncident.id == incident.id).first()
                             if bg_incident:
@@ -4648,7 +4664,7 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                     def _post_resolve_backup():
                         bg_db = SessionLocal()
                         try:
-                            post_resolve_backup = create_manual_backup(bg_db, initiated_by=_valid_admin_id(bg_db, admin_id), label="post_resolve", skip_database_snapshot=True)
+                            post_resolve_backup = create_manual_backup(bg_db, initiated_by=_valid_admin_id(bg_db, admin_id), label="post_resolve", skip_database_snapshot=True, skip_file_registration=True)
                             if post_resolve_backup.status == "success":
                                 bg_incident = bg_db.query(SecurityIncident).filter(SecurityIncident.id == incident.id).first()
                                 if bg_incident:
@@ -4863,42 +4879,29 @@ def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_ba
     backup_refresh_failed = False
     if has_quarantine_copy:
         if refresh_backup:
-            backup_root = latest_backup_root(db)
-            if backup_root:
+            # Run slow full backup in background to avoid HTTP timeout
+            def _fp_backup():
+                bg_db = SessionLocal()
                 try:
-                    refresh_backup_entry(db, file_entry, backup_root=backup_root)
-                    backup_refreshed = True
-                except Exception:
-                    backup_refresh_failed = True
-            else:
-                # Run slow full backup in background to avoid HTTP timeout
-                def _fp_backup():
-                    bg_db = SessionLocal()
-                    try:
-                        backup_event = create_manual_backup(bg_db, _valid_admin_id(bg_db, admin_id), label="false_positive", skip_database_snapshot=True)
-                        if backup_event.status == "success":
-                            bg_incident = bg_db.query(SecurityIncident).filter(SecurityIncident.id == incident.id).first()
-                            if bg_incident:
-                                bg_incident.response_action = "authorized_change_restored_backup_refreshed"
-                                bg_db.add(bg_incident)
-                                bg_db.commit()
-                    except Exception as exc:
-                        logger.warning("False-positive background backup failed: %s", exc)
-                    finally:
-                        bg_db.close()
-                _run_async_backup(_fp_backup)
-                backup_refresh_failed = True  # Will be corrected by background thread if backup succeeds
-            if backup_refreshed:
-                incident.response_action = "authorized_change_restored_backup_refreshed"
-            elif backup_refresh_failed:
-                incident.response_action = "authorized_change_restored_backup_failed"
+                    backup_event = create_manual_backup(bg_db, _valid_admin_id(bg_db, admin_id), label="false_positive", skip_database_snapshot=True, skip_file_registration=True)
+                    if backup_event.status == "success":
+                        bg_incident = bg_db.query(SecurityIncident).filter(SecurityIncident.id == incident.id).first()
+                        if bg_incident:
+                            bg_incident.response_action = "authorized_change_restored_backup_refreshed"
+                            bg_db.add(bg_incident)
+                            bg_db.commit()
+                except Exception as exc:
+                    logger.warning("False-positive background backup failed: %s", exc)
+                finally:
+                    bg_db.close()
+            _run_async_backup(_fp_backup)
+            backup_refresh_failed = True  # Will be corrected by background thread if backup succeeds
+            incident.response_action = "authorized_change_restored_backup_failed"
             db.add(incident)
             db.commit()
         cleanup_quarantine_paths([str(safe_source)])
-    if has_quarantine_copy and refresh_backup and backup_refreshed:
-        false_positive_summary = "Quarantined copy restored and backup baseline refreshed in place."
-    elif has_quarantine_copy and refresh_backup and backup_refresh_failed:
-        false_positive_summary = "Quarantined copy restored, but backup baseline refresh failed."
+    if has_quarantine_copy and refresh_backup:
+        false_positive_summary = "Quarantined copy restored; backup baseline refresh queued in background."
     elif has_quarantine_copy:
         false_positive_summary = "Quarantined copy restored; backup baseline will be refreshed by the bulk operation."
     else:
@@ -4946,7 +4949,7 @@ def bulk_update_incidents(db: Session, action: str, admin_id: int, confirm_missi
         def _bulk_fp_backup():
             bg_db = SessionLocal()
             try:
-                create_manual_backup(bg_db, _valid_admin_id(bg_db, admin_id), label="false_positive_bulk", skip_database_snapshot=True)
+                create_manual_backup(bg_db, _valid_admin_id(bg_db, admin_id), label="false_positive_bulk", skip_database_snapshot=True, skip_file_registration=True)
             except Exception as exc:
                 logger.warning("Bulk false-positive background backup failed: %s", exc)
             finally:
