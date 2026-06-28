@@ -540,6 +540,22 @@ def is_database_entry(file_entry) -> bool:
     return "database" in str(rp).lower() or "snapshot" in str(rp).lower()
 
 
+def is_vm1_file(file_entry) -> bool:
+    if not SECURITY_API_URL:
+        from SECURITY.security_engine import is_vm1_file as _local
+        return _local(file_entry)
+    rp = getattr(file_entry, "relative_path", "")
+    fp = getattr(file_entry, "file_path", "")
+    return str(rp).startswith("VM1_") or str(fp).startswith("vm1://")
+
+
+def _scan_vm1_snapshot(db, file_entry, context=None):
+    if not SECURITY_API_URL:
+        from SECURITY.security_engine import _scan_vm1_snapshot as _local
+        return _local(db, file_entry, context=context)
+    return None
+
+
 def normalize_database_monitor_entry(db, reset_baseline=False, ensure_snapshot=True):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import normalize_database_monitor_entry as _local

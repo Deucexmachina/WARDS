@@ -3636,6 +3636,69 @@ def scan_single_file(db: Session, file_entry: SecurityMonitoredFile, context: di
     return None
 
 
+def _scan_vm1_snapshot(db: Session, file_entry: SecurityMonitoredFile, context: dict | None = None) -> SecurityDetectionEvent | None:
+    """Scan a VM1 file by comparing its locally-stored snapshot to the baseline hash.
+
+    This allows manual/interval scans on VM2 to detect VM1 file changes even when
+    the manifest endpoint hasn't been triggered yet, or when bulk-change detection
+    suppressed a detection.
+    """
+    snapshot = VM1_SNAPSHOT_ROOT / file_entry.relative_path
+    if not snapshot.exists():
+        return None
+
+    current_hash = sha256_file(snapshot)
+    file_entry.current_hash = current_hash
+    file_entry.last_checked = now_utc()
+
+    if not file_entry.baseline_hash or current_hash == file_entry.baseline_hash:
+        file_entry.status = "clean"
+        db.add(file_entry)
+        return None
+
+    if _has_open_incident(db, file_entry, "vm1_content_modified"):
+        file_entry.status = "modified"
+        db.add(file_entry)
+        return None
+
+    # Attempt to recover the clean (baseline) content for diff and restore.
+    original_content_bytes = None
+    old_content = ""
+    for root in all_backup_roots(db):
+        candidate = backup_file_path(root, file_entry.relative_path)
+        if candidate.exists() and candidate.is_file():
+            if file_entry.baseline_hash and sha256_file(candidate) == file_entry.baseline_hash:
+                try:
+                    original_content_bytes = candidate.read_bytes()
+                    old_content = read_text(candidate)
+                    break
+                except Exception:
+                    pass
+
+    # Fallback: check restore-content store for a previously captured clean copy
+    if original_content_bytes is None and VM1_RESTORE_CONTENT_ROOT.exists():
+        for content_file in VM1_RESTORE_CONTENT_ROOT.glob("*.b64"):
+            try:
+                content = base64.b64decode(content_file.read_bytes())
+                if hashlib.sha256(content).hexdigest() == file_entry.baseline_hash:
+                    original_content_bytes = content
+                    old_content = content.decode("utf-8", errors="replace")
+                    break
+            except Exception:
+                pass
+
+    file_entry.status = "modified"
+    db.add(file_entry)
+    db.commit()
+
+    new_content = read_text(snapshot)
+    return _record_vm1_detection(
+        db, file_entry, "vm1_content_modified", current_hash,
+        old_content=old_content, new_content=new_content,
+        original_content_bytes=original_content_bytes,
+    )
+
+
 def record_detection(db: Session, file_entry: SecurityMonitoredFile, change_type: str, old_hash: str | None, new_hash: str | None, old_content: str, new_content: str, context: dict | None = None) -> SecurityDetectionEvent:
     # Safety-net: skip if an open incident already exists for this file and change type
     existing_incident = db.query(SecurityIncident).join(SecurityDetectionEvent).filter(
@@ -3798,6 +3861,9 @@ def scan_all_files(db: Session, context: dict | None = None) -> list[SecurityDet
 
     for file_entry in file_entries:
         if is_vm1_file(file_entry):
+            detection = _scan_vm1_snapshot(db, file_entry, context=context)
+            if detection:
+                detections.append(detection)
             continue
         if is_database_entry(file_entry) and database_entry and file_entry.id != database_entry.id:
             file_entry.status = "clean"
@@ -5978,7 +6044,15 @@ def _create_vm1_restore_command(db: Session, entry: SecurityMonitoredFile, detec
         content_bytes = None
         if snapshot.exists():
             try:
-                content_bytes = snapshot.read_bytes()
+                snapshot_hash = sha256_file(snapshot)
+                if snapshot_hash == entry.baseline_hash:
+                    content_bytes = snapshot.read_bytes()
+                else:
+                    logger.warning(
+                        "VM1 snapshot hash mismatch for %s (snapshot=%s baseline=%s); "
+                        "skipping snapshot-based restore content.",
+                        entry.relative_path, snapshot_hash, entry.baseline_hash,
+                    )
             except Exception:
                 pass
 

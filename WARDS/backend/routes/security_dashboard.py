@@ -49,8 +49,10 @@ from utils.security_client import (
     get_ai_rules,
     get_ai_sensitivity,
     is_database_entry,
+    is_vm1_file,
     list_monitored_files,
     manual_recover_file,
+    _scan_vm1_snapshot,
     mark_stale_backup_events_failed,
     mark_admin_change,
     mark_false_positive,
@@ -293,9 +295,14 @@ def list_files(db: Session = Depends(get_db), _=Depends(current_admin)):
 
 @router.post("/files/{file_id}/scan")
 def scan_file(file_id: int, request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
-    from types import SimpleNamespace
-    file_entry = SimpleNamespace(id=file_id, relative_path=None)
-    detection = scan_single_file(db, file_entry, context={"manual_scan": True})
+    from SECURITY.security_models import SecurityMonitoredFile
+    file_entry = db.query(SecurityMonitoredFile).filter(SecurityMonitoredFile.id == file_id).first()
+    if not file_entry:
+        raise HTTPException(status_code=404, detail="File not found")
+    if is_vm1_file(file_entry):
+        detection = _scan_vm1_snapshot(db, file_entry, context={"manual_scan": True})
+    else:
+        detection = scan_single_file(db, file_entry, context={"manual_scan": True})
     db.add(ActivityLog(
         action="Security File Scan",
         user=admin.username,
@@ -532,6 +539,13 @@ def _run_scan_all_files_sync(job_id: str) -> list:
                 file_entry.status = "clean"
                 file_entry.last_checked = now_utc()
                 db.add(file_entry)
+                continue
+            if is_vm1_file(file_entry):
+                detection = _scan_vm1_snapshot(db, file_entry, context={"manual_scan": True})
+                if detection:
+                    detections.append(detection)
+                progress = 10 + int((idx / total) * 80) if total else 50
+                job_manager.update_progress(job_id, progress, f"scanning {file_entry.relative_path}")
                 continue
             if not portable_monitored_path(file_entry).exists():
                 replacement_path = replacement_path_for(file_entry, hash_index)

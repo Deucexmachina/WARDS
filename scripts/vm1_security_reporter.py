@@ -37,7 +37,7 @@ MONITORED_ROOTS = {
     "OCR": Path(os.getenv("VM1_OCR_DIR", "/OCR")),
 }
 
-SCAN_INTERVAL = max(5, int(os.getenv("VM1_REPORT_INTERVAL", "30")))
+SCAN_INTERVAL = max(5, int(os.getenv("VM1_REPORT_INTERVAL", "10")))
 HEARTBEAT_INTERVAL = max(5, int(os.getenv("VM1_HEARTBEAT_INTERVAL", "10")))
 RESTORE_POLL_INTERVAL = max(3, int(os.getenv("VM1_RESTORE_POLL_INTERVAL", "5")))
 SNAPSHOT_DIR = Path(os.getenv("VM1_SNAPSHOT_DIR", "/app/.vm1_snapshots"))
