@@ -6054,7 +6054,7 @@ def acknowledge_vm1_restore_command(db: Session, command_id: str, success: bool)
     return True
 
 
-def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type: str, new_hash: str | None, old_content: str = "", new_content: str = "") -> SecurityDetectionEvent | None:
+def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type: str, new_hash: str | None, old_content: str = "", new_content: str = "", original_content_bytes: bytes | None = None) -> SecurityDetectionEvent | None:
     old_hash = entry.baseline_hash
     context = {
         "host_vm": "vm1",
@@ -6121,7 +6121,7 @@ def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type
         is_auto_recover = suffix in high_risk_exts or classification.get("severity_level") in {"high", "critical"}
         if is_auto_recover:
             # Auto-recovery: queue restore command but keep incident OPEN for admin review
-            _create_vm1_restore_command(db, entry, detection.id)
+            _create_vm1_restore_command(db, entry, detection.id, original_content_bytes=original_content_bytes)
             incident = create_incident(db, detection, classification, flags, changed, quarantine_path)
             incident.status = "open"
             incident.response_action = "auto_recovered_pending_review"
@@ -6424,9 +6424,16 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
                 changed += 1
                 db.add(entry)
                 db.commit()
-                # Read previous snapshot content for diff
+                # Read previous snapshot content for diff AND capture raw bytes
+                # before _store_vm1_snapshot overwrites it.
                 snapshot_path = VM1_SNAPSHOT_ROOT / entry.relative_path
                 old_content = read_text(snapshot_path) if snapshot_path.exists() else ""
+                old_snapshot_bytes = None
+                if snapshot_path.exists():
+                    try:
+                        old_snapshot_bytes = snapshot_path.read_bytes()
+                    except Exception:
+                        pass
                 new_content = ""
                 content_b64 = f.get("content_b64")
                 if content_b64:
@@ -6447,7 +6454,11 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
                     db.add(entry)
                     db.commit()
                     continue
-                detection = _record_vm1_detection(db, entry, "vm1_content_modified", current_hash, old_content=old_content, new_content=new_content)
+                detection = _record_vm1_detection(
+                    db, entry, "vm1_content_modified", current_hash,
+                    old_content=old_content, new_content=new_content,
+                    original_content_bytes=old_snapshot_bytes,
+                )
                 # Store the new snapshot so future changes have a baseline
                 _store_vm1_snapshot(rel_path, content_b64)
                 # Keep a copy of the defaced snapshot for false-positive revert
