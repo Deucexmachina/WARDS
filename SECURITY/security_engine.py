@@ -6149,6 +6149,10 @@ def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type
         SecurityIncident.status.in_(["open", "investigating"]),
     ).first()
     if existing_incident:
+        logger.info(
+            "VM1 dedup: skipping incident for %s (existing open incident SEC-%s)",
+            entry.relative_path, existing_incident.id,
+        )
         return detection
 
     # Always create a security incident for VM1 file changes; auto-recovery is controlled separately
@@ -6158,16 +6162,24 @@ def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type
         quarantine_path = None
         logger.warning("VM1 quarantine failed for %s: %s", entry.relative_path, exc)
 
-    try:
-        # Determine auto-recovery eligibility
-        suffix = Path(entry.relative_path).suffix.lower()
-        rules = context.get("ai_rules") or DEFAULT_AI_RULES
-        high_risk_exts = set(rules.get("file_type_risk", {}).get("config", {}).get("high_risk_extensions", [".html", ".jsx", ".js", ".py"]))
-        is_auto_recover = suffix in high_risk_exts or classification.get("severity_level") in {"high", "critical"}
-        if is_auto_recover:
-            # Auto-recovery: queue restore command but keep incident OPEN for admin review
+    # Determine auto-recovery eligibility — do this BEFORE creating the incident
+    # so that even if restore-command creation fails, the incident still exists.
+    suffix = Path(entry.relative_path).suffix.lower()
+    rules = context.get("ai_rules") or DEFAULT_AI_RULES
+    high_risk_exts = set(rules.get("file_type_risk", {}).get("config", {}).get("high_risk_extensions", [".html", ".jsx", ".js", ".py"]))
+    is_auto_recover = suffix in high_risk_exts or classification.get("severity_level") in {"high", "critical"}
+
+    if is_auto_recover:
+        # Queue restore command independently — failure here must NOT prevent incident creation
+        try:
             _create_vm1_restore_command(db, entry, detection.id, original_content_bytes=original_content_bytes)
-            incident = create_incident(db, detection, classification, flags, changed, quarantine_path)
+        except Exception as exc:
+            logger.exception("VM1 restore-command creation failed for %s: %s", entry.relative_path, exc)
+
+    # Now create the security incident regardless of whether the restore command succeeded
+    try:
+        incident = create_incident(db, detection, classification, flags, changed, quarantine_path)
+        if is_auto_recover:
             incident.status = "open"
             incident.response_action = "auto_recovered_pending_review"
             db.add(incident)
@@ -6192,12 +6204,11 @@ def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type
                 dedupe_key=f"SEC-{incident.id}",
             )
         else:
-            # Manual review required; do not queue restore command yet
-            incident = create_incident(db, detection, classification, flags, changed, quarantine_path)
             incident.response_action = "vm1_restore_pending"
             db.add(incident)
             db.commit()
             create_incident_system_alert(db, incident, detection, None)
+        logger.info("VM1 incident SEC-%s created for %s (auto_recover=%s)", incident.id, entry.relative_path, is_auto_recover)
     except Exception as exc:
         logger.exception("Failed to create security incident for VM1 detection %s: %s", detection.id, exc)
     return detection
