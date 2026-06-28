@@ -1,10 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CustomSelect, CustomDatePicker } from '../../components/FormControls';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
-import wardsLogo from '../../assets/branding/wards_logo.png';
-import qcLogo from '../../assets/branding/qclogo_main.png';
-import galasLogo from '../../assets/branding/galas_logo.png';
 
 const tabs = ['Dashboard', 'File Status', 'Backup History', 'Detection History', 'Recovery History', 'Security Incidents', 'Manual Controls'];
 const severities = ['info', 'low', 'medium', 'high', 'critical'];
@@ -106,11 +103,11 @@ const toDateInputMin = () => {
   return now.toISOString().slice(0, 16);
 };
 
-const Section = ({ title, children, actions }) => (
-  <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-    <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-      <h2 className="text-lg font-bold text-slate-900">{title}</h2>
-      {actions}
+const Section = ({ title, children, actions, className = '' }) => (
+  <section className={`rounded-[1.5rem] border border-slate-200 bg-white p-6 shadow-sm md:p-8 ${className}`.trim()}>
+    <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      <h2 className="text-xl font-bold text-slate-900">{title}</h2>
+      {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
     </div>
     {children}
   </section>
@@ -1012,74 +1009,53 @@ const BackupRecovery = () => {
         onSelect={selectFolder}
         onOpen={(path) => openFolderPicker(folderPicker.mode, folderPicker.title, path)}
       />
-      <nav className="fixed left-0 right-0 top-0 z-40 h-16 bg-primary px-6 shadow-lg">
-        <div className="flex h-full items-center justify-between">
+      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/80 px-4 py-3 shadow-sm backdrop-blur md:px-8">
+        <div className="mx-auto flex max-w-[90rem] items-center justify-between">
           <div className="flex items-center gap-3">
-            {[wardsLogo, qcLogo, galasLogo].map((logo, index) => (
-              <div key={index} className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-white/10 ring-1 ring-white/20">
-                <img src={logo} alt="Client logo" className="h-full w-full object-contain p-1" />
-              </div>
-            ))}
+            <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-primary shadow-sm">
+              <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+              </svg>
+            </div>
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-100">WARDS Backup & Recovery</p>
-              <h1 className="text-lg font-bold text-white">Security Dashboard</h1>
+              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">WARDS</p>
+              <h1 className="text-base font-bold text-slate-900">Security Dashboard</h1>
             </div>
           </div>
-          <button onClick={returnToAdmin} className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-primary transition hover:bg-blue-50">
-            Return to {isSuperadmin ? 'superadmin' : 'admin'} dashboard
+          <button onClick={returnToAdmin} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700">
+            Return to {adminLabel} Dashboard
           </button>
         </div>
-      </nav>
+      </header>
 
-      <aside className="fixed left-0 top-16 hidden h-[calc(100vh-4rem)] w-72 overflow-y-auto border-r border-slate-200 bg-white p-4 shadow-sm md:block">
-        <div className="mb-5 rounded-xl bg-purple-100 p-4 text-center text-purple-800">
-          <p className="text-sm font-bold">{adminLabel}</p>
-        </div>
-        <div className="space-y-2">
+      <div className="border-b border-slate-200 bg-white px-4 py-2 md:px-8">
+        <div className="mx-auto flex max-w-[90rem] gap-1 overflow-x-auto pb-1">
           {tabs.map((tab) => (
             <button
               key={tab}
               onClick={() => changeTab(tab)}
-              className={`w-full rounded-xl px-4 py-3 text-left text-sm font-semibold transition ${activeTab === tab ? 'bg-primary text-white' : 'text-slate-700 hover:bg-slate-100'}`}
-            >
-              <span>{tab}</span>
-              {notificationCounts[tab] > 0 && (
-                <span className="float-right rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold text-white">{notificationCounts[tab]}</span>
-              )}
-            </button>
-          ))}
-        </div>
-      </aside>
-
-      <div className="sticky top-16 z-30 block border-b border-slate-200 bg-white px-4 py-2 md:hidden">
-        <div className="flex gap-2 overflow-x-auto">
-          {tabs.map((tab) => (
-            <button
-              key={tab}
-              onClick={() => changeTab(tab)}
-              className={`shrink-0 rounded-lg px-3 py-2 text-xs font-semibold transition ${activeTab === tab ? 'bg-primary text-white' : 'bg-slate-100 text-slate-700'}`}
+              className={`shrink-0 rounded-lg px-3 py-2 text-xs font-semibold transition ${activeTab === tab ? 'bg-primary text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}
             >
               {tab}
               {notificationCounts[tab] > 0 && (
-                <span className="ml-1 rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">{notificationCounts[tab]}</span>
+                <span className="ml-1.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">{notificationCounts[tab]}</span>
               )}
             </button>
           ))}
         </div>
       </div>
 
-      <main className="ml-0 pt-16 md:ml-72">
-        <div className="space-y-6 p-4 md:p-8">
-          <section className="rounded-[2rem] border border-slate-300 bg-white px-4 py-5 text-slate-900 shadow-2xl shadow-slate-200/60 md:px-8 md:py-7">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-              <div>
-                <p className="max-w-3xl text-sm leading-6 text-slate-600">
-                  Local backup, Wazuh-fed monitoring, AI anomaly detection, quarantine, and recovery controls for the WARDS and OCR folders.
-                </p>
-              </div>
-              <Badge>{dashboard?.system_status || 'Loading'}</Badge>
+      <main className="mx-auto max-w-[90rem] space-y-6 px-4 py-6 md:px-8">
+        <section className="overflow-hidden rounded-[2rem] border border-slate-300 bg-white px-6 py-6 text-slate-900 shadow-2xl shadow-slate-200/60 md:px-8 md:py-7">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+            <div className="max-w-3xl">
+              <p className="text-xs font-semibold uppercase tracking-[0.26em] text-slate-500">Security Operations Center</p>
+              <h1 className="mt-2 text-2xl font-bold md:text-3xl">Backup & Recovery</h1>
+              <p className="mt-2 text-sm leading-6 text-slate-600">Local backup, Wazuh-fed monitoring, AI anomaly detection, quarantine, and recovery controls for the WARDS and OCR folders.</p>
             </div>
-          </section>
+            <Badge>{dashboard?.system_status || 'Loading'}</Badge>
+          </div>
+        </section>
 
           {notice && (
             <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-800">
@@ -1095,17 +1071,22 @@ const BackupRecovery = () => {
 
           {activeTab === 'Dashboard' && (
             <>
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-                {cards.map(([label, value]) => (
-                  <div key={label} className={`rounded-2xl p-5 shadow-sm ${cardClass(label, value)}`}>
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/80">{label}</p>
-                    <p className="mt-3 break-words text-2xl font-bold text-white">{value}</p>
-                  </div>
-                ))}
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                {cards.map(([label, value]) => {
+                  const isProtected = String(label).includes('Status') && String(value).toLowerCase() === 'protected';
+                  const isZeroIncidents = String(label).includes('Incidents') && Number(value || 0) === 0;
+                  const accent = isProtected || isZeroIncidents ? 'border-green-400 bg-green-50/40' : 'border-orange-400 bg-orange-50/40';
+                  return (
+                    <div key={label} className={`overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ${accent} border-t-[3px]`}>
+                      <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">{label}</p>
+                      <p className="mt-3 break-words text-2xl font-bold text-slate-900">{value}</p>
+                    </div>
+                  );
+                })}
               </div>
 
               {dashboard?.today_summary && (
-                <div className={`rounded-2xl border p-5 ${dashboard.today_summary.high_severity > 0 ? 'border-red-200 bg-red-50 text-red-900' : dashboard.today_summary.incidents > 0 ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-green-200 bg-green-50 text-green-900'}`}>
+                <div className={`rounded-[1.5rem] border p-5 ${dashboard.today_summary.high_severity > 0 ? 'border-red-200 bg-red-50 text-red-900' : dashboard.today_summary.incidents > 0 ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-green-200 bg-green-50 text-green-900'}`}>
                   <div className="flex items-center gap-3">
                     <span className="text-2xl">{dashboard.today_summary.high_severity > 0 ? '⚠️' : dashboard.today_summary.incidents > 0 ? '📊' : '✅'}</span>
                     <div className="flex-1">
@@ -1118,7 +1099,7 @@ const BackupRecovery = () => {
                 </div>
               )}
 
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-amber-900">
+              <div className="rounded-[1.5rem] border border-amber-200 bg-amber-50 p-5 text-amber-900">
                 <p className="text-sm font-bold">Scheduled backup reminder</p>
                 <p className="mt-1 text-sm">
                   {dashboard?.next_scheduled_backup && dashboard.next_scheduled_backup !== 'Not scheduled'
@@ -1143,11 +1124,11 @@ const BackupRecovery = () => {
               </div>
 
               <Section title="System Health">
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3 lg:grid-cols-5">
                   {Object.entries(dashboard?.health || {}).filter(([key]) => key !== 'backup_location').map(([key, value]) => (
-                    <div key={key} className="min-w-0 rounded-xl border border-green-100 bg-green-50/80 p-4">
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-green-700">{key.replaceAll('_', ' ')}</p>
-                      <p className="mt-2 overflow-hidden break-words text-sm font-bold text-green-900">{value}</p>
+                    <div key={key} className="min-w-0 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                      <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">{key.replaceAll('_', ' ')}</p>
+                      <p className="mt-2 overflow-hidden break-words text-sm font-bold text-slate-900">{value}</p>
                     </div>
                   ))}
                 </div>
@@ -1160,48 +1141,50 @@ const BackupRecovery = () => {
               title="Monitored Files"
               actions={(
                 <input
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm md:w-80"
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-sm md:w-80"
                   placeholder="Search files by keyword"
                   value={fileKeyword}
                   onChange={(e) => setFileKeyword(e.target.value)}
                 />
               )}
             >
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm min-w-[700px]">
-                  <thead className="border-b text-xs uppercase tracking-[0.16em] text-slate-500">
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <table className="w-full text-left text-sm min-w-[56rem]">
+                  <thead className="border-b border-slate-200 bg-slate-50 text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
                     <tr>
-                      <th className="min-w-[240px] py-3 pr-4">File</th>
-                      <th className="min-w-[80px] pr-4"><SortHeader label="Folder" column="folder" sort={fileSort} setSort={setFileSort} /></th>
-                      <th className="min-w-[100px] pr-4"><SortHeader label="Status" column="status" sort={fileSort} setSort={setFileSort} /></th>
-                      <th className="min-w-[60px] pr-4"><SortHeader label="Type" column="type" sort={fileSort} setSort={setFileSort} /></th>
-                      <th className="min-w-[80px] pr-4"><SortHeader label="Size" column="size" sort={fileSort} setSort={setFileSort} /></th>
-                      <th className="min-w-[160px] pr-4"><SortHeader label="Last Checked" column="last_checked" sort={fileSort} setSort={setFileSort} /></th>
-                      <th className="min-w-[140px]">Actions</th>
+                      <th className="min-w-[240px] px-4 py-3">File</th>
+                      <th className="min-w-[80px] px-4 py-3"><SortHeader label="Folder" column="folder" sort={fileSort} setSort={setFileSort} /></th>
+                      <th className="min-w-[100px] px-4 py-3"><SortHeader label="Status" column="status" sort={fileSort} setSort={setFileSort} /></th>
+                      <th className="min-w-[60px] px-4 py-3"><SortHeader label="Type" column="type" sort={fileSort} setSort={setFileSort} /></th>
+                      <th className="min-w-[80px] px-4 py-3"><SortHeader label="Size" column="size" sort={fileSort} setSort={setFileSort} /></th>
+                      <th className="min-w-[160px] px-4 py-3"><SortHeader label="Last Checked" column="last_checked" sort={fileSort} setSort={setFileSort} /></th>
+                      <th className="min-w-[140px] px-4 py-3">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {visibleFiles.slice((filePage - 1) * FILE_PAGE_SIZE, filePage * FILE_PAGE_SIZE).map((file) => (
-                      <tr key={file.id}>
-                        <td className="max-w-xs py-3 pr-4 font-semibold text-slate-800">
+                      <tr key={file.id} className="hover:bg-slate-50/60 transition">
+                        <td className="max-w-xs px-4 py-3 font-semibold text-slate-800">
                           <span className="block overflow-hidden text-ellipsis whitespace-nowrap" title={file.relative_path}>{file.relative_path}</span>
                         </td>
-                        <td className="pr-4">
+                        <td className="px-4 py-3">
                           <span className="block overflow-hidden text-ellipsis whitespace-nowrap" title={file.folder_root}>{file.folder_root}</span>
                         </td>
-                        <td className="pr-4"><Badge>{file.status}</Badge></td>
-                        <td className="pr-4">{file.file_type}</td>
-                        <td className="pr-4">{Number(file.size_bytes || 0).toLocaleString()} B</td>
-                        <td className="pr-4">{file.last_checked ? new Date(file.last_checked).toLocaleString() : 'n/a'}</td>
-                        <td className="flex gap-2 py-2">
-                          <button disabled={busy} className={`rounded-lg bg-slate-100 px-3 py-2 font-semibold text-slate-700 hover:bg-slate-200${disabledButtonClass}`} onClick={() => runAction(() => api.post(`/security/files/${file.id}/scan`), (result) => result?.data?.detection ? `Changes found in ${file.relative_path}. Detection log created.` : `No changes found in ${file.relative_path}.`, `Scanning ${file.relative_path}...`)}>Scan</button>
-                          <button disabled={busy} className={`rounded-lg bg-primary px-3 py-2 font-semibold text-white hover:bg-blue-900${disabledButtonClass}`} onClick={() => askConfirm('Recover this file from backup?', `This will restore ${file.relative_path} from the trusted local backup. There may be file or path mismatches if the file was moved, renamed, or backed up before recent structural changes. A full system backup is still recommended before relying on individual file recovery.`, () => api.post(`/security/files/${file.id}/recover`), 'File recovery complete.', 'Recover file')}>Recover</button>
+                        <td className="px-4 py-3"><Badge>{file.status}</Badge></td>
+                        <td className="px-4 py-3 text-slate-600">{file.file_type}</td>
+                        <td className="px-4 py-3 text-slate-600">{Number(file.size_bytes || 0).toLocaleString()} B</td>
+                        <td className="px-4 py-3 text-slate-600">{file.last_checked ? new Date(file.last_checked).toLocaleString() : 'n/a'}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex gap-2">
+                            <button disabled={busy} className={`rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-200${disabledButtonClass}`} onClick={() => runAction(() => api.post(`/security/files/${file.id}/scan`), (result) => result?.data?.detection ? `Changes found in ${file.relative_path}. Detection log created.` : `No changes found in ${file.relative_path}.`, `Scanning ${file.relative_path}...`)}>Scan</button>
+                            <button disabled={busy} className={`rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-blue-900${disabledButtonClass}`} onClick={() => askConfirm('Recover this file from backup?', `This will restore ${file.relative_path} from the trusted local backup. There may be file or path mismatches if the file was moved, renamed, or backed up before recent structural changes. A full system backup is still recommended before relying on individual file recovery.`, () => api.post(`/security/files/${file.id}/recover`), 'File recovery complete.', 'Recover file')}>Recover</button>
+                          </div>
                         </td>
                       </tr>
                     ))}
                     {!visibleFiles.length && (
                       <tr>
-                        <td colSpan={7} className="py-6 text-center text-sm font-semibold text-slate-500">No monitored files match your search.</td>
+                        <td colSpan={7} className="px-4 py-6 text-center text-sm font-semibold text-slate-500">No monitored files match your search.</td>
                       </tr>
                     )}
                   </tbody>
@@ -1221,21 +1204,21 @@ const BackupRecovery = () => {
                   const key = `b-${item.id}`;
                   const unseen = !item.is_viewed;
                   return (
-                    <div key={item.id} className="relative rounded-xl border border-slate-200 bg-white p-4">
-                      {unseen && <span className="absolute right-3 top-3 rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold text-white">New</span>}
+                    <div key={item.id} className="relative overflow-hidden rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300">
+                      {unseen && <span className="absolute right-3 top-3 rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-bold text-white">New</span>}
                       <button className="grid w-full gap-3 pr-12 text-left md:grid-cols-[minmax(0,1fr)_auto] md:items-center" onClick={() => toggleBackupRow(key, item.id)}>
                         <div className="min-w-0">
                           <p className="font-bold text-slate-900">{item.summary || 'Backup completed'}</p>
-                          <p className="text-sm text-slate-600">{formatDateTime(item.started_at)}</p>
+                          <p className="text-sm text-slate-500">{formatDateTime(item.started_at)}</p>
                         </div>
                         <div className="flex min-w-0 flex-wrap items-center gap-2 md:justify-end md:text-right">
-                          <span className="max-w-xs truncate text-sm font-semibold text-slate-600">{item.backup_path || 'No path recorded'}</span>
+                          <span className="max-w-xs truncate text-xs font-semibold text-slate-500">{item.backup_path || 'No path recorded'}</span>
                           <Badge>{item.recovery_type}</Badge>
                           <Badge>{item.status}</Badge>
                         </div>
                       </button>
                       {openRows[key] && (
-                        <pre className="mt-4 max-h-64 overflow-auto rounded-xl bg-slate-50 p-4 text-xs text-slate-700">{JSON.stringify(item, null, 2)}</pre>
+                        <pre className="mt-4 max-h-64 overflow-auto rounded-xl border border-slate-100 bg-slate-50 p-4 text-xs text-slate-700">{JSON.stringify(item, null, 2)}</pre>
                       )}
                     </div>
                   );
@@ -1253,16 +1236,16 @@ const BackupRecovery = () => {
                   const key = `d-${item.id}`;
                   const unseen = !item.is_legitimate && !item.is_viewed;
                   return (
-                    <div key={item.id} className="relative rounded-xl border border-slate-200 bg-white p-4">
-                      {unseen && <span className="absolute right-3 top-3 rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold text-white">New</span>}
+                    <div key={item.id} className="relative overflow-hidden rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300">
+                      {unseen && <span className="absolute right-3 top-3 rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-bold text-white">New</span>}
                       <button className="grid w-full gap-3 pr-12 text-left md:grid-cols-[minmax(0,1fr)_auto] md:items-center" onClick={() => toggleDetectionRow(key, item.id)}>
                         <div className="min-w-0">
                           <p className="font-bold text-slate-900">{item.target_name}</p>
-                          <p className="text-sm text-slate-600">{item.trigger_summary}</p>
-                          <p className="mt-1 text-xs font-semibold text-slate-500">{formatDateTime(item.detected_at)}</p>
+                          <p className="text-sm text-slate-500">{item.trigger_summary}</p>
+                          <p className="mt-1 text-xs font-semibold text-slate-400">{formatDateTime(item.detected_at)}</p>
                         </div>
                         <div className="flex flex-wrap items-center gap-2 md:justify-end md:text-right">
-                          <span className="text-sm font-semibold text-slate-600">{Math.round(Number(item.confidence || 0) * 100)}% confidence</span>
+                          <span className="text-xs font-semibold text-slate-500">{Math.round(Number(item.confidence || 0) * 100)}% confidence</span>
                           <Badge>{item.severity_level}</Badge>
                           <Badge>{detectionClassification(item)}</Badge>
                         </div>
@@ -1275,7 +1258,7 @@ const BackupRecovery = () => {
                             <p className="mt-3 text-sm font-bold text-slate-800">Behaviors</p>
                             <p className="mt-1 text-sm text-slate-600">{(item.behaviors || []).map(humanize).join(', ') || 'No extra behavior flags'}</p>
                           </div>
-                          <pre className="max-h-64 overflow-auto rounded-xl bg-slate-50 p-4 text-xs text-slate-700">{JSON.stringify(item.changed_lines, null, 2)}</pre>
+                          <pre className="max-h-64 overflow-auto rounded-xl border border-slate-100 bg-slate-50 p-4 text-xs text-slate-700">{JSON.stringify(item.changed_lines, null, 2)}</pre>
                         </div>
                       )}
                     </div>
@@ -1293,21 +1276,21 @@ const BackupRecovery = () => {
                   const key = `r-${item.id}`;
                   const unseen = !item.is_viewed;
                   return (
-                    <div key={item.id} className="relative rounded-xl border border-slate-200 bg-white p-4">
-                      {unseen && <span className="absolute right-3 top-3 rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold text-white">New</span>}
+                    <div key={item.id} className="relative overflow-hidden rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300">
+                      {unseen && <span className="absolute right-3 top-3 rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-bold text-white">New</span>}
                       <button className="grid w-full gap-3 pr-12 text-left md:grid-cols-[minmax(0,1fr)_auto] md:items-center" onClick={() => toggleRecoveryRow(key, item.id)}>
                         <div className="min-w-0">
                           <p className="font-bold text-slate-900">{item.summary || item.recovery_type}</p>
-                          <p className="text-sm text-slate-600">{formatDateTime(item.started_at)}</p>
+                          <p className="text-sm text-slate-500">{formatDateTime(item.started_at)}</p>
                         </div>
                         <div className="flex flex-wrap items-center gap-2 md:justify-end md:text-right">
-                          <span className="text-sm font-semibold text-slate-600">{item.recovery_duration_ms || 0} ms</span>
+                          <span className="text-xs font-semibold text-slate-500">{item.recovery_duration_ms || 0} ms</span>
                           <Badge>{item.recovery_type}</Badge>
                           <Badge>{item.status}</Badge>
                         </div>
                       </button>
                       {openRows[key] && (
-                        <pre className="mt-4 max-h-64 overflow-auto rounded-xl bg-slate-50 p-4 text-xs text-slate-700">{JSON.stringify(item, null, 2)}</pre>
+                        <pre className="mt-4 max-h-64 overflow-auto rounded-xl border border-slate-100 bg-slate-50 p-4 text-xs text-slate-700">{JSON.stringify(item, null, 2)}</pre>
                       )}
                     </div>
                   );
@@ -1321,8 +1304,8 @@ const BackupRecovery = () => {
             <Section
               title="Security Incidents"
               actions={
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-6">
-                  <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Search incidents" value={incidentFilters.keyword} onChange={(e) => setIncidentFilters({ ...incidentFilters, keyword: e.target.value })} />
+                <div className="grid w-full gap-3 md:ml-auto md:w-[min(100%,64rem)] md:grid-cols-6">
+                  <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm shadow-sm" placeholder="Search incidents" value={incidentFilters.keyword} onChange={(e) => setIncidentFilters({ ...incidentFilters, keyword: e.target.value })} />
                   <CustomDatePicker name="date_from" max={todayStr} value={incidentFilters.date_from} onChange={(e) => setIncidentFilters({ ...incidentFilters, date_from: e.target.value })} />
                   <CustomDatePicker name="date_to" max={todayStr} value={incidentFilters.date_to} onChange={(e) => setIncidentFilters({ ...incidentFilters, date_to: e.target.value })} />
                   <CustomSelect value={incidentFilters.status} onChange={(value) => setIncidentFilters({ ...incidentFilters, status: value })} options={[{ value: '', label: 'All statuses' }, ...['open', 'investigating', 'resolved', 'false_positive'].map((item) => ({ value: item, label: badgeText(item) }))]} placeholder="All statuses" />
@@ -1332,25 +1315,25 @@ const BackupRecovery = () => {
               }
             >
               <div className="mb-4 flex flex-wrap gap-2">
-                <button disabled={busy} className={`rounded-xl bg-green-600 px-4 py-2 text-sm font-bold text-white${disabledButtonClass}`} onClick={() => askConfirm('Mark all unresolved incidents as resolved?', 'This will close every open or investigating incident and delete their quarantine folders. Logs will remain. The backup will not be changed because resolved incidents keep the current clean files.', bulkIncidentAction('resolve'), 'All unresolved incidents marked as resolved.', 'Resolve all')}>Mark all as resolved</button>
-                <button disabled={busy} className={`rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-white${disabledButtonClass}`} onClick={() => askConfirm('Mark all unresolved incidents as false positives?', 'This will accept every open or investigating quarantined file as authorized, update the backup, and delete quarantine folders. Logs will remain.', bulkIncidentAction('false_positive'), 'All unresolved incidents marked as false positive.', 'Mark all False+')}>Mark all as False+</button>
-                <button disabled={busy} className={`rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white${disabledButtonClass}`} onClick={() => askConfirm('Mark all open incidents as investigating?', 'This will move every open incident into investigating status so your team can review them. No files will be restored or deleted.', bulkIncidentAction('investigating'), 'All open incidents marked as investigating.', 'Mark investigating')}>Mark all as investigating</button>
+                <button disabled={busy} className={`rounded-xl bg-green-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-green-700${disabledButtonClass}`} onClick={() => askConfirm('Mark all unresolved incidents as resolved?', 'This will close every open or investigating incident and delete their quarantine folders. Logs will remain. The backup will not be changed because resolved incidents keep the current clean files.', bulkIncidentAction('resolve'), 'All unresolved incidents marked as resolved.', 'Resolve all')}>Mark all as resolved</button>
+                <button disabled={busy} className={`rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-amber-600${disabledButtonClass}`} onClick={() => askConfirm('Mark all unresolved incidents as false positives?', 'This will accept every open or investigating quarantined file as authorized, update the backup, and delete quarantine folders. Logs will remain.', bulkIncidentAction('false_positive'), 'All unresolved incidents marked as false positive.', 'Mark all False+')}>Mark all as False+</button>
+                <button disabled={busy} className={`rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700${disabledButtonClass}`} onClick={() => askConfirm('Mark all open incidents as investigating?', 'This will move every open incident into investigating status so your team can review them. No files will be restored or deleted.', bulkIncidentAction('investigating'), 'All open incidents marked as investigating.', 'Mark investigating')}>Mark all as investigating</button>
               </div>
               <div className="space-y-3">
                 {incidents.map((item) => {
                   const key = `i-${item.id}`;
                   const unresolved = ['open', 'investigating'].includes(String(item.status).toLowerCase());
                   return (
-                    <div key={item.id} className="relative rounded-xl border border-slate-200 bg-white p-4">
-                      {unresolved && <span className="absolute right-3 top-3 rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold text-white">Open</span>}
+                    <div key={item.id} className="relative overflow-hidden rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300">
+                      {unresolved && <span className="absolute right-3 top-3 rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-bold text-white">Open</span>}
                       <button className="grid w-full gap-3 pr-12 text-left md:grid-cols-[minmax(0,1fr)_auto] md:items-center" onClick={() => toggleRow(key)}>
                         <div className="min-w-0">
                           <p className="font-bold text-slate-900">{titleize(item.incident_type)}</p>
-                          <p className="text-sm text-slate-600">{item.description}</p>
-                          <p className="mt-1 text-xs font-semibold text-slate-500">{formatDateTime(item.created_at)}</p>
+                          <p className="text-sm text-slate-500">{item.description}</p>
+                          <p className="mt-1 text-xs font-semibold text-slate-400">{formatDateTime(item.created_at)}</p>
                         </div>
                         <div className="flex flex-wrap items-center gap-2 md:justify-end md:text-right">
-                          <span className="text-sm font-bold text-slate-700">CVSS {item.cvss_score}</span>
+                          <span className="text-xs font-bold text-slate-700">CVSS {item.cvss_score}</span>
                           <Badge>{item.severity_level}</Badge>
                           <Badge>{item.status}</Badge>
                         </div>
@@ -1358,17 +1341,17 @@ const BackupRecovery = () => {
                       {openRows[key] && (
                         <div className="mt-4 space-y-4 border-t border-slate-100 pt-4">
                           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                            <div className="rounded-xl bg-slate-50 p-4"><p className="text-xs font-bold uppercase text-slate-500">NIST</p><p className="mt-1 text-sm font-semibold">{item.nist_category}</p></div>
-                            <div className="rounded-xl bg-slate-50 p-4"><p className="text-xs font-bold uppercase text-slate-500">ENISA</p><p className="mt-1 text-sm font-semibold">{item.enisa_threat_type}</p></div>
-                            <div className="rounded-xl bg-slate-50 p-4"><p className="text-xs font-bold uppercase text-slate-500">Action</p><p className="mt-1 text-sm font-semibold">{item.response_action}</p></div>
+                            <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4"><p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">NIST</p><p className="mt-1 text-sm font-semibold text-slate-900">{item.nist_category}</p></div>
+                            <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4"><p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">ENISA</p><p className="mt-1 text-sm font-semibold text-slate-900">{item.enisa_threat_type}</p></div>
+                            <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4"><p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Action</p><p className="mt-1 text-sm font-semibold text-slate-900">{item.response_action}</p></div>
                           </div>
                           <p className="text-sm text-slate-700"><strong>Behaviors:</strong> {(item.behaviors || []).map(humanize).join(', ') || 'None'}</p>
                           <p className="text-sm text-slate-700"><strong>Affected files:</strong> {(item.affected_files || []).join(', ') || 'None'}</p>
-                          <pre className="max-h-64 overflow-auto rounded-xl bg-slate-50 p-4 text-xs text-slate-700">{JSON.stringify(item.changed_lines, null, 2)}</pre>
+                          <pre className="max-h-64 overflow-auto rounded-xl border border-slate-100 bg-slate-50 p-4 text-xs text-slate-700">{JSON.stringify(item.changed_lines, null, 2)}</pre>
                           {unresolved && (
                             <div className="flex flex-wrap gap-2">
-                              <button disabled={busy} className={`rounded-lg bg-green-600 px-3 py-2 text-sm font-semibold text-white hover:bg-green-700${disabledButtonClass}`} onClick={(event) => { event.stopPropagation(); askConfirm('Resolve this incident?', 'WARDS will keep the restored clean file and delete this incident quarantine folder. The log remains. The backup will not be changed.', incidentStatusAction(item.id, 'resolve'), 'Incident resolved and quarantine cleared.', 'Resolve'); }}>Resolve</button>
-                              <button disabled={busy} className={`rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-600${disabledButtonClass}`} onClick={(event) => { event.stopPropagation(); askConfirm('Mark this incident as false positive?', 'WARDS will restore the quarantined file as an authorized change, update the backup, and delete the quarantine folder. The log remains.', incidentStatusAction(item.id, 'false-positive'), 'Incident marked as false positive and authorized file restored. Staying on Security Incidents for review.', 'False+'); }}>False+</button>
+                              <button disabled={busy} className={`rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-green-700${disabledButtonClass}`} onClick={(event) => { event.stopPropagation(); askConfirm('Resolve this incident?', 'WARDS will keep the restored clean file and delete this incident quarantine folder. The log remains. The backup will not be changed.', incidentStatusAction(item.id, 'resolve'), 'Incident resolved and quarantine cleared.', 'Resolve'); }}>Resolve</button>
+                              <button disabled={busy} className={`rounded-lg bg-amber-500 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-amber-600${disabledButtonClass}`} onClick={(event) => { event.stopPropagation(); askConfirm('Mark this incident as false positive?', 'WARDS will restore the quarantined file as an authorized change, update the backup, and delete the quarantine folder. The log remains.', incidentStatusAction(item.id, 'false-positive'), 'Incident marked as false positive and authorized file restored. Staying on Security Incidents for review.', 'False+'); }}>False+</button>
                             </div>
                           )}
                         </div>
@@ -1645,36 +1628,52 @@ const BackupRecovery = () => {
                     <input className="mt-3 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Reason" value={restrictionInput.reason} onChange={(e) => setRestrictionInput({ ...restrictionInput, reason: e.target.value })} />
                   </div>
 
-                  <div className="max-h-60 overflow-x-auto rounded-xl border border-slate-200 md:overflow-auto">
+                  <div className="max-h-60 overflow-x-auto rounded-xl border border-slate-200 bg-white md:overflow-auto">
                     {userRestrictions.length > 0 ? (
-                      <table className="w-full text-sm min-w-[400px]">
-                        <thead className="bg-slate-50"><tr><th className="px-4 py-3 text-left font-bold text-slate-700">Account</th><th className="px-4 py-3 text-left font-bold text-slate-700">Scope</th><th className="px-4 py-3 text-left font-bold text-slate-700">Remaining</th><th className="px-4 py-3 text-left font-bold text-slate-700">Strikes</th></tr></thead>
-                        <tbody>{userRestrictions.map((item) => <tr key={`${item.account_id}-${item.scope}`} className="border-t border-slate-100"><td className="px-4 py-3 font-mono text-slate-900">{item.account_id}</td><td className="px-4 py-3 text-slate-700">{item.scope}</td><td className="px-4 py-3 text-slate-700">{Math.floor(item.remaining_seconds / 60)}m {item.remaining_seconds % 60}s</td><td className="px-4 py-3 text-slate-700">{item.strike_count}</td></tr>)}</tbody>
+                      <table className="w-full text-left text-sm min-w-[28rem]">
+                        <thead className="border-b border-slate-200 bg-slate-50 text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
+                          <tr>
+                            <th className="px-4 py-3">Account</th>
+                            <th className="px-4 py-3">Scope</th>
+                            <th className="px-4 py-3">Remaining</th>
+                            <th className="px-4 py-3">Strikes</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {userRestrictions.map((item) => (
+                            <tr key={`${item.account_id}-${item.scope}`} className="hover:bg-slate-50/60 transition">
+                              <td className="px-4 py-3 font-mono text-xs text-slate-900">{item.account_id}</td>
+                              <td className="px-4 py-3 text-slate-700">{item.scope}</td>
+                              <td className="px-4 py-3 text-slate-700">{Math.floor(item.remaining_seconds / 60)}m {item.remaining_seconds % 60}s</td>
+                              <td className="px-4 py-3 text-slate-700">{item.strike_count}</td>
+                            </tr>
+                          ))}
+                        </tbody>
                       </table>
                     ) : <div className="p-8 text-center text-sm text-slate-500">No account restrictions are active.</div>}
                   </div>
 
                   {blockedIps.filter((item) => !item.is_permanent).length > 0 && (
-                    <div className="max-h-80 overflow-x-auto rounded-xl border border-slate-200 md:overflow-auto">
-                      <table className="w-full text-sm min-w-[400px]">
-                        <thead className="bg-slate-50">
+                    <div className="max-h-80 overflow-x-auto rounded-xl border border-slate-200 bg-white md:overflow-auto">
+                      <table className="w-full text-left text-sm min-w-[28rem]">
+                        <thead className="border-b border-slate-200 bg-slate-50 text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
                           <tr>
-                            <th className="px-4 py-3 text-left font-bold text-slate-700">IP Address</th>
-                            <th className="px-4 py-3 text-left font-bold text-slate-700">Remaining Time</th>
-                            <th className="px-4 py-3 text-right font-bold text-slate-700">Action</th>
+                            <th className="px-4 py-3">IP Address</th>
+                            <th className="px-4 py-3">Remaining Time</th>
+                            <th className="px-4 py-3 text-right">Action</th>
                           </tr>
                         </thead>
-                        <tbody>
+                        <tbody className="divide-y divide-slate-100">
                           {blockedIps.filter((item) => !item.is_permanent).map((item) => (
-                            <tr key={item.ip} className="border-t border-slate-100">
-                              <td className="px-4 py-3 font-mono text-slate-900">{item.ip}</td>
+                            <tr key={item.ip} className="hover:bg-slate-50/60 transition">
+                              <td className="px-4 py-3 font-mono text-xs text-slate-900">{item.ip}</td>
                               <td className="px-4 py-3 text-slate-700">
                                 {item.remaining_seconds > 0 ? `${Math.floor(item.remaining_seconds / 60)}m ${item.remaining_seconds % 60}s` : 'Expired'}
                               </td>
                               <td className="px-4 py-3 text-right">
                                 <button
                                   disabled={busy}
-                                  className={`rounded-lg bg-green-600 px-3 py-1 text-xs font-semibold text-white disabled:opacity-60${disabledButtonClass}`}
+                                  className={`rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-green-700 disabled:opacity-60${disabledButtonClass}`}
                                   onClick={() => askConfirm('Unblock this IP?', `WARDS will remove ${item.ip} from the temporary and active block lists.`, () => unblockIp(item.ip), `IP ${item.ip} unblocked.`, 'Unblock IP')}
                                 >
                                   Unblock
@@ -1733,27 +1732,27 @@ const BackupRecovery = () => {
                         />
                       </div>
 
-                      <div className="max-h-60 overflow-x-auto rounded-xl border border-slate-200 md:overflow-auto">
+                      <div className="max-h-60 overflow-x-auto rounded-xl border border-slate-200 bg-white md:overflow-auto">
                         {permanentBlocks.length > 0 ? (
-                          <table className="w-full text-sm min-w-[400px]">
-                            <thead className="bg-slate-50">
+                          <table className="w-full text-left text-sm min-w-[28rem]">
+                            <thead className="border-b border-slate-200 bg-slate-50 text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
                               <tr>
-                                <th className="px-4 py-3 text-left font-bold text-slate-700">IP Address</th>
-                                <th className="px-4 py-3 text-left font-bold text-slate-700">Reason</th>
-                                <th className="px-4 py-3 text-left font-bold text-slate-700">Blocked By</th>
-                                <th className="px-4 py-3 text-right font-bold text-slate-700">Action</th>
+                                <th className="px-4 py-3">IP Address</th>
+                                <th className="px-4 py-3">Reason</th>
+                                <th className="px-4 py-3">Blocked By</th>
+                                <th className="px-4 py-3 text-right">Action</th>
                               </tr>
                             </thead>
-                            <tbody>
+                            <tbody className="divide-y divide-slate-100">
                               {permanentBlocks.map((item) => (
-                                <tr key={item.id} className="border-t border-slate-100">
-                                  <td className="px-4 py-3 font-mono text-slate-900">{item.ip}</td>
+                                <tr key={item.id} className="hover:bg-slate-50/60 transition">
+                                  <td className="px-4 py-3 font-mono text-xs text-slate-900">{item.ip}</td>
                                   <td className="px-4 py-3 text-slate-700">{item.reason}</td>
                                   <td className="px-4 py-3 text-slate-700">{item.blocked_by}</td>
                                   <td className="px-4 py-3 text-right">
                                     <button
                                       disabled={busy}
-                                      className={`rounded-lg bg-orange-600 px-3 py-1 text-xs font-semibold text-white disabled:opacity-60${disabledButtonClass}`}
+                                      className={`rounded-lg bg-orange-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-orange-700 disabled:opacity-60${disabledButtonClass}`}
                                       onClick={() => askConfirm('Remove permanent IP block?', `WARDS will remove ${item.ip} from the manual permanent blocklist.`, () => removePermanentBlock(item.ip), `IP ${item.ip} removed from permanent blocklist.`, 'Remove block')}
                                     >
                                       Remove
@@ -1773,8 +1772,7 @@ const BackupRecovery = () => {
               </Section>
             </div>
           )}
-        </div>
-      </main>
+        </main>
     </div>
   );
 };

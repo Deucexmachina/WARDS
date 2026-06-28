@@ -6,7 +6,7 @@ import os
 import sys
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -634,16 +634,20 @@ def scan_result(job_id: str, _=Depends(current_admin)):
 
 
 @router.post("/recover/full")
-def recover_full(request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
-    try:
-        result = full_system_recovery(db, admin.id)
-    except httpx.HTTPStatusError as exc:
-        status_code = exc.response.status_code if exc.response else 502
-        raise HTTPException(status_code=status_code, detail=f"Security service error: {exc}")
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="Security service timed out. VM2 may be unreachable.")
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Unable to reach security service: {exc}")
+def recover_full(request: Request, background_tasks: BackgroundTasks = None, db: Session = Depends(get_db), admin=Depends(current_admin)):
+    def _run_recovery():
+        db2 = SessionLocal()
+        try:
+            full_system_recovery(db2, admin.id)
+        finally:
+            db2.close()
+
+    if background_tasks:
+        background_tasks.add_task(_run_recovery)
+    else:
+        import threading
+        threading.Thread(target=_run_recovery, daemon=True).start()
+
     db.add(ActivityLog(
         action="Security Full System Recovery",
         user=admin.username,
@@ -651,7 +655,7 @@ def recover_full(request: Request, db: Session = Depends(get_db), admin=Depends(
         type="security",
     ))
     db.commit()
-    return result
+    return {"status": "processing", "message": "Full system recovery started in the background. Check recovery logs for results."}
 
 
 @router.post("/recover/vm1-database")

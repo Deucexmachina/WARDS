@@ -248,18 +248,27 @@ def get_ai_sensitivity(db) -> str:
     return _cached_fetch("get_ai_sensitivity", _CACHE_TTL["get_ai_sensitivity"], lambda: _sync_get("/v1/ai/sensitivity"), default="medium")
 
 
+def _invalidate_cache(cache_key: str):
+    with _cache_lock:
+        _cache.pop(cache_key, None)
+
+
 def update_ai_rules(db, rules, actor):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import update_ai_rules as _local
         return _local(db, rules, actor)
-    return _sync_post("/v1/ai/rules", {"rules": rules, "actor": actor})
+    result = _sync_post("/v1/ai/rules", {"rules": rules, "actor": actor})
+    _invalidate_cache("get_ai_rules")
+    return result
 
 
 def add_ai_rule(db, rule_key, actor):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import add_ai_rule as _local
         return _local(db, rule_key, actor)
-    return _sync_post("/v1/ai/rules/add", {"rule_key": rule_key, "actor": actor})
+    result = _sync_post("/v1/ai/rules/add", {"rule_key": rule_key, "actor": actor})
+    _invalidate_cache("get_ai_rules")
+    return result
 
 
 def available_ai_rule_templates(db):
