@@ -5971,7 +5971,8 @@ def get_pending_vm1_restore_commands(db: Session) -> list[dict]:
             try:
                 path = Path(content_file)
                 if path.exists():
-                    c["restore_content_b64"] = base64.b64encode(path.read_bytes()).decode()
+                    # File already contains base64-encoded text; read it directly
+                    c["restore_content_b64"] = path.read_bytes().decode()
             except Exception:
                 pass
         pending.append(c)

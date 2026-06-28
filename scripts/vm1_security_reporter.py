@@ -168,18 +168,24 @@ def apply_restore_command(cmd: dict) -> bool:
     # Resolve the actual path on VM1
     target = None
     for root_name, root_path in MONITORED_ROOTS.items():
-        prefix = f"VM1_{root_name}/"
-        if rel_path.startswith(prefix):
-            suffix = rel_path[len(prefix):]
-            target = root_path / suffix
+        # Heartbeat sends relative_path as "WARDS/backend/..." with folder_root "VM1_WARDS";
+        # commands may use either format.
+        for prefix in (f"VM1_{root_name}/", f"{root_name}/"):
+            if rel_path.startswith(prefix):
+                suffix = rel_path[len(prefix):]
+                target = root_path / suffix
+                break
+        if target is not None:
             break
 
     if target is None:
         for custom_path in CUSTOM_FOLDERS:
-            prefix = f"{custom_path.name}/"
-            if rel_path.startswith(prefix):
-                suffix = rel_path[len(prefix):]
-                target = custom_path / suffix
+            for prefix in (f"VM1_{custom_path.name}/", f"{custom_path.name}/"):
+                if rel_path.startswith(prefix):
+                    suffix = rel_path[len(prefix):]
+                    target = custom_path / suffix
+                    break
+            if target is not None:
                 break
     if target is None:
         log(f"Could not resolve restore path for {rel_path}")
