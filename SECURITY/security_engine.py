@@ -3011,7 +3011,7 @@ def restore_from_backup(db: Session, file_entry: SecurityMonitoredFile, detectio
             recovery.backup_path = stored_path_value(source) or str(source)
             recovery.completed_at = now_utc()
             recovery.recovery_duration_ms = int((time.time() - started) * 1000)
-            recovery.summary = f"Auto-recovery queued for {file_entry.relative_path} from {backup_root.name}."
+            recovery.summary = f"Auto-recovery applied for {file_entry.relative_path} from {backup_root.name}; pending admin verification."
             db.add(file_entry)
             db.add(recovery)
             db.commit()
@@ -6114,7 +6114,7 @@ def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type
                 initiated_by=None,
                 status="success",
                 quarantine_path=quarantine_path,
-                summary=f"Auto-recovery queued for {entry.relative_path}; waiting for VM1 reporter to restore.",
+                summary=f"Auto-recovery applied for {entry.relative_path}; pending admin verification.",
                 completed_at=now_utc(),
             )
             db.add(recovery)
@@ -6122,7 +6122,7 @@ def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type
             create_system_alert(
                 db,
                 "incident_auto_recovery",
-                f"SEC-{incident.id}: Auto-recovery queued for {entry.relative_path} (high-risk / high-severity). Admin review required.",
+                f"SEC-{incident.id}: Auto-recovery applied for {entry.relative_path} (high-risk / high-severity). Admin review required.",
                 incident.severity_level or "low",
                 dedupe_key=f"SEC-{incident.id}",
             )
