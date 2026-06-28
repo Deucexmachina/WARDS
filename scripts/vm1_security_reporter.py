@@ -39,7 +39,7 @@ MONITORED_ROOTS = {
 
 SCAN_INTERVAL = max(5, int(os.getenv("VM1_REPORT_INTERVAL", "30")))
 HEARTBEAT_INTERVAL = max(5, int(os.getenv("VM1_HEARTBEAT_INTERVAL", "10")))
-RESTORE_POLL_INTERVAL = max(5, int(os.getenv("VM1_RESTORE_POLL_INTERVAL", "15")))
+RESTORE_POLL_INTERVAL = max(3, int(os.getenv("VM1_RESTORE_POLL_INTERVAL", "5")))
 SNAPSHOT_DIR = Path(os.getenv("VM1_SNAPSHOT_DIR", "/app/.vm1_snapshots"))
 MAX_FILE_SNAPSHOT_BYTES = int(os.getenv("VM1_MAX_SNAPSHOT_BYTES", "2097152"))  # 2 MB
 
@@ -120,6 +120,9 @@ def send_manifest(files: list[dict]) -> bool:
                 f"Manifest uploaded: registered={data.get('registered', 0)} "
                 f"changed={data.get('changed', 0)} detections={data.get('detections', 0)}"
             )
+            # Apply any restore commands returned immediately to avoid poll delay
+            for cmd in data.get("restore_commands", []):
+                apply_restore_command(cmd)
             return True
         log(f"Manifest upload failed: HTTP {resp.status_code} {resp.text[:200]}")
         return False
@@ -300,6 +303,9 @@ def main_loop():
             files = list(iter_monitored_files())
             snapshot_files(files)
             send_manifest(files)
+            # Immediately poll for any restore commands created from this manifest
+            # instead of waiting for the next restore-poll interval.
+            poll_restore_commands()
             last_scan = now
 
         if now - last_restore_poll >= RESTORE_POLL_INTERVAL:

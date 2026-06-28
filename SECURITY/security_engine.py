@@ -1793,9 +1793,9 @@ def is_deployment_in_progress(db: Session) -> bool:
     setting = db.query(SecuritySetting).filter(SecuritySetting.key == "deployment_in_progress").first()
     if not setting or not setting.value or setting.value.lower() != "true":
         return False
-    # Auto-clear stale deployment pause (> 10 minutes) so a failed webhook unpause
+    # Auto-clear stale deployment pause (> 30 minutes) so a failed webhook unpause
     # doesn't leave monitoring disabled forever.
-    stale_threshold = 600  # seconds
+    stale_threshold = 1800  # seconds
     if setting.updated_at and (now_utc() - setting.updated_at).total_seconds() > stale_threshold:
         logger.warning(
             "Deployment pause is stale (updated_at=%s, threshold=%ds). Auto-clearing.",
@@ -6227,6 +6227,69 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
         db.commit()
         return {"detections": [], "changed": 0, "registered": len(files)}
 
+    # --- Bulk change detection ---
+    # If many existing monitored files change at once with no open incidents,
+    # treat as a deployment and update baselines instead of flooding detections.
+    changed_entries: list[tuple[SecurityMonitoredFile, dict, str]] = []
+    for f in files:
+        if not isinstance(f, dict):
+            continue
+        rel_path = str(f.get("relative_path") or "").strip()
+        folder_root = str(f.get("folder_root") or "").strip()
+        folder_root = _clean_folder_root(folder_root)
+        rel_path = _clean_folder_root(rel_path)
+        if not rel_path or ".." in rel_path.replace("\\", "/"):
+            continue
+        if folder_root not in allowed_vm1_roots:
+            continue
+        rel_path_parts = set(Path(rel_path).parts)
+        if rel_path_parts.intersection({item.lower() for item in DEFAULT_EXCLUDED_DIRS}):
+            continue
+        if not _vm1_file_monitorable(rel_path):
+            continue
+        current_hash = _valid_hash(f.get("current_hash"))
+        if Path(rel_path).name.lower() == ".env":
+            continue
+        entry = (
+            db.query(SecurityMonitoredFile)
+            .filter(SecurityMonitoredFile.relative_path == rel_path)
+            .filter(SecurityMonitoredFile.folder_root == folder_root)
+            .first()
+        )
+        if entry and entry.baseline_hash and current_hash and entry.baseline_hash != current_hash:
+            changed_entries.append((entry, f, current_hash))
+
+    BULK_CHANGE_THRESHOLD = 5
+    if len(changed_entries) >= BULK_CHANGE_THRESHOLD:
+        has_open_incidents = any(
+            db.query(SecurityIncident)
+            .join(SecurityDetectionEvent)
+            .filter(SecurityDetectionEvent.file_id == entry.id)
+            .filter(SecurityIncident.status.in_(["open", "investigating"]))
+            .first()
+            is not None
+            for entry, _, _ in changed_entries
+        )
+        if not has_open_incidents:
+            logger.info(
+                "Bulk VM1 file change detected (%d files) — treating as deployment, updating baselines.",
+                len(changed_entries),
+            )
+            for entry, f, current_hash in changed_entries:
+                entry.current_hash = current_hash
+                entry.baseline_hash = current_hash
+                entry.status = "clean"
+                entry.last_checked = now_utc()
+                db.add(entry)
+                _store_vm1_snapshot(entry.relative_path, f.get("content_b64"))
+            db.commit()
+            return {
+                "registered": 0,
+                "changed": len(changed_entries),
+                "detections": 0,
+                "deployment_detected": True,
+            }
+
     detections = []
     changed = 0
     registered = 0
@@ -6390,11 +6453,15 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
     db.commit()
     set_setting(db, "vm1_last_heartbeat_at", now_utc().isoformat(), "vm1_reporter")
     set_setting(db, "vm1_last_heartbeat_status", "success", "vm1_reporter")
+    # Include pending restore commands in the response so the VM1 reporter can
+    # apply them immediately instead of waiting for the next poll cycle.
+    restore_commands = get_pending_vm1_restore_commands(db)
     return {
         "registered": registered,
         "changed": changed,
         "detections": len(detections),
         "detection_ids": [d.id for d in detections],
+        "restore_commands": restore_commands,
     }
 
 

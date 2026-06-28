@@ -93,13 +93,20 @@ def _unpause_vm2() -> bool:
                 time.sleep(2 ** attempt)
     logger.error(
         "CRITICAL: Failed to clear VM2 deployment mode after 5 attempts. "
-        "VM2 will auto-clear the stale pause after 10 minutes."
+        "VM2 will auto-clear the stale pause after 30 minutes."
     )
     return False
 
 
 @app.post("/webhook")
 async def github_webhook(request: Request):
+    if not VM2_HOST or not VM2_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="VM2_HOST or VM2_API_KEY not configured. "
+                   "Set these environment variables so VM2 monitoring can be paused during deployment.",
+        )
+
     body = await request.body()
     signature = request.headers.get("X-Hub-Signature-256", "")
 
