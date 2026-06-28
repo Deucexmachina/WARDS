@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
@@ -25,7 +26,7 @@ import requests
 from sqlalchemy import MetaData, Table, inspect, or_, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
-from database.models import Admin, Alert
+from database.models import Admin, Alert, SessionLocal
 from utils.log_integrity import verify_record_integrity
 
 from SECURITY.security_models import (
@@ -39,6 +40,18 @@ from SECURITY.security_models import (
 
 MASTER_ROOT = Path(__file__).resolve().parents[1]
 logger = logging.getLogger(__name__)
+
+
+def _run_async_backup(fn):
+    """Run a backup operation in a background daemon thread to avoid blocking the HTTP response."""
+    def _wrapper():
+        try:
+            fn()
+        except Exception as exc:
+            logger.warning("Background backup failed: %s", exc)
+    threading.Thread(target=_wrapper, daemon=True).start()
+
+
 SECURITY_ROOT = MASTER_ROOT / "SECURITY"
 QUARANTINE_ROOT = MASTER_ROOT / "QUARANTINE"
 VM1_SNAPSHOT_ROOT = Path(os.getenv("VM1_SNAPSHOT_ROOT", str(SECURITY_ROOT / "vm1_snapshots")))
@@ -4575,12 +4588,21 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                     db.add(recovery)
                     db.commit()
                 # Trigger a post-resolve backup so the restored state becomes the trusted baseline
-                try:
-                    post_resolve_backup = create_manual_backup(db, initiated_by=_valid_admin_id(db, admin_id), label="post_resolve")
-                    if post_resolve_backup.status == "success":
-                        incident.response_action = "resolved_clean_backup_refreshed"
-                except Exception as backup_exc:
-                    logger.warning("Post-resolve backup failed: %s", backup_exc)
+                def _post_resolve_backup():
+                    bg_db = SessionLocal()
+                    try:
+                        post_resolve_backup = create_manual_backup(bg_db, initiated_by=_valid_admin_id(bg_db, admin_id), label="post_resolve")
+                        if post_resolve_backup.status == "success":
+                            bg_incident = bg_db.query(SecurityIncident).filter(SecurityIncident.id == incident.id).first()
+                            if bg_incident:
+                                bg_incident.response_action = "resolved_clean_backup_refreshed"
+                                bg_db.add(bg_incident)
+                                bg_db.commit()
+                    except Exception as backup_exc:
+                        logger.warning("Post-resolve backup failed: %s", backup_exc)
+                    finally:
+                        bg_db.close()
+                _run_async_backup(_post_resolve_backup)
             else:
                 # Manual resolve: read original from quarantine, queue restore command
                 quarantine_paths = json_loads(incident.quarantine_paths_json, [])
@@ -4619,12 +4641,21 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                         db.add(recovery)
                         db.commit()
                     # Trigger a post-resolve backup so the restored state becomes the trusted baseline
-                    try:
-                        post_resolve_backup = create_manual_backup(db, initiated_by=_valid_admin_id(db, admin_id), label="post_resolve")
-                        if post_resolve_backup.status == "success":
-                            incident.response_action = "resolved_clean_backup_refreshed"
-                    except Exception as backup_exc:
-                        logger.warning("Post-resolve backup failed: %s", backup_exc)
+                    def _post_resolve_backup():
+                        bg_db = SessionLocal()
+                        try:
+                            post_resolve_backup = create_manual_backup(bg_db, initiated_by=_valid_admin_id(bg_db, admin_id), label="post_resolve")
+                            if post_resolve_backup.status == "success":
+                                bg_incident = bg_db.query(SecurityIncident).filter(SecurityIncident.id == incident.id).first()
+                                if bg_incident:
+                                    bg_incident.response_action = "resolved_clean_backup_refreshed"
+                                    bg_db.add(bg_incident)
+                                    bg_db.commit()
+                        except Exception as backup_exc:
+                            logger.warning("Post-resolve backup failed: %s", backup_exc)
+                        finally:
+                            bg_db.close()
+                    _run_async_backup(_post_resolve_backup)
         else:
             # Local file: restore from backup if missing or modified
             backup_root = latest_backup_root(db)
@@ -4836,9 +4867,23 @@ def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_ba
                 except Exception:
                     backup_refresh_failed = True
             else:
-                backup_event = create_manual_backup(db, _valid_admin_id(db, admin_id), label="false_positive")
-                backup_refreshed = backup_event.status == "success"
-                backup_refresh_failed = backup_event.status != "success"
+                # Run slow full backup in background to avoid HTTP timeout
+                def _fp_backup():
+                    bg_db = SessionLocal()
+                    try:
+                        backup_event = create_manual_backup(bg_db, _valid_admin_id(bg_db, admin_id), label="false_positive")
+                        if backup_event.status == "success":
+                            bg_incident = bg_db.query(SecurityIncident).filter(SecurityIncident.id == incident.id).first()
+                            if bg_incident:
+                                bg_incident.response_action = "authorized_change_restored_backup_refreshed"
+                                bg_db.add(bg_incident)
+                                bg_db.commit()
+                    except Exception as exc:
+                        logger.warning("False-positive background backup failed: %s", exc)
+                    finally:
+                        bg_db.close()
+                _run_async_backup(_fp_backup)
+                backup_refresh_failed = True  # Will be corrected by background thread if backup succeeds
             if backup_refreshed:
                 incident.response_action = "authorized_change_restored_backup_refreshed"
             elif backup_refresh_failed:
@@ -4894,7 +4939,15 @@ def bulk_update_incidents(db: Session, action: str, admin_id: int, confirm_missi
         except Exception:
             failed += 1
     if action == "false_positive" and updated:
-        create_manual_backup(db, _valid_admin_id(db, admin_id), label="false_positive_bulk")
+        def _bulk_fp_backup():
+            bg_db = SessionLocal()
+            try:
+                create_manual_backup(bg_db, _valid_admin_id(bg_db, admin_id), label="false_positive_bulk")
+            except Exception as exc:
+                logger.warning("Bulk false-positive background backup failed: %s", exc)
+            finally:
+                bg_db.close()
+        _run_async_backup(_bulk_fp_backup)
     recovery = SecurityRecoveryEvent(
         recovery_type="bulk_incident_update",
         initiated_by=_valid_admin_id(db, admin_id),
