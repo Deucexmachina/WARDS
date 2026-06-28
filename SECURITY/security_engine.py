@@ -3565,7 +3565,7 @@ def scan_single_file(db: Session, file_entry: SecurityMonitoredFile, context: di
     context = context or {}
     if is_database_entry(file_entry):
         return scan_database_entry(db, file_entry, context=context, commit_clean=commit_clean)
-    if is_vm1_file(file_entry):
+    if is_vm1_file(file_entry) and not context.get("scan_vm1_local"):
         return None
     # Skip environment files that change frequently and are environment-specific
     if Path(file_entry.file_path or "").name.lower() == ".env":

@@ -299,7 +299,10 @@ def scan_file(file_id: int, request: Request, db: Session = Depends(get_db), adm
     file_entry = db.query(SecurityMonitoredFile).filter(SecurityMonitoredFile.id == file_id).first()
     if not file_entry:
         raise HTTPException(status_code=404, detail="File not found")
-    detection = scan_single_file(db, file_entry, context={"manual_scan": True})
+    if is_vm1_file(file_entry):
+        detection = scan_single_file(db, file_entry, context={"manual_scan": True, "scan_vm1_local": True})
+    else:
+        detection = scan_single_file(db, file_entry, context={"manual_scan": True})
     db.add(ActivityLog(
         action="Security File Scan",
         user=admin.username,
@@ -538,7 +541,7 @@ def _run_scan_all_files_sync(job_id: str) -> list:
                 db.add(file_entry)
                 continue
             if is_vm1_file(file_entry):
-                detection = _scan_vm1_snapshot(db, file_entry, context={"manual_scan": True})
+                detection = scan_single_file(db, file_entry, context={"manual_scan": True, "scan_vm1_local": True}, commit_clean=False)
                 if detection:
                     detections.append(detection)
                 progress = 10 + int((idx / total) * 80) if total else 50
