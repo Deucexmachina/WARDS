@@ -426,9 +426,10 @@ def main_loop():
             if cfg:
                 new_interval = cfg.get("scan_interval_seconds")
                 if new_interval and isinstance(new_interval, int):
-                    # Respect local VM1_REPORT_INTERVAL as a ceiling so VM2 can never
-                    # force the reporter to scan slower than configured locally.
-                    DYNAMIC_SCAN_INTERVAL = max(5, min(new_interval, SCAN_INTERVAL))
+                    # Allow VM2 to control scan rate for demo/deployment flexibility.
+                    # Floor at 5s to prevent hammering; no ceiling so longer intervals
+                    # (e.g. 300s) can be used to delay detection during demonstrations.
+                    DYNAMIC_SCAN_INTERVAL = max(5, new_interval)
                 custom = cfg.get("vm1_custom_folders", [])
                 CUSTOM_FOLDERS = [Path(p) for p in custom if p]
                 if new_interval:
