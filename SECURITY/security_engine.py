@@ -4857,12 +4857,13 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                     snapshot.write_bytes(original_bytes)
                     clean_hash = hashlib.sha256(original_bytes).hexdigest()
                     file_entry.baseline_hash = clean_hash
+                    file_entry.current_hash = clean_hash
                     file_entry.status = "clean"
-                    # Do NOT update current_hash here; leave it as the defaced hash so
-                    # subsequent scans see previous_hash == current_hash and skip
-                    # re-detection while the VM1 restore command is pending.
                 else:
-                    file_entry.status = "modified"
+                    # No clean backup found — accept the current state as the new baseline
+                    # so the file stops getting re-detected on every scan.
+                    file_entry.baseline_hash = file_entry.current_hash
+                    file_entry.status = "clean"
                 file_entry.last_checked = now_utc()
                 db.add(file_entry)
                 if detection and original_bytes is not None:
