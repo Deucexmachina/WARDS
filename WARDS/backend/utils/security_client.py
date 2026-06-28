@@ -29,6 +29,7 @@ _CACHE_TTL: dict[str, int] = {
     "source_ids": 10,
     "query_detections": 10,
     "query_recoveries": 10,
+    "query_incidents": 10,
     "get_ai_rules": 60,
     "get_ai_sensitivity": 60,
     "get_setting": 30,
@@ -136,10 +137,13 @@ def query_incidents(db, keyword=None, status=None, severity=None, date_from=None
             query = query.filter(SecurityIncident.created_at <= datetime.fromisoformat(f"{date_to}T23:59:59" if len(date_to) == 10 else date_to))
         order = SecurityIncident.created_at.asc() if sort == "oldest" else SecurityIncident.created_at.desc()
         return query.order_by(order).limit(limit).all()
-    return _sync_post("/v1/incidents/query", {
-        "keyword": keyword, "status": status, "severity": severity,
-        "date_from": date_from, "date_to": date_to, "limit": limit, "sort": sort,
-    })
+    def _fetch():
+        return _sync_post("/v1/incidents/query", {
+            "keyword": keyword, "status": status, "severity": severity,
+            "date_from": date_from, "date_to": date_to, "limit": limit, "sort": sort,
+        })
+    cache_key = f"query_incidents:{keyword}:{status}:{severity}:{date_from}:{date_to}:{limit}:{sort}"
+    return _cached_fetch(cache_key, _CACHE_TTL["query_incidents"], _fetch, default=[])
 
 
 def source_ids_for_log_type(db, log_type: str) -> list[int]:

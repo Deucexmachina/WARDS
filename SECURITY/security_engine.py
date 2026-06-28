@@ -700,7 +700,7 @@ def record_context_detection(
         old_hash=None,
         new_hash=sha256_text(synthetic_content),
         is_legitimate=False,
-        admin_id=context.get("admin_id"),
+        admin_id=_valid_admin_id(db, context.get("admin_id")),
         ai_score=prediction.score,
         ai_prediction=prediction.prediction,
         confidence=prediction.confidence,
@@ -1906,7 +1906,11 @@ def update_ai_rules(db: Session, rules: dict, updated_by: str) -> dict:
         if key not in merged or not isinstance(value, dict):
             continue
         if "enabled" in value:
-            merged[key]["enabled"] = bool(value["enabled"])
+            enabled_val = value["enabled"]
+            if isinstance(enabled_val, str):
+                merged[key]["enabled"] = enabled_val.lower() not in ("false", "0", "off", "no", "", "disabled")
+            else:
+                merged[key]["enabled"] = bool(enabled_val)
         if "weight" in value:
             merged[key]["weight"] = max(0.0, min(2.0, float(value["weight"])))
         if "config" in value and isinstance(value["config"], dict):
@@ -3377,10 +3381,17 @@ def should_create_incident(change_type: str, prediction: AIPrediction, flags: li
 
 def create_incident(db: Session, detection: SecurityDetectionEvent, classification: dict, flags: list[str], changed: dict, quarantine_path: str | None) -> SecurityIncident:
     context = json.loads(detection.context_json or "{}")
-    source_ip = context.get("source_ip") or context.get("client_ip") or context.get("ip_address") or "unknown"
-    source_details = f" Source IP: {source_ip}."
-    if context.get("db_user"):
-        source_details += f" DB user: {context.get('db_user')}."
+    if detection.target_type == "vm1_host":
+        description = (
+            "VM1 security reporter heartbeat timeout. "
+            "Host may be compromised, reporter killed, or network partitioned."
+        )
+    else:
+        source_ip = context.get("source_ip") or context.get("client_ip") or context.get("ip_address") or "unknown"
+        source_details = f" Source IP: {source_ip}."
+        if context.get("db_user"):
+            source_details += f" DB user: {context.get('db_user')}."
+        description = f"{detection.change_type} detected in {detection.target_name}.{source_details}"
     incident = SecurityIncident(
         detection_event_id=detection.id,
         incident_type=classification["incident_type"],
@@ -3389,7 +3400,7 @@ def create_incident(db: Session, detection: SecurityDetectionEvent, classificati
         cvss_vector=classification["cvss_vector"],
         nist_category=classification["nist_category"],
         enisa_threat_type=classification["enisa_threat_type"],
-        description=f"{detection.change_type} detected in {detection.target_name}.{source_details}",
+        description=description,
         behaviors_json=json_dumps([BEHAVIOR_LABELS.get(flag, flag) for flag in flags]),
         affected_files_json=json_dumps([detection.target_name]),
         changed_lines_json=json_dumps(changed),
@@ -3627,7 +3638,7 @@ def record_detection(db: Session, file_entry: SecurityMonitoredFile, change_type
         old_hash=old_hash,
         new_hash=new_hash,
         is_legitimate=is_legitimate,
-        admin_id=admin_change.admin_id if admin_change else None,
+        admin_id=_valid_admin_id(db, admin_change.admin_id) if admin_change else None,
         ai_score=prediction.score,
         ai_prediction=prediction.prediction,
         confidence=prediction.confidence,
@@ -3687,6 +3698,7 @@ _last_full_registration_at = None
 def scan_all_files(db: Session, context: dict | None = None) -> list[SecurityDetectionEvent]:
     global _last_full_registration_at
     now = now_utc()
+    is_manual_scan = bool(context and context.get("manual_scan"))
     if is_deployment_in_progress(db):
         logger.info("Deployment in progress — refreshing file registry without creating detections.")
         register_initial_files(db, refresh_existing=True, incremental=False)
@@ -3703,13 +3715,15 @@ def scan_all_files(db: Session, context: dict | None = None) -> list[SecurityDet
         set_setting(db, "last_scan_at", now_utc().isoformat(), "security_scanner")
         db.commit()
         return []
-    if _last_full_registration_at is None or (now - _last_full_registration_at) > timedelta(hours=1):
+    if is_manual_scan:
+        register_initial_files(db, refresh_existing=False, incremental=True)
+    elif _last_full_registration_at is None or (now - _last_full_registration_at) > timedelta(hours=1):
         register_initial_files(db, refresh_existing=False, incremental=False)
         _last_full_registration_at = now
     else:
         register_initial_files(db, refresh_existing=False, incremental=True)
     migrate_portable_monitored_files(db)
-    database_entry = normalize_database_monitor_entry(db, reset_baseline=False, ensure_snapshot=True)
+    database_entry = normalize_database_monitor_entry(db, reset_baseline=False, ensure_snapshot=not is_manual_scan)
     set_setting(db, "last_scan_at", now_utc().isoformat(), "security_scanner")
     detections = []
     hash_index = current_hash_index(db)
@@ -3842,6 +3856,7 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
                 if not skip_database_snapshot:
                     create_database_snapshot(db, snapshot_target)
                 elif DATABASE_SNAPSHOT_PATH.exists():
+                    snapshot_target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(DATABASE_SNAPSHOT_PATH, snapshot_target)
                 checksum_target = backup_file_path(backup_root, DATABASE_CHECKSUM_RELATIVE_PATH)
                 checksum_target.parent.mkdir(parents=True, exist_ok=True)

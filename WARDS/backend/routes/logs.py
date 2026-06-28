@@ -137,21 +137,38 @@ async def get_activity_logs(
         match = re.search(rf"{re.escape(label)}\s*:\s*([^|,]+)", details, flags=re.IGNORECASE)
         return match.group(1).strip() if match else None
 
+    # Pre-fetch roles for all unique users in this batch to avoid N+1 queries
+    unique_users = {log.user for log in logs if log.user}
+    usernames = {u for u in unique_users if "@" not in u}
+    emails = {u for u in unique_users if "@" in u}
+
+    admins_map: dict[str, str] = {}
+    staff_map: dict[str, str] = {}
+    citizens_map: dict[str, str] = {}
+    if usernames:
+        admins_map = {a.username: a.role for a in db.query(Admin).filter(Admin.username.in_(usernames)).all()}
+        staff_map = {s.username: s.role for s in db.query(BranchStaff).filter(BranchStaff.username.in_(usernames)).all()}
+    if emails:
+        for email in emails:
+            citizen = find_citizen_by_email(db, CitizenUser, email)
+            if citizen and citizen.role:
+                citizens_map[email] = citizen.role
+
     def _resolve_role(user_identifier: str) -> str:
         if not user_identifier:
             return "unknown"
         if user_identifier.lower() == "system":
             return "system"
-        admin = db.query(Admin).filter(Admin.username == user_identifier).first()
-        if admin:
-            return admin.role
-        staff = db.query(BranchStaff).filter(BranchStaff.username == user_identifier).first()
-        if staff:
-            return staff.role
+        role = admins_map.get(user_identifier)
+        if role:
+            return role
+        role = staff_map.get(user_identifier)
+        if role:
+            return role
         if "@" in user_identifier:
-            citizen = find_citizen_by_email(db, CitizenUser, user_identifier)
-            if citizen and citizen.role:
-                return citizen.role
+            role = citizens_map.get(user_identifier)
+            if role:
+                return role
             return "citizen"
         return "unknown"
 
