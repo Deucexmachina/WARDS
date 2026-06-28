@@ -467,7 +467,8 @@ def bulk_incidents(payload: BulkIncidentRequest, request: Request, db: Session =
     try:
         result = bulk_update_incidents(db, payload.action, admin.id, confirm_missing_files=payload.confirm_missing_files)
     except MissingFileConfirmationRequired as exc:
-        raise HTTPException(status_code=409, detail=exc.details)
+        detail = getattr(exc, "details", None) or str(exc)
+        raise HTTPException(status_code=409, detail=detail)
     db.add(ActivityLog(
         action="Security Bulk Incident Update",
         user=admin.username,
@@ -483,7 +484,8 @@ def resolve(incident_id: int, confirm_missing_files: bool = False, db: Session =
     try:
         return serialize_incident(resolve_incident(db, incident_id, admin.id, confirm_missing_files=confirm_missing_files))
     except MissingFileConfirmationRequired as exc:
-        raise HTTPException(status_code=409, detail=exc.details)
+        detail = getattr(exc, "details", None) or str(exc)
+        raise HTTPException(status_code=409, detail=detail)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
@@ -493,7 +495,8 @@ def false_positive(incident_id: int, confirm_missing_files: bool = False, db: Se
     try:
         return serialize_incident(mark_false_positive(db, incident_id, admin.id, confirm_missing_files=confirm_missing_files))
     except MissingFileConfirmationRequired as exc:
-        raise HTTPException(status_code=409, detail=exc.details)
+        detail = getattr(exc, "details", None) or str(exc)
+        raise HTTPException(status_code=409, detail=detail)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except RuntimeError as exc:

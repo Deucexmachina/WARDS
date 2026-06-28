@@ -167,19 +167,8 @@ def source_ids_for_log_type(db, log_type: str) -> list[int]:
 
 
 def source_ids_batch(db, log_types: list[str]) -> dict[str, list[int]]:
-    """Fetch source IDs for multiple log types from VM2."""
-    if not SECURITY_API_URL:
-        return {lt: source_ids_for_log_type(db, lt) for lt in log_types}
-
-    results: dict[str, list[int]] = {}
-    for lt in log_types:
-        try:
-            r = _session.get(f"{SECURITY_API_URL}/v1/source-ids/{lt}", headers=_headers(), timeout=TIMEOUT, verify=False)
-            r.raise_for_status()
-            results[lt] = r.json().get("ids", [])
-        except Exception:
-            results[lt] = []
-    return results
+    """Fetch source IDs for multiple log types from VM2 (uses per-type cache)."""
+    return {lt: source_ids_for_log_type(db, lt) for lt in log_types}
 
 
 def query_detections(db, keyword=None, date_from=None, date_to=None, target=None, severity=None, limit=200, sort="newest", classification=None):

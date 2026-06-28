@@ -785,11 +785,9 @@ const BackupRecovery = () => {
     }
   };
 
-  const missingFileParams = (options) => (options?.confirmMissingFiles ? { params: { confirm_missing_files: true } } : undefined);
+  const bulkIncidentAction = (action) => () => api.patch('/security/incidents/bulk-action', { action, confirm_missing_files: true });
 
-  const bulkIncidentAction = (action) => (options = {}) => api.patch('/security/incidents/bulk-action', { action, confirm_missing_files: Boolean(options.confirmMissingFiles) });
-
-  const incidentStatusAction = (incidentId, actionPath) => (options = {}) => api.patch(`/security/incidents/${incidentId}/${actionPath}`, null, missingFileParams(options));
+  const incidentStatusAction = (incidentId, actionPath) => () => api.patch(`/security/incidents/${incidentId}/${actionPath}`, null, { params: { confirm_missing_files: true } });
 
   const askConfirm = (title, message, action, success, confirmText = 'Confirm') => {
     setConfirm({ title, message, action, success, confirmText });
