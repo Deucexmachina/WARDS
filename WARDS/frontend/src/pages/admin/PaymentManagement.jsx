@@ -308,6 +308,7 @@ const PaymentManagement = () => {
     try {
       setPageError('');
       const user = JSON.parse(localStorage.getItem('user') || '{}');
+      const token = localStorage.getItem('adminToken');
       let url = `${API_BASE_URL}/payments`;
 
       if (user.role === 'branch_admin' || user.role === 'branch_staff') {
@@ -318,8 +319,9 @@ const PaymentManagement = () => {
         }
       }
 
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
       const [response, branchesResponse] = await Promise.all([
-        axios.get(url),
+        axios.get(url, { headers }),
         axios.get(`${API_BASE_URL}/public/branches`),
       ]);
       setPayments(response.data || []);

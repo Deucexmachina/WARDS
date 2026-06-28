@@ -11,14 +11,14 @@ from pathlib import Path
 from textwrap import wrap
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import false, or_
 
 from database.models import (
     ActivityLog,
@@ -35,6 +35,7 @@ from database.models import (
     get_db,
 )
 from auth import require_main_admin, get_current_user
+from auth.decorators import decode_active_account_from_bearer_token, _validate_token_binding
 from services.email_service import send_payment_receipt_email
 from services.paymongo import paymongo_service
 from utils.branch_system_settings import get_branch_setting_value
@@ -51,6 +52,39 @@ def get_rate_limit_key(request: Request) -> str:
     if hasattr(request.state, 'user') and request.state.user:
         return f"user:{request.state.user.id}"
     return get_remote_address(request)
+
+
+async def resolve_auth_from_request(request: Request, db: Session = Depends(get_db)):
+    """Decode any valid Bearer token (public, admin, or branch) and return (portal, account)."""
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    token = auth_header.split(" ", 1)[1]
+    portal, account, payload = decode_active_account_from_bearer_token(
+        token, db, allowed_portals=("public", "admin", "branch")
+    )
+    _validate_token_binding(request, payload)
+    return portal, account
+
+
+async def resolve_optional_auth_from_request(request: Request, db: Session = Depends(get_db)):
+    """Decode any valid Bearer token if present; return (portal, account) or (None, None)."""
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return None, None
+    token = auth_header.split(" ", 1)[1]
+    try:
+        portal, account, payload = decode_active_account_from_bearer_token(
+            token, db, allowed_portals=("public", "admin", "branch")
+        )
+        _validate_token_binding(request, payload)
+        return portal, account
+    except HTTPException:
+        return None, None
 
 
 limiter = Limiter(key_func=get_rate_limit_key)
@@ -292,6 +326,58 @@ def citizen_name(user: CitizenUser) -> str | None:
 
 def citizen_tin(user: CitizenUser) -> str | None:
     return get_decrypted_or_raw(user, "tin") or user.tin
+
+
+def get_payments_for_citizen(db: Session, citizen_user: CitizenUser):
+    """Return a query scoped to payments belonging to the given citizen user."""
+    query = db.query(Payment)
+    user_email = citizen_email(citizen_user)
+    if user_email:
+        query = query.filter(
+            or_(
+                Payment.email == user_email,
+                Payment.email_hash == hash_optional_value(user_email),
+            )
+        )
+    else:
+        user_name = citizen_name(citizen_user)
+        user_tin = citizen_tin(citizen_user)
+        filters = []
+        if user_name:
+            filters.append(Payment.taxpayer_name == user_name)
+            filters.append(Payment.taxpayer_name_hash == hash_optional_value(user_name))
+        if user_tin:
+            filters.append(Payment.tin == user_tin)
+            filters.append(Payment.tin_hash == hash_optional_value(user_tin))
+        if filters:
+            query = query.filter(or_(*filters))
+        else:
+            query = query.filter(false())
+    return query
+
+
+def verify_payment_ownership(payment: Payment, citizen_user: CitizenUser):
+    """Raise 403 if the payment does not belong to the citizen user."""
+    user_email = citizen_email(citizen_user)
+    if user_email:
+        if (
+            payment.email == user_email
+            or payment.email_hash == hash_optional_value(user_email)
+        ):
+            return
+    else:
+        user_name = citizen_name(citizen_user)
+        user_tin = citizen_tin(citizen_user)
+        matches = []
+        if user_name:
+            matches.append(payment.taxpayer_name == user_name)
+            matches.append(payment.taxpayer_name_hash == hash_optional_value(user_name))
+        if user_tin:
+            matches.append(payment.tin == user_tin)
+            matches.append(payment.tin_hash == hash_optional_value(user_tin))
+        if any(matches):
+            return
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
 
 def payment_value(payment: Payment, field_name: str):
@@ -2917,6 +3003,7 @@ async def verify_payment(
     payment = find_payment_by_ref_number(db, Payment, ref_number)
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
+    verify_payment_ownership(payment, current_user)
     return serialize_payment(payment)
 
 
@@ -3074,10 +3161,19 @@ async def get_transactions(
 
 
 @router.get("/")
-async def get_all_payments(branch: str = None, db: Session = Depends(get_db)):
-    query = db.query(Payment)
-    if branch:
-        query = query_payments_for_branch_name(db, branch)
+async def get_all_payments(
+    request: Request,
+    branch: str = None,
+    db: Session = Depends(get_db),
+    auth=Depends(resolve_auth_from_request),
+):
+    portal, account = auth
+    if portal == "public":
+        query = get_payments_for_citizen(db, account)
+    else:
+        query = db.query(Payment)
+        if branch:
+            query = query_payments_for_branch_name(db, branch)
     payments = query.order_by(Payment.created_at.asc()).all()
     return [serialize_payment(payment) for payment in payments]
 
@@ -3308,12 +3404,19 @@ async def download_business_tax_official_receipt(
 
 
 @router.get("/{payment_id}/proof")
-async def download_payment_proof(payment_id: int, db: Session = Depends(get_db)):
+async def download_payment_proof(
+    payment_id: int,
+    db: Session = Depends(get_db),
+    auth=Depends(resolve_optional_auth_from_request),
+):
     payment = db.query(Payment).filter(Payment.id == payment_id).first()
     proof_path = payment_value(payment, "proof_file_path") if payment else None
     proof_name = payment_value(payment, "proof_file_name") if payment else None
     if not payment or not proof_path:
         raise HTTPException(status_code=404, detail="Payment proof not found")
+    portal, account = auth
+    if portal == "public":
+        verify_payment_ownership(payment, account)
     return deliver_file_response(
         proof_path,
         filename=proof_name or Path(proof_path).name,
@@ -3322,11 +3425,18 @@ async def download_payment_proof(payment_id: int, db: Session = Depends(get_db))
 
 
 @router.get("/{payment_id}/official-receipt")
-async def download_official_receipt(payment_id: int, db: Session = Depends(get_db)):
+async def download_official_receipt(
+    payment_id: int,
+    db: Session = Depends(get_db),
+    auth=Depends(resolve_optional_auth_from_request),
+):
     payment = db.query(Payment).filter(Payment.id == payment_id).first()
     official_receipt_path = payment_value(payment, "official_receipt_path") if payment else None
     if not payment or not official_receipt_path:
         raise HTTPException(status_code=404, detail="Official receipt not found")
+    portal, account = auth
+    if portal == "public":
+        verify_payment_ownership(payment, account)
     return deliver_file_response(
         official_receipt_path,
         filename=Path(official_receipt_path).name,
@@ -3335,10 +3445,17 @@ async def download_official_receipt(payment_id: int, db: Session = Depends(get_d
 
 
 @router.get("/{payment_id}/payment-confirmation")
-async def download_payment_confirmation(payment_id: int, db: Session = Depends(get_db)):
+async def download_payment_confirmation(
+    payment_id: int,
+    db: Session = Depends(get_db),
+    auth=Depends(resolve_optional_auth_from_request),
+):
     payment = db.query(Payment).filter(Payment.id == payment_id).first()
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
+    portal, account = auth
+    if portal == "public":
+        verify_payment_ownership(payment, account)
     pdf_bytes = build_payment_confirmation_pdf(payment)
     filename = f"{payment_value(payment, 'ref_number') or f'payment-{payment.id}'}-confirmation.pdf"
     return StreamingResponse(
