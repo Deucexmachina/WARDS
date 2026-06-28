@@ -179,24 +179,71 @@ def fetch_vm2_config() -> dict:
 
 
 def _trigger_docker_rebuild(rel_path: str):
-    """Restart frontend container if a restored file affects the built output."""
+    """Rebuild and restart frontend container if a restored file affects the built output."""
     lower = rel_path.lower()
     if not any(p in lower for p in ("/frontend/", "/public/", "index.html")):
         return
+
+    # Find a directory that contains docker-compose.yml so the build
+    # uses the correct compose definition and build context.
+    compose_dirs = ["/opt/wards/app", "/wards", "/app", "/"]
+    cwd = None
+    for d in compose_dirs:
+        if Path(d).joinpath("docker-compose.yml").exists():
+            cwd = d
+            break
+
     try:
         import subprocess
-        result = subprocess.run(
+        # Try rebuilding the image first — a simple restart won’t pick up
+        # restored source files because nginx serves static assets baked
+        # into the image at build time.
+        kwargs = {"capture_output": True, "text": True, "timeout": 300}
+        if cwd:
+            kwargs["cwd"] = cwd
+
+        # docker compose (new plugin) vs docker-compose (legacy standalone)
+        rebuild_cmds = [
+            ["docker", "compose", "up", "-d", "--build", "frontend"],
+            ["docker-compose", "up", "-d", "--build", "frontend"],
+        ]
+        result = None
+        for cmd in rebuild_cmds:
+            try:
+                result = subprocess.run(cmd, **kwargs)
+                if result.returncode == 0:
+                    log(f"Frontend rebuilt and restarted after restoring {rel_path}")
+                    return
+                break  # command exists but failed; don't try the other variant
+            except FileNotFoundError:
+                continue  # try next variant
+
+        if result is not None and result.returncode != 0:
+            err = result.stderr.strip() if result.stderr else "(no stderr)"
+            log(f"Frontend rebuild failed: {err}")
+
+        # Fallback: at least restart so any volume-mounted changes are picked up
+        restart_cmds = [
             ["docker", "compose", "restart", "frontend"],
-            capture_output=True, text=True, timeout=60,
-        )
-        if result.returncode == 0:
-            log(f"Frontend container restarted after restoring {rel_path}")
-        else:
-            log(f"Frontend restart failed: {result.stderr.strip()}")
-    except FileNotFoundError:
-        pass  # docker not available inside container
+            ["docker-compose", "restart", "frontend"],
+        ]
+        for cmd in restart_cmds:
+            try:
+                fb = subprocess.run(
+                    cmd,
+                    **{k: v for k, v in kwargs.items() if k != "timeout"},
+                    timeout=60,
+                )
+                if fb.returncode == 0:
+                    log(f"Frontend restart fallback succeeded")
+                    return
+                break
+            except FileNotFoundError:
+                continue
+
+        log("Docker not available inside vm1-reporter; frontend will not auto-rebuild")
     except Exception as exc:
-        log(f"Frontend restart exception: {exc}")
+        log(f"Frontend rebuild exception: {exc}")
 
 
 def apply_restore_command(cmd: dict) -> bool:
