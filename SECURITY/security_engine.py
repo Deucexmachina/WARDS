@@ -2935,14 +2935,15 @@ def restore_from_backup(db: Session, file_entry: SecurityMonitoredFile, detectio
     def _find_backup_source():
         for root in all_backup_roots(db):
             source = backup_file_path(root, file_entry.relative_path)
-            if source.exists():
-                return source, root
+            if source.exists() and source.is_file():
+                if file_entry.baseline_hash and sha256_file(source) == file_entry.baseline_hash:
+                    return source, root
         return None, None
 
     if not create_event:
         source, backup_root = _find_backup_source()
         if not source:
-            raise RuntimeError("No local backup exists. Create a manual backup first.")
+            raise RuntimeError("No local backup matching the trusted baseline exists. Create a manual backup first.")
         target = portable_monitored_path(file_entry)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
@@ -2980,7 +2981,7 @@ def restore_from_backup(db: Session, file_entry: SecurityMonitoredFile, detectio
     try:
         source, backup_root = _find_backup_source()
         if not source:
-            raise RuntimeError("No local backup exists. Create a manual backup first.")
+            raise RuntimeError("No local backup matching the trusted baseline exists. Create a manual backup first.")
         target = portable_monitored_path(file_entry)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
@@ -4769,7 +4770,7 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                     db.add(recovery)
                     db.commit()
             else:
-                # Manual resolve: search all backups and prefer one matching the trusted baseline
+                # Manual resolve: search all backups for one matching the trusted baseline
                 backup_source = None
                 backup_root = None
                 expected_hash = file_entry.baseline_hash
@@ -4780,9 +4781,12 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                             backup_source = candidate
                             backup_root = root
                             break
-                        if backup_source is None:
-                            backup_source = candidate
-                            backup_root = root
+                if backup_source is None:
+                    logger.warning(
+                        "No backup matching baseline hash %s found for %s; skipping restoration.",
+                        expected_hash,
+                        file_entry.relative_path,
+                    )
                 if backup_source and backup_source.exists() and backup_source.is_file():
                     if not target.exists() or not target.is_file() or sha256_file(target) != file_entry.baseline_hash:
                         started = time.time()

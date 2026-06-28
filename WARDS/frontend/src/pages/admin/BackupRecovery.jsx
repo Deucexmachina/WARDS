@@ -104,7 +104,7 @@ const toDateInputMin = () => {
 };
 
 const Section = ({ title, children, actions, className = '' }) => (
-  <section className={`rounded-[1.5rem] border border-slate-200 bg-white p-6 shadow-sm md:p-8 ${className}`.trim()}>
+  <section className={`rounded-xl border border-slate-200 bg-white p-6 shadow-lg md:p-8 ${className}`.trim()}>
     <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
       <h2 className="text-xl font-bold text-slate-900">{title}</h2>
       {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
@@ -993,13 +993,6 @@ const BackupRecovery = () => {
       });
   }, [files, fileKeyword, fileSort]);
 
-  const cardClass = (label, value) => {
-    if (label === 'System Status') return String(value).toLowerCase() === 'protected' ? 'bg-green-600 text-white' : 'bg-orange-500 text-white';
-    if (label === 'Active Incidents') return Number(value || 0) === 0 ? 'bg-green-400 text-white' : 'bg-orange-300 text-white';
-    if (label === 'Monitored Files') return 'bg-yellow-500 text-white';
-    return 'bg-blue-600 text-white';
-  };
-
   return (
     <div className="min-h-screen bg-lightbg">
       <ConfirmModal confirm={confirm} onCancel={() => setConfirm(null)} onConfirm={handleConfirm} busy={busy} />
@@ -1009,44 +1002,69 @@ const BackupRecovery = () => {
         onSelect={selectFolder}
         onOpen={(path) => openFolderPicker(folderPicker.mode, folderPicker.title, path)}
       />
-      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/80 px-4 py-3 shadow-sm backdrop-blur md:px-8">
+      <header className="sticky top-0 z-40 bg-primary px-4 py-3 shadow-lg md:px-8">
         <div className="mx-auto flex max-w-[90rem] items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-primary shadow-sm">
+            <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-white/20 shadow-sm">
               <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
               </svg>
             </div>
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">WARDS</p>
-              <h1 className="text-base font-bold text-slate-900">Security Dashboard</h1>
+              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/70">WARDS</p>
+              <h1 className="text-base font-bold text-white">Security Dashboard</h1>
             </div>
           </div>
-          <button onClick={returnToAdmin} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700">
+          <button onClick={returnToAdmin} className="rounded-lg bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/20">
             Return to {adminLabel} Dashboard
           </button>
         </div>
       </header>
 
-      <div className="border-b border-slate-200 bg-white px-4 py-2 md:px-8">
-        <div className="mx-auto flex max-w-[90rem] gap-1 overflow-x-auto pb-1">
-          {tabs.map((tab) => (
-            <button
-              key={tab}
-              onClick={() => changeTab(tab)}
-              className={`shrink-0 rounded-lg px-3 py-2 text-xs font-semibold transition ${activeTab === tab ? 'bg-primary text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}
-            >
-              {tab}
-              {notificationCounts[tab] > 0 && (
-                <span className="ml-1.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">{notificationCounts[tab]}</span>
-              )}
-            </button>
-          ))}
-        </div>
-      </div>
+      <div className="flex min-h-[calc(100vh-3.5rem)]">
+        {/* Desktop sidebar tabs */}
+        <aside className="hidden w-64 shrink-0 border-r border-slate-200 bg-white lg:block">
+          <nav className="p-3">
+            {tabs.map((tab) => (
+              <button
+                key={tab}
+                onClick={() => changeTab(tab)}
+                className={`mb-1 flex w-full items-center justify-between rounded-lg px-4 py-3 text-sm font-medium transition ${activeTab === tab ? 'bg-primary text-white' : 'text-slate-700 hover:bg-slate-100'}`}
+              >
+                <span>{tab}</span>
+                {notificationCounts[tab] > 0 && (
+                  <span className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">
+                    {notificationCounts[tab]}
+                  </span>
+                )}
+              </button>
+            ))}
+          </nav>
+        </aside>
 
-      <main className="mx-auto max-w-[90rem] space-y-6 px-4 py-6 md:px-8">
-        <section className="overflow-hidden rounded-[2rem] border border-slate-300 bg-white px-6 py-6 text-slate-900 shadow-2xl shadow-slate-200/60 md:px-8 md:py-7">
+        <div className="flex-1">
+          {/* Mobile tabs */}
+          <div className="border-b border-slate-200 bg-white px-4 py-2 lg:hidden">
+            <div className="flex gap-1 overflow-x-auto pb-1">
+              {tabs.map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => changeTab(tab)}
+                  className={`shrink-0 rounded-lg px-3 py-2 text-xs font-semibold transition ${activeTab === tab ? 'bg-primary text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}
+                >
+                  {tab}
+                  {notificationCounts[tab] > 0 && (
+                    <span className="ml-1.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+                      {notificationCounts[tab]}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <main className="space-y-6 p-4 md:p-8">
+        <section className="overflow-hidden rounded-xl border border-slate-200 bg-white px-6 py-6 text-slate-900 shadow-lg md:px-8 md:py-7">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
             <div className="max-w-3xl">
               <p className="text-xs font-semibold uppercase tracking-[0.26em] text-slate-500">Security Operations Center</p>
@@ -1073,20 +1091,50 @@ const BackupRecovery = () => {
             <>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 {cards.map(([label, value]) => {
-                  const isProtected = String(label).includes('Status') && String(value).toLowerCase() === 'protected';
-                  const isZeroIncidents = String(label).includes('Incidents') && Number(value || 0) === 0;
-                  const accent = isProtected || isZeroIncidents ? 'border-green-400 bg-green-50/40' : 'border-orange-400 bg-orange-50/40';
+                  let gradient = 'from-blue-500 to-blue-600';
+                  let icon = (
+                    <svg className="h-10 w-10 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  );
+                  if (label === 'System Status') {
+                    gradient = String(value).toLowerCase() === 'protected' ? 'from-green-500 to-green-600' : 'from-orange-500 to-orange-600';
+                    icon = (
+                      <svg className="h-10 w-10 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                      </svg>
+                    );
+                  } else if (label === 'Active Incidents') {
+                    gradient = Number(value || 0) === 0 ? 'from-green-400 to-green-500' : 'from-orange-400 to-orange-500';
+                    icon = (
+                      <svg className="h-10 w-10 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                    );
+                  } else if (label === 'Monitored Files') {
+                    gradient = 'from-yellow-400 to-yellow-500';
+                    icon = (
+                      <svg className="h-10 w-10 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                    );
+                  }
                   return (
-                    <div key={label} className={`overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ${accent} border-t-[3px]`}>
-                      <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">{label}</p>
-                      <p className="mt-3 break-words text-2xl font-bold text-slate-900">{value}</p>
+                    <div key={label} className={`rounded-xl bg-gradient-to-br ${gradient} p-6 text-white shadow-lg`}>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="mb-1 text-sm text-white/80">{label}</p>
+                          <p className="text-2xl font-bold">{value}</p>
+                        </div>
+                        {icon}
+                      </div>
                     </div>
                   );
                 })}
               </div>
 
               {dashboard?.today_summary && (
-                <div className={`rounded-[1.5rem] border p-5 ${dashboard.today_summary.high_severity > 0 ? 'border-red-200 bg-red-50 text-red-900' : dashboard.today_summary.incidents > 0 ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-green-200 bg-green-50 text-green-900'}`}>
+                <div className={`rounded-xl border p-5 ${dashboard.today_summary.high_severity > 0 ? 'border-red-200 bg-red-50 text-red-900' : dashboard.today_summary.incidents > 0 ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-green-200 bg-green-50 text-green-900'}`}>
                   <div className="flex items-center gap-3">
                     <span className="text-2xl">{dashboard.today_summary.high_severity > 0 ? '⚠️' : dashboard.today_summary.incidents > 0 ? '📊' : '✅'}</span>
                     <div className="flex-1">
@@ -1099,7 +1147,7 @@ const BackupRecovery = () => {
                 </div>
               )}
 
-              <div className="rounded-[1.5rem] border border-amber-200 bg-amber-50 p-5 text-amber-900">
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-amber-900">
                 <p className="text-sm font-bold">Scheduled backup reminder</p>
                 <p className="mt-1 text-sm">
                   {dashboard?.next_scheduled_backup && dashboard.next_scheduled_backup !== 'Not scheduled'
@@ -1618,12 +1666,12 @@ const BackupRecovery = () => {
                   
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                     <p className="mb-3 text-sm font-bold text-slate-900">Temporary User Restriction</p>
-                    <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
-                      <input className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="Account ID" value={restrictionInput.account_id} onChange={(e) => setRestrictionInput({ ...restrictionInput, account_id: e.target.value })} />
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                      <input className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="Account ID" value={restrictionInput.account_id} onChange={(e) => setRestrictionInput({ ...restrictionInput, account_id: e.target.value })} />
                       <CustomSelect value={restrictionInput.account_type} onChange={(value) => setRestrictionInput({ ...restrictionInput, account_type: value })} options={[{ value: 'citizen', label: 'Citizen' }, { value: 'branch', label: 'Branch Admin' }, { value: 'admin', label: 'Main Admin' }, { value: 'superadmin', label: 'Super Admin' }]} placeholder="Select account type" />
                       <CustomSelect value={restrictionInput.scope} onChange={(value) => setRestrictionInput({ ...restrictionInput, scope: value })} options={[{ value: 'manual', label: 'Manual' }, { value: 'general', label: 'General' }, { value: 'search', label: 'Search' }, { value: 'registration', label: 'Registration' }, { value: 'admin_general', label: 'Admin General' }, { value: 'password_reset', label: 'Password Reset' }]} placeholder="Select scope" />
-                      <input className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" type="number" min="60" max="604800" placeholder="Duration (seconds)" value={restrictionInput.duration} onChange={(e) => setRestrictionInput({ ...restrictionInput, duration: e.target.value })} />
-                      <button disabled={busy} className={`w-full whitespace-nowrap rounded-xl bg-red-600 px-4 py-3 font-semibold text-white${disabledButtonClass}`} onClick={() => askConfirm('Temporarily restrict this account?', `WARDS will restrict ${restrictionInput.account_type}:${restrictionInput.account_id || 'the entered account'} for ${restrictionInput.duration} seconds.`, restrictUser, 'Temporary user restriction added.', 'Restrict user')}>Restrict User</button>
+                      <input className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" type="number" min="60" max="604800" placeholder="Duration (seconds)" value={restrictionInput.duration} onChange={(e) => setRestrictionInput({ ...restrictionInput, duration: e.target.value })} />
+                      <button disabled={busy} className={`w-full whitespace-nowrap rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-700${disabledButtonClass}`} onClick={() => askConfirm('Temporarily restrict this account?', `WARDS will restrict ${restrictionInput.account_type}:${restrictionInput.account_id || 'the entered account'} for ${restrictionInput.duration} seconds.`, restrictUser, 'Temporary user restriction added.', 'Restrict user')}>Restrict User</button>
                     </div>
                     <input className="mt-3 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Reason" value={restrictionInput.reason} onChange={(e) => setRestrictionInput({ ...restrictionInput, reason: e.target.value })} />
                   </div>
@@ -1773,6 +1821,8 @@ const BackupRecovery = () => {
             </div>
           )}
         </main>
+        </div>
+      </div>
     </div>
   );
 };
