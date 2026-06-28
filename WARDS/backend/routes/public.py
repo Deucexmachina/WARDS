@@ -12,7 +12,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from database.models import (
-    Branch, BranchStaff, CitizenUser, Queue, QueueHistory, Service, BranchService, FAQ, TaxpayerGuide,
+    ActivityLog, Branch, BranchStaff, CitizenUser, Queue, QueueHistory, Service, BranchService, FAQ, TaxpayerGuide,
     BranchOperatingHours, Announcement, QueueActivity, ReceiptRequest,
     Payment, get_db
 )
@@ -946,7 +946,28 @@ async def register_queue(
 
     if not persisted:
         raise HTTPException(status_code=500, detail="Queue registration failed. Please try again.")
-    
+
+    log_user = (
+        (get_decrypted_or_raw(current_citizen, "email") or current_citizen.email)
+        if current_citizen
+        else (validated_contact_number or validated_taxpayer_name or "anonymous")
+    )
+    db.add(ActivityLog(
+        action="Queue Registered",
+        user=log_user,
+        details=(
+            f"branch: {branch_name} | "
+            f"taxpayer: {validated_taxpayer_name} | "
+            f"contact: {validated_contact_number or 'N/A'} | "
+            f"queue: {queue_value(new_queue, 'queue_number')} | "
+            f"service: {registration.service_type} | "
+            f"type: {queue_type} | "
+            f"ip: {request.client.host if request.client else 'unknown'}"
+        ),
+        type="public_portal",
+    ))
+    db.commit()
+
     return {
         "queue_number": queue_value(new_queue, "queue_number"),
         "branch_name": branch_name,
