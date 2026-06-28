@@ -4772,12 +4772,13 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                         db.add(recovery)
                         db.commit()
                     # Trigger a post-resolve backup so the restored state becomes the trusted baseline
+                    incident_id = incident.id
                     def _post_resolve_backup():
                         bg_db = SessionLocal()
                         try:
                             post_resolve_backup = create_manual_backup(bg_db, initiated_by=_valid_admin_id(bg_db, admin_id), label="post_resolve", skip_database_snapshot=True, skip_file_registration=True)
                             if post_resolve_backup.status == "success":
-                                bg_incident = bg_db.query(SecurityIncident).filter(SecurityIncident.id == incident.id).first()
+                                bg_incident = bg_db.query(SecurityIncident).filter(SecurityIncident.id == incident_id).first()
                                 if bg_incident:
                                     bg_incident.response_action = "resolved_clean_backup_refreshed"
                                     bg_db.add(bg_incident)
