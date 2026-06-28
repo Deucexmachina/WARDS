@@ -2996,23 +2996,44 @@ def restore_from_backup(db: Session, file_entry: SecurityMonitoredFile, detectio
         source, backup_root = _find_backup_source()
         if not source:
             raise RuntimeError("No local backup matching the trusted baseline exists. Create a manual backup first.")
-        target = portable_monitored_path(file_entry)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
-        restored_hash = sha256_file(target)
-        file_entry.current_hash = restored_hash
-        file_entry.baseline_hash = restored_hash
-        file_entry.status = "recovered"
-        file_entry.size_bytes = target.stat().st_size
-        file_entry.last_checked = now_utc()
-        recovery.status = "success"
-        recovery.backup_path = stored_path_value(source) or str(source)
-        recovery.completed_at = now_utc()
-        recovery.recovery_duration_ms = int((time.time() - started) * 1000)
-        recovery.summary = f"Restored {file_entry.relative_path} from {backup_root.name}."
-        db.add(file_entry)
-        db.add(recovery)
-        db.commit()
+
+        if is_vm1_file(file_entry):
+            # VM1 file: push clean snapshot and create a VM1 restore command
+            original_bytes = source.read_bytes()
+            snapshot = VM1_SNAPSHOT_ROOT / file_entry.relative_path
+            snapshot.parent.mkdir(parents=True, exist_ok=True)
+            snapshot.write_bytes(original_bytes)
+            clean_hash = hashlib.sha256(original_bytes).hexdigest()
+            file_entry.baseline_hash = clean_hash
+            file_entry.status = "clean"
+            file_entry.last_checked = now_utc()
+            recovery.status = "success"
+            recovery.backup_path = stored_path_value(source) or str(source)
+            recovery.completed_at = now_utc()
+            recovery.recovery_duration_ms = int((time.time() - started) * 1000)
+            recovery.summary = f"Auto-recovery queued for {file_entry.relative_path} from {backup_root.name}."
+            db.add(file_entry)
+            db.add(recovery)
+            db.commit()
+            _create_vm1_restore_command(db, file_entry, detection_id, original_content_bytes=original_bytes)
+        else:
+            target = portable_monitored_path(file_entry)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+            restored_hash = sha256_file(target)
+            file_entry.current_hash = restored_hash
+            file_entry.baseline_hash = restored_hash
+            file_entry.status = "recovered"
+            file_entry.size_bytes = target.stat().st_size
+            file_entry.last_checked = now_utc()
+            recovery.status = "success"
+            recovery.backup_path = stored_path_value(source) or str(source)
+            recovery.completed_at = now_utc()
+            recovery.recovery_duration_ms = int((time.time() - started) * 1000)
+            recovery.summary = f"Restored {file_entry.relative_path} from {backup_root.name}."
+            db.add(file_entry)
+            db.add(recovery)
+            db.commit()
         if recovery_type != "automatic":
             create_system_alert(db, "recovery_completed", f"Recovery #{recovery.id}: {recovery.summary}", "low", dedupe_key=f"Recovery #{recovery.id}")
     except Exception as exc:
