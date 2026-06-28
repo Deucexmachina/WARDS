@@ -153,7 +153,7 @@ def require_api_key(x_api_key: str = Header(..., alias="X-API-Key")):
         raise HTTPException(status_code=401, detail="Invalid API key")
 
 
-def require_admin_secret(x_admin_secret: str = Header(..., alias="X-Admin-Secret")):
+def require_admin_secret(x_admin_secret: str = Header(default="", alias="X-Admin-Secret")):
     if ADMIN_SECRET and x_admin_secret != ADMIN_SECRET:
         raise HTTPException(status_code=403, detail="Admin secret required")
 
