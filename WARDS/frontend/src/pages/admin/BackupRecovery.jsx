@@ -1024,21 +1024,42 @@ const BackupRecovery = () => {
       <div className="flex min-h-[calc(100vh-3.5rem)]">
         {/* Desktop sidebar tabs */}
         <aside className="hidden w-64 shrink-0 border-r border-slate-200 bg-white lg:block">
+          <div className="border-b border-slate-200 p-4">
+            <span className={`inline-block rounded-full px-3 py-1 text-xs font-semibold text-white ${isSuperadmin ? 'bg-fuchsia-600' : 'bg-purple-500'}`}>
+              {adminLabel}
+            </span>
+          </div>
           <nav className="p-3">
-            {tabs.map((tab) => (
-              <button
-                key={tab}
-                onClick={() => changeTab(tab)}
-                className={`mb-1 flex w-full items-center justify-between rounded-lg px-4 py-3 text-sm font-medium transition ${activeTab === tab ? 'bg-primary text-white' : 'text-slate-700 hover:bg-slate-100'}`}
-              >
-                <span>{tab}</span>
-                {notificationCounts[tab] > 0 && (
-                  <span className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">
-                    {notificationCounts[tab]}
+            {tabs.map((tab) => {
+              const tabIcons = {
+                Dashboard: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6',
+                'File Status': 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',
+                'Backup History': 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z',
+                'Detection History': 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z',
+                'Recovery History': 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15',
+                'Security Incidents': 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z',
+                'Manual Controls': 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z',
+              };
+              return (
+                <button
+                  key={tab}
+                  onClick={() => changeTab(tab)}
+                  className={`mb-1 flex w-full items-center justify-between rounded-lg px-4 py-3 text-sm font-medium transition ${activeTab === tab ? 'bg-primary text-white' : 'text-slate-700 hover:bg-slate-100'}`}
+                >
+                  <span className="flex items-center gap-3">
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d={tabIcons[tab]} />
+                    </svg>
+                    {tab}
                   </span>
-                )}
-              </button>
-            ))}
+                  {notificationCounts[tab] > 0 && (
+                    <span className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">
+                      {notificationCounts[tab]}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </nav>
         </aside>
 
@@ -1469,19 +1490,19 @@ const BackupRecovery = () => {
 
               <Section title="Granular Backups">
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <button disabled={busy} className="rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Backup VM1 database?', 'WARDS will create a full dump of the VM1 business database.', () => api.post('/security/backup/vm1-database'), 'VM1 database backup created.', 'Backup VM1 DB')}>VM1 Database Backup</button>
-                  <button disabled={busy} className="rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Backup VM2 database?', 'WARDS will snapshot the VM2 security database.', () => api.post('/security/backup/vm2-database'), 'VM2 database backup created.', 'Backup VM2 DB')}>VM2 Database Backup</button>
-                  <button disabled={busy} className="rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Backup files?', 'WARDS will back up monitored WARDS and OCR files.', () => api.post('/security/backup/files'), 'Files backup created.', 'Backup files')}>Files Backup</button>
-                  <button disabled={busy} className="rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Backup ML artifacts?', 'WARDS will back up ML model state and metadata.', () => api.post('/security/backup/ml'), 'ML backup created.', 'Backup ML')}>ML Backup</button>
+                  <button disabled={busy} className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60" onClick={() => askConfirm('Backup VM1 database?', 'WARDS will create a full dump of the VM1 business database.', () => api.post('/security/backup/vm1-database'), 'VM1 database backup created.', 'Backup VM1 DB')}>VM1 Database Backup</button>
+                  <button disabled={busy} className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60" onClick={() => askConfirm('Backup VM2 database?', 'WARDS will snapshot the VM2 security database.', () => api.post('/security/backup/vm2-database'), 'VM2 database backup created.', 'Backup VM2 DB')}>VM2 Database Backup</button>
+                  <button disabled={busy} className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60" onClick={() => askConfirm('Backup files?', 'WARDS will back up monitored WARDS and OCR files.', () => api.post('/security/backup/files'), 'Files backup created.', 'Backup files')}>Files Backup</button>
+                  <button disabled={busy} className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60" onClick={() => askConfirm('Backup ML artifacts?', 'WARDS will back up ML model state and metadata.', () => api.post('/security/backup/ml'), 'ML backup created.', 'Backup ML')}>ML Backup</button>
                 </div>
               </Section>
 
               <Section title="Granular Recovery">
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <button disabled={busy} className="rounded-xl bg-red-600 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Recover VM1 database?', 'Are you sure? This will restore the VM1 business database from the latest backup and log you out.', async () => { await api.post('/security/recover/vm1-database'); localStorage.removeItem('adminToken'); localStorage.removeItem('adminUser'); localStorage.removeItem('securityAuthenticated'); sessionStorage.removeItem('securityAuthenticated'); sessionStorage.removeItem('securityAuthenticatedAt'); navigate('/admin/backup/login'); return { skipRefresh: true }; }, 'VM1 database recovery complete.', 'Recover VM1 DB')}>VM1 Database Recovery</button>
-                  <button disabled={busy} className="rounded-xl bg-red-600 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Recover VM2 database?', 'WARDS will restore the VM2 security database from the latest backup.', () => api.post('/security/recover/vm2-database'), 'VM2 database recovery complete.', 'Recover VM2 DB')}>VM2 Database Recovery</button>
-                  <button disabled={busy} className="rounded-xl bg-red-600 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Recover files?', 'WARDS will restore monitored files from the latest backup.', () => api.post('/security/recover/files'), 'Files recovery complete.', 'Recover files')}>Files Recovery</button>
-                  <button disabled={busy} className="rounded-xl bg-red-600 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Recover ML artifacts?', 'WARDS will restore ML model state from the latest backup.', () => api.post('/security/recover/ml'), 'ML recovery complete.', 'Recover ML')}>ML Recovery</button>
+                  <button disabled={busy} className="rounded-lg bg-red-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-600 disabled:opacity-60" onClick={() => askConfirm('Recover VM1 database?', 'Are you sure? This will restore the VM1 business database from the latest backup and log you out.', async () => { await api.post('/security/recover/vm1-database'); localStorage.removeItem('adminToken'); localStorage.removeItem('adminUser'); localStorage.removeItem('securityAuthenticated'); sessionStorage.removeItem('securityAuthenticated'); sessionStorage.removeItem('securityAuthenticatedAt'); navigate('/admin/backup/login'); return { skipRefresh: true }; }, 'VM1 database recovery complete.', 'Recover VM1 DB')}>VM1 Database Recovery</button>
+                  <button disabled={busy} className="rounded-lg bg-red-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-600 disabled:opacity-60" onClick={() => askConfirm('Recover VM2 database?', 'WARDS will restore the VM2 security database from the latest backup.', () => api.post('/security/recover/vm2-database'), 'VM2 database recovery complete.', 'Recover VM2 DB')}>VM2 Database Recovery</button>
+                  <button disabled={busy} className="rounded-lg bg-red-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-600 disabled:opacity-60" onClick={() => askConfirm('Recover files?', 'WARDS will restore monitored files from the latest backup.', () => api.post('/security/recover/files'), 'Files recovery complete.', 'Recover files')}>Files Recovery</button>
+                  <button disabled={busy} className="rounded-lg bg-red-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-600 disabled:opacity-60" onClick={() => askConfirm('Recover ML artifacts?', 'WARDS will restore ML model state from the latest backup.', () => api.post('/security/recover/ml'), 'ML recovery complete.', 'Recover ML')}>ML Recovery</button>
                 </div>
               </Section>
 
