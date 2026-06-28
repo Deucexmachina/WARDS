@@ -283,7 +283,7 @@ def test_get_pending_vm1_restore_commands_hydrates_content():
     db = MonitoredFolderDB()
     with tempfile.TemporaryDirectory() as tmp:
         content_file = Path(tmp) / "rest_1_1234567890.b64"
-        content_file.write_bytes(b"hello")  # raw content; function b64-encodes it
+        content_file.write_bytes(b"aGVsbG8=")  # file already stores base64-encoded text
         commands_json = json.dumps([{
             "command_id": "rest_1_1234567890",
             "relative_path": "test.txt",

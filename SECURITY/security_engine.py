@@ -2871,6 +2871,7 @@ def diff_lines(old_content: str, new_content: str) -> dict:
     diff = difflib.ndiff(old_content.splitlines(), new_content.splitlines())
     old_line = 0
     new_line = 0
+    _MAX_DIFF_LINES = 500
     for entry in diff:
         code = entry[:2]
         text = entry[2:]
@@ -2883,6 +2884,9 @@ def diff_lines(old_content: str, new_content: str) -> dict:
         elif code == "+ ":
             new_line += 1
             changes["added"].append({"line": new_line, "text": text[:500]})
+        # Cap each list independently to keep total JSON well under MySQL TEXT limit
+        if len(changes["added"]) >= _MAX_DIFF_LINES and len(changes["removed"]) >= _MAX_DIFF_LINES:
+            break
     return changes
 
 
