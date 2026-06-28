@@ -3661,6 +3661,11 @@ def _scan_vm1_snapshot(db: Session, file_entry: SecurityMonitoredFile, context: 
         db.add(file_entry)
         return None
 
+    if _has_pending_vm1_restore_for_file(db, file_entry.relative_path):
+        file_entry.status = "modified"
+        db.add(file_entry)
+        return None
+
     # Attempt to recover the clean (baseline) content for diff and restore.
     original_content_bytes = None
     old_content = ""
@@ -3861,9 +3866,10 @@ def scan_all_files(db: Session, context: dict | None = None) -> list[SecurityDet
 
     for file_entry in file_entries:
         if is_vm1_file(file_entry):
-            detection = _scan_vm1_snapshot(db, file_entry, context=context)
-            if detection:
-                detections.append(detection)
+            if context and context.get("manual_scan"):
+                detection = _scan_vm1_snapshot(db, file_entry, context=context)
+                if detection:
+                    detections.append(detection)
             continue
         if is_database_entry(file_entry) and database_entry and file_entry.id != database_entry.id:
             file_entry.status = "clean"
@@ -6135,8 +6141,7 @@ def acknowledge_vm1_restore_command(db: Session, command_id: str, success: bool)
     if success:
         for cmd in removed:
             rel_path = cmd.get("relative_path")
-            content_file = cmd.get("restore_content_file")
-            if not rel_path or not content_file:
+            if not rel_path:
                 continue
             file_entry = (
                 db.query(SecurityMonitoredFile)
@@ -6146,13 +6151,21 @@ def acknowledge_vm1_restore_command(db: Session, command_id: str, success: bool)
             if not file_entry:
                 continue
             try:
-                content_path = Path(content_file)
-                if content_path.exists():
-                    clean_bytes = base64.b64decode(content_path.read_bytes())
-                    clean_hash = hashlib.sha256(clean_bytes).hexdigest()
-                    snapshot = VM1_SNAPSHOT_ROOT / rel_path
-                    snapshot.parent.mkdir(parents=True, exist_ok=True)
-                    snapshot.write_bytes(clean_bytes)
+                clean_hash = None
+                content_file = cmd.get("restore_content_file")
+                if content_file:
+                    content_path = Path(content_file)
+                    if content_path.exists():
+                        clean_bytes = base64.b64decode(content_path.read_bytes())
+                        clean_hash = hashlib.sha256(clean_bytes).hexdigest()
+                        snapshot = VM1_SNAPSHOT_ROOT / rel_path
+                        snapshot.parent.mkdir(parents=True, exist_ok=True)
+                        snapshot.write_bytes(clean_bytes)
+                if not clean_hash:
+                    expected_hash = cmd.get("expected_hash")
+                    if expected_hash:
+                        clean_hash = expected_hash
+                if clean_hash:
                     file_entry.baseline_hash = clean_hash
                     file_entry.current_hash = clean_hash
                     file_entry.status = "clean"

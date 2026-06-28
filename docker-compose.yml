@@ -83,7 +83,7 @@ services:
     environment:
       VM1_WARDS_DIR: /WARDS
       VM1_OCR_DIR: /OCR
-      VM1_REPORT_INTERVAL: "30"
+      VM1_REPORT_INTERVAL: "10"
       VM1_HEARTBEAT_INTERVAL: "10"
       VM1_RESTORE_POLL_INTERVAL: "5"
     volumes:

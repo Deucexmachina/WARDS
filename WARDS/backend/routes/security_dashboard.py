@@ -299,10 +299,7 @@ def scan_file(file_id: int, request: Request, db: Session = Depends(get_db), adm
     file_entry = db.query(SecurityMonitoredFile).filter(SecurityMonitoredFile.id == file_id).first()
     if not file_entry:
         raise HTTPException(status_code=404, detail="File not found")
-    if is_vm1_file(file_entry):
-        detection = _scan_vm1_snapshot(db, file_entry, context={"manual_scan": True})
-    else:
-        detection = scan_single_file(db, file_entry, context={"manual_scan": True})
+    detection = scan_single_file(db, file_entry, context={"manual_scan": True})
     db.add(ActivityLog(
         action="Security File Scan",
         user=admin.username,
