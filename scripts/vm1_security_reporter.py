@@ -19,6 +19,7 @@ Environment variables:
 import base64
 import hashlib
 import os
+import subprocess
 import sys
 import time
 from datetime import datetime, timezone
@@ -73,10 +74,62 @@ def file_content_b64(path: Path) -> str | None:
         return None
 
 
+def _git_info_for_root(root_path: Path) -> tuple[Path | None, set[str], set[str]]:
+    """Return (git_root, tracked_files, modified_files) for a monitored root.
+
+    If the root is not inside a git repo, returns (None, set(), set()).
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=root_path,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return None, set(), set()
+        git_root = Path(result.stdout.strip())
+    except Exception:
+        return None, set(), set()
+
+    tracked_files: set[str] = set()
+    modified_files: set[str] = set()
+
+    try:
+        r = subprocess.run(
+            ["git", "ls-files"],
+            cwd=git_root,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if r.returncode == 0:
+            tracked_files = set(r.stdout.strip().splitlines())
+    except Exception:
+        pass
+
+    try:
+        r = subprocess.run(
+            ["git", "diff", "--name-only", "HEAD"],
+            cwd=git_root,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if r.returncode == 0:
+            modified_files = set(r.stdout.strip().splitlines())
+    except Exception:
+        pass
+
+    return git_root, tracked_files, modified_files
+
+
 def _iter_root_files(root_name: str, root_path: Path):
     if not root_path.exists():
         log(f"WARNING: root path does not exist: {root_path}")
         return
+    git_root, tracked_files, modified_files = _git_info_for_root(root_path)
     for path in root_path.rglob("*"):
         if not path.is_file():
             continue
@@ -84,6 +137,14 @@ def _iter_root_files(root_name: str, root_path: Path):
         if path.name.lower() == ".env":
             continue
         rel = str(path.relative_to(root_path)).replace("\\", "/")
+        git_head_match = False
+        if git_root:
+            try:
+                rel_to_git = str(path.relative_to(git_root)).replace("\\", "/")
+                if rel_to_git in tracked_files and rel_to_git not in modified_files:
+                    git_head_match = True
+            except ValueError:
+                pass  # path is outside git_root
         yield {
             "relative_path": f"{root_name}/{rel}",
             "folder_root": f"VM1_{root_name}",
@@ -91,6 +152,7 @@ def _iter_root_files(root_name: str, root_path: Path):
             "size_bytes": path.stat().st_size,
             "current_hash": sha256_file(path),
             "content_b64": file_content_b64(path),
+            "git_head_match": git_head_match,
         }
 
 

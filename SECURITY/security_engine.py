@@ -3670,6 +3670,32 @@ def _scan_vm1_snapshot(db: Session, file_entry: SecurityMonitoredFile, context: 
         db.add(file_entry)
         return None
 
+    # Safety-net: if the most recent incident for this file was resolved or
+    # false-positive with the SAME hash, update baseline and skip.
+    recent_incident = (
+        db.query(SecurityIncident)
+        .join(SecurityDetectionEvent)
+        .filter(SecurityDetectionEvent.file_id == file_entry.id)
+        .order_by(SecurityIncident.created_at.desc())
+        .first()
+    )
+    if recent_incident and recent_incident.status in ("resolved", "false_positive"):
+        recent_detection = db.query(SecurityDetectionEvent).filter(
+            SecurityDetectionEvent.id == recent_incident.detection_event_id
+        ).first()
+        if recent_detection and recent_detection.new_hash == current_hash:
+            file_entry.baseline_hash = current_hash
+            file_entry.status = "clean"
+            db.add(file_entry)
+            db.commit()
+            logger.info(
+                "VM1 safety-net (_scan_vm1_snapshot): suppressed re-detection for %s (hash %s...%s) "
+                "because incident SEC-%s was already %s.",
+                file_entry.relative_path, current_hash[:8], current_hash[-8:],
+                recent_incident.id, recent_incident.status,
+            )
+            return None
+
     # Attempt to recover the clean (baseline) content for diff and restore.
     original_content_bytes = None
     old_content = ""
@@ -6577,6 +6603,14 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
                 entry.status = "modified"
                 db.add(entry)
                 continue
+            # If the VM1 reporter says this file matches git HEAD, it was changed
+            # through the legitimate GitHub workflow. Update baseline and skip.
+            if f.get("git_head_match"):
+                entry.baseline_hash = current_hash
+                entry.status = "clean"
+                db.add(entry)
+                _store_vm1_snapshot(rel_path, f.get("content_b64"))
+                continue
             # Suppress only if a restore command is already pending for this file
             has_pending_restore = _has_pending_vm1_restore_for_file(db, entry.relative_path)
             if not has_pending_restore:
@@ -6590,6 +6624,45 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
                     old_incident.resolved_by = None
                     old_incident.response_action = "superseded_by_new_detection"
                     db.add(old_incident)
+                # Safety-net: if the most recent incident for this file was resolved or
+                # false-positive with the SAME hash, treat as a re-detection of a known
+                # state and update baseline instead of flooding new incidents.
+                # This prevents git-workflow loops where Resolve reverts baseline to old
+                # content and the next manifest re-triggers the same detection.
+                recent_incident = (
+                    db.query(SecurityIncident)
+                    .join(SecurityDetectionEvent)
+                    .filter(SecurityDetectionEvent.file_id == entry.id)
+                    .order_by(SecurityIncident.created_at.desc())
+                    .first()
+                )
+                if recent_incident and recent_incident.status in ("resolved", "false_positive"):
+                    recent_detection = db.query(SecurityDetectionEvent).filter(
+                        SecurityDetectionEvent.id == recent_incident.detection_event_id
+                    ).first()
+                    if recent_detection and recent_detection.new_hash == current_hash:
+                        entry.baseline_hash = current_hash
+                        entry.status = "clean"
+                        db.add(entry)
+                        db.commit()
+                        logger.info(
+                            "VM1 safety-net: suppressed re-detection for %s (hash %s...%s) "
+                            "because incident SEC-%s was already %s.",
+                            entry.relative_path, current_hash[:8], current_hash[-8:],
+                            recent_incident.id, recent_incident.status,
+                        )
+                        continue
+                # Fallback: if baseline is missing, set it and skip instead of flooding
+                if not entry.baseline_hash:
+                    entry.baseline_hash = current_hash
+                    entry.status = "clean"
+                    db.add(entry)
+                    db.commit()
+                    logger.warning(
+                        "VM1 baseline missing for %s; updated to %s and skipping detection.",
+                        entry.relative_path, current_hash,
+                    )
+                    continue
                 entry.status = "modified"
                 changed += 1
                 db.add(entry)
