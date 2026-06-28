@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from auth import hash_password
+from auth import decorators
 from auth.decorators import _validate_token_binding
 from routes import branches, logs, unified_auth
 
@@ -234,7 +235,8 @@ def test_branch_admin_can_access_activity_logs(monkeypatch):
     assert result["items"][0]["action"] == "Branch Login"
 
 
-def test_token_binding_rejects_changed_user_agent():
+def test_token_binding_rejects_changed_user_agent(monkeypatch):
+    monkeypatch.setattr(decorators, "BINDING_CHECK_UA", True)
     request = SimpleNamespace(
         client=SimpleNamespace(host="127.0.0.1"),
         headers={"user-agent": "new-agent"},
