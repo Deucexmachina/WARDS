@@ -1056,6 +1056,25 @@ def save_scan_interval(payload: ScanIntervalRequest, db: Session = Depends(get_d
         raise HTTPException(status_code=400, detail="Scan interval must be 3600 seconds or less.")
     set_setting(db, "scan_interval_seconds", str(payload.seconds), admin.username)
     update_backend_env({"SECURITY_SCAN_INTERVAL_SECONDS": str(payload.seconds)})
+    # In 2-VM mode the VM1 reporter fetches config from VM2, so mirror the
+    # setting there so the reporter picks it up on its next poll.
+    if SECURITY_API_URL:
+        try:
+            httpx.post(
+                f"{SECURITY_API_URL}/v1/settings/set",
+                headers={
+                    "X-API-Key": os.getenv("SECURITY_API_KEY", ""),
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "key": "scan_interval_seconds",
+                    "value": str(payload.seconds),
+                    "actor": admin.username,
+                },
+                timeout=10,
+            )
+        except Exception:
+            pass
     return {"scan_interval_seconds": payload.seconds, "env_updated": True}
 
 
