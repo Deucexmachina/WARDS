@@ -3803,11 +3803,12 @@ def record_detection(db: Session, file_entry: SecurityMonitoredFile, change_type
         incident = create_incident(db, detection, classification, flags, changed, quarantine_path)
         recovery = None
 
-        # Auto-recovery only for web/code files or high/critical severity
+        # Auto-recovery for web/code files, high/critical severity, or database unauthorized changes
         suffix = Path(file_entry.relative_path).suffix.lower()
         is_web_code_file = suffix in {".html", ".htm", ".jsx", ".js", ".py", ".css", ".php"}
         is_high_severity = classification.get("severity_level") in {"high", "critical"}
-        if change_type in {"content_modified", "file_deleted"} and (is_web_code_file or is_high_severity):
+        is_database_unauthorized = is_database_entry(file_entry) and context.get("database_unauthorized_audit_changes")
+        if change_type in {"content_modified", "file_deleted"} and (is_web_code_file or is_high_severity or is_database_unauthorized):
             recovery = restore_from_backup(db, file_entry, detection.id, "automatic", None, quarantine_path)
             incident.response_action = "auto_recovered_pending_review" if recovery.status == "success" else "escalated"
             db.add(incident)
