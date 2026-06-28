@@ -6107,6 +6107,18 @@ def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type
             incident.response_action = "auto_recovered_pending_review"
             db.add(incident)
             db.commit()
+            recovery = SecurityRecoveryEvent(
+                detection_event_id=detection.id,
+                file_id=entry.id,
+                recovery_type="automatic",
+                initiated_by=None,
+                status="success",
+                quarantine_path=quarantine_path,
+                summary=f"Auto-recovery queued for {entry.relative_path}; waiting for VM1 reporter to restore.",
+                completed_at=now_utc(),
+            )
+            db.add(recovery)
+            db.commit()
             create_system_alert(
                 db,
                 "incident_auto_recovery",
