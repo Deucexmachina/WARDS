@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import { api } from '../../services/api';
 import { appendLanguageParam, resolvePublicLanguage, setPublicLanguage } from '../../utils/publicLanguage';
 
 import { API_BASE_URL } from '../../services/api';
@@ -57,7 +57,7 @@ const PaymentFailed = () => {
 
       try {
         const tokenQuery = accessToken ? `?token=${encodeURIComponent(accessToken)}` : '';
-        const response = await axios.get(`${API_BASE_URL}/payments/paymongo/status/${refNumber}${tokenQuery}`);
+        const response = await api.get(`${API_BASE_URL}/payments/paymongo/status/${refNumber}${tokenQuery}`);
         setPayment(response.data);
         setLoading(false);
 

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import axios from 'axios';
-import { paymentAPI } from '../../services/api';
+import { api, paymentAPI } from '../../services/api';
 import { appendLanguageParam, resolvePublicLanguage, setPublicLanguage } from '../../utils/publicLanguage';
 
 import { API_BASE_URL } from '../../services/api';
@@ -137,7 +136,7 @@ const PaymentStatus = () => {
 
       try {
         const tokenQuery = accessToken ? `?token=${encodeURIComponent(accessToken)}` : '';
-        const response = await axios.get(`${API_BASE_URL}/payments/paymongo/status/${refNumber}${tokenQuery}`);
+        const response = await api.get(`${API_BASE_URL}/payments/paymongo/status/${refNumber}${tokenQuery}`);
         const paymentData = response.data;
         setPayment(paymentData);
         setLoading(false);
@@ -208,7 +207,7 @@ const PaymentStatus = () => {
 
       try {
         const tokenQuery = accessToken ? `?token=${encodeURIComponent(accessToken)}` : '';
-        const response = await axios.get(`${API_BASE_URL}/payments/paymongo/status/${refNumber}${tokenQuery}`);
+        const response = await api.get(`${API_BASE_URL}/payments/paymongo/status/${refNumber}${tokenQuery}`);
         setPayment(response.data);
         setError('');
       } catch (err) {
