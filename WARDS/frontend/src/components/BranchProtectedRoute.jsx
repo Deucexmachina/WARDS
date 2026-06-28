@@ -57,6 +57,7 @@ const BranchProtectedRoute = ({ children, requiredInternalRole = null }) => {
         if (requiredInternalRole && userRole !== requiredInternalRole) {
           setIsAuthenticated(false);
           setIsLoading(false);
+          window.location.assign('/login?portal=branch');
           return;
         }
         setIsAuthenticated(true);
