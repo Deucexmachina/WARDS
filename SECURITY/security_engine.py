@@ -4707,7 +4707,7 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                 quarantine_path = quarantine_paths[0] if quarantine_paths else None
                 safe_quarantine = safe_quarantine_path(quarantine_path) if quarantine_path else None
                 if original_bytes is None:
-                    # Fallback to quarantine (stores defaced content, but better than nothing)
+                    # Fallback to quarantine (stores the last known clean snapshot)
                     if safe_quarantine and safe_quarantine.exists():
                         try:
                             original_bytes = safe_quarantine.read_bytes()
@@ -4727,10 +4727,12 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                     snapshot.write_bytes(original_bytes)
                     clean_hash = hashlib.sha256(original_bytes).hexdigest()
                     file_entry.baseline_hash = clean_hash
+                    file_entry.status = "clean"
                     # Do NOT update current_hash here; leave it as the defaced hash so
                     # subsequent scans see previous_hash == current_hash and skip
                     # re-detection while the VM1 restore command is pending.
-                file_entry.status = "clean"
+                else:
+                    file_entry.status = "modified"
                 file_entry.last_checked = now_utc()
                 db.add(file_entry)
                 if detection and original_bytes is not None:
@@ -4915,60 +4917,57 @@ def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_ba
     if not has_quarantine_copy and not confirm_missing_files:
         raise ValueError("Incident has no quarantined copy to restore")
     false_positive_recovery = None
-    if has_quarantine_copy:
-        if is_vm1_file(file_entry):
-            # VM1 false+: accept the defaced state as legitimate
-            # The snapshot in VM1_SNAPSHOT_ROOT already holds the defaced content
-            # (it was stored during detection before quarantine captured the original).
-            defaced_hash = detection.new_hash if detection else file_entry.current_hash
-            file_entry.baseline_hash = defaced_hash
-            file_entry.current_hash = defaced_hash
-            file_entry.status = "clean"
-            file_entry.last_checked = now_utc()
-            db.add(file_entry)
-            if incident.response_action in {"auto_recovered", "auto_recovered_pending_review"}:
-                # Auto-recovery already ran (or was queued); push the defaced snapshot back to VM1
-                defaced_snapshot = VM1_DEFACED_SNAPSHOT_ROOT / file_entry.relative_path
-                defaced_bytes = None
-                if defaced_snapshot.exists():
-                    try:
-                        defaced_bytes = defaced_snapshot.read_bytes()
-                    except Exception:
-                        pass
-                if defaced_bytes is not None:
-                    # Update VM2 snapshot to defaced so backup baseline matches
-                    snapshot = VM1_SNAPSHOT_ROOT / file_entry.relative_path
-                    snapshot.parent.mkdir(parents=True, exist_ok=True)
-                    snapshot.write_bytes(defaced_bytes)
-                    defaced_hash = hashlib.sha256(defaced_bytes).hexdigest()
-                    file_entry.baseline_hash = defaced_hash
-                    file_entry.current_hash = defaced_hash
-                    db.add(file_entry)
-                _create_vm1_restore_command(db, file_entry, incident.detection_event_id, original_content_bytes=defaced_bytes)
-                if create_event:
-                    false_positive_recovery = SecurityRecoveryEvent(
-                        detection_event_id=incident.detection_event_id,
-                        file_id=file_entry.id,
-                        recovery_type="reverted",
-                        initiated_by=_valid_admin_id(db, admin_id),
-                        status="success",
-                        quarantine_path=str(safe_source),
-                        summary=f"False positive: auto-recovery reverted for {file_entry.relative_path}.",
-                        completed_at=now_utc(),
-                    )
-                    db.add(false_positive_recovery)
-                    db.commit()
-        else:
-            false_positive_recovery = restore_quarantined_copy_to_original(
-                db,
-                file_entry,
-                str(safe_source),
-                admin_id,
-                incident.detection_event_id,
-                create_event=create_event,
-            )
-            if false_positive_recovery and false_positive_recovery.status != "reverted":
-                raise RuntimeError(false_positive_recovery.error_message or "Unable to restore the quarantined file")
+    if is_vm1_file(file_entry):
+        # VM1 false+: accept the defaced state as legitimate
+        defaced_hash = detection.new_hash if detection else file_entry.current_hash
+        file_entry.baseline_hash = defaced_hash
+        file_entry.current_hash = defaced_hash
+        file_entry.status = "clean"
+        file_entry.last_checked = now_utc()
+        db.add(file_entry)
+        if has_quarantine_copy and incident.response_action in {"auto_recovered", "auto_recovered_pending_review"}:
+            # Auto-recovery already ran (or was queued); push the defaced snapshot back to VM1
+            defaced_snapshot = VM1_DEFACED_SNAPSHOT_ROOT / file_entry.relative_path
+            defaced_bytes = None
+            if defaced_snapshot.exists():
+                try:
+                    defaced_bytes = defaced_snapshot.read_bytes()
+                except Exception:
+                    pass
+            if defaced_bytes is not None:
+                # Update VM2 snapshot to defaced so backup baseline matches
+                snapshot = VM1_SNAPSHOT_ROOT / file_entry.relative_path
+                snapshot.parent.mkdir(parents=True, exist_ok=True)
+                snapshot.write_bytes(defaced_bytes)
+                defaced_hash = hashlib.sha256(defaced_bytes).hexdigest()
+                file_entry.baseline_hash = defaced_hash
+                file_entry.current_hash = defaced_hash
+                db.add(file_entry)
+            _create_vm1_restore_command(db, file_entry, incident.detection_event_id, original_content_bytes=defaced_bytes)
+            if create_event:
+                false_positive_recovery = SecurityRecoveryEvent(
+                    detection_event_id=incident.detection_event_id,
+                    file_id=file_entry.id,
+                    recovery_type="reverted",
+                    initiated_by=_valid_admin_id(db, admin_id),
+                    status="success",
+                    quarantine_path=str(safe_source),
+                    summary=f"False positive: auto-recovery reverted for {file_entry.relative_path}.",
+                    completed_at=now_utc(),
+                )
+                db.add(false_positive_recovery)
+                db.commit()
+    elif has_quarantine_copy:
+        false_positive_recovery = restore_quarantined_copy_to_original(
+            db,
+            file_entry,
+            str(safe_source),
+            admin_id,
+            incident.detection_event_id,
+            create_event=create_event,
+        )
+        if false_positive_recovery and false_positive_recovery.status != "reverted":
+            raise RuntimeError(false_positive_recovery.error_message or "Unable to restore the quarantined file")
     if detection:
         detection.is_legitimate = True
         detection.ai_prediction = "normal"
@@ -5116,7 +5115,8 @@ def dashboard_payload(db: Session) -> dict:
     severity = {key: 0 for key in ["info", "low", "medium", "high", "critical"]}
     attack_types = {}
     behaviors = {}
-    chart_incidents = db.query(SecurityIncident).all()
+    chart_cutoff = datetime.utcnow() - timedelta(days=30)
+    chart_incidents = db.query(SecurityIncident).filter(SecurityIncident.created_at >= chart_cutoff).all()
     for incident in chart_incidents:
         severity[incident.severity_level or "info"] = severity.get(incident.severity_level or "info", 0) + 1
         attack_types[incident.incident_type] = attack_types.get(incident.incident_type, 0) + 1

@@ -87,11 +87,11 @@ services:
       VM1_HEARTBEAT_INTERVAL: "10"
       VM1_RESTORE_POLL_INTERVAL: "15"
     volumes:
-      - ./WARDS:/WARDS:ro
-      - ./OCR:/OCR:ro
+      - ./WARDS:/WARDS
+      - ./OCR:/OCR
       - ./scripts/vm1_security_reporter.py:/app/vm1_security_reporter.py:ro
       - vm1_snapshots:/app/.vm1_snapshots
-      - .:/opt/wards/app:ro
+      - .:/opt/wards/app
     command: >
       sh -c "pip install --no-cache-dir requests && python3 /app/vm1_security_reporter.py"
     depends_on:
