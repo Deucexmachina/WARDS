@@ -4881,6 +4881,7 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                         )
                         db.add(recovery)
                         db.commit()
+                    cleanup_quarantine_paths(quarantine_paths)
                     # Trigger a post-resolve backup so the restored state becomes the trusted baseline
                     incident_id = incident.id
                     def _post_resolve_backup():
@@ -5057,38 +5058,58 @@ def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_ba
         file_entry.status = "clean"
         file_entry.last_checked = now_utc()
         db.add(file_entry)
-        if has_quarantine_copy and incident.response_action in {"auto_recovered", "auto_recovered_pending_review"}:
-            # Auto-recovery already ran (or was queued); push the defaced snapshot back to VM1
-            defaced_snapshot = VM1_DEFACED_SNAPSHOT_ROOT / file_entry.relative_path
-            defaced_bytes = None
-            if defaced_snapshot.exists():
-                try:
-                    defaced_bytes = defaced_snapshot.read_bytes()
-                except Exception:
-                    pass
-            if defaced_bytes is not None:
-                # Update VM2 snapshot to defaced so backup baseline matches
-                snapshot = VM1_SNAPSHOT_ROOT / file_entry.relative_path
-                snapshot.parent.mkdir(parents=True, exist_ok=True)
-                snapshot.write_bytes(defaced_bytes)
-                defaced_hash = hashlib.sha256(defaced_bytes).hexdigest()
-                file_entry.baseline_hash = defaced_hash
-                file_entry.current_hash = defaced_hash
-                db.add(file_entry)
-            _create_vm1_restore_command(db, file_entry, incident.detection_event_id, original_content_bytes=defaced_bytes)
-            if create_event:
-                false_positive_recovery = SecurityRecoveryEvent(
-                    detection_event_id=incident.detection_event_id,
-                    file_id=file_entry.id,
-                    recovery_type="reverted",
-                    initiated_by=_valid_admin_id(db, admin_id),
-                    status="success",
-                    quarantine_path=str(safe_source),
-                    summary=f"False positive: auto-recovery reverted for {file_entry.relative_path}.",
-                    completed_at=now_utc(),
-                )
-                db.add(false_positive_recovery)
-                db.commit()
+        if has_quarantine_copy:
+            if incident.response_action in {"auto_recovered", "auto_recovered_pending_review"}:
+                # Auto-recovery already ran (or was queued); push the defaced snapshot back to VM1
+                defaced_snapshot = VM1_DEFACED_SNAPSHOT_ROOT / file_entry.relative_path
+                defaced_bytes = None
+                if defaced_snapshot.exists():
+                    try:
+                        defaced_bytes = defaced_snapshot.read_bytes()
+                    except Exception:
+                        pass
+                if defaced_bytes is not None:
+                    # Update VM2 snapshot to defaced so backup baseline matches
+                    snapshot = VM1_SNAPSHOT_ROOT / file_entry.relative_path
+                    snapshot.parent.mkdir(parents=True, exist_ok=True)
+                    snapshot.write_bytes(defaced_bytes)
+                    defaced_hash = hashlib.sha256(defaced_bytes).hexdigest()
+                    file_entry.baseline_hash = defaced_hash
+                    file_entry.current_hash = defaced_hash
+                    db.add(file_entry)
+                _create_vm1_restore_command(db, file_entry, incident.detection_event_id, original_content_bytes=defaced_bytes)
+                if create_event:
+                    false_positive_recovery = SecurityRecoveryEvent(
+                        detection_event_id=incident.detection_event_id,
+                        file_id=file_entry.id,
+                        recovery_type="reverted",
+                        initiated_by=_valid_admin_id(db, admin_id),
+                        status="success",
+                        quarantine_path=str(safe_source),
+                        summary=f"False positive: auto-recovery reverted for {file_entry.relative_path}.",
+                        completed_at=now_utc(),
+                    )
+                    db.add(false_positive_recovery)
+                    db.commit()
+            else:
+                # Non-priority VM1 file: copy quarantined copy to snapshot so VM2 baseline matches
+                target = VM1_SNAPSHOT_ROOT / file_entry.relative_path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(safe_source, target)
+                if create_event:
+                    false_positive_recovery = SecurityRecoveryEvent(
+                        detection_event_id=incident.detection_event_id,
+                        file_id=file_entry.id,
+                        recovery_type="reverted",
+                        initiated_by=_valid_admin_id(db, admin_id),
+                        status="success",
+                        quarantine_path=str(safe_source),
+                        summary=f"False positive: quarantined copy restored to snapshot for {file_entry.relative_path}.",
+                        completed_at=now_utc(),
+                    )
+                    db.add(false_positive_recovery)
+                    db.commit()
+            cleanup_quarantine_paths(quarantine_paths)
     elif has_quarantine_copy:
         false_positive_recovery = restore_quarantined_copy_to_original(
             db,
@@ -5100,6 +5121,7 @@ def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_ba
         )
         if false_positive_recovery and false_positive_recovery.status != "reverted":
             raise RuntimeError(false_positive_recovery.error_message or "Unable to restore the quarantined file")
+        cleanup_quarantine_paths(quarantine_paths)
     if detection:
         detection.is_legitimate = True
         detection.ai_prediction = "normal"
