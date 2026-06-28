@@ -210,7 +210,10 @@ def scan_single_file(db, file_entry, context=None, commit_clean=True):
         "context": context or {},
         "commit_clean": commit_clean,
     }
-    return _sync_post("/v1/scan/file", payload)
+    resp = _sync_post("/v1/scan/file", payload)
+    # VM2 wraps the detection in {"detection": ...}; unwrap it so callers
+    # get the same shape as the local function (detection object/dict or None).
+    return resp.get("detection") if isinstance(resp, dict) else resp
 
 
 def scan_all_files(db, context=None):

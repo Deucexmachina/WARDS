@@ -6096,11 +6096,22 @@ def _quarantine_vm1_snapshot(entry: SecurityMonitoredFile, detection_id: int) ->
 
 
 def _create_vm1_restore_command(db: Session, entry: SecurityMonitoredFile, detection_id: int, *, original_content_bytes: bytes | None = None):
+    content_bytes = None
     if original_content_bytes is not None:
-        content_bytes = original_content_bytes
-    else:
+        # Verify the provided bytes actually match the expected baseline hash
+        provided_hash = hashlib.sha256(original_content_bytes).hexdigest()
+        if provided_hash == entry.baseline_hash:
+            content_bytes = original_content_bytes
+        else:
+            logger.warning(
+                "VM1 provided original_content_bytes hash mismatch for %s (provided=%s baseline=%s); "
+                "falling back to snapshot/backups.",
+                entry.relative_path, provided_hash, entry.baseline_hash,
+            )
+
+    # Fallback 1: snapshot on VM2
+    if content_bytes is None:
         snapshot = VM1_SNAPSHOT_ROOT / entry.relative_path
-        content_bytes = None
         if snapshot.exists():
             try:
                 snapshot_hash = sha256_file(snapshot)
@@ -6112,6 +6123,29 @@ def _create_vm1_restore_command(db: Session, entry: SecurityMonitoredFile, detec
                         "skipping snapshot-based restore content.",
                         entry.relative_path, snapshot_hash, entry.baseline_hash,
                     )
+            except Exception:
+                pass
+
+    # Fallback 2: backup roots (clean copies from before the incident)
+    if content_bytes is None:
+        for root in all_backup_roots(db):
+            candidate = backup_file_path(root, entry.relative_path)
+            if candidate.exists() and candidate.is_file():
+                try:
+                    if sha256_file(candidate) == entry.baseline_hash:
+                        content_bytes = candidate.read_bytes()
+                        break
+                except Exception:
+                    pass
+
+    # Fallback 3: previously stored restore-content files
+    if content_bytes is None and VM1_RESTORE_CONTENT_ROOT.exists():
+        for content_file in VM1_RESTORE_CONTENT_ROOT.glob("*.b64"):
+            try:
+                decoded = base64.b64decode(content_file.read_bytes())
+                if hashlib.sha256(decoded).hexdigest() == entry.baseline_hash:
+                    content_bytes = decoded
+                    break
             except Exception:
                 pass
 
@@ -6603,16 +6637,28 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
                 entry.status = "modified"
                 db.add(entry)
                 continue
+            # Suppress only if a restore command is already pending for this file
+            has_pending_restore = _has_pending_vm1_restore_for_file(db, entry.relative_path)
             # If the VM1 reporter says this file matches git HEAD, it was changed
-            # through the legitimate GitHub workflow. Update baseline and skip.
+            # through the legitimate GitHub workflow. Cancel any stale pending
+            # restores (they would revert a legitimate state) and update baseline.
             if f.get("git_head_match"):
+                if has_pending_restore:
+                    # Remove stale restore commands for this file so they don't revert
+                    # the legitimate git state on the next poll.
+                    all_cmds = json_loads(get_setting(db, "vm1_restore_commands", "[]"), [])
+                    filtered = [c for c in all_cmds if c.get("relative_path") != entry.relative_path]
+                    if len(filtered) != len(all_cmds):
+                        set_setting(db, "vm1_restore_commands", json_dumps(filtered), "vm2_monitor")
+                        logger.info(
+                            "VM1 git workflow: cancelled %s stale restore command(s) for %s",
+                            len(all_cmds) - len(filtered), entry.relative_path,
+                        )
                 entry.baseline_hash = current_hash
                 entry.status = "clean"
                 db.add(entry)
                 _store_vm1_snapshot(rel_path, f.get("content_b64"))
                 continue
-            # Suppress only if a restore command is already pending for this file
-            has_pending_restore = _has_pending_vm1_restore_for_file(db, entry.relative_path)
             if not has_pending_restore:
                 # Resolve any existing open incidents for this file before creating a new one
                 for old_incident in db.query(SecurityIncident).join(SecurityDetectionEvent).filter(

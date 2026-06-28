@@ -347,13 +347,8 @@ def apply_restore_command(cmd: dict) -> bool:
             with open(target, "wb") as f:
                 f.write(data)
         else:
-            snapshot = SNAPSHOT_DIR / rel_path
-            if snapshot.exists():
-                import shutil
-                shutil.copy2(snapshot, target)
-            else:
-                log(f"No snapshot or content for restore: {rel_path}")
-                return False
+            log(f"Restore command for {rel_path} has no content_b64; skipping (local snapshot would be defaced).")
+            return False
 
         actual_hash = sha256_file(target)
         if expected_hash and actual_hash != expected_hash:
