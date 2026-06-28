@@ -3932,8 +3932,8 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
                         root_name = _clean_folder_root(str(entry.folder_root or ""))
                         if root_name:
                             backed_up_roots.add(root_name)
-                    entry.baseline_hash = entry.current_hash or entry.baseline_hash
-                    entry.current_hash = entry.baseline_hash
+                    entry.baseline_hash = file_hash
+                    entry.current_hash = file_hash
                     entry.status = "clean"
                     entry.file_type = file_type(snapshot) if snapshot.exists() else entry.file_type
                     entry.size_bytes = snapshot.stat().st_size if snapshot.exists() else entry.size_bytes
@@ -4698,16 +4698,36 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                         bg_db.close()
                 _run_async_backup(_post_resolve_backup)
             else:
-                # Manual resolve: read original from quarantine, queue restore command
+                # Manual resolve: search backups for clean content matching the trusted baseline
+                original_bytes = None
+                found_backup_root = None
+                for root in all_backup_roots(db):
+                    candidate = backup_file_path(root, file_entry.relative_path)
+                    if candidate.exists() and candidate.is_file():
+                        if file_entry.baseline_hash and sha256_file(candidate) == file_entry.baseline_hash:
+                            try:
+                                original_bytes = candidate.read_bytes()
+                                found_backup_root = root
+                                break
+                            except Exception:
+                                pass
                 quarantine_paths = json_loads(incident.quarantine_paths_json, [])
                 quarantine_path = quarantine_paths[0] if quarantine_paths else None
                 safe_quarantine = safe_quarantine_path(quarantine_path) if quarantine_path else None
-                original_bytes = None
-                if safe_quarantine and safe_quarantine.exists():
-                    try:
-                        original_bytes = safe_quarantine.read_bytes()
-                    except Exception:
-                        pass
+                if original_bytes is None:
+                    # Fallback to quarantine (stores defaced content, but better than nothing)
+                    if safe_quarantine and safe_quarantine.exists():
+                        try:
+                            original_bytes = safe_quarantine.read_bytes()
+                        except Exception:
+                            pass
+                    if original_bytes is None:
+                        logger.warning(
+                            "No clean backup matching baseline hash %s or quarantine found for %s; "
+                            "cannot restore file content.",
+                            file_entry.baseline_hash,
+                            file_entry.relative_path,
+                        )
                 if original_bytes is not None:
                     # Write clean snapshot on VM2 so backup and baseline use the original trusted content
                     snapshot = VM1_SNAPSHOT_ROOT / file_entry.relative_path
@@ -4715,11 +4735,13 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                     snapshot.write_bytes(original_bytes)
                     clean_hash = hashlib.sha256(original_bytes).hexdigest()
                     file_entry.baseline_hash = clean_hash
-                    file_entry.current_hash = clean_hash
+                    # Do NOT update current_hash here; leave it as the defaced hash so
+                    # subsequent scans see previous_hash == current_hash and skip
+                    # re-detection while the VM1 restore command is pending.
                 file_entry.status = "clean"
                 file_entry.last_checked = now_utc()
                 db.add(file_entry)
-                if detection:
+                if detection and original_bytes is not None:
                     cmd = _create_vm1_restore_command(db, file_entry, detection.id, original_content_bytes=original_bytes)
                     if create_event:
                         recovery = SecurityRecoveryEvent(
@@ -4729,7 +4751,7 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                             initiated_by=_valid_admin_id(db, admin_id),
                             status="success",
                             quarantine_path=str(safe_quarantine) if safe_quarantine else None,
-                            summary=f"Resolved incident: restore command queued for {file_entry.relative_path}.",
+                            summary=f"Resolved incident: restored {file_entry.relative_path} from {found_backup_root.name if found_backup_root else 'quarantine'}.",
                             completed_at=now_utc(),
                         )
                         db.add(recovery)
