@@ -8,7 +8,7 @@ User=root
 WorkingDirectory=/opt/wards/app
 Environment="WEBHOOK_SECRET=replace-with-your-github-webhook-secret"
 Environment="DEPLOY_DIR=/opt/wards/app"
-Environment="VM2_HOST=146.190.97.87"
+Environment="VM2_HOST=api-vm2.nanowards.com"
 Environment="VM2_API_KEY=3e5833e12a888a95601b31f69b4e9bb8612f0e17807020deeb4d24f43e3e68c1"
 Environment="VM2_ADMIN_SECRET=a9fa79fa240f4dcb537ff81a33fd91f51a34d1cb7bf4987603ecf1a631c4aa8d"
 ExecStart=/opt/wards/app/venv/bin/python /opt/wards/app/scripts/webhook_deploy.py
