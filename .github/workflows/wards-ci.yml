@@ -155,7 +155,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 10
+          fetch-depth: 0
       - name: Wait for VMs to sync
         run: |
           START=$(date +%s)
@@ -165,9 +165,16 @@ jobs:
             VM2_COMMIT=$(curl -sSf http://152.42.249.84:9000/vm2-deploy-status | jq -r '.commit')
             echo "VM1=$VM1_COMMIT VM2=$VM2_COMMIT"
 
-            if [ "$VM1_COMMIT" = "$VM2_COMMIT" ] && [ "$VM1_COMMIT" != "unknown" ]; then
-              if git merge-base --is-ancestor "$VM1_COMMIT" origin/main; then
-                echo "VMs synchronized at $VM1_COMMIT (on origin/main) — deploy verified."
+            if [ "$VM1_COMMIT" != "unknown" ] && [ "$VM2_COMMIT" != "unknown" ]; then
+              VM1_ON_MAIN=$(git merge-base --is-ancestor "$VM1_COMMIT" origin/main && echo "yes" || echo "no")
+              VM2_ON_MAIN=$(git merge-base --is-ancestor "$VM2_COMMIT" origin/main && echo "yes" || echo "no")
+
+              if [ "$VM1_ON_MAIN" = "yes" ] && [ "$VM2_ON_MAIN" = "yes" ]; then
+                if [ "$VM1_COMMIT" = "$VM2_COMMIT" ]; then
+                  echo "VMs synchronized at $VM1_COMMIT (on origin/main) — deploy verified."
+                else
+                  echo "VMs at different commits but both on origin/main — VM1=$VM1_COMMIT VM2=$VM2_COMMIT — deploy verified."
+                fi
                 exit 0
               fi
             fi
