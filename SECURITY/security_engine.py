@@ -162,7 +162,7 @@ SUSPICIOUS_PATTERNS = {
     "iframe_injection": ("<iframe",),
     "defacement_keywords": ("hacked", "defaced", "owned", "pwned"),
     "credential_access": ("password=", "token=", "secret=", "api_key"),
-    "sql_injection": ("' or '1'='1", "union select", "drop table", "--"),
+    "sql_injection": ("' or '1'='1", "union select", "drop table"),
 }
 
 BEHAVIOR_LABELS = {
