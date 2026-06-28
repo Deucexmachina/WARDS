@@ -3945,9 +3945,19 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
                         root_name = _clean_folder_root(str(entry.folder_root or ""))
                         if root_name:
                             backed_up_roots.add(root_name)
-                    entry.baseline_hash = file_hash
-                    entry.current_hash = file_hash
-                    entry.status = "clean"
+                    else:
+                        file_hash = entry.current_hash or entry.baseline_hash
+                    has_open_incident = (
+                        _has_open_incident(db, entry, "vm1_content_modified")
+                        or _has_open_incident(db, entry, "file_deleted")
+                    )
+                    if not has_open_incident:
+                        entry.baseline_hash = file_hash
+                        entry.current_hash = file_hash
+                        entry.status = "clean"
+                    else:
+                        entry.current_hash = file_hash
+                        entry.status = "modified"
                     entry.file_type = file_type(snapshot) if snapshot.exists() else entry.file_type
                     entry.size_bytes = snapshot.stat().st_size if snapshot.exists() else entry.size_bytes
                     entry.last_checked = now_utc()
@@ -4688,11 +4698,14 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                             except Exception:
                                 pass
                 if not clean_hash:
-                    # Fallback: use current snapshot if already clean
+                    # Fallback: use current snapshot only if it matches the existing
+                    # baseline (meaning it wasn't overwritten by a defaced version).
                     snapshot = VM1_SNAPSHOT_ROOT / file_entry.relative_path
                     if snapshot.exists():
                         try:
-                            clean_hash = sha256_file(snapshot)
+                            snapshot_hash = sha256_file(snapshot)
+                            if snapshot_hash == file_entry.baseline_hash:
+                                clean_hash = snapshot_hash
                         except Exception:
                             pass
                 if clean_hash:
@@ -6042,6 +6055,38 @@ def acknowledge_vm1_restore_command(db: Session, command_id: str, success: bool)
     removed = [c for c in commands if c.get("command_id") == command_id]
     commands = [c for c in commands if c.get("command_id") != command_id]
     set_setting(db, "vm1_restore_commands", json_dumps(commands), "vm1_reporter")
+
+    # Update the monitored file baseline when a restore succeeds so the clean
+    # state is trusted immediately and doesn't trigger a re-detection.
+    if success:
+        for cmd in removed:
+            rel_path = cmd.get("relative_path")
+            content_file = cmd.get("restore_content_file")
+            if not rel_path or not content_file:
+                continue
+            file_entry = (
+                db.query(SecurityMonitoredFile)
+                .filter(SecurityMonitoredFile.relative_path == rel_path)
+                .first()
+            )
+            if not file_entry:
+                continue
+            try:
+                content_path = Path(content_file)
+                if content_path.exists():
+                    clean_bytes = base64.b64decode(content_path.read_bytes())
+                    clean_hash = hashlib.sha256(clean_bytes).hexdigest()
+                    snapshot = VM1_SNAPSHOT_ROOT / rel_path
+                    snapshot.parent.mkdir(parents=True, exist_ok=True)
+                    snapshot.write_bytes(clean_bytes)
+                    file_entry.baseline_hash = clean_hash
+                    file_entry.current_hash = clean_hash
+                    file_entry.status = "clean"
+                    file_entry.last_checked = now_utc()
+                    db.add(file_entry)
+                    db.commit()
+            except Exception:
+                pass
 
     # Clean up external content files to prevent disk bloat
     for c in removed:

@@ -122,7 +122,22 @@ def send_manifest(files: list[dict]) -> bool:
             )
             # Apply any restore commands returned immediately to avoid poll delay
             for cmd in data.get("restore_commands", []):
-                apply_restore_command(cmd)
+                success = apply_restore_command(cmd)
+                # Ack immediately so VM2 can update the baseline without waiting
+                # for the next poll cycle.
+                try:
+                    requests.post(
+                        f"{SECURITY_API_URL}/v1/vm1/restore-ack",
+                        headers={"X-API-Key": API_KEY, "Content-Type": "application/json"},
+                        json={
+                            "command_id": cmd.get("command_id"),
+                            "success": success,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        },
+                        timeout=10,
+                    )
+                except Exception:
+                    pass
             return True
         log(f"Manifest upload failed: HTTP {resp.status_code} {resp.text[:200]}")
         return False
