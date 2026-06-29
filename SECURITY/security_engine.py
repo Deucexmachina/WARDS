@@ -7032,7 +7032,7 @@ def _vm1_file_monitorable(rel_path: str) -> bool:
     return False
 
 
-def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
+def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit: str | None = None) -> dict:
     # Build the set of currently allowed VM1 folder roots so stale manifests
     # from reporters that haven't refreshed config yet don't recreate entries.
     allowed_vm1_roots = {
@@ -7056,7 +7056,14 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
         except (TypeError, ValueError):
             return 0
 
-    if is_deployment_in_progress(db):
+    deployment_commit = str(deployment_commit or "").strip()
+    deployment_paused = is_deployment_in_progress(db)
+    if deployment_commit:
+        set_setting(db, "vm1_last_manifest_commit", deployment_commit, "vm1_reporter")
+    set_setting(db, "vm1_last_manifest_at", now_utc().isoformat(), "vm1_reporter")
+    set_setting(db, "vm1_last_manifest_deployment_paused", "true" if deployment_paused else "false", "vm1_reporter")
+
+    if deployment_paused:
         logger.info("Deployment in progress — skipping VM1 file change detections.")
         # Still register or update files so the baseline is correct post-deploy
         for f in files:
@@ -7107,7 +7114,19 @@ def process_vm1_file_manifest(db: Session, files: list[dict]) -> dict:
             # Store the snapshot during deployment so future diffs have a proper baseline
             _store_vm1_snapshot(rel_path, f.get("content_b64"))
         db.commit()
-        return {"detections": [], "changed": 0, "registered": len(files)}
+        target_commit = (get_setting(db, "deployment_target_commit", "") or "").strip()
+        baseline_ready = bool(deployment_commit and target_commit and deployment_commit == target_commit)
+        if baseline_ready:
+            set_setting(db, "deployment_vm1_baseline_ready", "true", "vm1_reporter")
+        return {
+            "detections": [],
+            "changed": 0,
+            "registered": len(files),
+            "deployment_paused": True,
+            "deployment_commit": deployment_commit,
+            "deployment_target_commit": target_commit,
+            "deployment_vm1_baseline_ready": baseline_ready,
+        }
 
     # --- Bulk change detection ---
     # If many existing monitored files change at once with no open incidents,

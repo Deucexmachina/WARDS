@@ -37,6 +37,7 @@ MONITORED_ROOTS = {
     "WARDS": Path(os.getenv("VM1_WARDS_DIR", "/WARDS")),
     "OCR": Path(os.getenv("VM1_OCR_DIR", "/OCR")),
 }
+DEPLOY_DIR = Path(os.getenv("DEPLOY_DIR", "/opt/wards/app"))
 
 SCAN_INTERVAL = max(5, int(os.getenv("VM1_REPORT_INTERVAL", "10")))
 HEARTBEAT_INTERVAL = max(5, int(os.getenv("VM1_HEARTBEAT_INTERVAL", "10")))
@@ -61,6 +62,25 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: f.read(8192), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def current_git_commit() -> str:
+    """Return the deployed repo commit so VM2 can verify deployment baselines."""
+    candidates = [DEPLOY_DIR, *MONITORED_ROOTS.values()]
+    for candidate in candidates:
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=candidate,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except Exception:
+            pass
+    return "unknown"
 
 
 def file_content_b64(path: Path) -> str | None:
@@ -173,7 +193,7 @@ def send_manifest(files: list[dict]) -> bool:
         resp = requests.post(
             f"{SECURITY_API_URL}/v1/vm1/files/register",
             headers={"X-API-Key": API_KEY, "Content-Type": "application/json"},
-            json={"files": files},
+            json={"files": files, "commit": current_git_commit()},
             timeout=30,
         )
         if resp.status_code == 200:

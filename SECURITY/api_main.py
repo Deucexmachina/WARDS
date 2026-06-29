@@ -476,7 +476,7 @@ def on_shutdown():
 @app.post("/v1/vm1/files/register", dependencies=[Depends(require_api_key)])
 def api_vm1_files_register(payload: dict = {}, db=Depends(get_db)):
     from SECURITY.security_engine import process_vm1_file_manifest
-    return process_vm1_file_manifest(db, payload.get("files", []))
+    return process_vm1_file_manifest(db, payload.get("files", []), deployment_commit=payload.get("commit"))
 
 
 @app.post("/v1/vm1/heartbeat", dependencies=[Depends(require_api_key)])
@@ -802,9 +802,13 @@ def api_mark_stale(db=Depends(get_db)):
 # ---------------------------------------------------------------------------
 @app.post("/internal/deployment-mode", dependencies=[Depends(require_api_key)])
 def api_deployment_mode(payload: dict = {}, db: Session = Depends(get_db)):
-    from SECURITY.security_engine import set_deployment_mode
+    from SECURITY.security_engine import set_deployment_mode, set_setting
     in_progress = payload.get("in_progress", False)
     set_deployment_mode(db, in_progress, updated_by="webhook")
+    target_commit = str(payload.get("target_commit") or "").strip()
+    if in_progress and target_commit:
+        set_setting(db, "deployment_target_commit", target_commit, "webhook")
+        set_setting(db, "deployment_vm1_baseline_ready", "false", "webhook")
     return {"deployment_in_progress": in_progress}
 
 
@@ -873,8 +877,9 @@ def api_internal_deploy(request: Request = None):
 
 
 @app.get("/internal/deploy-status", dependencies=[Depends(require_api_key)])
-def api_internal_deploy_status():
+def api_internal_deploy_status(db: Session = Depends(get_db)):
     import subprocess
+    from SECURITY.security_engine import get_setting, is_deployment_in_progress
     app_dir = os.getenv("VM2_APP_DIR", "/opt/wards/security/app")
     commit = "unknown"
     try:
@@ -887,7 +892,16 @@ def api_internal_deploy_status():
                 commit = result.stdout.strip()
     except Exception:
         pass
-    return {"vm": "vm2", "commit": commit, "deploy_dir": app_dir}
+    return {
+        "vm": "vm2",
+        "commit": commit,
+        "deploy_dir": app_dir,
+        "deployment_in_progress": is_deployment_in_progress(db),
+        "deployment_target_commit": get_setting(db, "deployment_target_commit", ""),
+        "deployment_vm1_baseline_ready": (get_setting(db, "deployment_vm1_baseline_ready", "false") or "false").lower() == "true",
+        "vm1_last_manifest_commit": get_setting(db, "vm1_last_manifest_commit", ""),
+        "vm1_last_manifest_at": get_setting(db, "vm1_last_manifest_at", ""),
+    }
 
 
 @app.post("/v1/admin/clear-all-logs", dependencies=[Depends(require_api_key), Depends(require_admin_secret)])

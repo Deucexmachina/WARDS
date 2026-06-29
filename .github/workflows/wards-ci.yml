@@ -159,29 +159,30 @@ jobs:
       - name: Wait for VMs to sync
         run: |
           START=$(date +%s)
-          MAX_WAIT=180
+          MAX_WAIT=300
+          TARGET_COMMIT="${GITHUB_SHA}"
           while true; do
-            VM1_COMMIT=$(curl -sSf http://152.42.249.84:9000/deploy-status | jq -r '.commit')
-            VM2_COMMIT=$(curl -sSf http://152.42.249.84:9000/vm2-deploy-status | jq -r '.commit')
-            echo "VM1=$VM1_COMMIT VM2=$VM2_COMMIT"
+            VM1_JSON=$(curl -sSf http://152.42.249.84:9000/deploy-status)
+            VM2_JSON=$(curl -sSf http://152.42.249.84:9000/vm2-deploy-status)
+            VM1_COMMIT=$(echo "$VM1_JSON" | jq -r '.commit')
+            VM2_COMMIT=$(echo "$VM2_JSON" | jq -r '.commit')
+            VM2_BASELINE_READY=$(echo "$VM2_JSON" | jq -r '.deployment_vm1_baseline_ready // false')
+            VM2_VM1_MANIFEST_COMMIT=$(echo "$VM2_JSON" | jq -r '.vm1_last_manifest_commit // ""')
+            VM2_PAUSED=$(echo "$VM2_JSON" | jq -r '.deployment_in_progress // false')
+            echo "target=$TARGET_COMMIT VM1=$VM1_COMMIT VM2=$VM2_COMMIT vm1_manifest=$VM2_VM1_MANIFEST_COMMIT baseline_ready=$VM2_BASELINE_READY paused=$VM2_PAUSED"
 
-            if [ "$VM1_COMMIT" != "unknown" ] && [ "$VM2_COMMIT" != "unknown" ]; then
-              VM1_ON_MAIN=$(git merge-base --is-ancestor "$VM1_COMMIT" origin/main && echo "yes" || echo "no")
-              VM2_ON_MAIN=$(git merge-base --is-ancestor "$VM2_COMMIT" origin/main && echo "yes" || echo "no")
-
-              if [ "$VM1_ON_MAIN" = "yes" ] && [ "$VM2_ON_MAIN" = "yes" ]; then
-                if [ "$VM1_COMMIT" = "$VM2_COMMIT" ]; then
-                  echo "VMs synchronized at $VM1_COMMIT (on origin/main) — deploy verified."
-                else
-                  echo "VMs at different commits but both on origin/main — VM1=$VM1_COMMIT VM2=$VM2_COMMIT — deploy verified."
-                fi
+            if [ "$VM1_COMMIT" = "$TARGET_COMMIT" ] && \
+               [ "$VM2_COMMIT" = "$TARGET_COMMIT" ] && \
+               [ "$VM2_VM1_MANIFEST_COMMIT" = "$TARGET_COMMIT" ] && \
+               [ "$VM2_BASELINE_READY" = "true" ] && \
+               [ "$VM2_PAUSED" = "false" ]; then
+                  echo "VMs synchronized at $TARGET_COMMIT and VM1 baseline manifest verified."
                 exit 0
-              fi
             fi
 
             ELAPSED=$(($(date +%s) - START))
             if [ "$ELAPSED" -ge "$MAX_WAIT" ]; then
-              echo "Timeout after ${MAX_WAIT}s — VMs still not synchronized."
+              echo "Timeout after ${MAX_WAIT}s — VMs did not reach target commit and verified baseline."
               exit 1
             fi
 

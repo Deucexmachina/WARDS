@@ -219,6 +219,26 @@ def test_deployment_compose_includes_redis_and_frontend_build_args():
     assert "VITE_API_BASE_URL:" in compose_text
 
 
+def test_ci_deploy_status_requires_exact_commit_and_vm1_baseline():
+    workflow = (Path(__file__).resolve().parents[1] / ".github" / "workflows" / "wards-ci.yml").read_text()
+
+    assert 'TARGET_COMMIT="${GITHUB_SHA}"' in workflow
+    assert '[ "$VM1_COMMIT" = "$TARGET_COMMIT" ]' in workflow
+    assert '[ "$VM2_COMMIT" = "$TARGET_COMMIT" ]' in workflow
+    assert '[ "$VM2_VM1_MANIFEST_COMMIT" = "$TARGET_COMMIT" ]' in workflow
+    assert '[ "$VM2_BASELINE_READY" = "true" ]' in workflow
+    assert '[ "$VM2_PAUSED" = "false" ]' in workflow
+
+
+def test_webhook_deploy_waits_for_vm1_baseline_manifest():
+    script = (Path(__file__).resolve().parents[1] / "scripts" / "webhook_deploy.py").read_text()
+
+    assert '"target_commit": target_commit' in script
+    assert "deployment_vm1_baseline_ready" in script
+    assert "vm1_last_manifest_commit" in script
+    assert "VM1 did not upload a deployment-paused baseline manifest" in script
+
+
 def test_frontend_dockerfile_uses_static_nginx_server():
     dockerfile = (Path(__file__).resolve().parents[1] / "WARDS" / "frontend" / "Dockerfile").read_text()
 
