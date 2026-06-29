@@ -339,7 +339,7 @@ class OnlinePaymentCreate(BaseModel):
 # ============= Branch Home Module =============
 
 @router.get("/branches")
-@limiter.limit("60000/minute")  # TEMP: increased for DS-21 load test; revert to "60/minute" after
+@limiter.limit("60/minute")  # TEMP: increased for DS-21 load test; revert to "60/minute" after
 async def get_all_public_branches(
     request: Request,
     skip: int = 0,
