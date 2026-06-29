@@ -1,0 +1,10 @@
+[Unit]
+Description=WARDS Security AI retraining job
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/wards/security/app
+ExecStart=/bin/bash -lc 'set -a; source /opt/wards/security/app/.env; set +a; curl -fsS -X POST -H "X-API-Key: ${APP_API_KEY}" -H "Content-Type: application/json" --data "{\"actor\":\"systemd-timer\"}" http://127.0.0.1:8443/v1/ai/retrain'
+

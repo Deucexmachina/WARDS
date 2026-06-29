@@ -237,6 +237,31 @@ class BulkIncidentRequest(BaseModel):
     confirm_missing_files: bool = False
 
 
+def _latest_vm1_database_backup(db: Session):
+    vm1_types = ["Security VM1 Manual", "Security Full VM1", "Scheduled"]
+    latest = (
+        db.query(Backup)
+        .filter(
+            Backup.status == "Completed",
+            Backup.type.in_(vm1_types),
+        )
+        .order_by(Backup.created_at.desc())
+        .first()
+    )
+    if latest:
+        return latest
+    return (
+        db.query(Backup)
+        .filter(
+            Backup.status == "Completed",
+            Backup.type.ilike("%database%"),
+            Backup.db_type.isnot(None),
+        )
+        .order_by(Backup.created_at.desc())
+        .first()
+    )
+
+
 ROLE_MAIN_ADMIN = "main_admin"
 ROLE_SUPERADMIN = "superadmin"
 
@@ -655,6 +680,14 @@ def recover_full(request: Request, background_tasks: BackgroundTasks = None, db:
     def _run_recovery():
         db2 = SessionLocal()
         try:
+            latest_vm1 = _latest_vm1_database_backup(db2)
+            if latest_vm1:
+                from utils.backup_engine import backup_dir
+                restore_database_backup(
+                    backup_dir() / latest_vm1.filename,
+                    getattr(latest_vm1, "checksum", None),
+                    getattr(latest_vm1, "db_type", None),
+                )
             full_system_recovery(db2, admin.id)
         finally:
             db2.close()
@@ -677,7 +710,7 @@ def recover_full(request: Request, background_tasks: BackgroundTasks = None, db:
 
 @router.post("/recover/vm1-database")
 def recover_vm1_database(request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
-    latest = db.query(Backup).filter(Backup.status == "Completed").order_by(Backup.created_at.desc()).first()
+    latest = _latest_vm1_database_backup(db)
     if not latest:
         raise HTTPException(status_code=404, detail="No completed VM1 database backup found.")
     from utils.backup_engine import backup_dir

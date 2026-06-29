@@ -1,5 +1,6 @@
 import gzip
 import hashlib
+import logging
 import os
 import shutil
 import subprocess
@@ -7,6 +8,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
+
+logger = logging.getLogger(__name__)
+DEFAULT_DATABASE_BACKUP_RETENTION_LIMIT = 10
 
 
 @dataclass
@@ -29,6 +33,33 @@ def backup_dir() -> Path:
     path = Path(os.getenv("BACKUP_DIR", "./backups")).resolve()
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def database_backup_retention_limit() -> int:
+    try:
+        return max(1, int(os.getenv("VM1_DATABASE_BACKUP_RETENTION_LIMIT", str(DEFAULT_DATABASE_BACKUP_RETENTION_LIMIT))))
+    except (TypeError, ValueError):
+        return DEFAULT_DATABASE_BACKUP_RETENTION_LIMIT
+
+
+def prune_database_backups(backup_location: Path | None = None, keep: int | None = None) -> int:
+    """Keep only the newest VM1 database dump files in the backup directory."""
+    location = backup_location or backup_dir()
+    keep_count = database_backup_retention_limit() if keep is None else max(1, int(keep))
+    if not location.exists() or not location.is_dir():
+        return 0
+    backups = sorted(
+        [item for item in location.iterdir() if item.is_file() and item.name.startswith("database_") and item.name.endswith(".sql.gz")],
+        key=lambda item: item.name,
+    )
+    removed = 0
+    for old_backup in backups[:-keep_count]:
+        try:
+            old_backup.unlink()
+            removed += 1
+        except OSError as exc:
+            logger.warning("Failed to remove old VM1 database backup %s: %s", old_backup, exc)
+    return removed
 
 
 def _db_type(database_url: str) -> str:
@@ -131,6 +162,7 @@ def create_database_backup() -> BackupResult:
             )
 
     checksum = sha256_file(output_path)
+    prune_database_backups(output_path.parent)
     return BackupResult(
         filename=output_path.name,
         path=output_path,

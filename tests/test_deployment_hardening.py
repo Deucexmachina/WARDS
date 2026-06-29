@@ -83,6 +83,43 @@ def test_backup_engine_creates_compressed_dump_with_checksum(monkeypatch, tmp_pa
         assert handle.read() == b"-- sql dump\n"
 
 
+def test_backup_engine_prunes_vm1_database_dumps_to_ten(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/wards")
+    monkeypatch.setenv("BACKUP_DIR", str(tmp_path))
+
+    for idx in range(12):
+        old = tmp_path / f"database_20260101_0000{idx:02d}.sql.gz"
+        old.write_bytes(b"old")
+    unrelated = tmp_path / "manual_backup_20260101_000000.sql.gz"
+    unrelated.write_bytes(b"keep")
+
+    def fake_run(command, stdout=None, stderr=None, check=False, stdin=None):
+        if stdout:
+            stdout.write(b"-- sql dump\n")
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(backup_engine.subprocess, "run", fake_run)
+    result = backup_engine.create_database_backup()
+
+    backups = sorted(path.name for path in tmp_path.glob("database_*.sql.gz"))
+    assert result.path.exists()
+    assert len(backups) == 10
+    assert "database_20260101_000000.sql.gz" not in backups
+    assert unrelated.exists()
+
+
+def test_prune_database_backups_is_configurable_and_scoped(tmp_path):
+    for idx in range(5):
+        (tmp_path / f"database_20260101_0000{idx:02d}.sql.gz").write_bytes(b"old")
+    (tmp_path / "database_notes.txt").write_text("ignore", encoding="utf-8")
+
+    removed = backup_engine.prune_database_backups(tmp_path, keep=3)
+
+    assert removed == 2
+    assert len(list(tmp_path.glob("database_*.sql.gz"))) == 3
+    assert (tmp_path / "database_notes.txt").exists()
+
+
 def test_refresh_tokens_are_separate_from_access_tokens():
     access = create_access_token("public", {"sub": "citizen@example.com", "type": "user"})
     refresh = create_refresh_token("public", {"sub": "citizen@example.com", "type": "user"})

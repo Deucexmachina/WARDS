@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 import random
 import shlex
@@ -39,6 +40,27 @@ from SECURITY.security_models import (
     SecuritySetting,
 )
 
+try:
+    import numpy as np
+    _NUMPY_AVAILABLE = True
+except ImportError:
+    np = None  # type: ignore
+    _NUMPY_AVAILABLE = False
+
+try:
+    from sklearn.ensemble import IsolationForest
+    _SKLEARN_AVAILABLE = True
+except ImportError:
+    IsolationForest = None  # type: ignore
+    _SKLEARN_AVAILABLE = False
+
+try:
+    import joblib
+    _JOBLIB_AVAILABLE = True
+except ImportError:
+    joblib = None  # type: ignore
+    _JOBLIB_AVAILABLE = False
+
 MASTER_ROOT = Path(__file__).resolve().parents[1]
 logger = logging.getLogger(__name__)
 
@@ -66,12 +88,26 @@ VM1_RESTORE_CONTENT_ROOT = VM1_SNAPSHOT_ROOT / ".restore_content"
 DEFAULT_BACKUP_ROOT = SECURITY_ROOT / "local_backups"
 MODEL_STATE_PATH = SECURITY_ROOT / "ml" / "isolation_forest_state.json"
 MODEL_METADATA_PATH = SECURITY_ROOT / "ml" / "isolation_forest_metadata.json"
+ML_MODELS_DIR = SECURITY_ROOT / "ml_models"
+IFOREST_MODEL_PATH = ML_MODELS_DIR / "isolation_forest.pkl"
+IFOREST_META_PATH = ML_MODELS_DIR / "model_metadata.json"
+MIN_ML_TRAINING_SAMPLES = 10
 WAZUH_CONFIG_PATH = Path(os.getenv("WAZUH_CONFIG_PATH", str(SECURITY_ROOT / "wazuh" / "ossec.conf"))).expanduser()
 DATABASE_MONITOR_ROOT = SECURITY_ROOT / "database_monitor"
 DATABASE_SNAPSHOT_PATH = DATABASE_MONITOR_ROOT / "wards_db_snapshot.json"
 DATABASE_CHECKSUM_PATH = DATABASE_MONITOR_ROOT / "wards_db_checksum.json"
 DATABASE_BACKUP_RELATIVE_PATH = "DATABASE/wards_db_snapshot.json"
 DATABASE_CHECKSUM_RELATIVE_PATH = "DATABASE/wards_db_checksum.json"
+RECOVERY_DOMAIN_FILES = "application_files"
+RECOVERY_DOMAIN_VM2_DATABASE = "vm2_database"
+RECOVERY_DOMAIN_ML = "ai_ml_assets"
+RECOVERY_DOMAIN_VM1_DATABASE = "vm1_database"
+RECOVERY_DOMAINS = {
+    RECOVERY_DOMAIN_FILES,
+    RECOVERY_DOMAIN_VM2_DATABASE,
+    RECOVERY_DOMAIN_ML,
+    RECOVERY_DOMAIN_VM1_DATABASE,
+}
 DATABASE_AUDIT_TABLE = "wards_security_db_audit_log"
 DATABASE_AUTH_TABLE = "wards_security_authorized_operations"
 DATABASE_AUDIT_TRIGGER_PREFIX = "wards_security_audit"
@@ -81,6 +117,7 @@ WAZUH_CONFIG_BACKUP_SUFFIX = ".bak"
 WAZUH_HELPER_SCRIPT = SECURITY_ROOT / "wazuh_admin_helper.py"
 WAZUH_HELPER_LOG_PATH = SECURITY_ROOT / "wazuh" / "wazuh_helper.log"
 MODEL_RELATIVE_BACKUP_DIR = "SECURITY/ml"
+ML_MODELS_RELATIVE_BACKUP_DIR = "SECURITY/ml_models"
 SHARED_MONITORED_FOLDERS_PATH = SECURITY_ROOT / "monitoring" / "monitored_folders.json"
 LOCAL_MONITORED_FOLDERS_SETTING = "custom_monitored_folders"
 VM1_CUSTOM_MONITORED_FOLDERS_SETTING = "vm1_custom_monitored_folders"
@@ -1036,8 +1073,6 @@ def merge_monitored_file_entry(db: Session, source: SecurityMonitoredFile, targe
 
 def migrate_portable_monitored_files(db: Session) -> int:
     global _last_migrate_at
-    if time.time() - _last_migrate_at < 300:
-        return 0
     changed = 0
     entries = db.query(SecurityMonitoredFile).order_by(SecurityMonitoredFile.id.asc()).all()
     by_path: dict[str, SecurityMonitoredFile] = {}
@@ -1976,6 +2011,19 @@ def latest_backup_root(db: Session) -> Path | None:
     return None
 
 
+def backup_folder_sort_key(path: Path) -> tuple[datetime, float, str]:
+    timestamp_text = path.name.split("_backup_", 1)[1] if "_backup_" in path.name else path.name
+    try:
+        timestamp = datetime.strptime(timestamp_text[:15], "%Y%m%d_%H%M%S")
+    except Exception:
+        timestamp = datetime.min
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    return (timestamp, mtime, str(path))
+
+
 def all_backup_roots(db: Session) -> list[Path]:
     locations_to_check = []
     configured = resolve_stored_path(get_setting(db, "backup_location", ""))
@@ -1988,7 +2036,7 @@ def all_backup_roots(db: Session) -> list[Path]:
     for location in locations_to_check:
         if location.exists() and location.is_dir():
             backups.extend([item for item in location.iterdir() if item.is_dir()])
-    result = sorted(set(backups), reverse=True)
+    result = sorted(set(backups), key=backup_folder_sort_key, reverse=True)
     logger.info("all_backup_roots found %s backup(s) in %s", len(result), [str(p) for p in locations_to_check])
     return result
 
@@ -2063,10 +2111,18 @@ def relative_backup_path(path: Path, backup_root: Path) -> str:
 
 
 def iter_model_artifact_paths() -> list[Path]:
-    return [path for path in (MODEL_STATE_PATH, MODEL_METADATA_PATH) if path.exists() and path.is_file()]
+    paths = [
+        MODEL_STATE_PATH,
+        MODEL_METADATA_PATH,
+        IFOREST_META_PATH,
+        IFOREST_MODEL_PATH,
+    ]
+    return [path for path in paths if path.exists() and path.is_file()]
 
 
 def model_backup_relative_path(path: Path) -> str:
+    if path.name in {IFOREST_META_PATH.name, IFOREST_MODEL_PATH.name}:
+        return f"{ML_MODELS_RELATIVE_BACKUP_DIR}/{path.name}"
     return f"{MODEL_RELATIVE_BACKUP_DIR}/{path.name}"
 
 
@@ -2081,7 +2137,12 @@ def backup_ml_artifacts(
     for path in iter_model_artifact_paths():
         relative = model_backup_relative_path(path)
         target = backup_file_path(backup_root, relative)
-        file_hash = sha256_file(path)
+        try:
+            file_hash = sha256_file(path)
+            size_bytes = path.stat().st_size
+        except OSError as exc:
+            logger.warning("Skipping ML artifact that disappeared during backup: %s (%s)", path, exc)
+            continue
         previous_source = backup_file_path(previous_backup_root, relative) if previous_backup_root else None
         previous_matches = bool(previous_source and previous_source.exists() and str(previous_manifest.get(relative, {}).get("sha256") or "") == file_hash)
         copy_into_backup(
@@ -2092,7 +2153,7 @@ def backup_ml_artifacts(
         )
         manifest_files.append({
             "path": relative,
-            "size_bytes": path.stat().st_size,
+            "size_bytes": size_bytes,
             "sha256": file_hash,
         })
         copied += 1
@@ -2100,20 +2161,24 @@ def backup_ml_artifacts(
 
 
 def restore_ml_artifacts_from_backup(db: Session) -> int:
-    backup_root = latest_backup_root(db)
+    backup_root = newest_valid_backup_for_domain(db, RECOVERY_DOMAIN_ML)
     if not backup_root:
         return 0
     restored = 0
-    for artifact_name, destination in (
-        (MODEL_STATE_PATH.name, MODEL_STATE_PATH),
-        (MODEL_METADATA_PATH.name, MODEL_METADATA_PATH),
+    for destination in (
+        MODEL_STATE_PATH,
+        MODEL_METADATA_PATH,
+        IFOREST_META_PATH,
+        IFOREST_MODEL_PATH,
     ):
-        source = backup_file_path(backup_root, f"{MODEL_RELATIVE_BACKUP_DIR}/{artifact_name}")
+        source = backup_file_path(backup_root, model_backup_relative_path(destination))
         if not source.exists() or not source.is_file():
             continue
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
         restored += 1
+    global _ml_model_cache
+    _ml_model_cache = {"model": None, "mtime": 0.0}
     return restored
 
 
@@ -2129,6 +2194,9 @@ def backup_manifest_index(backup_root: Path | None) -> dict[str, dict[str, objec
         return {}
     if not isinstance(payload, dict):
         return {}
+    if not verify_backup_manifest_hmac(payload):
+        logger.warning("Backup manifest HMAC verification failed for '%s'.", manifest_path)
+        return {}
     files = payload.get("files")
     if not isinstance(files, list):
         return {}
@@ -2143,8 +2211,97 @@ def backup_manifest_index(backup_root: Path | None) -> dict[str, dict[str, objec
         manifest[relative] = {
             "sha256": file_hash,
             "size_bytes": int(item.get("size_bytes") or 0),
+            "domain": str(item.get("domain") or recovery_domain_for_relative_path(relative)),
         }
     return manifest
+
+
+def verify_backup_manifest_hmac(payload: dict) -> bool:
+    expected = str(payload.get("manifest_hmac_sha256") or "")
+    if not expected:
+        return False
+    unsigned = {key: value for key, value in payload.items() if key != "manifest_hmac_sha256"}
+    encoded = json.dumps(unsigned, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    actual = hmac.new(hmac_secret().encode("utf-8"), encoded.encode("utf-8"), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(actual, expected)
+
+
+def recovery_domain_for_relative_path(relative: str) -> str:
+    normalized = str(relative or "").replace("\\", "/")
+    lower = normalized.lower()
+    if normalized in {DATABASE_BACKUP_RELATIVE_PATH, DATABASE_CHECKSUM_RELATIVE_PATH}:
+        return RECOVERY_DOMAIN_VM2_DATABASE
+    if lower.startswith("security/ml/") or lower.startswith("security/ml_models/"):
+        return RECOVERY_DOMAIN_ML
+    return RECOVERY_DOMAIN_FILES
+
+
+def add_manifest_file(manifest_files: list[dict[str, object]], path: str, source: Path, domain: str | None = None, file_hash: str | None = None) -> None:
+    manifest_files.append({
+        "path": str(path).replace("\\", "/"),
+        "size_bytes": source.stat().st_size,
+        "sha256": file_hash or sha256_file(source),
+        "domain": domain or recovery_domain_for_relative_path(path),
+        "version": "1",
+    })
+
+
+def manifest_domains(manifest: dict[str, dict[str, object]]) -> set[str]:
+    return {str(item.get("domain") or recovery_domain_for_relative_path(path)) for path, item in manifest.items()}
+
+
+def backup_root_has_valid_domain(backup_root: Path, domain: str) -> bool:
+    manifest = backup_manifest_index(backup_root)
+    if not manifest:
+        return False
+    has_domain_file = False
+    for relative, meta in manifest.items():
+        item_domain = str(meta.get("domain") or recovery_domain_for_relative_path(relative))
+        if item_domain != domain:
+            continue
+        source = backup_file_path(backup_root, relative)
+        if not source.exists() or not source.is_file():
+            return False
+        try:
+            if int(meta.get("size_bytes") or 0) != source.stat().st_size:
+                return False
+            if sha256_file(source) != str(meta.get("sha256") or ""):
+                return False
+        except OSError:
+            return False
+        has_domain_file = True
+    return has_domain_file
+
+
+def newest_valid_backup_for_domain(db: Session, domain: str) -> Path | None:
+    for root in all_backup_roots(db):
+        if backup_root_has_valid_domain(root, domain):
+            return root
+    return None
+
+
+def newest_valid_backup_for_path(db: Session, relative: str, expected_hash: str | None = None) -> tuple[Path | None, Path | None]:
+    normalized = str(relative or "").replace("\\", "/")
+    for root in all_backup_roots(db):
+        manifest = backup_manifest_index(root)
+        meta = manifest.get(normalized)
+        if not meta:
+            continue
+        source = backup_file_path(root, normalized)
+        if not source.exists() or not source.is_file():
+            continue
+        try:
+            source_hash = sha256_file(source)
+            if source_hash != str(meta.get("sha256") or ""):
+                continue
+            if int(meta.get("size_bytes") or 0) != source.stat().st_size:
+                continue
+            if expected_hash and source_hash != expected_hash:
+                continue
+            return source, root
+        except OSError:
+            continue
+    return None, None
 
 
 def write_backup_manifest(backup_root: Path, files: list[dict[str, object]] | None = None) -> Path:
@@ -2154,16 +2311,34 @@ def write_backup_manifest(backup_root: Path, files: list[dict[str, object]] | No
         for path in sorted(backup_root.rglob("*")):
             if not path.is_file() or path.name == BACKUP_MANIFEST_NAME:
                 continue
+            relative = relative_backup_path(path, backup_root)
             manifest_files.append({
-                "path": relative_backup_path(path, backup_root),
+                "path": relative,
                 "size_bytes": path.stat().st_size,
                 "sha256": sha256_file(path),
+                "domain": recovery_domain_for_relative_path(relative),
+                "version": "1",
             })
+    else:
+        normalized_files = []
+        for item in manifest_files:
+            relative = str(item.get("path") or "").replace("\\", "/")
+            if not relative:
+                continue
+            normalized = dict(item)
+            normalized["path"] = relative
+            normalized.setdefault("domain", recovery_domain_for_relative_path(relative))
+            normalized.setdefault("version", "1")
+            normalized_files.append(normalized)
+        manifest_files = normalized_files
     manifest_files.sort(key=lambda item: str(item.get("path") or ""))
+    domains = sorted({str(item.get("domain") or recovery_domain_for_relative_path(str(item.get("path") or ""))) for item in manifest_files})
     payload = {
         "manifest_type": "wards_backup_integrity_manifest",
         "backup_root": stored_path_value(backup_root) or str(backup_root),
         "generated_at": now_utc().isoformat(),
+        "recovery_domains": domains,
+        "backup_type": backup_root.name.split("_backup_", 1)[0] if "_backup_" in backup_root.name else "unknown",
         "files": manifest_files,
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
@@ -2427,6 +2602,304 @@ def build_behavioral_profile(admin_changes: list[SecurityAdminFileChange]) -> di
     }
 
 
+FEATURE_NAMES = [
+    "hour",
+    "weekday",
+    "business_hours",
+    "ip_hash",
+    "ip_consistent",
+    "vpn_activity",
+    "source_ip_reputation",
+    "session_duration",
+    "admin_session_valid",
+    "mfa_verified",
+    "method_legitimate",
+    "keystroke_dynamics",
+    "ext_hash",
+    "file_size_change",
+    "content_length",
+    "special_chars_count",
+    "file_type_risk",
+    "first_time_device",
+    "first_time_country",
+    "geo_distance",
+    "unauthorized_admin_path",
+    "sensitive_config_change",
+    "backup_restore_activity",
+    "mfa_configuration_change",
+    "auth_system_modification",
+    "admin_action_rarity",
+    "restore_frequency",
+    "affected_files_count",
+]
+
+
+def _hash_enc(value, mod: int) -> int:
+    if not value or mod <= 0:
+        return 0
+    digest = hashlib.sha256(str(value).encode("utf-8", errors="ignore")).hexdigest()
+    return int(digest[:12], 16) % mod
+
+
+def first_present(mapping: dict | None, *keys: str, default=None):
+    """Return the first non-None value so valid zeroes do not fall through."""
+    mapping = mapping or {}
+    for key in keys:
+        value = mapping.get(key)
+        if value is not None:
+            return value
+    return default
+
+
+def build_feature_vector(log: dict) -> list[float]:
+    """Convert one security/admin event into the stable 28-feature ML vector."""
+    log = log or {}
+
+    def safe_int(x, default=0):
+        try:
+            return int(x)
+        except (TypeError, ValueError):
+            return default
+
+    def safe_float(x, default=0.0):
+        try:
+            value = float(x)
+            if math.isnan(value) or math.isinf(value):
+                return default
+            return value
+        except (TypeError, ValueError):
+            return default
+
+    hour = safe_int(log.get("hour_of_day") if log.get("hour_of_day") is not None else log.get("hour"))
+    weekday = safe_int(log.get("day_of_week") if log.get("day_of_week") is not None else log.get("weekday"))
+    business_hours = 1 if (8 <= hour <= 18 and weekday < 5) else 0
+    source_ip = log.get("source_ip") or log.get("client_ip") or log.get("ip_address") or ""
+    file_path = log.get("file_path") or log.get("target_name") or ""
+    path_obj = Path(str(file_path)) if file_path else Path("unknown")
+    source_ip_reputation = safe_float(first_present(log, "source_ip_reputation", "ip_reputation_score", default=0.0))
+    geo_distance = safe_float(first_present(log, "geo_distance_from_last_login", "geo_distance_from_last_login_km", "geo_distance_km", default=0.0))
+
+    return [
+        float(hour),
+        float(weekday),
+        float(business_hours),
+        float(_hash_enc(source_ip, 1000)),
+        1.0 if log.get("ip_consistent") else 0.0,
+        1.0 if log.get("vpn_activity") or log.get("vpn_detected") else 0.0,
+        source_ip_reputation,
+        float(safe_int(log.get("session_duration"))),
+        1.0 if log.get("admin_session_valid") else 0.0,
+        1.0 if log.get("mfa_verified") else 0.0,
+        1.0 if log.get("method_legitimate") else 0.0,
+        safe_float(first_present(log, "keystroke_dynamics", "keystroke_anomaly_confidence", default=0.0)),
+        float(_hash_enc(path_obj.suffix.lower(), 100)),
+        float(safe_int(log.get("file_size_change"))),
+        float(safe_int(log.get("content_length"))),
+        float(safe_int(log.get("special_chars_count"))),
+        float(safe_int(log.get("file_type_risk"))),
+        1.0 if log.get("first_time_device") or log.get("new_device") or log.get("device_seen_before") is False else 0.0,
+        1.0 if log.get("first_time_country") or log.get("new_country") or log.get("country_seen_before") is False else 0.0,
+        geo_distance,
+        1.0 if log.get("unauthorized_admin_path") else 0.0,
+        1.0 if log.get("sensitive_config_change") else 0.0,
+        1.0 if log.get("backup_restore_activity") else 0.0,
+        1.0 if log.get("mfa_configuration_change") else 0.0,
+        1.0 if log.get("auth_system_modification") else 0.0,
+        safe_float(first_present(log, "admin_action_rarity", "admin_action_rarity_score", default=0.0)),
+        float(safe_int(first_present(log, "restore_frequency", "restores_in_window", "restore_count", default=0))),
+        float(safe_int(first_present(log, "affected_files_count", "modified_file_count", "files_modified_in_window", default=0))),
+    ]
+
+
+def train_isolation_forest(logs: list[dict]) -> object | None:
+    """Train and persist the real Isolation Forest model, if dependencies/data are available."""
+    if not _NUMPY_AVAILABLE or not _SKLEARN_AVAILABLE or not _JOBLIB_AVAILABLE:
+        logger.warning("numpy/sklearn/joblib unavailable; skipping Isolation Forest training.")
+        return None
+    if len(logs) < MIN_ML_TRAINING_SAMPLES:
+        logger.info("Need >= %s samples for ML; have %s.", MIN_ML_TRAINING_SAMPLES, len(logs))
+        return None
+
+    X = np.array([build_feature_vector(log) for log in logs], dtype=float)
+    if not np.isfinite(X).all():
+        logger.warning("Isolation Forest training data contained NaN/Inf; sanitizing invalid values to zero.")
+        X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+    non_zero = ~(X == 0).all(axis=1)
+    X = X[non_zero]
+    if len(X) < MIN_ML_TRAINING_SAMPLES:
+        logger.info("Not enough non-zero samples after filtering.")
+        return None
+
+    contamination = min(0.1, max(0.01, 5.0 / len(X)))
+    model = IsolationForest(
+        n_estimators=100,
+        contamination=contamination,
+        random_state=42,
+        n_jobs=-1,
+    )
+    model.fit(X)
+
+    ML_MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    joblib.dump(model, IFOREST_MODEL_PATH)
+    meta = {
+        "algorithm": "IsolationForest",
+        "version": now_utc().strftime("iforest-v%Y%m%d%H%M%S"),
+        "trained_at": now_utc().isoformat(),
+        "sample_count": int(len(X)),
+        "contamination": float(contamination),
+        "n_estimators": 100,
+        "feature_count": int(X.shape[1]),
+        "features": FEATURE_NAMES,
+        "model_path": stored_path_value(IFOREST_MODEL_PATH) or str(IFOREST_MODEL_PATH),
+    }
+    IFOREST_META_PATH.write_text(json_dumps(meta), encoding="utf-8")
+
+    global _ml_model_cache
+    try:
+        model_mtime = IFOREST_MODEL_PATH.stat().st_mtime
+    except OSError:
+        model_mtime = 0.0
+    _ml_model_cache = {"model": model, "mtime": model_mtime}
+    logger.info("Isolation Forest trained on %s samples.", len(X))
+    return model
+
+
+_ml_model_cache = {"model": None, "mtime": 0.0}
+_ml_model_lock = threading.Lock()
+
+
+def _get_cached_model():
+    if not _JOBLIB_AVAILABLE or not IFOREST_MODEL_PATH.exists():
+        return None
+    try:
+        mtime = IFOREST_MODEL_PATH.stat().st_mtime
+    except OSError as exc:
+        logger.warning("ML model disappeared before cache load: %s", exc)
+        _ml_model_cache["model"] = None
+        _ml_model_cache["mtime"] = 0.0
+        return None
+    with _ml_model_lock:
+        if _ml_model_cache["model"] is None or mtime > float(_ml_model_cache.get("mtime") or 0.0):
+            try:
+                _ml_model_cache["model"] = joblib.load(IFOREST_MODEL_PATH)
+                _ml_model_cache["mtime"] = mtime
+            except Exception as exc:
+                logger.warning("Failed to load ML model: %s", exc)
+                _ml_model_cache["model"] = None
+                _ml_model_cache["mtime"] = 0.0
+        return _ml_model_cache["model"]
+
+
+def ml_anomaly_score(log: dict) -> float:
+    """Return Isolation Forest anomaly risk in [0.0, 1.0]. Missing model means no ML risk."""
+    if not _NUMPY_AVAILABLE or not _SKLEARN_AVAILABLE or not _JOBLIB_AVAILABLE or not IFOREST_MODEL_PATH.exists():
+        return 0.0
+    try:
+        model = _get_cached_model()
+    except OSError as exc:
+        logger.warning("ML model cache lookup failed during filesystem race: %s", exc)
+        return 0.0
+    if model is None:
+        return 0.0
+
+    try:
+        x = np.array([build_feature_vector(log)], dtype=float)
+        if hasattr(model, "n_features_in_") and int(model.n_features_in_) != int(x.shape[1]):
+            logger.warning("ML model feature mismatch: model=%s input=%s", model.n_features_in_, x.shape[1])
+            return 0.0
+        pred = model.predict(x)[0]
+        raw = float(model.decision_function(x)[0])
+    except Exception as exc:
+        logger.warning("ML inference failed: %s", exc)
+        return 0.0
+
+    if pred == -1:
+        risk = min(1.0, 0.6 + abs(raw) * 0.8)
+    else:
+        risk = max(0.0, 0.4 - raw * 0.8)
+    return round(float(risk), 4)
+
+
+def behavioral_score_from_profile(context: dict, profile: dict, rules: dict | None = None) -> tuple[float, list[str], bool]:
+    """Compute learned-profile risk additions for hour, weekday, file type, and source IP."""
+    context = context or {}
+    rules = rules or DEFAULT_AI_RULES
+
+    def enabled(rule_name: str) -> bool:
+        return bool(rules.get(rule_name, {}).get("enabled", True))
+
+    def weight(rule_name: str, fallback: float) -> float:
+        try:
+            return float(rules.get(rule_name, {}).get("weight", fallback))
+        except Exception:
+            return fallback
+
+    sample_count = int(profile.get("sample_count") or 0)
+    if sample_count < 3:
+        return 0.0, [], False
+
+    learned_notes: list[str] = []
+    learned_warning = False
+    risk = 0.0
+    current_hour = int(context.get("hour_of_day") if context.get("hour_of_day") is not None else now_utc().hour)
+    current_weekday = int(context.get("day_of_week") if context.get("day_of_week") is not None else now_utc().weekday())
+    file_path = context.get("file_path") or ""
+    suffix = Path(str(file_path)).suffix.lower() if file_path else ""
+    source_ip = context.get("source_ip") or context.get("client_ip") or context.get("ip_address")
+
+    normal_hours = set(profile.get("normal_hours") or [])
+    if enabled("hour_of_day") and normal_hours and current_hour not in normal_hours:
+        risk += weight("hour_of_day", 0.08)
+        learned_warning = True
+        learned_notes.append(f"hour {current_hour} outside learned hours")
+
+    normal_weekdays = set(profile.get("normal_weekdays") or [])
+    if enabled("day_of_week") and normal_weekdays and current_weekday not in normal_weekdays:
+        risk += weight("day_of_week", 0.05)
+        learned_warning = True
+        learned_notes.append(f"weekday {current_weekday} outside learned weekdays")
+
+    common_extensions = set(profile.get("common_extensions") or [])
+    if enabled("file_type_risk") and common_extensions and suffix and suffix not in common_extensions:
+        risk += min(weight("file_type_risk", 0.07), 0.1)
+        learned_warning = True
+        learned_notes.append(f"{suffix} outside learned file types")
+
+    known_source_ips = set(profile.get("known_source_ips") or [])
+    if enabled("ip_consistent") and source_ip and known_source_ips and source_ip not in known_source_ips:
+        risk += weight("ip_consistent", 0.08)
+        learned_warning = True
+        learned_notes.append("source IP outside learned admin profile")
+
+    return risk, learned_notes, learned_warning
+
+
+def compute_profile_confidence(profile: dict) -> float:
+    """Measure how much the model/profile should influence final predictions."""
+    profile = profile or {}
+    try:
+        sample_count = int(profile.get("sample_count") or 0)
+    except (TypeError, ValueError):
+        sample_count = 0
+    sample_score = min(sample_count / 50.0, 1.0)
+    coverage_parts = [
+        bool(profile.get("normal_hours")),
+        bool(profile.get("normal_weekdays")),
+        bool(profile.get("common_extensions")),
+        bool(profile.get("known_source_ips")),
+    ]
+    coverage_score = sum(1 for part in coverage_parts if part) / len(coverage_parts)
+    freshness_score = 0.0
+    try:
+        if IFOREST_MODEL_PATH.exists():
+            age_hours = max(0.0, (time.time() - IFOREST_MODEL_PATH.stat().st_mtime) / 3600.0)
+            freshness_score = max(0.0, 1.0 - (age_hours / (14 * 24)))
+    except OSError:
+        freshness_score = 0.0
+    confidence = (sample_score * 0.5) + (coverage_score * 0.3) + (freshness_score * 0.2)
+    return round(max(0.0, min(1.0, confidence)), 4)
+
+
 def load_ai_model_state() -> dict:
     if not MODEL_STATE_PATH.exists():
         return {}
@@ -2445,85 +2918,181 @@ def load_ai_model_metadata() -> dict:
         return {}
 
 
+def load_isolation_forest_metadata() -> dict:
+    try:
+        if not IFOREST_META_PATH.exists():
+            return {}
+        return json_loads(IFOREST_META_PATH.read_text(encoding="utf-8"), {})
+    except OSError:
+        return {}
+
+
 def retrain_ai(db: Session, initiated_by: str = "system") -> dict:
-    samples = generate_initial_training_samples()
+    now = now_utc()
+    admin_cutoff = now - timedelta(days=90)
+    detection_cutoff = now - timedelta(days=30)
     admin_changes = (
         db.query(SecurityAdminFileChange)
+        .filter(SecurityAdminFileChange.timestamp >= admin_cutoff)
         .order_by(SecurityAdminFileChange.timestamp.desc())
+        .limit(2000)
         .all()
     )
+    detections = (
+        db.query(SecurityDetectionEvent)
+        .filter(SecurityDetectionEvent.detected_at >= detection_cutoff)
+        .order_by(SecurityDetectionEvent.detected_at.desc())
+        .limit(500)
+        .all()
+    )
+
+    logs: list[dict] = []
     for change in admin_changes:
-        path = Path(change.file_path)
-        length = path.stat().st_size if path.exists() else 0
-        samples.append(
+        timestamp = change.timestamp or now
+        path = Path(change.file_path or "")
+        try:
+            length = path.stat().st_size if path.exists() else 0
+        except OSError:
+            length = 0
+        file_path_text = str(change.file_path or "")
+        user_agent = str(change.user_agent or "").lower()
+        high_risk_ext = path.suffix.lower() in {".py", ".js", ".jsx", ".html", ".css", ".json", ".env", ".yml", ".yaml", ".xml"}
+        logs.append(
             {
-                "hour_of_day": change.timestamp.hour,
-                "day_of_week": change.timestamp.weekday(),
+                "hour_of_day": timestamp.hour,
+                "day_of_week": timestamp.weekday(),
+                "source_ip": change.ip_address,
+                "file_path": change.file_path,
+                "change_type": change.change_type,
                 "session_duration": 1800,
-                "file_size_change": 80,
                 "content_length": length,
-                "special_chars_count": 40,
+                "file_size_change": length,
+                "special_chars_count": 0,
                 "admin_session_valid": 1,
                 "mfa_verified": 1,
-                "ip_consistent": 1,
-                "source_ip_reputation": 0,
-                "keystroke_dynamics": 0,
+                "ip_consistent": bool(change.ip_address),
+                "source_ip_reputation": 0.0,
+                "keystroke_dynamics": 0.0,
                 "method_legitimate": 1,
-                "business_hours": 1 if 8 <= change.timestamp.hour <= 18 and change.timestamp.weekday() < 5 else 0,
-                "file_type_risk": 1,
-                "suspicious_pattern_score": 0,
-                "vpn_activity": 0,
+                "business_hours": 1 if 8 <= timestamp.hour <= 18 and timestamp.weekday() < 5 else 0,
+                "file_type_risk": 1 if high_risk_ext else 0,
+                "vpn_activity": 1 if "vpn" in user_agent or "proxy" in user_agent else 0,
                 "first_time_device": 0,
                 "first_time_country": 0,
-                "geo_distance_from_last_login": 0,
+                "geo_distance_from_last_login": 0.0,
                 "unauthorized_admin_path": 0,
-                "sensitive_config_change": 0,
-                "backup_restore_activity": 0,
-                "mfa_configuration_change": 0,
-                "auth_system_modification": 0,
-                "admin_action_rarity": 0,
+                "sensitive_config_change": 1 if path.suffix.lower() in {".env", ".xml", ".yml", ".yaml", ".sql"} or path.name.lower() in {"requirements.txt", "package.json"} else 0,
+                "backup_restore_activity": 1 if any(keyword in file_path_text.lower() for keyword in ("backup", "restore", "recovery", "quarantine")) else 0,
+                "mfa_configuration_change": 1 if any(keyword in file_path_text.lower() for keyword in ("mfa", "authenticator", "two_factor", "2fa")) else 0,
+                "auth_system_modification": 1 if any(keyword in file_path_text.lower() for keyword in ("auth", "login", "jwt", "token", "password", "session", "middleware")) else 0,
+                "admin_action_rarity": 0.0,
                 "restore_frequency": 0,
-                "backup_integrity_validation": 1,
-                "content_similarity_score": 1,
-                "affected_files_count": 0,
+                "affected_files_count": 1,
             }
         )
 
+    for detection in detections:
+        timestamp = detection.detected_at or now
+        context = json_loads(detection.context_json, {})
+        if not isinstance(context, dict):
+            context = {}
+        flags = json_loads(detection.behavior_flags_json, [])
+        flag_text = " ".join(str(flag).lower() for flag in flags) if isinstance(flags, list) else ""
+        log = {
+            **context,
+            "hour_of_day": context.get("hour_of_day") if context.get("hour_of_day") is not None else timestamp.hour,
+            "day_of_week": context.get("day_of_week") if context.get("day_of_week") is not None else timestamp.weekday(),
+            "file_path": context.get("file_path") or detection.target_name,
+            "target_name": detection.target_name,
+            "source_ip": context.get("source_ip") or context.get("client_ip") or context.get("ip_address"),
+            "content_length": first_present(context, "content_length", default=len(detection.changed_lines_json or "")),
+            "admin_session_valid": context.get("admin_session_valid", detection.change_type != "invalid_admin_session"),
+            "method_legitimate": context.get("method_legitimate", bool(detection.is_legitimate)),
+            "mfa_verified": context.get("mfa_verified", False),
+            "file_type_risk": 1 if str(detection.target_name or "").lower().endswith((".py", ".js", ".jsx", ".html", ".css", ".json", ".env", ".yml", ".yaml", ".xml")) else 0,
+            "unauthorized_admin_path": "unauthorized" in flag_text,
+            "sensitive_config_change": "sensitive" in flag_text,
+            "backup_restore_activity": "backup" in flag_text or "restore" in flag_text,
+            "mfa_configuration_change": "mfa" in flag_text,
+            "auth_system_modification": "auth" in flag_text,
+            "admin_action_rarity": float(detection.ai_score or 0.0),
+            "affected_files_count": first_present(context, "affected_files_count", "modified_file_count", default=0),
+        }
+        logs.append(log)
+
+    training_error = None
+    try:
+        ml_model = train_isolation_forest(logs)
+    except Exception as exc:
+        logger.exception("ML training failed; continuing with existing rules/profile state: %s", exc)
+        training_error = str(exc)
+        ml_model = None
+    ml_meta = load_isolation_forest_metadata()
     MODEL_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    version = now_utc().strftime("v%Y%m%d%H%M%S")
+    version = now.strftime("v%Y%m%d%H%M%S")
+    profile = build_behavioral_profile(admin_changes)
     state = {
-        "algorithm": "Isolation Forest",
-        "strategy": "Continuous incremental retraining with Wazuh-fed admin activity",
-        "normal_samples": len(samples),
+        "algorithm": "Hybrid Rules + Behavioral Profile + Isolation Forest",
+        "strategy": "Rules-based detection fused with learned admin profile and capped-window Isolation Forest retraining",
+        "normal_samples": len(logs),
         "historical_admin_samples": len(admin_changes),
-        "features": list(samples[0].keys()),
-        "behavioral_profile": build_behavioral_profile(admin_changes),
-        "updated_at": now_utc().isoformat(),
+        "detection_samples": len(detections),
+        "features": FEATURE_NAMES,
+        "behavioral_profile": profile,
+        "updated_at": now.isoformat(),
         "updated_by": initiated_by,
         "version": version,
-        "note": "Uses bootstrap normal data plus all historical validated admin behavior, including the newest verified records since the previous retrain.",
+        "note": "Uses recent validated admin behavior plus recent security detections; falls back to rules/profile if the ML artifact is missing.",
+        "report": {
+            "admin_window_days": 90,
+            "detection_window_days": 30,
+            "admin_sample_cap": 2000,
+            "detection_sample_cap": 500,
+            "training_log_count": len(logs),
+            "ml_training_available": bool(_NUMPY_AVAILABLE and _SKLEARN_AVAILABLE and _JOBLIB_AVAILABLE),
+            "ml_model_trained": bool(ml_model),
+            "ml_model_path": stored_path_value(IFOREST_MODEL_PATH) if IFOREST_MODEL_PATH.exists() else None,
+            "ml_sample_count": ml_meta.get("sample_count", 0),
+            "profile_confidence": compute_profile_confidence(profile),
+            "ml_training_error": training_error,
+        },
     }
     metadata = {
-        "model_name": "wards_isolation_forest_profile",
+        "model_name": "wards_hybrid_ai_security_model",
         "version": version,
         "trained_at": state["updated_at"],
         "model_type": state["algorithm"],
         "feature_set": state["features"],
         "training_parameters": {
             "strategy": state["strategy"],
-            "bootstrap_samples": len(generate_initial_training_samples()),
+            "bootstrap_samples": 0,
             "historical_admin_samples": len(admin_changes),
+            "detection_samples": len(detections),
+            "ml_model_trained": bool(ml_model),
         },
         "state_path": stored_path_value(MODEL_STATE_PATH) or str(MODEL_STATE_PATH),
+        "isolation_forest": ml_meta,
     }
-    MODEL_STATE_PATH.write_text(json_dumps(state), encoding="utf-8")
-    MODEL_METADATA_PATH.write_text(json_dumps(metadata), encoding="utf-8")
+    try:
+        MODEL_STATE_PATH.write_text(json_dumps(state), encoding="utf-8")
+        MODEL_METADATA_PATH.write_text(json_dumps(metadata), encoding="utf-8")
+    except OSError as exc:
+        logger.exception("AI state persistence failed after retraining attempt: %s", exc)
+        state["report"]["persistence_error"] = str(exc)
+        return state
     # Update baseline hashes for model artifacts so they aren't flagged as unauthorized changes
-    for artifact_path in (MODEL_STATE_PATH, MODEL_METADATA_PATH):
-        rel = str(artifact_path.relative_to(MASTER_ROOT)).replace("\\", "/")
+    for artifact_path in iter_model_artifact_paths():
+        try:
+            rel = str(artifact_path.relative_to(MASTER_ROOT)).replace("\\", "/")
+        except ValueError:
+            continue
         entry = db.query(SecurityMonitoredFile).filter(SecurityMonitoredFile.relative_path == rel).first()
         if entry:
-            artifact_hash = sha256_file(artifact_path)
+            try:
+                artifact_hash = sha256_file(artifact_path)
+            except OSError as exc:
+                logger.warning("Skipping ML artifact hash refresh; artifact disappeared: %s (%s)", artifact_path, exc)
+                continue
             entry.current_hash = artifact_hash
             entry.baseline_hash = artifact_hash
             entry.status = "clean"
@@ -2531,7 +3100,7 @@ def retrain_ai(db: Session, initiated_by: str = "system") -> dict:
             db.add(entry)
     db.commit()
     set_setting(db, "ai_last_retrained_at", state["updated_at"], initiated_by)
-    set_setting(db, "ai_training_sample_count", str(len(samples)), initiated_by)
+    set_setting(db, "ai_training_sample_count", str(len(logs)), initiated_by)
     set_setting(db, "ai_model_version", version, initiated_by)
     return state
 
@@ -2547,17 +3116,17 @@ def content_flags(content: str, context: dict | None = None, path: Path | None =
         flags.append("weekend_activity")
     if context.get("vpn_activity") or context.get("vpn_detected"):
         flags.append("vpn_activity")
-    ip_reputation_score = context.get("ip_reputation_score")
+    ip_reputation_score = first_present(context, "ip_reputation_score", "source_ip_reputation", default=0)
     ip_reputation = str(context.get("ip_reputation") or context.get("source_ip_reputation") or "").lower()
     try:
-        if float(ip_reputation_score or 0) >= 50:
+        if float(ip_reputation_score) >= 50:
             flags.append("source_ip_reputation")
     except (TypeError, ValueError):
         pass
     if ip_reputation in {"suspicious", "malicious", "blocked", "abusive"}:
         flags.append("source_ip_reputation")
     try:
-        keystroke_confidence = float(context.get("keystroke_anomaly_confidence") or 0)
+        keystroke_confidence = float(first_present(context, "keystroke_anomaly_confidence", "keystroke_dynamics", default=0))
     except (TypeError, ValueError):
         keystroke_confidence = 0
     if context.get("keystroke_anomaly") or context.get("typing_pattern_anomaly") or keystroke_confidence >= 0.7:
@@ -2571,33 +3140,33 @@ def content_flags(content: str, context: dict | None = None, path: Path | None =
     if context.get("first_time_country") or context.get("new_country") or context.get("country_seen_before") is False:
         flags.append("first_time_country")
     try:
-        geo_distance_km = float(context.get("geo_distance_from_last_login_km") or context.get("geo_distance_km") or 0)
-        geo_elapsed_hours = float(context.get("hours_since_last_login") or context.get("geo_elapsed_hours") or 0)
+        geo_distance_km = float(first_present(context, "geo_distance_from_last_login_km", "geo_distance_km", default=0))
+        geo_elapsed_hours = float(first_present(context, "hours_since_last_login", "geo_elapsed_hours", default=0))
     except (TypeError, ValueError):
         geo_distance_km = 0
         geo_elapsed_hours = 0
     if context.get("impossible_travel") or geo_distance_km >= 500 or (geo_elapsed_hours > 0 and geo_distance_km / geo_elapsed_hours >= 900):
         flags.append("geo_distance_from_last_login")
     try:
-        peer_login_z_score = float(context.get("peer_login_time_z_score") or 0)
+        peer_login_z_score = float(first_present(context, "peer_login_time_z_score", default=0))
     except (TypeError, ValueError):
         peer_login_z_score = 0
     if context.get("peer_login_time_deviation") or peer_login_z_score >= 2.5:
         flags.append("peer_login_time_deviation")
     try:
-        peer_path_z_score = float(context.get("peer_path_access_z_score") or 0)
+        peer_path_z_score = float(first_present(context, "peer_path_access_z_score", default=0))
     except (TypeError, ValueError):
         peer_path_z_score = 0
     if context.get("peer_path_access_deviation") or peer_path_z_score >= 2.5:
         flags.append("peer_path_access_deviation")
     try:
-        modified_file_count = int(context.get("modified_file_count") or context.get("files_modified_in_window") or 0)
+        modified_file_count = int(first_present(context, "modified_file_count", "files_modified_in_window", default=0))
     except (TypeError, ValueError):
         modified_file_count = 0
     if context.get("excessive_file_modifications") or modified_file_count > 10:
         flags.append("excessive_file_modifications")
     try:
-        admin_actions_per_minute = float(context.get("admin_actions_per_minute") or context.get("privileged_actions_per_minute") or 0)
+        admin_actions_per_minute = float(first_present(context, "admin_actions_per_minute", "privileged_actions_per_minute", default=0))
     except (TypeError, ValueError):
         admin_actions_per_minute = 0
     if context.get("rapid_admin_actions") or admin_actions_per_minute > 12:
@@ -2712,7 +3281,7 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
         risk += weight("business_hours", 0.08)
     if enabled("admin_action_rarity"):
         try:
-            rarity_score = float(context.get("admin_action_rarity_score") or context.get("admin_action_rarity") or 0)
+            rarity_score = float(first_present(context, "admin_action_rarity_score", "admin_action_rarity", default=0))
         except (TypeError, ValueError):
             rarity_score = 0
         if rarity_score >= float(config("admin_action_rarity").get("high_rarity_score", 0.75)):
@@ -2720,7 +3289,7 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
             risk += weight("admin_action_rarity", 0.16) * min(rarity_score, 1)
     if enabled("restore_frequency"):
         try:
-            restore_count = int(context.get("restore_count") or context.get("restores_in_window") or 0)
+            restore_count = int(first_present(context, "restore_count", "restores_in_window", default=0))
         except (TypeError, ValueError):
             restore_count = 0
         if restore_count >= int(config("restore_frequency").get("max_restores_per_window", 3)):
@@ -2739,7 +3308,7 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
             risk += weight("content_similarity_score", 0.2) * (1 - max(0, similarity))
     if enabled("affected_files_count"):
         try:
-            affected_files_count = int(context.get("affected_files_count") or context.get("modified_file_count") or 0)
+            affected_files_count = int(first_present(context, "affected_files_count", "modified_file_count", default=0))
         except (TypeError, ValueError):
             affected_files_count = 0
         high_count = int(config("affected_files_count").get("high_risk_count", 10))
@@ -2750,34 +3319,16 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
         elif affected_files_count >= medium_count:
             flags.append("affected_files_count")
             risk += weight("affected_files_count", 0.2) * 0.5
-    learned_notes = []
-    learned_warning = False
     model_state = load_ai_model_state()
     profile = model_state.get("behavioral_profile") or {}
-    if int(profile.get("sample_count") or 0) >= 3:
-        normal_hours = set(profile.get("normal_hours") or [])
-        current_hour = int(context.get("hour_of_day") if context.get("hour_of_day") is not None else now_utc().hour)
-        if enabled("hour_of_day") and normal_hours and current_hour not in normal_hours:
-            risk += weight("hour_of_day", 0.08)
-            learned_warning = True
-            learned_notes.append(f"hour {current_hour} outside learned hours")
-        normal_weekdays = set(profile.get("normal_weekdays") or [])
-        current_weekday = int(context.get("day_of_week") if context.get("day_of_week") is not None else now_utc().weekday())
-        if enabled("day_of_week") and normal_weekdays and current_weekday not in normal_weekdays:
-            risk += weight("day_of_week", 0.05)
-            learned_warning = True
-            learned_notes.append(f"weekday {current_weekday} outside learned weekdays")
-        common_extensions = set(profile.get("common_extensions") or [])
-        if enabled("file_type_risk") and common_extensions and path.suffix.lower() and path.suffix.lower() not in common_extensions:
-            risk += min(weight("file_type_risk", 0.07), 0.1)
-            learned_warning = True
-            learned_notes.append(f"{path.suffix.lower()} outside learned file types")
-        known_source_ips = set(profile.get("known_source_ips") or [])
-        source_ip = context.get("source_ip") or context.get("client_ip") or context.get("ip_address")
-        if enabled("ip_consistent") and source_ip and known_source_ips and source_ip not in known_source_ips:
-            risk += weight("ip_consistent", 0.08)
-            learned_warning = True
-            learned_notes.append("source IP outside learned admin profile")
+    profile_context = {
+        **context,
+        "file_path": str(path),
+        "hour_of_day": context.get("hour_of_day") if context.get("hour_of_day") is not None else now_utc().hour,
+        "day_of_week": context.get("day_of_week") if context.get("day_of_week") is not None else now_utc().weekday(),
+    }
+    profile_risk, learned_notes, learned_warning = behavioral_score_from_profile(profile_context, profile, rules)
+    rule_risk = risk + profile_risk
     identity_warning = (
         context.get("ip_consistent") is False
         or "source_ip_reputation" in flags
@@ -2786,19 +3337,35 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
         or learned_warning
     )
     if context.get("admin_session_valid") and context.get("method_legitimate") and enabled("admin_session_valid") and enabled("method_legitimate") and not identity_warning:
-        risk = min(risk, 0.18)
+        rule_risk = min(rule_risk, 0.18)
 
-    risk = max(0.01, min(risk, 0.99))
+    ml_log = {
+        **profile_context,
+        "file_size_change": size_delta,
+        "content_length": len(new_content or ""),
+        "special_chars_count": sum((new_content or "").count(char) for char in ["<", ">", "&", '"', "'", "/", "\\"]),
+        "file_type_risk": 1 if path.suffix.lower() in set(config("file_type_risk").get("high_risk_extensions", [".html", ".jsx", ".js", ".py"])) else 0,
+    }
+    for flag in flags:
+        ml_log.setdefault(flag, 1)
+    ml_risk = ml_anomaly_score(ml_log)
+    profile_confidence = compute_profile_confidence(profile)
+    ml_weight = profile_confidence * 0.4
+    rule_weight = 1.0 - ml_weight
+    final_risk = (rule_risk * rule_weight) + (ml_risk * ml_weight)
+    final_risk = max(0.01, min(final_risk, 0.99))
     sensitivity = str(context.get("ai_sensitivity") or context.get("global_ai_sensitivity") or "medium").lower().replace(" ", "_")
     suspicious_threshold = AI_SENSITIVITY_THRESHOLDS.get(sensitivity, AI_SENSITIVITY_THRESHOLDS["medium"])
     malicious_threshold = max(0.7, suspicious_threshold + 0.15)
-    prediction = "normal" if risk < suspicious_threshold else "suspicious" if risk < malicious_threshold else "malicious"
-    confidence = risk if prediction != "normal" else 1 - risk
+    prediction = "normal" if final_risk < suspicious_threshold else "suspicious" if final_risk < malicious_threshold else "malicious"
+    confidence = final_risk if prediction != "normal" else 1 - final_risk
     active_rules = [key for key, value in rules.items() if value.get("enabled", True)]
     basis = f"Based on enabled AI rules: {', '.join(active_rules)}."
     if learned_notes:
         basis = f"{basis} Learned behavioral profile: {', '.join(learned_notes)}."
-    return AIPrediction(prediction=prediction, score=round(risk, 4), confidence=round(confidence, 4), basis=basis)
+    if ml_risk > 0:
+        basis = f"{basis} Isolation Forest risk {ml_risk:.4f} with ML weight {ml_weight:.2f}."
+    return AIPrediction(prediction=prediction, score=round(final_risk, 4), confidence=round(confidence, 4), basis=basis)
 
 
 def classify(change_type: str, prediction: AIPrediction, flags: list[str], context: dict | None = None) -> dict:
@@ -2906,6 +3473,7 @@ def recent_admin_change(db: Session, file_path: str) -> SecurityAdminFileChange 
 
 def quarantine_file(file_path: Path, detection_id: int) -> str | None:
     if not file_path.exists():
+        logger.warning("Unable to quarantine detection %s because file is missing: %s", detection_id, file_path)
         return None
     target = QUARANTINE_ROOT / f"detection_{detection_id}" / safe_rel(file_path)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -2951,12 +3519,7 @@ def restore_from_backup(db: Session, file_entry: SecurityMonitoredFile, detectio
         return restore_database_from_backup(db, file_entry, detection_id, recovery_type, initiated_by, quarantine_path, create_event=create_event)
 
     def _find_backup_source():
-        for root in all_backup_roots(db):
-            source = backup_file_path(root, file_entry.relative_path)
-            if source.exists() and source.is_file():
-                if file_entry.baseline_hash and sha256_file(source) == file_entry.baseline_hash:
-                    return source, root
-        return None, None
+        return newest_valid_backup_for_path(db, file_entry.relative_path, file_entry.baseline_hash)
 
     if not create_event:
         source, backup_root = _find_backup_source()
@@ -3003,11 +3566,10 @@ def restore_from_backup(db: Session, file_entry: SecurityMonitoredFile, detectio
 
         if is_vm1_file(file_entry):
             # VM1 file: push clean snapshot and create a VM1 restore command
-            original_bytes = source.read_bytes()
             snapshot = VM1_SNAPSHOT_ROOT / file_entry.relative_path
             snapshot.parent.mkdir(parents=True, exist_ok=True)
-            snapshot.write_bytes(original_bytes)
-            clean_hash = hashlib.sha256(original_bytes).hexdigest()
+            shutil.copy2(source, snapshot)
+            clean_hash = sha256_file(snapshot)
             file_entry.baseline_hash = clean_hash
             file_entry.status = "clean"
             file_entry.last_checked = now_utc()
@@ -3019,7 +3581,7 @@ def restore_from_backup(db: Session, file_entry: SecurityMonitoredFile, detectio
             db.add(file_entry)
             db.add(recovery)
             db.commit()
-            _create_vm1_restore_command(db, file_entry, detection_id, original_content_bytes=original_bytes)
+            _create_vm1_restore_command(db, file_entry, detection_id)
         else:
             target = portable_monitored_path(file_entry)
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -3071,7 +3633,7 @@ def restore_database_from_backup(db: Session, file_entry: SecurityMonitoredFile,
 
     started = time.time()
     try:
-        backup_root = latest_backup_root(db)
+        backup_root = newest_valid_backup_for_domain(db, RECOVERY_DOMAIN_VM2_DATABASE)
         if not backup_root:
             raise RuntimeError("No local database backup exists. Create a manual backup first.")
         source = backup_file_path(backup_root, DATABASE_BACKUP_RELATIVE_PATH)
@@ -3805,7 +4367,7 @@ def record_detection(db: Session, file_entry: SecurityMonitoredFile, change_type
 
         # Auto-recovery for web/code files, high/critical severity, or database unauthorized changes
         suffix = Path(file_entry.relative_path).suffix.lower()
-        is_web_code_file = suffix in {".html", ".htm", ".jsx", ".js", ".py", ".css", ".php"}
+        is_web_code_file = suffix in {".html", ".htm", ".jsx", ".js", ".ts", ".tsx", ".py"}
         is_high_severity = classification.get("severity_level") in {"high", "critical"}
         is_database_unauthorized = is_database_entry(file_entry) and context.get("database_unauthorized_audit_changes")
         if change_type in {"content_modified", "file_deleted"} and (is_web_code_file or is_high_severity or is_database_unauthorized):
@@ -4487,19 +5049,11 @@ def _restore_full_backup(backup_root: Path, db: Session) -> tuple[int, int]:
 
 
 def recover_files(db: Session, admin_id: int) -> dict:
-    """Restore all monitored files from the latest backup, then patch missing files from older backups."""
+    """Restore only monitored application files from their newest valid file-domain backups."""
     started = time.time()
-    roots = all_backup_roots(db)
-    if not roots:
-        raise RuntimeError("No local backup exists. Create a manual backup first.")
-
-    latest = roots[0]
-    logger.info("Recovering files: restoring full latest backup from %s", latest)
-    full_restored, full_failed = _restore_full_backup(latest, db)
-
-    # Patch any files still missing (not in latest backup) from older backups
-    patched = 0
-    patch_failed = 0
+    restored = 0
+    failed = 0
+    skipped = 0
     for file_entry in (
         db.query(SecurityMonitoredFile)
         .filter(SecurityMonitoredFile.status != "monitoring_removed")
@@ -4508,56 +5062,60 @@ def recover_files(db: Session, admin_id: int) -> dict:
     ):
         if is_database_entry(file_entry):
             continue
-        path = portable_monitored_path(file_entry)
-        if path.exists():
-            # Update DB entry to reflect restored state
-            file_entry.current_hash = sha256_file(path)
-            file_entry.baseline_hash = file_entry.current_hash
+        relative = str(file_entry.relative_path or "").replace("\\", "/")
+        try:
+            source, backup_root = newest_valid_backup_for_path(db, relative)
+            if not source:
+                skipped += 1
+                continue
+            if is_vm1_file(file_entry):
+                snapshot = VM1_SNAPSHOT_ROOT / relative
+                snapshot.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, snapshot)
+                restored_hash = sha256_file(snapshot)
+                file_entry.current_hash = restored_hash
+                file_entry.baseline_hash = restored_hash
+                file_entry.status = "clean"
+                file_entry.size_bytes = snapshot.stat().st_size
+                file_entry.last_checked = now_utc()
+                db.add(file_entry)
+                _create_vm1_restore_command(db, file_entry, None)
+                restored += 1
+                continue
+            path = portable_monitored_path(file_entry)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, path)
+            restored_hash = sha256_file(path)
+            file_entry.current_hash = restored_hash
+            file_entry.baseline_hash = restored_hash
             file_entry.status = "recovered"
             file_entry.size_bytes = path.stat().st_size
             file_entry.last_checked = now_utc()
             db.add(file_entry)
+            restored += 1
+        except Exception:
+            failed += 1
             continue
-        # File still missing after latest backup restore; search older backups
-        recovered = False
-        for older in roots[1:]:
-            source = backup_file_path(older, file_entry.relative_path)
-            if source.exists():
-                try:
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(source, path)
-                    file_entry.current_hash = sha256_file(path)
-                    file_entry.baseline_hash = file_entry.current_hash
-                    file_entry.status = "recovered"
-                    file_entry.size_bytes = path.stat().st_size
-                    file_entry.last_checked = now_utc()
-                    db.add(file_entry)
-                    recovered = True
-                    patched += 1
-                    break
-                except Exception:
-                    pass
-        if not recovered:
-            patch_failed += 1
 
     db.commit()
-    total_restored = full_restored + patched
-    total_failed = full_failed + patch_failed
     recovery = SecurityRecoveryEvent(
         recovery_type="files_recovery",
         initiated_by=admin_id,
-        status="success" if total_failed == 0 else "failed",
+        status="success" if failed == 0 else "failed",
         completed_at=now_utc(),
         recovery_duration_ms=int((time.time() - started) * 1000),
-        summary=f"Full backup restored {full_restored} file(s); patched {patched} from older backup(s); {total_failed} failed.",
+        summary=f"Application files recovery: {restored} file(s) restored, {skipped} skipped, {failed} failed.",
     )
     db.add(recovery)
     db.commit()
     db.refresh(recovery)
-    create_system_alert(db, "recovery_completed", f"Recovery #{recovery.id}: {recovery.summary}", "low", dedupe_key=f"Recovery #{recovery.id}")
+    alert_type = "recovery_completed" if recovery.status == "success" else "recovery_failed"
+    alert_severity = "low" if recovery.status == "success" else "high"
+    create_system_alert(db, alert_type, f"Recovery #{recovery.id}: {recovery.summary}", alert_severity, dedupe_key=f"Recovery #{recovery.id}")
     return {
-        "restored": total_restored,
-        "failed": total_failed,
+        "restored": restored,
+        "failed": failed,
+        "skipped": skipped,
         "recovery_event_id": recovery.id,
     }
 
@@ -4620,48 +5178,99 @@ def manual_recover_file(db: Session, file_id: int, admin_id: int) -> SecurityRec
 
 
 def full_system_recovery(db: Session, admin_id: int) -> dict:
-    restored = 0
-    failed = 0
-    skipped = 0
     started = time.time()
-    backup_root = latest_backup_root(db)
-    manifest = backup_manifest_index(backup_root) if backup_root else {}
-    for file_entry in db.query(SecurityMonitoredFile).order_by(SecurityMonitoredFile.relative_path.asc()).all():
-        if is_vm1_file(file_entry):
-            skipped += 1
-            continue
+    plan = {
+        RECOVERY_DOMAIN_FILES: newest_valid_backup_for_domain(db, RECOVERY_DOMAIN_FILES),
+        RECOVERY_DOMAIN_VM1_DATABASE: newest_valid_backup_for_domain(db, RECOVERY_DOMAIN_VM1_DATABASE),
+        RECOVERY_DOMAIN_VM2_DATABASE: newest_valid_backup_for_domain(db, RECOVERY_DOMAIN_VM2_DATABASE),
+        RECOVERY_DOMAIN_ML: newest_valid_backup_for_domain(db, RECOVERY_DOMAIN_ML),
+    }
+    results: dict[str, object] = {}
+    failed = 0
+    restored_domains = 0
+
+    if not plan[RECOVERY_DOMAIN_FILES]:
+        failed += 1
+        results[RECOVERY_DOMAIN_FILES] = {"failed": 1, "reason": "no valid backup"}
+    else:
         try:
-            # Skip files that already match their backup
-            relative = str(file_entry.relative_path or "").replace("\\", "/")
-            if relative in manifest:
-                target = portable_monitored_path(file_entry)
-                backup_source = backup_file_path(backup_root, relative)
-                if target.exists() and backup_source.exists():
-                    if target.stat().st_size == manifest[relative]["size_bytes"]:
-                        if sha256_file(target) == manifest[relative]["sha256"]:
-                            skipped += 1
-                            continue
-            restore_from_backup(db, file_entry, None, "manual_full", admin_id, create_event=False)
-            restored += 1
-        except Exception:
+            results[RECOVERY_DOMAIN_FILES] = recover_files(db, admin_id)
+            if int(results[RECOVERY_DOMAIN_FILES].get("failed", 0)) > 0:
+                failed += 1
+            if int(results[RECOVERY_DOMAIN_FILES].get("restored", 0)) > 0:
+                restored_domains += 1
+        except Exception as exc:
             failed += 1
-    restored_ml_artifacts = restore_ml_artifacts_from_backup(db)
+            results[RECOVERY_DOMAIN_FILES] = {"failed": 1, "error": str(exc)}
+
+    results[RECOVERY_DOMAIN_VM1_DATABASE] = {
+        "skipped": True,
+        "reason": "vm1 database recovery is performed by the VM1 route before VM2 domain recovery",
+        "backup_available": bool(plan.get(RECOVERY_DOMAIN_VM1_DATABASE)),
+    }
+
+    try:
+        if plan[RECOVERY_DOMAIN_VM2_DATABASE]:
+            db_entry = normalize_database_monitor_entry(db, reset_baseline=False, ensure_snapshot=False)
+            if db_entry:
+                event = restore_database_from_backup(db, db_entry, None, "full_vm2_database", admin_id, create_event=True)
+                results[RECOVERY_DOMAIN_VM2_DATABASE] = {"restored": bool(event and event.status == "success"), "recovery_event_id": getattr(event, "id", None)}
+                if not event or event.status != "success":
+                    failed += 1
+                else:
+                    restored_domains += 1
+            else:
+                failed += 1
+                results[RECOVERY_DOMAIN_VM2_DATABASE] = {"failed": 1, "reason": "database monitor entry missing"}
+        else:
+            failed += 1
+            results[RECOVERY_DOMAIN_VM2_DATABASE] = {"failed": 1, "reason": "no valid backup"}
+    except Exception as exc:
+        failed += 1
+        results[RECOVERY_DOMAIN_VM2_DATABASE] = {"failed": 1, "error": str(exc)}
+
+    if not plan[RECOVERY_DOMAIN_ML]:
+        failed += 1
+        restored_ml_artifacts = 0
+        results[RECOVERY_DOMAIN_ML] = {"failed": 1, "reason": "no valid backup"}
+    else:
+        try:
+            restored_ml_artifacts = restore_ml_artifacts_from_backup(db)
+            results[RECOVERY_DOMAIN_ML] = {"restored_artifacts": restored_ml_artifacts}
+            if restored_ml_artifacts > 0:
+                restored_domains += 1
+            else:
+                failed += 1
+                results[RECOVERY_DOMAIN_ML]["failed"] = 1
+                results[RECOVERY_DOMAIN_ML]["reason"] = "valid backup contained no restorable ML artifacts"
+        except Exception as exc:
+            failed += 1
+            restored_ml_artifacts = 0
+            results[RECOVERY_DOMAIN_ML] = {"failed": 1, "error": str(exc)}
+
     recovery = SecurityRecoveryEvent(
         recovery_type="full_system_recovery",
         initiated_by=admin_id,
-        status="success" if failed == 0 else "failed",
+        status="success" if failed == 0 and restored_domains > 0 else "failed",
         completed_at=now_utc(),
         recovery_duration_ms=int((time.time() - started) * 1000),
-        summary=f"Full system recovery: {restored} file(s) restored, {failed} failed, {skipped} VM1 file(s) skipped, {restored_ml_artifacts} ML artifact(s).",
+        summary=(
+            "Full system recovery assembled per domain: "
+            f"files={results.get(RECOVERY_DOMAIN_FILES)}, "
+            f"vm1_database={results.get(RECOVERY_DOMAIN_VM1_DATABASE)}, "
+            f"vm2_database={results.get(RECOVERY_DOMAIN_VM2_DATABASE)}, "
+            f"ml_artifacts={restored_ml_artifacts}; restored_domains={restored_domains}; failed_domains={failed}."
+        ),
     )
     db.add(recovery)
     db.commit()
     db.refresh(recovery)
     create_system_alert(db, "recovery_completed", f"Recovery #{recovery.id}: {recovery.summary}", "low", dedupe_key=f"Recovery #{recovery.id}")
     return {
-        "restored": restored,
-        "failed": failed,
-        "skipped": skipped,
+        "failed_domains": failed,
+        "restored_domains": restored_domains,
+        "plan": {domain: (stored_path_value(root) if root else None) for domain, root in plan.items()},
+        "domain_results": results,
         "restored_ml_artifacts": restored_ml_artifacts,
         "recovery_event_id": recovery.id,
     }
@@ -4814,7 +5423,9 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                 if clean_hash:
                     file_entry.baseline_hash = clean_hash
                     file_entry.current_hash = clean_hash
-                file_entry.status = "clean"
+                    file_entry.status = "clean"
+                else:
+                    file_entry.status = "modified"
                 file_entry.last_checked = now_utc()
                 db.add(file_entry)
                 if create_event:
@@ -4830,36 +5441,31 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                     )
                     db.add(recovery)
                     db.commit()
-                # Trigger a post-resolve backup so the restored state becomes the trusted baseline
-                def _post_resolve_backup():
-                    bg_db = SessionLocal()
-                    try:
-                        post_resolve_backup = create_manual_backup(bg_db, initiated_by=_valid_admin_id(bg_db, admin_id), label="post_resolve", skip_database_snapshot=True, skip_file_registration=True)
-                        if post_resolve_backup.status == "success":
-                            bg_incident = bg_db.query(SecurityIncident).filter(SecurityIncident.id == incident.id).first()
-                            if bg_incident:
-                                bg_incident.response_action = "resolved_clean_backup_refreshed"
-                                bg_db.add(bg_incident)
-                                bg_db.commit()
-                    except Exception as backup_exc:
-                        logger.warning("Post-resolve backup failed: %s", backup_exc)
-                    finally:
-                        bg_db.close()
-                _run_async_backup(_post_resolve_backup)
+                    # Trigger a post-resolve backup so the restored state becomes the trusted baseline.
+                    def _post_resolve_backup():
+                        bg_db = SessionLocal()
+                        try:
+                            post_resolve_backup = create_manual_backup(bg_db, initiated_by=_valid_admin_id(bg_db, admin_id), label="post_resolve", skip_database_snapshot=True, skip_file_registration=True)
+                            if post_resolve_backup.status == "success":
+                                bg_incident = bg_db.query(SecurityIncident).filter(SecurityIncident.id == incident.id).first()
+                                if bg_incident:
+                                    bg_incident.response_action = "resolved_clean_backup_refreshed"
+                                    bg_db.add(bg_incident)
+                                    bg_db.commit()
+                        except Exception as backup_exc:
+                            logger.warning("Post-resolve backup failed: %s", backup_exc)
+                        finally:
+                            bg_db.close()
+                    _run_async_backup(_post_resolve_backup)
             else:
                 # Manual resolve: search backups for clean content matching the trusted baseline
                 original_bytes = None
-                found_backup_root = None
-                for root in all_backup_roots(db):
-                    candidate = backup_file_path(root, file_entry.relative_path)
-                    if candidate.exists() and candidate.is_file():
-                        if file_entry.baseline_hash and sha256_file(candidate) == file_entry.baseline_hash:
-                            try:
-                                original_bytes = candidate.read_bytes()
-                                found_backup_root = root
-                                break
-                            except Exception:
-                                pass
+                candidate, found_backup_root = newest_valid_backup_for_path(db, file_entry.relative_path, file_entry.baseline_hash)
+                if candidate and candidate.exists() and candidate.is_file():
+                    try:
+                        original_bytes = candidate.read_bytes()
+                    except Exception:
+                        original_bytes = None
                 quarantine_paths = json_loads(incident.quarantine_paths_json, [])
                 quarantine_path = quarantine_paths[0] if quarantine_paths else None
                 safe_quarantine = safe_quarantine_path(quarantine_path) if quarantine_path else None
@@ -4948,22 +5554,26 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                     db.commit()
             else:
                 # Manual resolve: search all backups for one matching the trusted baseline
-                backup_source = None
-                backup_root = None
                 expected_hash = file_entry.baseline_hash
-                for root in all_backup_roots(db):
-                    candidate = backup_file_path(root, file_entry.relative_path)
-                    if candidate.exists() and candidate.is_file():
-                        if expected_hash and sha256_file(candidate) == expected_hash:
-                            backup_source = candidate
-                            backup_root = root
-                            break
+                backup_source, backup_root = newest_valid_backup_for_path(db, file_entry.relative_path, expected_hash)
                 if backup_source is None:
                     logger.warning(
                         "No backup matching baseline hash %s found for %s; skipping restoration.",
                         expected_hash,
                         file_entry.relative_path,
                     )
+                    if create_event:
+                        recovery = SecurityRecoveryEvent(
+                            detection_event_id=incident.detection_event_id,
+                            file_id=file_entry.id,
+                            recovery_type="resolve",
+                            initiated_by=_valid_admin_id(db, admin_id),
+                            status="failed",
+                            error_message=f"No valid backup matching baseline hash {expected_hash} found.",
+                            summary=f"Resolve attempted for {file_entry.relative_path}, but no domain-valid trusted backup was available.",
+                            completed_at=now_utc(),
+                        )
+                        db.add(recovery)
                 if backup_source and backup_source.exists() and backup_source.is_file():
                     if not target.exists() or not target.is_file() or sha256_file(target) != file_entry.baseline_hash:
                         started = time.time()
@@ -5079,7 +5689,14 @@ def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_ba
     false_positive_recovery = None
     if is_vm1_file(file_entry):
         # VM1 false+: accept the defaced state as legitimate
-        defaced_hash = detection.new_hash if detection else file_entry.current_hash
+        defaced_hash = None
+        if has_quarantine_copy:
+            try:
+                defaced_hash = sha256_file(safe_source)
+            except OSError:
+                defaced_hash = None
+        if not defaced_hash:
+            defaced_hash = detection.new_hash if detection and detection.new_hash else file_entry.current_hash
         file_entry.baseline_hash = defaced_hash
         file_entry.current_hash = defaced_hash
         file_entry.status = "clean"
@@ -5123,6 +5740,13 @@ def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_ba
                 target = VM1_SNAPSHOT_ROOT / file_entry.relative_path
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(safe_source, target)
+                try:
+                    defaced_hash = sha256_file(target)
+                    file_entry.baseline_hash = defaced_hash
+                    file_entry.current_hash = defaced_hash
+                    db.add(file_entry)
+                except OSError:
+                    pass
                 if create_event:
                     false_positive_recovery = SecurityRecoveryEvent(
                         detection_event_id=incident.detection_event_id,
@@ -5311,6 +5935,8 @@ def dashboard_payload(db: Session) -> dict:
     elif incidents:
         status = "At Risk"
     monitoring_enabled = (get_setting(db, "monitoring_enabled", "false") or "false").lower() == "true"
+    ml_model_trained = IFOREST_MODEL_PATH.exists()
+    iforest_metadata = load_isolation_forest_metadata()
 
     # Today's counts
     today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -5353,8 +5979,11 @@ def dashboard_payload(db: Session) -> dict:
             "database": "healthy",
             "backup_status": "Active" if latest_backup and backup_location_path and backup_location_path.exists() else "Inactive",
             "backup_location": backup_location,
-            "ai_model": "trained" if MODEL_STATE_PATH.exists() else "bootstrap-ready",
+            "ai_model": "trained" if (MODEL_STATE_PATH.exists() or ml_model_trained) else "bootstrap-ready",
             "ai_model_version": model_metadata.get("version") or get_setting(db, "ai_model_version", ""),
+            "ml_model_trained": ml_model_trained,
+            "ml_model_version": iforest_metadata.get("version", ""),
+            "ml_model_path": str(IFOREST_MODEL_PATH) if ml_model_trained else None,
             "ai_rules_enabled": sum(1 for item in get_ai_rules(db).values() if item.get("enabled", True)),
             "deployment_mode": get_setting(db, "deployment_mode", "development"),
             "monitoring_enabled": "true" if monitoring_enabled else "false",
@@ -5923,7 +6552,8 @@ def remove_monitored_folder(db: Session, folder_path: str, initiated_by: int | N
     if entry_ids:
         db.query(SecurityDetectionEvent).filter(SecurityDetectionEvent.file_id.in_(entry_ids)).delete(synchronize_session=False)
         db.query(SecurityRecoveryEvent).filter(SecurityRecoveryEvent.file_id.in_(entry_ids)).delete(synchronize_session=False)
-        db.query(SecurityMonitoredFile).filter(SecurityMonitoredFile.id.in_(entry_ids)).delete(synchronize_session=False)
+        for entry in entries:
+            db.delete(entry)
     db.commit()
 
     # Clean up VM1 snapshot files for removed folders so they don't reappear in backups
@@ -6129,15 +6759,12 @@ def _create_vm1_restore_command(db: Session, entry: SecurityMonitoredFile, detec
 
     # Fallback 2: backup roots (clean copies from before the incident)
     if content_bytes is None:
-        for root in all_backup_roots(db):
-            candidate = backup_file_path(root, entry.relative_path)
-            if candidate.exists() and candidate.is_file():
-                try:
-                    if sha256_file(candidate) == entry.baseline_hash:
-                        content_bytes = candidate.read_bytes()
-                        break
-                except Exception:
-                    pass
+        candidate, _root = newest_valid_backup_for_path(db, entry.relative_path, entry.baseline_hash)
+        if candidate and candidate.exists() and candidate.is_file():
+            try:
+                content_bytes = candidate.read_bytes()
+            except Exception:
+                pass
 
     # Fallback 3: previously stored restore-content files
     if content_bytes is None and VM1_RESTORE_CONTENT_ROOT.exists():
@@ -6169,10 +6796,14 @@ def _create_vm1_restore_command(db: Session, entry: SecurityMonitoredFile, detec
         "created_at": now_utc().isoformat(),
     }
     existing = json_loads(get_setting(db, "vm1_restore_commands", "[]"), [])
+    if not isinstance(existing, list):
+        existing = []
+    acked_raw = json_loads(get_setting(db, "vm1_restore_acks", "[]"), [])
+    acked_ids = {ack.get("command_id") for ack in acked_raw if isinstance(ack, dict)}
+    existing = [item for item in existing if isinstance(item, dict) and item.get("command_id") not in acked_ids]
     existing.append(cmd)
-    # Keep only the most recent 50 pending commands to prevent the setting from growing too large
-    if len(existing) > 50:
-        existing = existing[-50:]
+    if len(existing) > 500:
+        logger.warning("VM1 restore command queue has %s pending command(s); not truncating pending restores.", len(existing))
     set_setting(db, "vm1_restore_commands", json_dumps(existing), "vm2_monitor")
     return cmd
 

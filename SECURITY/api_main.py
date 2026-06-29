@@ -37,6 +37,7 @@ from SECURITY.security_engine import (
     add_ai_rule,
     available_ai_rule_templates,
     retrain_ai,
+    ml_anomaly_score,
     weekly_ai_behavior_data,
     create_manual_backup,
     create_database_backup,
@@ -305,6 +306,11 @@ def api_ai_templates(db=Depends(get_db)):
 @app.post("/v1/ai/retrain", dependencies=[Depends(require_api_key)])
 def api_ai_retrain(payload: dict = {}, db=Depends(get_db)):
     return retrain_ai(db, payload.get("actor", "api"))
+
+
+@app.post("/v1/ai/ml-score", dependencies=[Depends(require_api_key)])
+def api_ai_ml_score(payload: dict = {}, db=Depends(get_db)):
+    return {"ml_anomaly_score": ml_anomaly_score(payload)}
 
 
 @app.get("/v1/ai/weekly-data", dependencies=[Depends(require_api_key)])

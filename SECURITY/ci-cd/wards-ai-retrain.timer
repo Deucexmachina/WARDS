@@ -1,0 +1,11 @@
+[Unit]
+Description=Run WARDS Security AI retraining weekly
+
+[Timer]
+OnCalendar=Sun 02:30
+Persistent=true
+Unit=wards-ai-retrain.service
+
+[Install]
+WantedBy=timers.target
+
