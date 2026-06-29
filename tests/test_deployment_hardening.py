@@ -225,6 +225,7 @@ def test_ci_deploy_status_requires_exact_commit_and_vm1_baseline():
     assert 'TARGET_COMMIT="${GITHUB_SHA}"' in workflow
     assert '[ "$VM1_COMMIT" = "$TARGET_COMMIT" ]' in workflow
     assert '[ "$VM2_COMMIT" = "$TARGET_COMMIT" ]' in workflow
+    assert "VM1 and VM2 are already synchronized at target commit" in workflow
     assert '[ "$VM2_VM1_MANIFEST_COMMIT" = "$TARGET_COMMIT" ]' in workflow
     assert '[ "$VM2_BASELINE_READY" = "true" ]' in workflow
     assert '[ "$VM2_PAUSED" = "false" ]' in workflow

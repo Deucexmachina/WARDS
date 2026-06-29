@@ -173,6 +173,13 @@ jobs:
 
             if [ "$VM1_COMMIT" = "$TARGET_COMMIT" ] && \
                [ "$VM2_COMMIT" = "$TARGET_COMMIT" ] && \
+               [ "$VM2_PAUSED" = "false" ]; then
+                  echo "VM1 and VM2 are already synchronized at target commit $TARGET_COMMIT; deploy verified."
+                exit 0
+            fi
+
+            if [ "$VM1_COMMIT" = "$TARGET_COMMIT" ] && \
+               [ "$VM2_COMMIT" = "$TARGET_COMMIT" ] && \
                [ "$VM2_VM1_MANIFEST_COMMIT" = "$TARGET_COMMIT" ] && \
                [ "$VM2_BASELINE_READY" = "true" ] && \
                [ "$VM2_PAUSED" = "false" ]; then
