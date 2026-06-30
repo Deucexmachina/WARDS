@@ -146,10 +146,12 @@ if _vm2_app_dir:
     _deploy_root = Path(_vm2_app_dir)
     MONITORED_ROOTS = {
         "WARDS": _deploy_root / "WARDS",
+        "SECURITY": _deploy_root / "SECURITY",
     }
 else:
     MONITORED_ROOTS = {
         "WARDS": MASTER_ROOT / "WARDS",
+        "SECURITY": MASTER_ROOT / "SECURITY",
     }
 
 DEFAULT_EXCLUDED_DIRS = {
@@ -163,6 +165,7 @@ DEFAULT_EXCLUDED_DIRS = {
     "build",
     "output",
     "SECURITY",
+    "local_backups",
     "QUARANTINE",
     "DEFACEMENT",
     "OCR",
@@ -183,16 +186,24 @@ MONITORED_SUFFIXES = {
     ".yml",
     ".yaml",
     ".sql",
+    ".db",
+    ".sqlite",
+    ".sqlite3",
+    ".php",
+    ".phtml",
+    ".pkl",
     ".csv",
 }
 
 MONITORED_SPECIAL_FILENAMES = {
     "dockerfile",
+    ".env",
     ".gitignore",
     ".gitkeep",
 }
 
 MONITORED_SPECIAL_NAME_SUFFIXES = (
+    ".env",
     ".env.example",
     "env.example",
 )
@@ -201,9 +212,9 @@ SUSPICIOUS_PATTERNS = {
     "script_injection": ("<script", "javascript:", "eval(", "document.write", "onerror=", "onload="),
     "iframe_injection": ("<iframe",),
     "defacement_keywords": ("hacked", "defaced", "owned", "pwned"),
-    "credential_access": ("password=", "token=", "secret=", "api_key"),
+    "credential_access": ("password=", "token=", "secret=", "secret_key=", "api_key", "api_key=", "private_key="),
     "sql_injection": ("' or '1'='1", "union select", "drop table"),
-    "destructive_command_pattern": ("rm -rf", "del /f", "format ", "truncate table", "delete from", "drop database"),
+    "destructive_command_pattern": ("rm -rf", "del /f", "format ", "truncate table", "delete from", "drop database", "os.system(", "subprocess.call(", "subprocess.run("),
     "webshell_indicator": ("cmd=", "shell_exec", "passthru(", "system($_", "eval($_", "base64_decode("),
 }
 
@@ -337,7 +348,7 @@ DEFAULT_AI_RULES = {
         "description": "Risk weight for web/code files.",
         "enabled": True,
         "weight": 0.07,
-        "config": {"high_risk_extensions": [".html", ".jsx", ".js", ".py"]},
+        "config": {"high_risk_extensions": [".html", ".jsx", ".js", ".ts", ".tsx", ".py", ".env", ".json", ".sql", ".db", ".sqlite", ".sqlite3", ".yml", ".yaml", ".xml", ".php", ".phtml", ".pkl"]},
     },
     "suspicious_pattern_score": {
         "label": "Suspicious Pattern Score",
@@ -463,7 +474,7 @@ DEFAULT_AI_RULES = {
         "description": "Detects dangerous shell, SQL, and file-destruction commands in protected content.",
         "enabled": True,
         "weight": 0.28,
-        "config": {"patterns": ["rm -rf", "del /f", "format ", "truncate table", "delete from", "drop database"]},
+        "config": {"patterns": ["rm -rf", "del /f", "format ", "truncate table", "delete from", "drop database", "os.system(", "subprocess.call(", "subprocess.run("]},
     },
     "webshell_indicator": {
         "label": "Web Shell Indicator",
@@ -789,8 +800,7 @@ def enrich_file_ai_context(
     if ai_rule_enabled(rules, "special_chars_count"):
         context.setdefault("special_chars_count", sum(new_text.count(char) for char in ["<", ">", "&", '"', "'", "/", "\\"]))
     if ai_rule_enabled(rules, "file_type_risk"):
-        high_risk = set(ai_rule_config(rules, "file_type_risk").get("high_risk_extensions", [".html", ".jsx", ".js", ".py"]))
-        context.setdefault("file_type_risk", 1 if path.suffix.lower() in high_risk else 0)
+        context.setdefault("file_type_risk", 1 if is_high_risk_file_path(path, rules) else 0)
     if ai_rule_enabled(rules, "content_similarity_score"):
         context.setdefault("content_similarity_score", difflib.SequenceMatcher(None, old_text, new_text).ratio())
     if ai_rule_enabled(rules, "sensitive_config_change"):
@@ -2128,6 +2138,28 @@ def ai_rule_config(rules: dict | None, rule_name: str) -> dict:
     default = DEFAULT_AI_RULES.get(rule_name, APPROVED_ADDITIONAL_AI_RULES.get(rule_name, {}))
     current = rules.get(rule_name, {}) if isinstance(rules, dict) else {}
     return {**default.get("config", {}), **current.get("config", {})}
+
+
+def high_risk_file_extensions(rules: dict | None = None) -> set[str]:
+    return {
+        str(item).lower()
+        for item in ai_rule_config(rules or DEFAULT_AI_RULES, "file_type_risk").get(
+            "high_risk_extensions",
+            DEFAULT_AI_RULES["file_type_risk"]["config"]["high_risk_extensions"],
+        )
+    }
+
+
+def is_high_risk_file_path(path: Path | str, rules: dict | None = None) -> bool:
+    path_obj = Path(path)
+    lower_name = path_obj.name.lower()
+    return (
+        path_obj.suffix.lower() in high_risk_file_extensions(rules)
+        or lower_name == ".env"
+        or lower_name.endswith(".env")
+        or lower_name.endswith(".env.example")
+        or lower_name.endswith("env.example")
+    )
 
 
 def available_ai_rule_templates(db: Session) -> list[dict]:
@@ -3862,7 +3894,7 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
         special_count = sum(new_content.count(char) for char in ["<", ">", "&", '"', "'", "/", "\\"])
         if special_count > int(config("special_chars_count").get("high_count", 300)):
             risk += weight("special_chars_count", 0.08)
-    if enabled("file_type_risk") and path.suffix.lower() in set(config("file_type_risk").get("high_risk_extensions", [".html", ".jsx", ".js", ".py"])):
+    if enabled("file_type_risk") and is_high_risk_file_path(path, rules):
         risk += weight("file_type_risk", 0.07)
     if enabled("ip_consistent") and context.get("ip_consistent") is False:
         risk += weight("ip_consistent", 0.08)
@@ -3943,7 +3975,7 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
         "file_size_change": size_delta,
         "content_length": len(new_content or ""),
         "special_chars_count": sum((new_content or "").count(char) for char in ["<", ">", "&", '"', "'", "/", "\\"]),
-        "file_type_risk": 1 if path.suffix.lower() in set(config("file_type_risk").get("high_risk_extensions", [".html", ".jsx", ".js", ".py"])) else 0,
+        "file_type_risk": 1 if is_high_risk_file_path(path, rules) else 0,
     }
     for flag in flags:
         ml_log.setdefault(flag, 1)
@@ -5052,7 +5084,7 @@ def scan_all_files(db: Session, context: dict | None = None) -> list[SecurityDet
         db.commit()
         return []
     if is_manual_scan:
-        register_initial_files(db, refresh_existing=False, incremental=True)
+        register_initial_files(db, refresh_existing=False, incremental=not bool(context and context.get("force_full_registration")))
     elif _last_full_registration_at is None or (now - _last_full_registration_at) > timedelta(hours=1):
         register_initial_files(db, refresh_existing=False, incremental=False)
         _last_full_registration_at = now
@@ -7628,10 +7660,8 @@ def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type
 
     # Determine auto-recovery eligibility — do this BEFORE creating the incident
     # so that even if restore-command creation fails, the incident still exists.
-    suffix = Path(entry.relative_path).suffix.lower()
     rules = context.get("ai_rules") or DEFAULT_AI_RULES
-    high_risk_exts = set(rules.get("file_type_risk", {}).get("config", {}).get("high_risk_extensions", [".html", ".jsx", ".js", ".py"]))
-    is_auto_recover = suffix in high_risk_exts or classification.get("severity_level") in {"high", "critical"}
+    is_auto_recover = is_high_risk_file_path(entry.relative_path or "", rules) or classification.get("severity_level") in {"high", "critical"}
 
     if is_auto_recover:
         # Queue restore command independently — failure here must NOT prevent incident creation
