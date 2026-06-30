@@ -22,6 +22,7 @@ from eval_config import (
     RESULTS_CSV,
     SCAN_BACKOFF_SECONDS,
     SCAN_WAIT_SECONDS,
+    SSH_RETRIES,
     VERIFY_TLS,
     VM1_DIRECT_MANIFEST,
     VM1_SNAPSHOT_WAIT_SECONDS,
@@ -295,6 +296,16 @@ def matching_detections(detections: list[dict], case: TestCase) -> list[dict]:
     return matched or ([] if case.target_hint else detections)
 
 
+def detection_is_actionable(detection: dict) -> bool:
+    if detection.get("incident_id"):
+        return True
+    prediction = str(detection.get("ai_prediction") or "").lower()
+    if prediction in {"suspicious", "malicious", "manifest_detected"}:
+        return True
+    severity = str(detection.get("severity_level") or "").lower()
+    return severity in {"medium", "high", "critical"}
+
+
 def resolve_incident(incident_id: int | str | None) -> bool:
     if not incident_id:
         return False
@@ -406,8 +417,10 @@ def run_test(case: TestCase) -> dict:
             else:
                 detections = matching_detections(query_new_detections(start_iso, target=case.target_hint), case)
         if detections:
-            predicted = "attack"
-            detection = detections[0]
+            actionable = [item for item in detections if detection_is_actionable(item)]
+            if actionable:
+                predicted = "attack"
+                detection = actionable[0]
     except Exception as exc:
         predicted = "error"
         error = str(exc)
@@ -453,13 +466,29 @@ def ssh(host: str, user: str, key_path: str, command: str, *, timeout: int = REQ
         "BatchMode=yes",
         "-o",
         "StrictHostKeyChecking=accept-new",
+        "-o",
+        "ConnectTimeout=15",
+        "-o",
+        "ServerAliveInterval=10",
+        "-o",
+        "ServerAliveCountMax=2",
         f"{user}@{host}",
         command,
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or result.stdout.strip() or f"ssh exited {result.returncode}")
-    return result.stdout.strip()
+    last_error = ""
+    for attempt in range(max(1, SSH_RETRIES)):
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            if result.returncode == 0:
+                return result.stdout.strip()
+            last_error = result.stderr.strip() or result.stdout.strip() or f"ssh exited {result.returncode}"
+        except subprocess.TimeoutExpired as exc:
+            last_error = f"ssh timed out after {timeout} seconds"
+            if exc.stderr:
+                last_error += f": {exc.stderr}"
+        if attempt + 1 < max(1, SSH_RETRIES):
+            time.sleep(2)
+    raise RuntimeError(last_error)
 
 
 def vm1(command: str, *, timeout: int = REQUEST_TIMEOUT_SECONDS) -> str:

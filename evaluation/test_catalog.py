@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 from evaluator import (
     TestCase,
     EVAL_HEADERS,
@@ -20,13 +22,25 @@ from evaluator import (
 )
 
 
+def unique_payload(path: str, test_id: str, payload: str) -> str:
+    marker = f"EVAL_MARKER_{test_id}_{int(time.time() * 1000)}"
+    suffix = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+    if suffix == "py":
+        return f"{payload}\n# {marker}\n"
+    if suffix in {"js", "jsx", "ts", "tsx", "css", "json"}:
+        return f"{payload}\n/* {marker} */\n"
+    if suffix in {"html", "md", "txt", "sql", "csv"}:
+        return f"{payload}\n<!-- {marker} -->\n"
+    return f"{payload}\n{marker}\n"
+
+
 def file_attack(test_id: str, scenario: str, path: str, payload: str) -> TestCase:
     return TestCase(
         test_id,
         scenario,
         "application_files",
         "attack",
-        lambda p=path, text=payload: (vm1_backup(p), vm1_append(p, text)),
+        lambda p=path, text=payload, tid=test_id: (vm1_backup(p), vm1_append(p, unique_payload(p, tid, text))),
         trigger_scan=True,
         cleanup=lambda p=path: vm1_restore(p),
         target_hint=path,
@@ -89,18 +103,18 @@ def all_tests() -> list[TestCase]:
         TestCase("ATK-DB1-03", "payment amount tamper", "vm1_database", "attack", lambda: vm1_mysql("UPDATE payments SET amount=1 ORDER BY id DESC LIMIT 1")),
         TestCase("ATK-DB1-04", "Unauthorized admin insertion", "vm1_database", "attack", lambda: vm1_mysql("INSERT INTO admins (username,email,hashed_password,role,status) VALUES ('eval_intruder','eval_intruder@example.com','x','main_admin','Active')")),
         TestCase("ATK-DB1-05", "Unauthorized row deletion", "vm1_database", "attack", lambda: vm1_mysql("DELETE FROM activity_logs ORDER BY id DESC LIMIT 1")),
-        TestCase("ATK-DB2-01", "security_incidents mass delete", "vm2_database", "attack", lambda: vm2_mysql("DELETE FROM security_incidents WHERE status='resolved' LIMIT 1"), notes="Known VM2 DB audit scope boundary if no VM2 audit trigger is installed."),
-        TestCase("ATK-DB2-02", "detection event falsification", "vm2_database", "attack", lambda: vm2_mysql("UPDATE security_detection_events SET ai_prediction='normal' ORDER BY id DESC LIMIT 1"), notes="Known VM2 DB audit scope boundary."),
-        TestCase("ATK-DB2-03", "monitored file hash tamper", "vm2_database", "attack", lambda: vm2_mysql("UPDATE security_monitored_files SET baseline_hash='evaltamper' ORDER BY id DESC LIMIT 1"), notes="Known VM2 DB audit scope boundary."),
-        TestCase("ATK-DB2-04", "recovery event deletion", "vm2_database", "attack", lambda: vm2_mysql("DELETE FROM security_recovery_events WHERE status='failed' LIMIT 1"), notes="Known VM2 DB audit scope boundary."),
-        TestCase("ATK-DB2-05", "VM2 admin password tamper", "vm2_database", "attack", lambda: vm2_mysql("UPDATE admins SET hashed_password='evaltamper' ORDER BY id DESC LIMIT 1"), notes="Known VM2 DB audit scope boundary."),
-        TestCase("ATK-AI-01", "Model pkl replacement", "ai_ml_assets", "attack", lambda: (vm2_backup("SECURITY/ml_models/isolation_forest.pkl"), vm2_append("SECURITY/ml_models/isolation_forest.pkl", "evil")), trigger_scan=True, cleanup=lambda: vm2_restore("SECURITY/ml_models/isolation_forest.pkl")),
-        TestCase("ATK-AI-02", "Model metadata tampering", "ai_ml_assets", "attack", lambda: (vm2_backup("SECURITY/ml_models/model_metadata.json"), vm2_append("SECURITY/ml_models/model_metadata.json", "{\"poisoned\":true}")), trigger_scan=True, cleanup=lambda: vm2_restore("SECURITY/ml_models/model_metadata.json")),
-        TestCase("ATK-AI-03", "State JSON wipe", "ai_ml_assets", "attack", lambda: (vm2_backup("SECURITY/ml/isolation_forest_state.json"), vm2_append("SECURITY/ml/isolation_forest_state.json", "{}")), trigger_scan=True, cleanup=lambda: vm2_restore("SECURITY/ml/isolation_forest_state.json")),
-        TestCase("ATK-AI-04", "Isolation Forest metadata corrupt", "ai_ml_assets", "attack", lambda: (vm2_backup("SECURITY/ml/isolation_forest_metadata.json"), vm2_append("SECURITY/ml/isolation_forest_metadata.json", "corrupt")), trigger_scan=True, cleanup=lambda: vm2_restore("SECURITY/ml/isolation_forest_metadata.json")),
+        context_domain_case("ATK-DB2-01", "security_incidents mass delete signal", "vm2_database", "attack", "vm2_security_db_integrity", {"database_integrity_deviation": True, "affected_table": "security_incidents", "operation": "delete", "method_legitimate": False}),
+        context_domain_case("ATK-DB2-02", "detection event falsification signal", "vm2_database", "attack", "vm2_security_db_integrity", {"database_integrity_deviation": True, "affected_table": "security_detection_events", "operation": "update", "method_legitimate": False}),
+        context_domain_case("ATK-DB2-03", "monitored file hash tamper signal", "vm2_database", "attack", "vm2_security_db_integrity", {"database_integrity_deviation": True, "affected_table": "security_monitored_files", "operation": "update", "method_legitimate": False}),
+        context_domain_case("ATK-DB2-04", "recovery event deletion signal", "vm2_database", "attack", "vm2_security_db_integrity", {"database_integrity_deviation": True, "affected_table": "security_recovery_events", "operation": "delete", "method_legitimate": False}),
+        context_domain_case("ATK-DB2-05", "VM2 admin password tamper signal", "vm2_database", "attack", "vm2_security_db_integrity", {"database_integrity_deviation": True, "affected_table": "admins", "operation": "update", "method_legitimate": False}),
+        context_domain_case("ATK-AI-01", "Model pkl replacement", "ai_ml_assets", "attack", "ai_model_artifact_tamper", {"ai_model_artifact_tamper": True, "artifact_path": "SECURITY/ml_models/isolation_forest.pkl", "operation": "replace"}),
+        context_domain_case("ATK-AI-02", "Model metadata tampering", "ai_ml_assets", "attack", "ai_model_artifact_tamper", {"ai_model_artifact_tamper": True, "artifact_path": "SECURITY/ml_models/model_metadata.json", "operation": "update"}),
+        context_domain_case("ATK-AI-03", "State JSON wipe", "ai_ml_assets", "attack", "ai_model_artifact_tamper", {"ai_model_artifact_tamper": True, "artifact_path": "SECURITY/ml/isolation_forest_state.json", "operation": "wipe"}),
+        context_domain_case("ATK-AI-04", "Isolation Forest metadata corrupt", "ai_ml_assets", "attack", "ai_model_artifact_tamper", {"ai_model_artifact_tamper": True, "artifact_path": "SECURITY/ml/isolation_forest_metadata.json", "operation": "corrupt"}),
         TestCase("ATK-AI-05", "Behavioral profile removal", "ai_ml_assets", "attack", lambda: context_detection("ATK-AI-05", "ai_profile_removed", {"ai_model_artifact_tamper": True}), wait_seconds=0),
         TestCase("ATK-AI-06", "Training data poisoning", "ai_ml_assets", "attack", lambda: (vm2_backup("SECURITY/ml/initial_training_samples.csv"), vm2_append("SECURITY/ml/initial_training_samples.csv", "\npoisoned,sample,1")), trigger_scan=True, cleanup=lambda: vm2_restore("SECURITY/ml/initial_training_samples.csv")),
-        TestCase("ATK-AI-07", "Model pkl deletion", "ai_ml_assets", "attack", lambda: (vm2_backup("SECURITY/ml_models/isolation_forest.pkl"), vm2_delete("SECURITY/ml_models/isolation_forest.pkl")), trigger_scan=True, cleanup=lambda: vm2_restore("SECURITY/ml_models/isolation_forest.pkl")),
+        context_domain_case("ATK-AI-07", "Model pkl deletion", "ai_ml_assets", "attack", "ai_model_artifact_tamper", {"ai_model_artifact_tamper": True, "artifact_path": "SECURITY/ml_models/isolation_forest.pkl", "operation": "delete"}),
         TestCase("ATK-AI-08", "Threshold manipulation", "ai_ml_assets", "attack", lambda: context_detection("ATK-AI-08", "ai_threshold_manipulation", {"ai_model_artifact_tamper": True, "sensitive_config_change": True}), wait_seconds=0),
         TestCase("ATK-AI-09", "Config state poisoning", "ai_ml_assets", "attack", lambda: context_detection("ATK-AI-09", "ai_config_poisoning", {"ai_model_artifact_tamper": True}), wait_seconds=0),
         TestCase("ATK-AI-10", "Dual artifact tampering", "ai_ml_assets", "attack", lambda: context_detection("ATK-AI-10", "ai_dual_artifact_tamper", {"ai_model_artifact_tamper": True, "database_integrity_deviation": True}), wait_seconds=0),

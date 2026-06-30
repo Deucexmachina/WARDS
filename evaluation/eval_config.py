@@ -39,6 +39,7 @@ VM1_DIRECT_MANIFEST = env("EVAL_VM1_DIRECT_MANIFEST", "true").lower() not in {"0
 PREFLIGHT_WAIT_SECONDS = int(env("EVAL_PREFLIGHT_WAIT_SECONDS", "60") or "60")
 PREFLIGHT_POLL_SECONDS = int(env("EVAL_PREFLIGHT_POLL_SECONDS", "5") or "5")
 REQUEST_TIMEOUT_SECONDS = int(env("EVAL_REQUEST_TIMEOUT_SECONDS", "180") or "180")
+SSH_RETRIES = int(env("EVAL_SSH_RETRIES", "2") or "2")
 VERIFY_TLS = env("EVAL_VERIFY_TLS", "true").lower() not in {"0", "false", "no"}
 
 ROOT = Path(__file__).resolve().parent
