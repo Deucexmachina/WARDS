@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import false, or_
@@ -2137,14 +2137,17 @@ async def search_rpt_property(
             },
         )
 
-    return {
-        "status": "PROPERTY_FOUND",
-        "branch": {"id": branch.id, "name": branch.name, "location": branch.location},
-        "property": serialize_rpt_assessment_property(assessment_record) if assessment_record else compute_rpt_breakdown(normalized_tdn, property_record),
-        "searchesRemaining": searches_remaining,
-        "searchesUsed": searches_used,
-        "searchLimit": MAX_RPT_SEARCHES_PER_DAY,
-    }
+    return JSONResponse(
+        content={
+            "status": "PROPERTY_FOUND",
+            "branch": {"id": branch.id, "name": branch.name, "location": branch.location},
+            "property": serialize_rpt_assessment_property(assessment_record) if assessment_record else compute_rpt_breakdown(normalized_tdn, property_record),
+            "searchesRemaining": searches_remaining,
+            "searchesUsed": searches_used,
+            "searchLimit": MAX_RPT_SEARCHES_PER_DAY,
+        },
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+    )
 
 
 @router.get("/rpt/active-payment")
@@ -2154,7 +2157,10 @@ async def get_active_rpt_payment(
 ):
     ensure_public_payment_gateway_enabled(db)
     active_payment = get_active_rpt_payment_for_user(db, current_user)
-    return {"payment": serialize_payment(active_payment) if active_payment else None}
+    return JSONResponse(
+        content={"payment": serialize_payment(active_payment) if active_payment else None},
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+    )
 
 
 @router.post("/rpt/generate-reference")

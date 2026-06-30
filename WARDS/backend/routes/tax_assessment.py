@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -659,20 +659,23 @@ async def get_public_account_management(
     )
     mfa_enabled = bool(mfa_record and get_decrypted_or_raw(mfa_record, "secret"))
 
-    return {
-        "profile": {
-            "id": current_user.id,
-            "full_name": citizen_name(current_user),
-            "email": citizen_email(current_user),
-            "mobile_number": citizen_contact(current_user),
-            "address": citizen_address(current_user),
-            "taxpayer_type": current_user.taxpayer_type or "Individual",
-            "tin": citizen_tin(current_user),
+    return JSONResponse(
+        content={
+            "profile": {
+                "id": current_user.id,
+                "full_name": citizen_name(current_user),
+                "email": citizen_email(current_user),
+                "mobile_number": citizen_contact(current_user),
+                "address": citizen_address(current_user),
+                "taxpayer_type": current_user.taxpayer_type or "Individual",
+                "tin": citizen_tin(current_user),
+            },
+            "submissions": [serialize_submission(record) for record in submissions],
+            "assessments": [serialize_assessment(record) for record in assessments],
+            "mfa_enabled": mfa_enabled,
         },
-        "submissions": [serialize_submission(record) for record in submissions],
-        "assessments": [serialize_assessment(record) for record in assessments],
-        "mfa_enabled": mfa_enabled,
-    }
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+    )
 
 
 @router.put("/user/account/profile")
@@ -867,7 +870,10 @@ async def list_public_assessments(
         query = query.filter(hash_aware_match(TaxAssessmentRecord, "tax_type", normalize_submission_type(tax_type)))
     assessments = query.order_by(TaxAssessmentRecord.created_at.desc()).all()
     assessments = filter_unsettled_public_assessments(db, current_user, assessments)
-    return {"items": [serialize_assessment(record) for record in assessments]}
+    return JSONResponse(
+        content={"items": [serialize_assessment(record) for record in assessments]},
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+    )
 
 
 @router.get("/submissions/{submission_id}/file")
