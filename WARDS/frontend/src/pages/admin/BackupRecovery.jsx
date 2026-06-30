@@ -309,6 +309,69 @@ const FolderPicker = ({ picker, onClose, onSelect, onOpen }) => {
   );
 };
 
+const BackupInventoryModal = ({ open, inventory, onClose }) => {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4">
+      <div className="flex max-h-[82vh] w-full max-w-4xl flex-col rounded-2xl bg-white shadow-2xl">
+        <div className="border-b border-slate-200 p-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Backup inventory</p>
+              <h3 className="mt-2 text-xl font-bold text-slate-900">Saved backups</h3>
+              <p className="mt-1 text-sm text-slate-600">{(inventory?.items || []).length} backup(s) found.</p>
+            </div>
+            <button className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-700" onClick={onClose}>Close</button>
+          </div>
+        </div>
+
+        <div className="min-h-0 overflow-auto p-5">
+          {(inventory?.timeout) && (
+            <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700">
+              {inventory.warning || 'Backup inventory query timed out. Try again shortly.'}
+            </div>
+          )}
+          <div className="overflow-hidden rounded-xl border border-slate-200">
+            <table className="min-w-full divide-y divide-slate-100 text-sm">
+              <thead className="sticky top-0 bg-white text-left text-xs uppercase tracking-[0.12em] text-slate-500">
+                <tr>
+                  <th className="px-3 py-2">Filename</th>
+                  <th className="px-3 py-2">Label</th>
+                  <th className="px-3 py-2">Timestamp</th>
+                  <th className="px-3 py-2">Latest for</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {(inventory?.items || []).length === 0 && (
+                  <tr><td className="px-3 py-4 text-slate-500" colSpan={4}>No backups found.</td></tr>
+                )}
+                {(inventory?.items || []).map((item, index) => (
+                  <tr key={`${item.path || item.filename}-${index}`} className="align-top">
+                    <td className="max-w-[16rem] break-all px-3 py-2 font-semibold text-slate-800">{item.filename || 'Unknown'}</td>
+                    <td className="px-3 py-2 text-slate-600">{item.label || item.backup_type || 'unknown'}</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-slate-600">{item.timestamp ? formatDateTime(item.timestamp) : 'Unknown'}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-wrap gap-1.5">
+                        {(item.latest_domains || []).length === 0 && <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-500">Older</span>}
+                        {(item.latest_domains || []).map((domain) => (
+                          <span key={domain} className="rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-700">
+                            {recoveryDomainLabels[domain] || domain}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const BackupRecovery = () => {
   const todayStr = new Date().toISOString().split('T')[0];
   const [activeTab, setActiveTab] = useState('Dashboard');
@@ -1023,6 +1086,11 @@ const BackupRecovery = () => {
         onSelect={selectFolder}
         onOpen={(path) => openFolderPicker(folderPicker.mode, folderPicker.title, path)}
       />
+      <BackupInventoryModal
+        open={showBackupInventory}
+        inventory={backupInventory}
+        onClose={() => setShowBackupInventory(false)}
+      />
       <header className="sticky top-0 z-40 bg-primary px-4 py-3 shadow-lg md:px-8">
         <div className="flex w-full items-center justify-between">
           <PublicBrandLogo
@@ -1511,48 +1579,6 @@ const BackupRecovery = () => {
                     >
                       View backups
                     </button>
-                    {showBackupInventory && (
-                      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-                        <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-3 py-2">
-                          <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Saved backups</p>
-                          <button className="text-xs font-semibold text-primary hover:text-blue-900" onClick={() => setShowBackupInventory(false)}>Hide</button>
-                        </div>
-                        <div className="max-h-80 overflow-auto">
-                          <table className="min-w-full divide-y divide-slate-100 text-sm">
-                            <thead className="sticky top-0 bg-white text-left text-xs uppercase tracking-[0.12em] text-slate-500">
-                              <tr>
-                                <th className="px-3 py-2">Filename</th>
-                                <th className="px-3 py-2">Label</th>
-                                <th className="px-3 py-2">Timestamp</th>
-                                <th className="px-3 py-2">Latest for</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                              {(backupInventory?.items || []).length === 0 && (
-                                <tr><td className="px-3 py-4 text-slate-500" colSpan={4}>No backups found.</td></tr>
-                              )}
-                              {(backupInventory?.items || []).map((item, index) => (
-                                <tr key={`${item.path || item.filename}-${index}`} className="align-top">
-                                  <td className="max-w-[16rem] break-all px-3 py-2 font-semibold text-slate-800">{item.filename || 'Unknown'}</td>
-                                  <td className="px-3 py-2 text-slate-600">{item.label || item.backup_type || 'unknown'}</td>
-                                  <td className="whitespace-nowrap px-3 py-2 text-slate-600">{item.timestamp ? formatDateTime(item.timestamp) : 'Unknown'}</td>
-                                  <td className="px-3 py-2">
-                                    <div className="flex flex-wrap gap-1.5">
-                                      {(item.latest_domains || []).length === 0 && <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-500">Older</span>}
-                                      {(item.latest_domains || []).map((domain) => (
-                                        <span key={domain} className="rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-700">
-                                          {recoveryDomainLabels[domain] || domain}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 </div>
               </Section>

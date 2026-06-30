@@ -319,7 +319,10 @@ def list_backup_inventory(db):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import list_backup_inventory as _local
         return _local(db)
-    return _sync_get("/v1/backup/inventory", timeout=30.0)
+    try:
+        return _sync_get("/v1/backup/inventory", timeout=15.0)
+    except (requests.exceptions.Timeout, requests.exceptions.ReadTimeout, requests.exceptions.ConnectTimeout):
+        return {"items": [], "timeout": True, "latest_by_domain": {}, "domains": []}
 
 
 def full_system_recovery(db, admin_id):

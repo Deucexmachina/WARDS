@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi.concurrency import run_in_threadpool
 
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -463,9 +464,20 @@ def backup_history(
 
 
 @router.get("/backups/inventory")
-def backup_inventory(db: Session = Depends(get_db), admin=Depends(current_admin)):
+async def backup_inventory(db: Session = Depends(get_db), admin=Depends(current_admin)):
     try:
-        inventory = list_backup_inventory(db) or {}
+        inventory = await asyncio.wait_for(
+            run_in_threadpool(lambda: list_backup_inventory(db) or {}),
+            timeout=20.0,
+        )
+    except asyncio.TimeoutError:
+        inventory = {
+            "items": [],
+            "domains": [],
+            "latest_by_domain": {},
+            "timeout": True,
+            "warning": "Backup inventory query timed out. Try again shortly.",
+        }
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Unable to load security backup inventory: {exc}")
 
