@@ -98,6 +98,26 @@ def _unpause_vm2() -> bool:
     return False
 
 
+def _trigger_vm2_post_deploy_backup_background():
+    """Start the non-critical VM2 backup after deploy without delaying CI."""
+    if not VM2_HOST or not VM2_API_KEY:
+        return
+
+    def _run():
+        try:
+            backup_resp = httpx.post(
+                f"https://{VM2_HOST}/v1/backup/full",
+                headers=_vm2_headers(),
+                timeout=20.0,
+            )
+            backup_resp.raise_for_status()
+            logger.info("VM2 post-deploy backup triggered: %s", backup_resp.json())
+        except Exception as e:
+            logger.error("VM2 post-deploy backup trigger failed: %s", e)
+
+    threading.Thread(target=_run, daemon=True, name="vm2-post-deploy-backup").start()
+
+
 @app.post("/webhook")
 async def github_webhook(request: Request):
     if not VM2_HOST or not VM2_API_KEY:
@@ -237,23 +257,15 @@ async def github_webhook(request: Request):
             else:
                 raise RuntimeError("VM1 did not upload a deployment-paused baseline manifest for the target commit")
 
-            # --- Step 8: Trigger post-deploy backup ---
-            try:
-                backup_resp = httpx.post(
-                    f"https://{VM2_HOST}/v1/backup/full",
-                    headers=_vm2_headers(),
-                    timeout=120.0,
-                )
-                backup_resp.raise_for_status()
-                logger.info("VM2 post-deploy backup triggered: %s", backup_resp.json())
-            except Exception as e:
-                logger.error("VM2 post-deploy backup trigger failed: %s", e)
-                # Non-fatal: backup failure should not block unpause
-
-        # --- Step 9: Resume monitoring (success path) ---
+        # --- Step 8: Resume monitoring (success path) ---
         if vm2_pushed_pause:
             if _unpause_vm2():
                 deployment_resumed = True
+
+        # --- Step 9: Trigger non-critical post-deploy VM2 backup in the background ---
+        # Baselines are already verified before unpause, so this should not
+        # keep GitHub Actions waiting for a backup HTTP request.
+        _trigger_vm2_post_deploy_backup_background()
 
         # --- Step 10: Restart webhook process to load updated code ---
         # The running Python process still has the OLD code in memory.

@@ -314,7 +314,7 @@ const BackupInventoryModal = ({ open, inventory, onClose }) => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4">
-      <div className="flex max-h-[82vh] w-full max-w-4xl flex-col rounded-2xl bg-white shadow-2xl">
+      <div className="flex max-h-[88vh] w-full max-w-7xl flex-col rounded-2xl bg-white shadow-2xl">
         <div className="border-b border-slate-200 p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -332,25 +332,36 @@ const BackupInventoryModal = ({ open, inventory, onClose }) => {
               {inventory.warning || 'Backup inventory query timed out. Try again shortly.'}
             </div>
           )}
-          <div className="overflow-hidden rounded-xl border border-slate-200">
-            <table className="min-w-full divide-y divide-slate-100 text-sm">
+          <div className="overflow-auto rounded-xl border border-slate-200">
+            <table className="min-w-[58rem] divide-y divide-slate-100 text-sm">
               <thead className="sticky top-0 bg-white text-left text-xs uppercase tracking-[0.12em] text-slate-500">
                 <tr>
                   <th className="px-3 py-2">Filename</th>
                   <th className="px-3 py-2">Label</th>
                   <th className="px-3 py-2">Timestamp</th>
+                  <th className="px-3 py-2">Domains</th>
                   <th className="px-3 py-2">Latest for</th>
+                  <th className="px-3 py-2">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {(inventory?.items || []).length === 0 && (
-                  <tr><td className="px-3 py-4 text-slate-500" colSpan={4}>No backups found.</td></tr>
+                  <tr><td className="px-3 py-4 text-slate-500" colSpan={6}>No backups found.</td></tr>
                 )}
                 {(inventory?.items || []).map((item, index) => (
                   <tr key={`${item.path || item.filename}-${index}`} className="align-top">
-                    <td className="max-w-[16rem] break-all px-3 py-2 font-semibold text-slate-800">{item.filename || 'Unknown'}</td>
+                    <td className="max-w-[22rem] break-all px-3 py-2 font-semibold text-slate-800">{item.filename || 'Unknown'}</td>
                     <td className="px-3 py-2 text-slate-600">{item.label || item.backup_type || 'unknown'}</td>
                     <td className="whitespace-nowrap px-3 py-2 text-slate-600">{item.timestamp ? formatDateTime(item.timestamp) : 'Unknown'}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-wrap gap-1.5">
+                        {(item.domains || []).map((domain) => (
+                          <span key={domain} className="rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold text-primary">
+                            {recoveryDomainLabels[domain] || domain}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
                     <td className="px-3 py-2">
                       <div className="flex flex-wrap gap-1.5">
                         {(item.latest_domains || []).length === 0 && <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-500">Older</span>}
@@ -360,6 +371,11 @@ const BackupInventoryModal = ({ open, inventory, onClose }) => {
                           </span>
                         ))}
                       </div>
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className={`rounded-full px-2 py-1 text-xs font-semibold ${item.manifest_valid ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
+                        {item.manifest_valid ? 'Verified' : 'Unverified'}
+                      </span>
                     </td>
                   </tr>
                 ))}

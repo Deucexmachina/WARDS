@@ -238,6 +238,37 @@ def test_webhook_deploy_waits_for_vm1_baseline_manifest():
     assert "deployment_vm1_baseline_ready" in script
     assert "vm1_last_manifest_commit" in script
     assert "VM1 did not upload a deployment-paused baseline manifest" in script
+    assert "_trigger_vm2_post_deploy_backup_background" in script
+    assert "timeout=120.0" not in script
+
+
+def test_vm1_startup_creates_database_baseline_for_split_deployment():
+    main_text = (Path(__file__).resolve().parents[1] / "WARDS" / "backend" / "main.py").read_text()
+
+    assert "start_vm1_database_startup_baseline_if_configured" in main_text
+    assert "Startup Baseline VM1" in main_text
+    assert "SECURITY_API_URL" in main_text
+    assert "create_vm1_database_backup" in main_text
+
+
+def test_ci_backend_job_uses_cache_and_single_pytest_process():
+    workflow = (Path(__file__).resolve().parents[1] / ".github" / "workflows" / "wards-ci.yml").read_text()
+
+    assert "cache: pip" in workflow
+    assert workflow.count("pytest -q") == 1
+    assert "python -m compileall SECURITY\n      - name: Run" not in workflow
+
+
+def test_file_status_scan_and_recover_routes_still_proxy_to_vm2():
+    dashboard_route = (Path(__file__).resolve().parents[1] / "WARDS" / "backend" / "routes" / "security_dashboard.py").read_text()
+    security_api = (Path(__file__).resolve().parents[1] / "SECURITY" / "api_main.py").read_text()
+    client = (Path(__file__).resolve().parents[1] / "WARDS" / "backend" / "utils" / "security_client.py").read_text()
+
+    assert '@router.post("/files/{file_id}/scan")' in dashboard_route
+    assert '@router.post("/files/{file_id}/recover")' in dashboard_route
+    assert '@app.post("/v1/scan/file"' in security_api
+    assert '@app.post("/v1/files/recover"' in security_api
+    assert 'return _sync_post("/v1/files/recover"' in client
 
 
 def test_frontend_dockerfile_uses_static_nginx_server():
