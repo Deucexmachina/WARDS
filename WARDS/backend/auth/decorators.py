@@ -78,7 +78,7 @@ def _get_refresh_cookie_name(portal: str) -> str:
     return f"wards_{portal}_refresh_token"
 
 
-COOKIE_PORTALS = ("admin", "branch", "user")
+COOKIE_PORTALS = ("admin", "branch", "public")
 
 
 def _extract_token_from_request(request: Request, cookie_name: str) -> str | None:
@@ -211,7 +211,7 @@ async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: Session = Depends(get_db),
 ) -> CitizenUser:
-    token = _extract_token_from_request(request, _get_cookie_name("user")) or (credentials.credentials if credentials else None)
+    token = _extract_token_from_request(request, _get_cookie_name("public")) or (credentials.credentials if credentials else None)
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -249,7 +249,7 @@ async def get_optional_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(optional_user_security),
     db: Session = Depends(get_db),
 ) -> CitizenUser | None:
-    token = _extract_token_from_request(request, _get_cookie_name("user")) or (credentials.credentials if credentials else None)
+    token = _extract_token_from_request(request, _get_cookie_name("public")) or (credentials.credentials if credentials else None)
     if not token:
         return None
 
