@@ -355,6 +355,20 @@ def download_latest_vm1_database_backup(destination_dir):
     return _download("/v1/vm1/database-backups/latest", destination, timeout=600.0)
 
 
+def list_vm1_database_backup_archives():
+    if not SECURITY_API_URL:
+        return {"items": []}
+    return _sync_get("/v1/vm1/database-backups", timeout=60.0)
+
+
+def download_vm1_database_backup_archive(archive_name: str, destination_dir):
+    if not SECURITY_API_URL:
+        return None
+    safe_name = Path(str(archive_name or "")).name
+    destination = Path(destination_dir) / f"{safe_name}.sql.gz"
+    return _download(f"/v1/vm1/database-backups/{safe_name}", destination, timeout=600.0)
+
+
 def set_backup_location(db, path, delete_previous=False, actor=None):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import set_backup_location as _local

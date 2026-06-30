@@ -553,13 +553,22 @@ def _safe_vm1_database_dump_name(filename: str) -> str:
 
 
 def _latest_vm1_database_archive() -> tuple[Path, str, dict[str, object]] | None:
-    if not DEFAULT_BACKUP_ROOT.exists():
+    archives = _vm1_database_archives()
+    if not archives:
         return None
+    item = archives[0]
+    return Path(item["path"]), str(item["relative"]), dict(item["meta"])
+
+
+def _vm1_database_archives() -> list[dict[str, object]]:
+    if not DEFAULT_BACKUP_ROOT.exists():
+        return []
     roots = sorted(
         [item for item in DEFAULT_BACKUP_ROOT.iterdir() if item.is_dir() and item.name.startswith("vm1_database_backup_")],
         key=lambda item: item.name,
         reverse=True,
     )
+    archives: list[dict[str, object]] = []
     for root in roots:
         manifest = backup_manifest_index(root)
         if RECOVERY_DOMAIN_VM1_DATABASE not in manifest_domains(manifest):
@@ -577,8 +586,16 @@ def _latest_vm1_database_archive() -> tuple[Path, str, dict[str, object]] | None
                     continue
             except OSError:
                 continue
-            return source, relative, meta
-    return None
+            archives.append({
+                "archive": root.name,
+                "filename": source.name,
+                "path": str(source),
+                "relative": relative,
+                "checksum": str(meta.get("sha256") or ""),
+                "size_bytes": int(meta.get("size_bytes") or 0),
+                "meta": meta,
+            })
+    return archives
 
 
 @app.post("/v1/vm1/database-backups/upload", dependencies=[Depends(require_api_key), Depends(require_admin_secret)])
@@ -641,6 +658,35 @@ def api_latest_vm1_database_backup():
             "X-Backup-Db-Type": "mysql",
         },
     )
+
+
+@app.get("/v1/vm1/database-backups", dependencies=[Depends(require_api_key), Depends(require_admin_secret)])
+@rate_limit("vm1_database_backup_list", max_requests=20, window_seconds=300)
+def api_list_vm1_database_backups():
+    return {"items": [
+        {key: value for key, value in item.items() if key not in {"path", "relative", "meta"}}
+        for item in _vm1_database_archives()
+    ]}
+
+
+@app.get("/v1/vm1/database-backups/{archive_name}", dependencies=[Depends(require_api_key), Depends(require_admin_secret)])
+@rate_limit("vm1_database_backup_download_named", max_requests=20, window_seconds=300)
+def api_download_vm1_database_backup(archive_name: str):
+    safe_name = Path(str(archive_name or "")).name
+    for item in _vm1_database_archives():
+        if item.get("archive") != safe_name:
+            continue
+        source = Path(str(item["path"]))
+        return FileResponse(
+            source,
+            media_type="application/gzip",
+            filename=source.name,
+            headers={
+                "X-Backup-Checksum": str(item.get("checksum") or ""),
+                "X-Backup-Db-Type": "mysql",
+            },
+        )
+    raise HTTPException(status_code=404, detail="VM1 database backup archive not found")
 
 
 @app.post("/v1/backup/manual", dependencies=[Depends(require_api_key)])

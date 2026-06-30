@@ -594,6 +594,277 @@ print(hash_password(os.environ["EVAL_REPAIR_ADMIN_PASSWORD"]))
     return f"admin_password_repair=updated:{REPAIR_ADMIN_EMAIL}"
 
 
+def restore_vm1_admin_hashes_from_backups() -> str:
+    script = r'''
+import ast
+import gzip
+import re
+import sys
+import tempfile
+from pathlib import Path
+
+sys.path.insert(0, "/app")
+from database.models import Admin, CitizenUser, Payment, SessionLocal
+from utils.backup_engine import backup_dir
+from utils.security_client import SECURITY_API_URL, list_vm1_database_backup_archives, download_vm1_database_backup_archive
+import requests
+
+VALID_HASH_PREFIXES = ("$2a$", "$2b$", "$2y$", "$argon2", "pbkdf2:", "scrypt:")
+
+
+def valid_hash(value):
+    value = str(value or "")
+    return value.startswith(VALID_HASH_PREFIXES) and len(value) >= 40
+
+
+def split_sql_values(payload):
+    rows = []
+    current = []
+    token = []
+    in_quote = False
+    escape = False
+    depth = 0
+    for char in payload:
+        if in_quote:
+            token.append(char)
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == "'":
+                in_quote = False
+            continue
+        if char == "'":
+            token.append(char)
+            in_quote = True
+            continue
+        if char == "(":
+            if depth == 0:
+                current = []
+                token = []
+            else:
+                token.append(char)
+            depth += 1
+            continue
+        if char == ")" and depth:
+            depth -= 1
+            if depth == 0:
+                current.append("".join(token).strip())
+                rows.append(current)
+                token = []
+            else:
+                token.append(char)
+            continue
+        if char == "," and depth == 1:
+            current.append("".join(token).strip())
+            token = []
+            continue
+        if depth:
+            token.append(char)
+    return rows
+
+
+def decode_sql_value(value):
+    value = value.strip()
+    if value.upper() == "NULL":
+        return None
+    if value.startswith("'") and value.endswith("'"):
+        try:
+            return ast.literal_eval(value)
+        except Exception:
+            return value[1:-1].replace("\\'", "'").replace("\\\\", "\\")
+    return value
+
+
+def admin_hashes_from_dump(path):
+    rows = table_records_from_dump(
+        path,
+        "admins",
+        ["id", "username", "email", "full_name", "hashed_password", "role", "is_verified", "status", "last_login", "created_at"],
+    )
+    found = {}
+    for record in rows:
+        hash_value = record.get("hashed_password")
+        if not valid_hash(hash_value):
+            continue
+        for key in (record.get("email"), record.get("username")):
+            if key:
+                found[str(key).lower()] = str(hash_value)
+    return found
+
+
+def table_records_from_dump(path, table_name, default_columns):
+    content = gzip.open(path, "rt", encoding="utf-8", errors="ignore").read()
+    pattern = rf"INSERT INTO `?{re.escape(table_name)}`?(?:\s*\((?P<columns>[^)]*)\))?\s+VALUES\s*(?P<values>.*?);"
+    matches = re.finditer(pattern, content, re.I | re.S)
+    records = []
+    for match in matches:
+        raw_columns = match.group("columns")
+        columns = [col.strip(" `") for col in raw_columns.split(",")] if raw_columns else default_columns
+        for row in split_sql_values(match.group("values")):
+            values = [decode_sql_value(item) for item in row]
+            records.append(dict(zip(columns, values)))
+    return records
+
+
+def records_by_id_from_dump(path, table_name, default_columns):
+    records = {}
+    for record in table_records_from_dump(path, table_name, default_columns):
+        try:
+            record_id = int(record.get("id"))
+        except Exception:
+            continue
+        records[record_id] = record
+    return records
+
+
+location = backup_dir()
+dumps = sorted(location.glob("database_*.sql.gz"), key=lambda item: item.name, reverse=True)
+if SECURITY_API_URL:
+    try:
+        archive_payload = list_vm1_database_backup_archives()
+        archive_items = list((archive_payload or {}).get("items") or [])
+    except requests.exceptions.HTTPError as exc:
+        archive_items = []
+    except Exception:
+        archive_items = []
+    if archive_items:
+        archive_dir = Path(tempfile.mkdtemp(prefix="vm2_vm1_db_archives_"))
+        for item in archive_items:
+            archive_name = str(item.get("archive") or "")
+            if not archive_name:
+                continue
+            try:
+                downloaded = download_vm1_database_backup_archive(archive_name, archive_dir)
+                if downloaded and downloaded.get("path"):
+                    dumps.append(Path(downloaded["path"]))
+            except Exception:
+                continue
+        dumps = sorted(set(dumps), key=lambda item: item.name, reverse=True)
+if not dumps:
+    print("admin_hash_restore=no_dumps")
+    raise SystemExit(0)
+
+db = SessionLocal()
+try:
+    admins = (
+        db.query(Admin)
+        .filter(Admin.role.in_(["main_admin", "superadmin"]))
+        .all()
+    )
+    admin_targets = [
+        admin for admin in admins
+        if not valid_hash(getattr(admin, "hashed_password", None))
+    ]
+    citizen_targets = [
+        user for user in db.query(CitizenUser).all()
+        if any(marker in str(getattr(user, "email", "") or "").lower() for marker in ("attacker", "eval_attack", "eval_intruder"))
+    ]
+    payment_targets = [
+        payment for payment in db.query(Payment).all()
+        if getattr(payment, "amount", None) is not None
+        and (float(getattr(payment, "amount") or 0) < 0 or float(getattr(payment, "amount") or 0) >= 10000000)
+    ]
+    if not admin_targets and not citizen_targets and not payment_targets:
+        print("known_db_artifact_restore=no_suspicious_rows")
+        raise SystemExit(0)
+    repaired = []
+    for dump in dumps:
+        hashes = admin_hashes_from_dump(dump)
+        for admin in list(admin_targets):
+            candidates = [
+                str(getattr(admin, "email", "") or "").lower(),
+                str(getattr(admin, "username", "") or "").lower(),
+            ]
+            replacement = next((hashes[item] for item in candidates if item in hashes), None)
+            if not replacement:
+                continue
+            admin.hashed_password = replacement
+            db.add(admin)
+            repaired.append(f"admin_hash:{admin.email or admin.username}:{dump.name}")
+            admin_targets.remove(admin)
+
+        citizen_records = records_by_id_from_dump(dump, "citizen_users", [
+            "id", "email", "email_hash", "email_enc", "full_name", "full_name_hash", "full_name_enc",
+            "tin", "tin_hash", "tin_enc", "contact_number", "contact_number_hash", "contact_number_enc",
+            "address", "address_hash", "address_enc", "taxpayer_type", "hashed_password", "role",
+            "is_verified", "status", "created_at", "last_login",
+        ])
+        for user in list(citizen_targets):
+            backup_record = citizen_records.get(int(user.id))
+            if not backup_record:
+                continue
+            backup_email = backup_record.get("email")
+            if not backup_email or any(marker in str(backup_email).lower() for marker in ("attacker", "eval_attack", "eval_intruder")):
+                continue
+            user.email = backup_email
+            user.email_hash = backup_record.get("email_hash")
+            user.email_enc = backup_record.get("email_enc")
+            db.add(user)
+            repaired.append(f"citizen_email:{user.id}:{dump.name}")
+            citizen_targets.remove(user)
+
+        payment_records = records_by_id_from_dump(dump, "payments", [
+            "id", "ref_number", "ref_number_hash", "ref_number_enc", "txn_id", "txn_id_hash", "txn_id_enc",
+            "taxpayer_name", "taxpayer_name_hash", "taxpayer_name_enc", "tin", "tin_hash", "tin_enc",
+            "property_ref_number", "property_ref_number_hash", "property_ref_number_enc", "tax_type",
+            "tax_type_hash", "tax_type_enc", "amount", "payment_method", "payment_method_hash",
+            "payment_method_enc", "branch_id", "branch", "branch_hash", "branch_enc", "status", "email",
+            "email_hash", "email_enc", "contact_number", "contact_number_hash", "contact_number_enc",
+            "source_module", "related_request_id", "paymongo_checkout_session_id",
+            "paymongo_checkout_session_id_hash", "paymongo_checkout_session_id_enc",
+            "paymongo_payment_intent_id", "paymongo_payment_intent_id_hash", "paymongo_payment_intent_id_enc",
+            "paymongo_source_id", "paymongo_source_id_hash", "paymongo_source_id_enc", "paymongo_payment_id",
+            "paymongo_payment_id_hash", "paymongo_payment_id_enc", "paymongo_checkout_url",
+            "paymongo_checkout_url_hash", "paymongo_checkout_url_enc", "paymongo_status",
+            "paymongo_status_hash", "paymongo_status_enc", "metadata_json", "proof_file_path",
+            "proof_file_path_hash", "proof_file_path_enc", "proof_file_name", "proof_file_name_hash",
+            "proof_file_name_enc", "proof_uploaded_at", "treasury_remarks", "treasury_remarks_hash",
+            "treasury_remarks_enc", "treasury_updated_at", "official_receipt_number",
+            "official_receipt_number_hash", "official_receipt_number_enc", "official_receipt_path",
+            "official_receipt_path_hash", "official_receipt_path_enc", "official_receipt_generated_at",
+            "release_method", "release_method_hash", "release_method_enc", "release_details_json",
+            "payment_expiry", "receipt_sent_at", "created_at", "verified_at", "public_access_token",
+        ])
+        for payment in list(payment_targets):
+            backup_record = payment_records.get(int(payment.id))
+            if not backup_record:
+                continue
+            try:
+                backup_amount = float(backup_record.get("amount"))
+            except Exception:
+                continue
+            if backup_amount < 0 or backup_amount >= 10000000:
+                continue
+            payment.amount = backup_amount
+            db.add(payment)
+            repaired.append(f"payment_amount:{payment.id}:{dump.name}")
+            payment_targets.remove(payment)
+
+        if not admin_targets and not citizen_targets and not payment_targets:
+            break
+    if repaired:
+        db.commit()
+        print("known_db_artifact_restore=updated:" + ",".join(repaired))
+    else:
+        leftovers = []
+        if admin_targets:
+            leftovers.append(f"admin_hashes:{len(admin_targets)}")
+        if citizen_targets:
+            leftovers.append(f"citizen_emails:{len(citizen_targets)}")
+        if payment_targets:
+            leftovers.append(f"payment_amounts:{len(payment_targets)}")
+        print("known_db_artifact_restore=no_matching_backup_rows:" + ",".join(leftovers))
+finally:
+    db.close()
+'''
+    result = vm1(
+        f"cd {q(VM1_APP_DIR)} && docker compose exec -T backend python - <<'PY'\n{script}\nPY",
+        timeout=max(REQUEST_TIMEOUT_SECONDS, 300),
+    )
+    return result.strip().splitlines()[-1] if result.strip() else "admin_hash_restore=unknown"
+
+
 def restore_latest_vm1_database_backup() -> str:
     script = r'''
 import sys
@@ -601,6 +872,7 @@ sys.path.insert(0, "/app")
 from database.models import Backup, SessionLocal
 from utils.backup_engine import backup_dir, is_database_backup_record, restore_database_backup
 from utils.security_client import SECURITY_API_URL, download_latest_vm1_database_backup
+import requests
 
 db = SessionLocal()
 try:
@@ -625,7 +897,12 @@ try:
             restore_database_backup(latest_file, None, None)
             print(latest_file.name)
         elif SECURITY_API_URL:
-            downloaded = download_latest_vm1_database_backup(location)
+            try:
+                downloaded = download_latest_vm1_database_backup(location)
+            except requests.exceptions.HTTPError as exc:
+                if exc.response is not None and exc.response.status_code == 404:
+                    raise RuntimeError("No VM2 VM1-database archive is available yet. Deploy the VM2 archive endpoint and create a new VM1 DB backup.") from exc
+                raise
             if not downloaded:
                 raise RuntimeError("No VM2 VM1-database archive is available.")
             latest_file = downloaded["path"]
@@ -706,6 +983,10 @@ def cleanup_vm1_after_evaluation(
             notes.append(restore_latest_vm1_database_backup())
         except Exception as exc:
             notes.append(f"vm1_database_restore_failed:{exc}")
+        try:
+            notes.append(restore_vm1_admin_hashes_from_backups())
+        except Exception as exc:
+            notes.append(f"admin_hash_restore_failed:{exc}")
     try:
         vm1_mysql("DELETE FROM admins WHERE email='eval_intruder@example.com' OR username='eval_intruder';")
         notes.append("vm1_eval_intruder_removed")
