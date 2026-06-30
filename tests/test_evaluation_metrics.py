@@ -121,6 +121,7 @@ def test_evaluation_scan_tests_query_detections_created_during_wait(monkeypatch,
     import evaluator
 
     monkeypatch.setattr(evaluator, "RESULTS_CSV", tmp_path / "results.csv")
+    monkeypatch.setattr(evaluator, "VM1_DIRECT_MANIFEST", False)
     monkeypatch.setattr(evaluator, "VM1_SNAPSHOT_WAIT_SECONDS", 0)
     monkeypatch.setattr(evaluator, "CLEANUP_WAIT_SECONDS", 0)
     monkeypatch.setattr(evaluator, "trigger_scan_all", lambda: [])
@@ -147,6 +148,42 @@ def test_evaluation_scan_tests_query_detections_created_during_wait(monkeypatch,
     assert row["detection_id"] == 123
 
 
+def test_evaluation_direct_vm1_manifest_queries_manifest_detection(monkeypatch, tmp_path):
+    evaluation_dir = Path(__file__).resolve().parents[1] / "evaluation"
+    if str(evaluation_dir) not in sys.path:
+        sys.path.insert(0, str(evaluation_dir))
+
+    import evaluator
+
+    manifest_calls = []
+    monkeypatch.setattr(evaluator, "RESULTS_CSV", tmp_path / "results.csv")
+    monkeypatch.setattr(evaluator, "VM1_DIRECT_MANIFEST", True)
+    monkeypatch.setattr(evaluator, "CLEANUP_WAIT_SECONDS", 0)
+    monkeypatch.setattr(evaluator, "vm1_manifest_for_targets", lambda targets: manifest_calls.append(targets) or {"detection_ids": [321]})
+    monkeypatch.setattr(
+        evaluator,
+        "query_new_detections",
+        lambda _since, target=None: [{"id": 321, "incident_id": 654, "target_name": target, "ai_score": 0.8, "ai_prediction": "malicious"}],
+    )
+    monkeypatch.setattr(evaluator, "resolve_incident", lambda _incident_id: True)
+
+    case = evaluator.TestCase(
+        "ATK-DIRECT",
+        "Direct manifest detection",
+        "application_files",
+        "attack",
+        lambda: None,
+        trigger_scan=True,
+        target_hint="WARDS/frontend/index.html",
+    )
+
+    row = evaluator.run_test(case)
+
+    assert row["result"] == "TP"
+    assert row["detection_id"] == 321
+    assert manifest_calls == [["WARDS/frontend/index.html"], ["WARDS/frontend/index.html"]]
+
+
 def test_evaluation_ignores_unrelated_recent_detections(monkeypatch, tmp_path):
     evaluation_dir = Path(__file__).resolve().parents[1] / "evaluation"
     if str(evaluation_dir) not in sys.path:
@@ -155,6 +192,7 @@ def test_evaluation_ignores_unrelated_recent_detections(monkeypatch, tmp_path):
     import evaluator
 
     monkeypatch.setattr(evaluator, "RESULTS_CSV", tmp_path / "results.csv")
+    monkeypatch.setattr(evaluator, "VM1_DIRECT_MANIFEST", False)
     monkeypatch.setattr(evaluator, "SCAN_WAIT_SECONDS", 0)
     monkeypatch.setattr(evaluator, "CLEANUP_WAIT_SECONDS", 0)
     monkeypatch.setattr(

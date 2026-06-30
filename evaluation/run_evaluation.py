@@ -6,8 +6,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from eval_config import RESULTS_CSV, validate_required
-from evaluator import run_test
+from eval_config import RESULTS_CSV, VM1_DIRECT_MANIFEST, validate_required
+from evaluator import print_diagnostics, run_test, vm1_manifest_for_targets, wait_for_vm1_targets
 from metrics import compute_and_print
 from test_catalog import all_tests
 
@@ -19,6 +19,8 @@ def main() -> None:
     parser.add_argument("--actual", choices=["attack", "benign"], help="Run only attack or benign cases.")
     parser.add_argument("--fresh", action="store_true", help="Delete the previous CSV before running.")
     parser.add_argument("--list", action="store_true", help="List registered tests and exit.")
+    parser.add_argument("--diagnose", action="store_true", help="Print VM1 reporter/baseline diagnostics and exit.")
+    parser.add_argument("--skip-preflight", action="store_true", help="Skip VM1 baseline preflight for file attack cases.")
     args = parser.parse_args()
 
     tests = all_tests()
@@ -38,6 +40,26 @@ def main() -> None:
         selected = [case for case in selected if case.domain in allowed_domains]
     if args.actual:
         selected = [case for case in selected if case.actual == args.actual]
+    if args.diagnose:
+        print_diagnostics(selected)
+        return
+    file_attack_targets = sorted(
+        {
+            str(case.target_hint or "").replace("\\", "/").strip("/")
+            for case in selected
+            if case.domain == "application_files" and case.actual == "attack" and case.target_hint
+        }
+    )
+    if file_attack_targets and not args.skip_preflight:
+        if VM1_DIRECT_MANIFEST:
+            vm1_manifest_for_targets(file_attack_targets)
+        missing, _files = wait_for_vm1_targets(file_attack_targets)
+        if missing:
+            print("VM1 baseline preflight failed. Missing monitored baseline(s):")
+            for target in missing:
+                print(f"  - {target}")
+            print("Run with --diagnose for reporter status, or --skip-preflight to run anyway.")
+            raise SystemExit(2)
     if args.fresh and RESULTS_CSV.exists():
         RESULTS_CSV.unlink()
 

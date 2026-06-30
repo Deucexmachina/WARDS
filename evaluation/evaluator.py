@@ -16,11 +16,14 @@ import requests
 from eval_config import (
     CLEANUP_WAIT_SECONDS,
     DETECTION_LOOKBACK_SECONDS,
+    PREFLIGHT_POLL_SECONDS,
+    PREFLIGHT_WAIT_SECONDS,
     REQUEST_TIMEOUT_SECONDS,
     RESULTS_CSV,
     SCAN_BACKOFF_SECONDS,
     SCAN_WAIT_SECONDS,
     VERIFY_TLS,
+    VM1_DIRECT_MANIFEST,
     VM1_SNAPSHOT_WAIT_SECONDS,
     VM1_APP_DIR,
     VM1_HOST,
@@ -113,6 +116,157 @@ def query_new_detections(since_iso: str, *, target: str | None = None) -> list[d
     return list(rows or [])
 
 
+def api_files() -> list[dict]:
+    rows = api_get("/v1/files", headers=HEADERS)
+    return list(rows or [])
+
+
+def normalize_rel_path(path: str | None) -> str:
+    return str(path or "").replace("\\", "/").strip("/")
+
+
+def vm1_manifest_for_targets(relative_paths: list[str]) -> dict:
+    """Submit a VM1 manifest for target files through VM2's normal reporter endpoint."""
+    targets = [normalize_rel_path(path) for path in relative_paths if path]
+    if not targets:
+        return {"registered": 0, "changed": 0, "detections": 0}
+    script = r'''
+import base64
+import hashlib
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+app_dir = Path(sys.argv[1])
+relative_paths = [item.replace("\\", "/").strip("/") for item in sys.argv[2:]]
+
+def sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(8192), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+def run_git(args, cwd):
+    try:
+        result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return ""
+
+git_root_text = run_git(["rev-parse", "--show-toplevel"], app_dir)
+git_root = Path(git_root_text) if git_root_text else app_dir
+commit = run_git(["rev-parse", "HEAD"], git_root) or "unknown"
+tracked = set((run_git(["ls-files"], git_root) or "").splitlines())
+modified = set((run_git(["diff", "--name-only", "HEAD"], git_root) or "").splitlines())
+
+files = []
+for rel in relative_paths:
+    path = app_dir / rel
+    root_name = rel.split("/", 1)[0] if rel else "WARDS"
+    if not path.exists() or not path.is_file():
+        files.append({
+            "relative_path": rel,
+            "folder_root": f"VM1_{root_name}",
+            "deleted": True,
+            "current_hash": "",
+            "content_b64": None,
+        })
+        continue
+    size = path.stat().st_size
+    content_b64 = None
+    if size <= 2097152:
+        content_b64 = base64.b64encode(path.read_bytes()).decode()
+    try:
+        rel_to_git = path.relative_to(git_root).as_posix()
+    except Exception:
+        rel_to_git = rel
+    files.append({
+        "relative_path": rel,
+        "folder_root": f"VM1_{root_name}",
+        "file_path": str(path),
+        "size_bytes": size,
+        "current_hash": sha256_file(path),
+        "content_b64": content_b64,
+        "git_head_match": rel_to_git in tracked and rel_to_git not in modified,
+    })
+
+print(json.dumps({"commit": commit, "files": files}))
+'''
+    command = f"python3 - {q(VM1_APP_DIR)} {' '.join(q(path) for path in targets)} <<'PY'\n{script}\nPY"
+    payload = json.loads(vm1(command, timeout=REQUEST_TIMEOUT_SECONDS))
+    return api_post("/v1/vm1/files/register", payload, headers=EVAL_HEADERS)
+
+
+def direct_vm1_manifest_enabled(case: TestCase) -> bool:
+    return bool(VM1_DIRECT_MANIFEST and case.domain == "application_files" and case.target_hint)
+
+
+def target_file_status(files: list[dict], target: str) -> dict | None:
+    needle = normalize_rel_path(target).lower()
+    for item in files:
+        if normalize_rel_path(item.get("relative_path")).lower() == needle:
+            return item
+    return None
+
+
+def required_vm1_targets(cases: list[TestCase]) -> list[str]:
+    return sorted(
+        {
+            normalize_rel_path(case.target_hint)
+            for case in cases
+            if case.domain == "application_files" and case.target_hint
+        }
+    )
+
+
+def wait_for_vm1_targets(targets: list[str]) -> tuple[list[str], list[dict]]:
+    files = api_files()
+    deadline = time.time() + max(0, PREFLIGHT_WAIT_SECONDS)
+    while True:
+        missing = [
+            target for target in targets
+            if not (target_file_status(files, target) or {}).get("baseline_hash")
+        ]
+        if not missing or time.time() >= deadline:
+            return missing, files
+        time.sleep(max(1, PREFLIGHT_POLL_SECONDS))
+        files = api_files()
+
+
+def print_diagnostics(cases: list[TestCase]) -> None:
+    targets = required_vm1_targets(cases)
+    print("VM2 health:", api_get("/health", headers=HEADERS))
+    print("VM1 config:", api_get("/v1/vm1/config", headers=HEADERS))
+    for key in [
+        "vm1_last_heartbeat_at",
+        "vm1_last_heartbeat_status",
+        "vm1_last_manifest_at",
+        "vm1_last_manifest_deployment_paused",
+        "deployment_vm1_baseline_ready",
+        "scan_interval_seconds",
+    ]:
+        try:
+            print(f"{key}:", api_post("/v1/settings/get", {"key": key, "default": ""}, headers=HEADERS))
+        except Exception as exc:
+            print(f"{key}: ERROR {exc}")
+    files = api_files()
+    print(f"VM2 monitored file rows: {len(files)}")
+    for target in targets[:25]:
+        status = target_file_status(files, target)
+        if status:
+            print(
+                f"registered {target}: status={status.get('status')} "
+                f"baseline={str(status.get('baseline_hash') or '')[:12]} "
+                f"current={str(status.get('current_hash') or '')[:12]}"
+            )
+        else:
+            print(f"missing {target}: no monitored file row")
+
+
 def merge_detections(*groups: list[dict]) -> list[dict]:
     merged: list[dict] = []
     seen: set[str] = set()
@@ -194,14 +348,29 @@ def classify_result(actual: str, predicted: str) -> str:
 
 def run_test(case: TestCase) -> dict:
     print(f"[{case.test_id}] {case.scenario}")
-    start_iso = (datetime.now(timezone.utc) - timedelta(seconds=DETECTION_LOOKBACK_SECONDS)).isoformat()
     started = time.time()
+    start_iso = (datetime.now(timezone.utc) - timedelta(seconds=DETECTION_LOOKBACK_SECONDS)).isoformat()
     predicted = "benign"
     detection = None
     error = ""
     try:
+        if direct_vm1_manifest_enabled(case):
+            vm1_manifest_for_targets([case.target_hint or ""])
+            skew_guard = min(max(DETECTION_LOOKBACK_SECONDS, 5), 30)
+            start_iso = (datetime.now(timezone.utc) - timedelta(seconds=skew_guard)).isoformat()
         case.action()
-        if case.trigger_scan:
+        if direct_vm1_manifest_enabled(case):
+            manifest_result = vm1_manifest_for_targets([case.target_hint or ""])
+            manifest_ids = [str(item) for item in (manifest_result or {}).get("detection_ids", [])]
+            queried = query_new_detections(start_iso, target=case.target_hint)
+            detections = matching_detections(queried, case)
+            if not detections and manifest_ids:
+                broader = query_new_detections(start_iso)
+                detections = [
+                    item for item in broader
+                    if str(item.get("id")) in manifest_ids or detection_matches_case(item, case)
+                ]
+        elif case.trigger_scan:
             if case.domain == "application_files" and VM1_SNAPSHOT_WAIT_SECONDS > 0:
                 time.sleep(VM1_SNAPSHOT_WAIT_SECONDS)
             scan_detections = trigger_scan_all()
@@ -306,6 +475,10 @@ def vm2_append(relative_path: str, content: str) -> None:
 
 def vm1_delete(relative_path: str) -> None:
     vm1(f"rm -f {q(vm1_path(relative_path))}")
+
+
+def vm2_delete(relative_path: str) -> None:
+    vm2(f"rm -f {q(vm2_path(relative_path))}")
 
 
 def vm1_backup(relative_path: str) -> str:

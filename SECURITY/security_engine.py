@@ -7921,6 +7921,42 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
             .first()
         )
 
+        if f.get("deleted"):
+            if not entry or entry.status == MONITORING_REMOVED_STATUS:
+                continue
+            if _has_open_incident(db, entry, "file_deleted"):
+                entry.status = "missing"
+                entry.current_hash = None
+                entry.last_checked = now_utc()
+                db.add(entry)
+                continue
+            snapshot_path = VM1_SNAPSHOT_ROOT / entry.relative_path
+            old_content = read_text(snapshot_path) if snapshot_path.exists() else ""
+            old_snapshot_bytes = None
+            if snapshot_path.exists():
+                try:
+                    old_snapshot_bytes = snapshot_path.read_bytes()
+                except Exception:
+                    pass
+            entry.status = "missing"
+            entry.current_hash = None
+            entry.last_checked = now_utc()
+            changed += 1
+            db.add(entry)
+            db.commit()
+            detection = _record_vm1_detection(
+                db,
+                entry,
+                "file_deleted",
+                None,
+                old_content=old_content,
+                new_content="",
+                original_content_bytes=old_snapshot_bytes,
+            )
+            if detection:
+                detections.append(detection)
+            continue
+
         if entry:
             if entry.status == MONITORING_REMOVED_STATUS:
                 continue  # Don't reactivate removed entries
