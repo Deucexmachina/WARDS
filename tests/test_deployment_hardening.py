@@ -81,6 +81,21 @@ def test_background_job_manager_rejects_duplicate_active_job():
         manager.submit("security_full_backup")
 
 
+def test_vm2_incident_resolve_path_route_exists():
+    source = Path("SECURITY/api_main.py").read_text(encoding="utf-8")
+
+    assert '@app.post("/v1/incidents/resolve"' in source
+    assert '@app.post("/v1/incidents/{incident_id}/resolve"' in source
+
+
+def test_vm2_rate_limit_allows_evaluation_bypass():
+    source = Path("SECURITY/api_main.py").read_text(encoding="utf-8")
+
+    assert 'request.headers.get("X-Evaluation-Run"' in source
+    assert "eval_secret == ADMIN_SECRET" in source
+    assert "return func(*args, **kwargs)" in source
+
+
 def test_deployed_scan_file_returns_serialized_dict_without_double_serializing(monkeypatch):
     detection = {"id": 42, "change_type": "content_modified", "target_name": "WARDS/backend/main.py"}
     db = SimpleNamespace(add=lambda _item: None, commit=lambda: None)

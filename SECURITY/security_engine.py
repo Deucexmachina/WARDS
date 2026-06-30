@@ -29,6 +29,7 @@ import requests
 from sqlalchemy import MetaData, Table, inspect, or_, text
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import StaleDataError
 from database.models import Admin, Alert, SessionLocal
 from utils.log_integrity import verify_record_integrity
 
@@ -145,10 +146,12 @@ if _vm2_app_dir:
     _deploy_root = Path(_vm2_app_dir)
     MONITORED_ROOTS = {
         "WARDS": _deploy_root / "WARDS",
+        "SECURITY": _deploy_root / "SECURITY",
     }
 else:
     MONITORED_ROOTS = {
         "WARDS": MASTER_ROOT / "WARDS",
+        "SECURITY": MASTER_ROOT / "SECURITY",
     }
 
 DEFAULT_EXCLUDED_DIRS = {
@@ -162,6 +165,7 @@ DEFAULT_EXCLUDED_DIRS = {
     "build",
     "output",
     "SECURITY",
+    "local_backups",
     "QUARANTINE",
     "DEFACEMENT",
     "OCR",
@@ -182,16 +186,24 @@ MONITORED_SUFFIXES = {
     ".yml",
     ".yaml",
     ".sql",
+    ".db",
+    ".sqlite",
+    ".sqlite3",
+    ".php",
+    ".phtml",
+    ".pkl",
     ".csv",
 }
 
 MONITORED_SPECIAL_FILENAMES = {
     "dockerfile",
+    ".env",
     ".gitignore",
     ".gitkeep",
 }
 
 MONITORED_SPECIAL_NAME_SUFFIXES = (
+    ".env",
     ".env.example",
     "env.example",
 )
@@ -200,9 +212,9 @@ SUSPICIOUS_PATTERNS = {
     "script_injection": ("<script", "javascript:", "eval(", "document.write", "onerror=", "onload="),
     "iframe_injection": ("<iframe",),
     "defacement_keywords": ("hacked", "defaced", "owned", "pwned"),
-    "credential_access": ("password=", "token=", "secret=", "api_key"),
+    "credential_access": ("password=", "token=", "secret=", "secret_key=", "api_key", "api_key=", "private_key="),
     "sql_injection": ("' or '1'='1", "union select", "drop table"),
-    "destructive_command_pattern": ("rm -rf", "del /f", "format ", "truncate table", "delete from", "drop database"),
+    "destructive_command_pattern": ("rm -rf", "del /f", "format ", "truncate table", "delete from", "drop database", "os.system(", "subprocess.call(", "subprocess.run("),
     "webshell_indicator": ("cmd=", "shell_exec", "passthru(", "system($_", "eval($_", "base64_decode("),
 }
 
@@ -287,7 +299,7 @@ DEFAULT_AI_RULES = {
         "description": "Whether a WARDS admin JWT/MFA session was present.",
         "enabled": True,
         "weight": 0.22,
-        "config": {},
+        "config": {"required": True},
     },
     "mfa_verified": {
         "label": "MFA Verified",
@@ -301,7 +313,7 @@ DEFAULT_AI_RULES = {
         "description": "Whether source looks consistent with normal admin use.",
         "enabled": True,
         "weight": 0.08,
-        "config": {},
+        "config": {"treat_unknown_as_inconsistent": False},
     },
     "source_ip_reputation": {
         "label": "Source IP Reputation",
@@ -315,14 +327,14 @@ DEFAULT_AI_RULES = {
         "description": "Uses aggregate typing-pattern anomaly signals when available.",
         "enabled": True,
         "weight": 0.1,
-        "config": {"minimum_confidence": 0.7},
+        "config": {"minimum_confidence": 0.7, "flag_paste_or_autofill_without_typing": True},
     },
     "method_legitimate": {
         "label": "Legitimate Method",
         "description": "Whether change came through an approved admin workflow.",
         "enabled": True,
         "weight": 0.18,
-        "config": {},
+        "config": {"approved_workflows": ["admin_change", "deployment", "backup", "recovery"]},
     },
     "business_hours": {
         "label": "Business Hours",
@@ -336,7 +348,7 @@ DEFAULT_AI_RULES = {
         "description": "Risk weight for web/code files.",
         "enabled": True,
         "weight": 0.07,
-        "config": {"high_risk_extensions": [".html", ".jsx", ".js", ".py"]},
+        "config": {"high_risk_extensions": [".html", ".jsx", ".js", ".ts", ".tsx", ".py", ".env", ".json", ".sql", ".db", ".sqlite", ".sqlite3", ".yml", ".yaml", ".xml", ".php", ".phtml", ".pkl"]},
     },
     "suspicious_pattern_score": {
         "label": "Suspicious Pattern Score",
@@ -357,14 +369,14 @@ DEFAULT_AI_RULES = {
         "description": "Raises risk when an admin action comes from a device not seen in the learned profile.",
         "enabled": True,
         "weight": 0.14,
-        "config": {},
+        "config": {"history_scope": "per_admin", "match_field": "device_hash"},
     },
     "first_time_country": {
         "label": "First-Time Country",
         "description": "Raises risk when an admin action comes from a country not seen in the learned profile.",
         "enabled": True,
         "weight": 0.16,
-        "config": {},
+        "config": {"history_scope": "per_admin", "match_field": "country_code"},
     },
     "geo_distance_from_last_login": {
         "label": "Geo Distance From Last Login",
@@ -427,7 +439,7 @@ DEFAULT_AI_RULES = {
         "description": "Blocks recovery risk acceptance when backup hash validation fails before restoration.",
         "enabled": True,
         "weight": 0.24,
-        "config": {},
+        "config": {"require_manifest_hmac": True, "require_file_hash_match": True},
     },
     "content_similarity_score": {
         "label": "Content Similarity Score",
@@ -462,14 +474,14 @@ DEFAULT_AI_RULES = {
         "description": "Detects dangerous shell, SQL, and file-destruction commands in protected content.",
         "enabled": True,
         "weight": 0.28,
-        "config": {},
+        "config": {"patterns": ["rm -rf", "del /f", "format ", "truncate table", "delete from", "drop database", "os.system(", "subprocess.call(", "subprocess.run("]},
     },
     "webshell_indicator": {
         "label": "Web Shell Indicator",
         "description": "Detects common web-shell execution and request-control primitives.",
         "enabled": True,
         "weight": 0.3,
-        "config": {},
+        "config": {"patterns": ["cmd=", "shell_exec", "passthru(", "system($_", "eval($_", "base64_decode("]},
     },
     "session_context_anomaly": {
         "label": "Session Context Anomaly",
@@ -788,8 +800,7 @@ def enrich_file_ai_context(
     if ai_rule_enabled(rules, "special_chars_count"):
         context.setdefault("special_chars_count", sum(new_text.count(char) for char in ["<", ">", "&", '"', "'", "/", "\\"]))
     if ai_rule_enabled(rules, "file_type_risk"):
-        high_risk = set(ai_rule_config(rules, "file_type_risk").get("high_risk_extensions", [".html", ".jsx", ".js", ".py"]))
-        context.setdefault("file_type_risk", 1 if path.suffix.lower() in high_risk else 0)
+        context.setdefault("file_type_risk", 1 if is_high_risk_file_path(path, rules) else 0)
     if ai_rule_enabled(rules, "content_similarity_score"):
         context.setdefault("content_similarity_score", difflib.SequenceMatcher(None, old_text, new_text).ratio())
     if ai_rule_enabled(rules, "sensitive_config_change"):
@@ -910,6 +921,8 @@ def record_context_detection(
     context.setdefault("method_legitimate", change_type not in {"invalid_admin_session", "suspicious_login"})
     context.setdefault("business_hours", 8 <= now_utc().hour <= 18)
     context.setdefault("ai_rules", get_ai_rules(db))
+    if (context.get("target_type") or "admin_session") not in {"file", "application_file", "vm1_file", "database"}:
+        context.setdefault("content_similarity_score", 1.0)
     flags = content_flags(synthetic_content, context)
     if force_flag:
         flags.append(force_flag)
@@ -2125,6 +2138,28 @@ def ai_rule_config(rules: dict | None, rule_name: str) -> dict:
     default = DEFAULT_AI_RULES.get(rule_name, APPROVED_ADDITIONAL_AI_RULES.get(rule_name, {}))
     current = rules.get(rule_name, {}) if isinstance(rules, dict) else {}
     return {**default.get("config", {}), **current.get("config", {})}
+
+
+def high_risk_file_extensions(rules: dict | None = None) -> set[str]:
+    return {
+        str(item).lower()
+        for item in ai_rule_config(rules or DEFAULT_AI_RULES, "file_type_risk").get(
+            "high_risk_extensions",
+            DEFAULT_AI_RULES["file_type_risk"]["config"]["high_risk_extensions"],
+        )
+    }
+
+
+def is_high_risk_file_path(path: Path | str, rules: dict | None = None) -> bool:
+    path_obj = Path(path)
+    lower_name = path_obj.name.lower()
+    return (
+        path_obj.suffix.lower() in high_risk_file_extensions(rules)
+        or lower_name == ".env"
+        or lower_name.endswith(".env")
+        or lower_name.endswith(".env.example")
+        or lower_name.endswith("env.example")
+    )
 
 
 def available_ai_rule_templates(db: Session) -> list[dict]:
@@ -3601,7 +3636,18 @@ def content_flags(content: str, context: dict | None = None, path: Path | None =
         keystroke_confidence = float(first_present(context, "keystroke_anomaly_confidence", "keystroke_dynamics", default=0))
     except (TypeError, ValueError):
         keystroke_confidence = 0
-    if ai_rule_enabled(rules, "keystroke_dynamics") and (context.get("keystroke_anomaly") or context.get("typing_pattern_anomaly") or keystroke_confidence >= 0.7):
+    keystroke_config = ai_rule_config(rules, "keystroke_dynamics")
+    paste_without_typing = (
+        bool(keystroke_config.get("flag_paste_or_autofill_without_typing", True))
+        and (context.get("pasted_password") or context.get("autofill_used"))
+        and not context.get("keystroke_dynamics_available")
+    )
+    if ai_rule_enabled(rules, "keystroke_dynamics") and (
+        context.get("keystroke_anomaly")
+        or context.get("typing_pattern_anomaly")
+        or keystroke_confidence >= float(keystroke_config.get("minimum_confidence", 0.7))
+        or paste_without_typing
+    ):
         flags.append("keystroke_dynamics")
     if ai_rule_enabled(rules, "admin_session_valid") and not context.get("admin_session_valid"):
         flags.append("unauthenticated_change")
@@ -3747,6 +3793,9 @@ def content_flags(content: str, context: dict | None = None, path: Path | None =
         for key, patterns in SUSPICIOUS_PATTERNS.items():
             if key in rules and not ai_rule_enabled(rules, key):
                 continue
+            rule_patterns = ai_rule_config(rules, key).get("patterns") if key in rules else None
+            if isinstance(rule_patterns, list) and rule_patterns:
+                patterns = tuple(str(pattern).lower() for pattern in rule_patterns if str(pattern).strip())
             if any(pattern in lowered for pattern in patterns):
                 flags.append(key)
     if context.get("rapid_change"):
@@ -3845,7 +3894,7 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
         special_count = sum(new_content.count(char) for char in ["<", ">", "&", '"', "'", "/", "\\"])
         if special_count > int(config("special_chars_count").get("high_count", 300)):
             risk += weight("special_chars_count", 0.08)
-    if enabled("file_type_risk") and path.suffix.lower() in set(config("file_type_risk").get("high_risk_extensions", [".html", ".jsx", ".js", ".py"])):
+    if enabled("file_type_risk") and is_high_risk_file_path(path, rules):
         risk += weight("file_type_risk", 0.07)
     if enabled("ip_consistent") and context.get("ip_consistent") is False:
         risk += weight("ip_consistent", 0.08)
@@ -3926,7 +3975,7 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
         "file_size_change": size_delta,
         "content_length": len(new_content or ""),
         "special_chars_count": sum((new_content or "").count(char) for char in ["<", ">", "&", '"', "'", "/", "\\"]),
-        "file_type_risk": 1 if path.suffix.lower() in set(config("file_type_risk").get("high_risk_extensions", [".html", ".jsx", ".js", ".py"])) else 0,
+        "file_type_risk": 1 if is_high_risk_file_path(path, rules) else 0,
     }
     for flag in flags:
         ml_log.setdefault(flag, 1)
@@ -5035,7 +5084,7 @@ def scan_all_files(db: Session, context: dict | None = None) -> list[SecurityDet
         db.commit()
         return []
     if is_manual_scan:
-        register_initial_files(db, refresh_existing=False, incremental=True)
+        register_initial_files(db, refresh_existing=False, incremental=not bool(context and context.get("force_full_registration")))
     elif _last_full_registration_at is None or (now - _last_full_registration_at) > timedelta(hours=1):
         register_initial_files(db, refresh_existing=False, incremental=False)
         _last_full_registration_at = now
@@ -5111,6 +5160,21 @@ def mark_stale_backup_events_failed(db: Session, max_age_minutes: int = 10) -> i
     if stale_events:
         db.commit()
     return len(stale_events)
+
+
+def commit_backup_file_progress(db: Session) -> bool:
+    """Commit monitored-file backup progress without failing the backup on reporter races."""
+    try:
+        db.commit()
+        return True
+    except StaleDataError as exc:
+        logger.warning("Skipping stale monitored-file progress update during backup: %s", exc)
+        try:
+            db.rollback()
+            db.expire_all()
+        except Exception:
+            pass
+        return False
 
 
 def create_manual_backup(db: Session, initiated_by: int | None, label: str = "manual", skip_database_snapshot: bool = False, skip_file_registration: bool = False) -> SecurityRecoveryEvent:
@@ -5281,8 +5345,8 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
             # Incremental commit every 50 entries to avoid holding hundreds
             # of row locks at once (prevents MySQL deadlock with monitor loop).
             if processed % 50 == 0:
-                db.commit()
-        db.commit()
+                commit_backup_file_progress(db)
+        commit_backup_file_progress(db)
         model_artifact_count = backup_ml_artifacts(
             backup_root,
             manifest_files,
@@ -7596,10 +7660,8 @@ def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type
 
     # Determine auto-recovery eligibility — do this BEFORE creating the incident
     # so that even if restore-command creation fails, the incident still exists.
-    suffix = Path(entry.relative_path).suffix.lower()
     rules = context.get("ai_rules") or DEFAULT_AI_RULES
-    high_risk_exts = set(rules.get("file_type_risk", {}).get("config", {}).get("high_risk_extensions", [".html", ".jsx", ".js", ".py"]))
-    is_auto_recover = suffix in high_risk_exts or classification.get("severity_level") in {"high", "critical"}
+    is_auto_recover = is_high_risk_file_path(entry.relative_path or "", rules) or classification.get("severity_level") in {"high", "critical"}
 
     if is_auto_recover:
         # Queue restore command independently — failure here must NOT prevent incident creation

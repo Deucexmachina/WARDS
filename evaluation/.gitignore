@@ -1,0 +1,10 @@
+# Evaluation-generated artifacts (already covered by root .gitignore; kept here for clarity)
+results/
+*.csv
+*.json
+*.md
+*.xlsx
+
+# Local secrets / overrides
+.env
+*.local.py
