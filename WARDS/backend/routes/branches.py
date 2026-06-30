@@ -382,6 +382,7 @@ async def create_superadmin_branch_session(
 
     response = JSONResponse(
         content={
+            "access_token": access_token,
             "token_type": "bearer",
             "user": {
                 "id": staff.id,

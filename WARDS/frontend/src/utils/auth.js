@@ -101,6 +101,9 @@ export const persistSession = ({
     localStorage.setItem('wardsPortal', 'branch');
     localStorage.setItem('branchUser', JSON.stringify(enrichedUser));
     localStorage.setItem('branchAuthenticatedAt', new Date().toISOString());
+    if (access_token) {
+      localStorage.setItem('branchToken', access_token);
+    }
     localStorage.removeItem('branchSettingsAuthenticated');
     localStorage.removeItem('branchSettingsAuthenticatedAt');
     sessionStorage.removeItem('branchSettingsAuthenticated');

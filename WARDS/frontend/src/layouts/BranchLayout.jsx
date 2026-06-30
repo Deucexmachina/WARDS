@@ -379,6 +379,7 @@ const BranchLayout = () => {
       localStorage.removeItem('branchUser');
       localStorage.removeItem('branchAuthenticatedAt');
       clearBranchSettingsSession();
+      localStorage.setItem('wardsPortal', 'admin');
       setShowLogoutConfirm(false);
       setIsLoggingOut(false);
       navigate('/admin', { replace: true });

@@ -1869,15 +1869,18 @@ async def unified_mfa_recovery_verify_otp(
 @limiter.limit("30/minute")
 async def unified_verify(request: Request, db: Session = Depends(get_db)):
     token = None
-    for portal in ("admin", "branch", "public"):
-        token = _extract_token_from_request(request, _get_cookie_name(portal))
-        if token:
-            break
+    # Prefer explicit Authorization header over ambient cookies so the
+    # frontend can control which session is verified (e.g. superadmin
+    # managing a branch can send the branch token explicitly).
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1]
 
     if not token:
-        auth_header = request.headers.get("Authorization", "")
-        if auth_header.startswith("Bearer "):
-            token = auth_header.split(" ", 1)[1]
+        for portal in ("admin", "branch", "public"):
+            token = request.cookies.get(_get_cookie_name(portal))
+            if token:
+                break
 
     if not token:
         raise HTTPException(
