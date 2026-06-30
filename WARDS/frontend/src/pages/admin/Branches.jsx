@@ -352,7 +352,7 @@ const Branches = () => {
       setAdminEmailError(getEmailValidationMessage(nextValue));
     }
     if (name === 'admin_username' && nextValue && !isValidUsername(nextValue)) {
-      setModalError('Username must be 3-32 characters and may only contain letters, numbers, dots, underscores, or hyphens.');
+      setModalError('Username must be 3-32 characters and may only contain letters, numbers, dots, underscores, hyphens, or @.');
     } else if (modalError) {
       setModalError('');
     }
@@ -373,7 +373,7 @@ const Branches = () => {
   };
 
   const isValidUsername = (username) => {
-    return /^[A-Za-z0-9_.-]{3,32}$/.test(username);
+    return /^[A-Za-z0-9_.@-]{3,32}$/.test(username);
   };
 
   const handlePresetChange = (e) => {
