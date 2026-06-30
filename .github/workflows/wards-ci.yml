@@ -161,7 +161,7 @@ jobs:
           START=$(date +%s)
           MAX_WAIT=300
           TARGET_COMMIT="${GITHUB_SHA}"
-          CURL_OPTS="-sSf --connect-timeout 5 --max-time 15"
+          CURL_OPTS="-sSf --connect-timeout 3 --max-time 5"
           while true; do
             LOOP_START=$(date +%s)
 
