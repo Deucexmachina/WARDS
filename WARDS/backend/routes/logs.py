@@ -15,7 +15,7 @@ from utils.log_integrity import verify_record_integrity
 from utils.rbac import require_permission
 
 router = APIRouter()
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 
 async def get_logs_current_user(
