@@ -1539,7 +1539,7 @@ def duplicate_match_is_critical(match_details: dict[str, bool]) -> bool:
     supporting_matches = sum(1 for key in ("taxpayer_name", "transaction_date", "amount") if match_details.get(key))
     return (
         identifier_matches >= 2
-        or (identifier_matches >= 1 and supporting_matches >= 1)
+        or (identifier_matches >= 1 and supporting_matches >= 2)
         or supporting_matches >= 3
     )
 
