@@ -600,6 +600,7 @@ import sys
 sys.path.insert(0, "/app")
 from database.models import Backup, SessionLocal
 from utils.backup_engine import backup_dir, is_database_backup_record, restore_database_backup
+from utils.security_client import SECURITY_API_URL, download_latest_vm1_database_backup
 
 db = SessionLocal()
 try:
@@ -619,11 +620,19 @@ try:
     ]
     if not candidates:
         files = sorted(location.glob("database_*.sql.gz"), key=lambda item: item.name, reverse=True)
-        if not files:
+        if files:
+            latest_file = files[0]
+            restore_database_backup(latest_file, None, None)
+            print(latest_file.name)
+        elif SECURITY_API_URL:
+            downloaded = download_latest_vm1_database_backup(location)
+            if not downloaded:
+                raise RuntimeError("No VM2 VM1-database archive is available.")
+            latest_file = downloaded["path"]
+            restore_database_backup(latest_file, downloaded.get("checksum"), downloaded.get("db_type") or "mysql")
+            print(f"{latest_file} (vm2_archive)")
+        else:
             raise RuntimeError(f"No restorable VM1 database dump found in {location}. Backup rows may be stale or backup storage is not mounted.")
-        latest_file = files[0]
-        restore_database_backup(latest_file, None, None)
-        print(latest_file.name)
     else:
         latest = candidates[0]
         restore_database_backup(

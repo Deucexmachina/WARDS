@@ -1759,6 +1759,7 @@ def start_vm1_database_startup_baseline_if_configured():
         try:
             from database.models import ActivityLog, Backup
             from utils.backup_engine import create_database_backup as create_vm1_database_backup, prune_database_backup_records
+            from utils.security_client import upload_vm1_database_backup
 
             db = SessionLocal()
             try:
@@ -1771,6 +1772,11 @@ def start_vm1_database_startup_baseline_if_configured():
                 if recent and recent.created_at and (datetime.now() - recent.created_at) < timedelta(minutes=10):
                     return
                 result = create_vm1_database_backup()
+                vm2_archive = None
+                try:
+                    vm2_archive = upload_vm1_database_backup(result.path, result.checksum, result.db_type)
+                except Exception as exc:
+                    vm2_archive = {"status": "failed", "error": str(exc)}
                 db.add(Backup(
                     filename=result.filename,
                     size=str(result.size_bytes),
@@ -1783,7 +1789,7 @@ def start_vm1_database_startup_baseline_if_configured():
                 db.add(ActivityLog(
                     action="Security VM1 Startup Baseline Backup",
                     user="system",
-                    details=f"VM1 database startup baseline created: {result.filename}; Checksum: {result.checksum}.",
+                    details=f"VM1 database startup baseline created: {result.filename}; Checksum: {result.checksum}; VM2 archive: {vm2_archive}.",
                     type="security",
                 ))
                 db.commit()

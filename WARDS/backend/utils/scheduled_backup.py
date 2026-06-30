@@ -28,7 +28,7 @@ def start_scheduled_backup_runner():
 def _scheduled_backup_loop():
     from database.models import SessionLocal, Backup, ActivityLog
     from utils.backup_engine import create_database_backup as create_vm1_database_backup, prune_database_backup_records
-    from utils.security_client import get_setting, set_setting, create_full_system_backup
+    from utils.security_client import get_setting, set_setting, create_full_system_backup, upload_vm1_database_backup
 
     _running = False
 
@@ -71,6 +71,7 @@ def _scheduled_backup_loop():
 
         vm1_result = None
         vm2_event = None
+        vm1_archive = None
         vm1_error = None
         vm2_error = None
         db = SessionLocal()
@@ -78,6 +79,10 @@ def _scheduled_backup_loop():
             # VM1 database backup
             try:
                 vm1_result = create_vm1_database_backup()
+                try:
+                    vm1_archive = upload_vm1_database_backup(vm1_result.path, vm1_result.checksum, vm1_result.db_type)
+                except Exception as exc:
+                    vm1_archive = {"status": "failed", "error": str(exc)}
                 print(f"[SCHEDULED BACKUP] VM1 DB backup created: {vm1_result.filename}")
             except Exception as exc:
                 vm1_error = str(exc)
@@ -108,6 +113,7 @@ def _scheduled_backup_loop():
             details = (
                 f"Scheduled backup executed. "
                 f"VM1: {'ok' if vm1_result else ('failed: ' + vm1_error if vm1_error else 'skipped')}. "
+                f"VM1 archive: {vm1_archive}. "
                 f"VM2: {'ok' if vm2_event and getattr(vm2_event, 'status', None) == 'success' else ('failed: ' + vm2_error if vm2_error else 'skipped')}."
             )
             db.add(ActivityLog(

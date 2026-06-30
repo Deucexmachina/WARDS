@@ -44,6 +44,7 @@ from utils.security_client import (
     create_full_system_backup,
     current_hash_index,
     dashboard_payload,
+    download_latest_vm1_database_backup,
     full_system_recovery,
     list_backup_inventory,
     recover_database,
@@ -88,6 +89,7 @@ from utils.security_client import (
     source_ids_for_log_type,
     source_ids_batch,
     update_ai_rules,
+    upload_vm1_database_backup,
     weekly_ai_behavior_data,
     sync_security_alerts,
     next_weekday,
@@ -311,6 +313,46 @@ def _latest_vm1_database_backup(db: Session):
         .order_by(Backup.created_at.desc())
         .first()
     )
+
+
+def _existing_vm1_database_backup_path(row) -> Path | None:
+    filename = str(getattr(row, "filename", "") or "")
+    if not filename:
+        return None
+    path = backup_dir() / filename
+    return path if path.exists() and path.is_file() else None
+
+
+def _restore_latest_vm1_database_backup(db: Session) -> dict:
+    latest = _latest_vm1_database_backup(db)
+    if latest:
+        local_path = _existing_vm1_database_backup_path(latest)
+        if local_path:
+            restore_database_backup(local_path, getattr(latest, "checksum", None), getattr(latest, "db_type", None))
+            return {"restored": True, "filename": local_path.name, "source": "vm1_local"}
+
+    if SECURITY_API_URL:
+        downloaded = download_latest_vm1_database_backup(backup_dir())
+        if downloaded:
+            restore_database_backup(
+                Path(downloaded["path"]),
+                downloaded.get("checksum"),
+                downloaded.get("db_type") or getattr(latest, "db_type", None) or "mysql",
+            )
+            return {"restored": True, "filename": Path(downloaded["path"]).name, "source": "vm2_archive"}
+
+    if latest:
+        raise RuntimeError(f"VM1 database backup row exists but dump file is missing: {latest.filename}")
+    raise RuntimeError("No completed VM1 database backup found.")
+
+
+def _archive_vm1_database_backup_to_vm2(result) -> dict | None:
+    if not SECURITY_API_URL or not result:
+        return None
+    try:
+        return upload_vm1_database_backup(result.path, getattr(result, "checksum", None), getattr(result, "db_type", None))
+    except Exception as exc:
+        return {"status": "failed", "error": str(exc)}
 
 
 def _is_vm1_database_backup_row(row) -> bool:
@@ -585,17 +627,18 @@ async def backup_inventory(db: Session = Depends(get_db), admin=Depends(current_
         filename = str(getattr(row, "filename", "") or "")
         created_at = getattr(row, "created_at", None)
         path = backup_dir() / filename if filename else None
+        path_valid = bool(path and path.exists() and path.is_file() and getattr(row, "checksum", None))
         items.append({
             "filename": filename,
             "label": "vm1_database",
             "timestamp": created_at.isoformat() if created_at else None,
             "path": str(path) if path else None,
             "backup_type": getattr(row, "type", None),
-            "manifest_valid": bool(getattr(row, "checksum", None)),
+            "manifest_valid": path_valid,
             "domains": ["vm1_database"],
-            "domain_validity": {"vm1_database": bool(path and path.exists() and getattr(row, "checksum", None))},
-            "latest_domains": ["vm1_database"] if latest_vm1 is row else [],
-            "is_latest": latest_vm1 is row,
+            "domain_validity": {"vm1_database": path_valid},
+            "latest_domains": ["vm1_database"] if latest_vm1 is row and path_valid else [],
+            "is_latest": latest_vm1 is row and path_valid,
             "file_count": 1,
             "size_bytes": int(getattr(row, "size", 0) or 0) if str(getattr(row, "size", "") or "0").isdigit() else None,
             "checksum": getattr(row, "checksum", None),
@@ -603,7 +646,7 @@ async def backup_inventory(db: Session = Depends(get_db), admin=Depends(current_
         })
 
     latest_by_domain = dict(inventory.get("latest_by_domain") or {})
-    if latest_vm1:
+    if latest_vm1 and _existing_vm1_database_backup_path(latest_vm1):
         latest_by_domain["vm1_database"] = str(backup_dir() / latest_vm1.filename)
     domains = list(dict.fromkeys(list(inventory.get("domains") or []) + ["vm1_database"]))
     items.sort(key=lambda item: item.get("timestamp") or "", reverse=True)
@@ -858,14 +901,10 @@ def recover_full(request: Request, background_tasks: BackgroundTasks = None, db:
         db2 = SessionLocal()
         try:
             job_manager.update_progress(job_id, 10, "restoring_vm1_database")
-            latest_vm1 = _latest_vm1_database_backup(db2)
-            if latest_vm1:
-                from utils.backup_engine import backup_dir
-                restore_database_backup(
-                    backup_dir() / latest_vm1.filename,
-                    getattr(latest_vm1, "checksum", None),
-                    getattr(latest_vm1, "db_type", None),
-                )
+            try:
+                _restore_latest_vm1_database_backup(db2)
+            except RuntimeError as exc:
+                job_manager.update_progress(job_id, 25, f"vm1_database_restore_skipped: {exc}")
             job_manager.update_progress(job_id, 35, "restoring_vm2_domains")
             result = full_system_recovery(db2, admin_id)
             db2.add(ActivityLog(
@@ -898,20 +937,16 @@ def recover_vm1_database(request: Request, db: Session = Depends(get_db), admin=
         db2 = SessionLocal()
         try:
             job_manager.update_progress(job_id, 15, "selecting_vm1_database_backup")
-            latest = _latest_vm1_database_backup(db2)
-            if not latest:
-                raise RuntimeError("No completed VM1 database backup found.")
-            backup_path = backup_dir() / latest.filename
-            job_manager.update_progress(job_id, 35, f"restoring {latest.filename}")
-            restore_database_backup(backup_path, getattr(latest, "checksum", None), getattr(latest, "db_type", None))
+            restore_result = _restore_latest_vm1_database_backup(db2)
+            job_manager.update_progress(job_id, 35, f"restored {restore_result.get('filename')}")
             db2.add(ActivityLog(
                 action="Security VM1 Database Recovery Completed",
                 user=username,
-                details=f"VM1 database restored from {latest.filename}. | IP: {client_ip}",
+                details=f"VM1 database restored from {restore_result.get('filename')} ({restore_result.get('source')}). | IP: {client_ip}",
                 type="security",
             ))
             db2.commit()
-            return {"restored": True, "filename": latest.filename}
+            return restore_result
         finally:
             db2.close()
 
@@ -1063,6 +1098,7 @@ def backup_vm1_database(request: Request, db: Session = Depends(get_db), admin=D
         try:
             job_manager.update_progress(job_id, 20, "dumping_vm1_database")
             result = create_vm1_database_backup()
+            vm2_archive = _archive_vm1_database_backup_to_vm2(result)
             backup = Backup(
                 filename=result.filename,
                 size=str(result.size_bytes),
@@ -1089,6 +1125,7 @@ def backup_vm1_database(request: Request, db: Session = Depends(get_db), admin=D
                 "checksum": result.checksum,
                 "db_type": result.db_type,
                 "status": "Completed",
+                "vm2_archive": vm2_archive,
             }
         finally:
             db2.close()
@@ -1210,6 +1247,7 @@ def backup_full(request: Request, db: Session = Depends(get_db), admin=Depends(c
         try:
             job_manager.update_progress(job_id, 15, "dumping_vm1_database")
             vm1_result = create_vm1_database_backup()
+            vm2_archive = _archive_vm1_database_backup_to_vm2(vm1_result)
             vm1_backup = Backup(
                 filename=vm1_result.filename,
                 size=str(vm1_result.size_bytes),
@@ -1238,6 +1276,7 @@ def backup_full(request: Request, db: Session = Depends(get_db), admin=Depends(c
                     "filename": vm1_result.filename,
                     "size_bytes": vm1_result.size_bytes,
                     "checksum": vm1_result.checksum,
+                    "vm2_archive": vm2_archive,
                 },
                 "vm2": serialize_recovery(event),
             }

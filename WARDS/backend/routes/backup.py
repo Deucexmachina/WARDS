@@ -9,6 +9,7 @@ from database.models import Backup, get_db, ActivityLog
 from auth import get_current_admin_user, require_main_admin
 from utils.backup_engine import backup_dir, create_database_backup, prune_database_backup_records, restore_database_backup
 from utils.request_signing import require_internal_signature
+from utils.security_client import SECURITY_API_URL, download_latest_vm1_database_backup, upload_vm1_database_backup
 
 def get_rate_limit_key(request: Request) -> str:
     """Get rate limit key - user-based if authenticated, otherwise IP-based"""
@@ -61,6 +62,10 @@ async def create_backup(
     db.add(log)
     db.commit()
     if result:
+        try:
+            upload_vm1_database_backup(result.path, result.checksum, result.db_type)
+        except Exception:
+            pass
         prune_database_backup_records(db, Backup)
     db.refresh(backup)
     
@@ -91,7 +96,16 @@ async def restore_backup(
         raise HTTPException(status_code=404, detail="Backup not found")
     
     try:
-        restore_database_backup(backup_dir() / backup.filename, getattr(backup, "checksum", None), getattr(backup, "db_type", None))
+        backup_path = backup_dir() / backup.filename
+        if not backup_path.exists() and SECURITY_API_URL:
+            downloaded = download_latest_vm1_database_backup(backup_dir())
+            backup_path = downloaded and downloaded.get("path") or backup_path
+            checksum = downloaded and downloaded.get("checksum") or getattr(backup, "checksum", None)
+            db_type = downloaded and downloaded.get("db_type") or getattr(backup, "db_type", None)
+        else:
+            checksum = getattr(backup, "checksum", None)
+            db_type = getattr(backup, "db_type", None)
+        restore_database_backup(backup_path, checksum, db_type)
         log = ActivityLog(
             action="Backup Restored",
             user=getattr(current_user, "username", "admin"),

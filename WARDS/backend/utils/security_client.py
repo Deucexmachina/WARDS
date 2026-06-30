@@ -5,6 +5,7 @@ import os
 import time
 import threading
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -56,8 +57,10 @@ def _cached_fetch(cache_key: str, ttl_seconds: int, fetch_fn, default=None):
         return default
 
 
-def _headers() -> dict[str, str]:
-    headers = {"X-API-Key": SECURITY_API_KEY, "Content-Type": "application/json"}
+def _headers(include_content_type: bool = True) -> dict[str, str]:
+    headers = {"X-API-Key": SECURITY_API_KEY}
+    if include_content_type:
+        headers["Content-Type"] = "application/json"
     if SECURITY_ADMIN_SECRET:
         headers["X-Admin-Secret"] = SECURITY_ADMIN_SECRET
     return headers
@@ -89,6 +92,24 @@ def _sync_get(path: str, params: dict | None = None, timeout: float | None = Non
     r = _session.get(url, headers=_headers(), params=params, timeout=timeout or TIMEOUT, verify=False)
     r.raise_for_status()
     return r.json()
+
+
+def _download(path: str, destination, timeout: float | None = None):
+    if not SECURITY_API_URL:
+        raise RuntimeError("SECURITY_API_URL is not configured")
+    url = f"{SECURITY_API_URL}{path}"
+    r = _session.get(url, headers=_headers(include_content_type=False), stream=True, timeout=timeout or TIMEOUT, verify=False)
+    r.raise_for_status()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with destination.open("wb") as handle:
+        for chunk in r.iter_content(chunk_size=1024 * 1024):
+            if chunk:
+                handle.write(chunk)
+    return {
+        "path": str(destination),
+        "checksum": r.headers.get("X-Backup-Checksum"),
+        "db_type": r.headers.get("X-Backup-Db-Type"),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -306,6 +327,32 @@ def create_manual_backup(db, admin_id, label: str = "manual"):
         from SECURITY.security_engine import create_manual_backup as _local
         return _local(db, admin_id, label=label)
     return _sync_post("/v1/backup/manual", {"admin_id": admin_id, "label": label}, timeout=600.0)
+
+
+def upload_vm1_database_backup(path, checksum: str | None = None, db_type: str | None = None):
+    if not SECURITY_API_URL:
+        return None
+    dump_path = Path(path)
+    with dump_path.open("rb") as handle:
+        files = {"file": (dump_path.name, handle, "application/gzip")}
+        data = {"checksum": checksum or "", "db_type": db_type or "mysql"}
+        response = _session.post(
+            f"{SECURITY_API_URL}/v1/vm1/database-backups/upload",
+            headers=_headers(include_content_type=False),
+            files=files,
+            data=data,
+            timeout=600.0,
+            verify=False,
+        )
+    response.raise_for_status()
+    return response.json()
+
+
+def download_latest_vm1_database_backup(destination_dir):
+    if not SECURITY_API_URL:
+        return None
+    destination = Path(destination_dir) / "vm2_latest_vm1_database.sql.gz"
+    return _download("/v1/vm1/database-backups/latest", destination, timeout=600.0)
 
 
 def set_backup_location(db, path, delete_previous=False, actor=None):

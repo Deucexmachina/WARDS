@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import sys
 import threading
 
@@ -17,8 +18,8 @@ MASTER_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(MASTER_ROOT))
 sys.path.insert(0, str(MASTER_ROOT / "WARDS" / "backend"))
 
-from fastapi import FastAPI, HTTPException, Header, Depends, BackgroundTasks, Request
-from starlette.responses import JSONResponse
+from fastapi import FastAPI, HTTPException, Header, Depends, BackgroundTasks, Request, UploadFile, File, Form
+from starlette.responses import JSONResponse, FileResponse
 from pydantic import BaseModel
 from sqlalchemy import inspect
 from typing import Any
@@ -83,6 +84,14 @@ from SECURITY.security_engine import (
     seed_settings,
     drop_database_audit_triggers,
     MissingFileConfirmationRequired,
+    DEFAULT_BACKUP_ROOT,
+    RECOVERY_DOMAIN_VM1_DATABASE,
+    add_manifest_file,
+    backup_file_path,
+    backup_manifest_index,
+    manifest_domains,
+    sha256_file,
+    write_backup_manifest,
 )
 from SECURITY.security_models import (
     SecurityMonitoredFile,
@@ -533,6 +542,107 @@ def api_vm1_config(db=Depends(get_db)):
 # ---------------------------------------------------------------------------
 # Backup & Recovery
 # ---------------------------------------------------------------------------
+VM1_DATABASE_ARCHIVE_RELATIVE_DIR = "VM1_DATABASE"
+
+
+def _safe_vm1_database_dump_name(filename: str) -> str:
+    name = Path(str(filename or "")).name
+    if not (name.startswith("database_") and name.endswith(".sql.gz")):
+        raise HTTPException(status_code=400, detail="VM1 database backup must be a database_*.sql.gz dump")
+    return name
+
+
+def _latest_vm1_database_archive() -> tuple[Path, str, dict[str, object]] | None:
+    if not DEFAULT_BACKUP_ROOT.exists():
+        return None
+    roots = sorted(
+        [item for item in DEFAULT_BACKUP_ROOT.iterdir() if item.is_dir() and item.name.startswith("vm1_database_backup_")],
+        key=lambda item: item.name,
+        reverse=True,
+    )
+    for root in roots:
+        manifest = backup_manifest_index(root)
+        if RECOVERY_DOMAIN_VM1_DATABASE not in manifest_domains(manifest):
+            continue
+        for relative, meta in manifest.items():
+            if str(meta.get("domain") or "") != RECOVERY_DOMAIN_VM1_DATABASE:
+                continue
+            source = backup_file_path(root, relative)
+            if not source.exists() or not source.is_file():
+                continue
+            try:
+                if int(meta.get("size_bytes") or 0) != source.stat().st_size:
+                    continue
+                if sha256_file(source) != str(meta.get("sha256") or ""):
+                    continue
+            except OSError:
+                continue
+            return source, relative, meta
+    return None
+
+
+@app.post("/v1/vm1/database-backups/upload", dependencies=[Depends(require_api_key), Depends(require_admin_secret)])
+@rate_limit("vm1_database_backup_upload", max_requests=3, window_seconds=300)
+async def api_upload_vm1_database_backup(
+    file: UploadFile = File(...),
+    checksum: str = Form(""),
+    db_type: str = Form("mysql"),
+):
+    filename = _safe_vm1_database_dump_name(file.filename or "")
+    timestamp = time.strftime("%Y%m%d_%H%M%S", time.gmtime())
+    backup_root = DEFAULT_BACKUP_ROOT / f"vm1_database_backup_{timestamp}"
+    target = backup_root / VM1_DATABASE_ARCHIVE_RELATIVE_DIR / filename
+    backup_root.mkdir(parents=True, exist_ok=True)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with target.open("wb") as handle:
+            shutil.copyfileobj(file.file, handle)
+        actual_checksum = sha256_file(target)
+        expected_checksum = str(checksum or "").strip()
+        if expected_checksum and actual_checksum.lower() != expected_checksum.lower():
+            target.unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail="VM1 database backup checksum mismatch")
+        manifest_files: list[dict[str, object]] = []
+        relative = f"{VM1_DATABASE_ARCHIVE_RELATIVE_DIR}/{filename}"
+        add_manifest_file(
+            manifest_files,
+            relative,
+            target,
+            domain=RECOVERY_DOMAIN_VM1_DATABASE,
+            file_hash=actual_checksum,
+        )
+        manifest_path = write_backup_manifest(backup_root, files=manifest_files)
+        return {
+            "status": "success",
+            "filename": filename,
+            "path": str(target),
+            "backup_root": str(backup_root),
+            "manifest": str(manifest_path),
+            "checksum": actual_checksum,
+            "db_type": db_type or "mysql",
+        }
+    finally:
+        await file.close()
+
+
+@app.get("/v1/vm1/database-backups/latest", dependencies=[Depends(require_api_key), Depends(require_admin_secret)])
+@rate_limit("vm1_database_backup_download", max_requests=10, window_seconds=300)
+def api_latest_vm1_database_backup():
+    latest = _latest_vm1_database_archive()
+    if not latest:
+        raise HTTPException(status_code=404, detail="No verified VM1 database backup archive found on VM2")
+    source, _relative, meta = latest
+    return FileResponse(
+        source,
+        media_type="application/gzip",
+        filename=source.name,
+        headers={
+            "X-Backup-Checksum": str(meta.get("sha256") or ""),
+            "X-Backup-Db-Type": "mysql",
+        },
+    )
+
+
 @app.post("/v1/backup/manual", dependencies=[Depends(require_api_key)])
 @rate_limit("backup_manual", max_requests=3, window_seconds=60)
 def api_backup_manual(payload: dict = {}, request: Request = None, db=Depends(get_db)):
