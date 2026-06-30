@@ -1324,6 +1324,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
 
     response = JSONResponse(
         content={
+            "access_token": access_token,
             "token_type": "bearer",
             "portal": portal,
             "user": build_user_response(portal, account, mfa_setup_required),
@@ -1481,6 +1482,7 @@ async def unified_refresh_token(request: Request, payload: RefreshTokenRequest, 
 
     response = JSONResponse(
         content={
+            "access_token": access_token,
             "token_type": "bearer",
             "portal": portal,
             "user": build_user_response(portal, account, mfa_setup_required),
@@ -1883,9 +1885,10 @@ async def unified_verify(request: Request, db: Session = Depends(get_db)):
             break
 
     if not token:
-        auth_header = request.headers.get("Authorization", "")
-        if auth_header.startswith("Bearer "):
-            token = auth_header.split(" ", 1)[1]
+        for portal in ("admin", "branch", "public"):
+            token = request.cookies.get(_get_cookie_name(portal))
+            if token:
+                break
 
     if not token:
         raise HTTPException(

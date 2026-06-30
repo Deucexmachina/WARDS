@@ -351,13 +351,29 @@ const Branches = () => {
     if (name === 'admin_email') {
       setAdminEmailError(getEmailValidationMessage(nextValue));
     }
-    if (modalError) {
+    if (name === 'admin_username' && nextValue && !isValidUsername(nextValue)) {
+      setModalError('Username must be 3-32 characters and may only contain letters, numbers, dots, underscores, or hyphens.');
+    } else if (modalError) {
       setModalError('');
     }
   };
 
   const handleSelectChange = (fieldName) => (value) => {
     handleInputChange({ target: { name: fieldName, value } });
+  };
+
+  const generateAdminUsername = (branchName) => {
+    const slug = branchName
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .replace(/-/g, '');
+    return slug ? `${slug}_admin` : '';
+  };
+
+  const isValidUsername = (username) => {
+    return /^[A-Za-z0-9_.-]{3,32}$/.test(username);
   };
 
   const handlePresetChange = (e) => {
@@ -372,6 +388,7 @@ const Branches = () => {
         location: '',
         contact: '',
         dashboard_url: buildBranchDashboardUrl('branch'),
+        admin_username: '',
       }));
       setSelectedMapLocation(null);
       setMapSearchResults([]);
@@ -391,6 +408,7 @@ const Branches = () => {
       location: preset.location,
       contact: preset.contact,
       dashboard_url: buildBranchDashboardUrl(preset.name),
+      admin_username: generateAdminUsername(preset.name),
     }));
   };
 
@@ -553,6 +571,11 @@ const Branches = () => {
     if (!editingBranch) {
       if (!formData.admin_username || !formData.admin_email || !formData.admin_password) {
         setModalError('Please fill in admin account details for the new branch.');
+        return;
+      }
+
+      if (!isValidUsername(formData.admin_username)) {
+        setModalError('Admin username must be 3-32 characters and may only contain letters, numbers, dots, underscores, or hyphens.');
         return;
       }
 

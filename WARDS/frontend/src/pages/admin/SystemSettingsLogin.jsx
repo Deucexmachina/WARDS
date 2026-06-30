@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import ReCAPTCHA from 'react-google-recaptcha';
+import api from '../../services/api';
 import {
   clearSettingsSession,
   isSettingsRoleAllowed,
@@ -162,6 +163,9 @@ const SystemSettingsLogin = () => {
       }
 
       localStorage.setItem('adminUser', JSON.stringify(response.data.user));
+      if (response.data.access_token) {
+        localStorage.setItem('adminToken', response.data.access_token);
+      }
       if (!localStorage.getItem('adminAuthenticatedAt')) {
         localStorage.setItem('adminAuthenticatedAt', new Date(Date.now() - 1000).toISOString());
       }

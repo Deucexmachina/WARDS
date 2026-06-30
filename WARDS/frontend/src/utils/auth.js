@@ -71,6 +71,9 @@ export const persistSession = ({
     localStorage.setItem('wardsPortal', 'admin');
     localStorage.setItem('adminUser', JSON.stringify(enrichedUser));
     localStorage.setItem('adminAuthenticatedAt', new Date().toISOString());
+    if (access_token) {
+      localStorage.setItem('adminToken', access_token);
+    }
     localStorage.removeItem('securityAuthenticated');
     localStorage.removeItem('securityAuthenticatedAt');
     localStorage.removeItem('settingsAuthenticated');
@@ -91,6 +94,9 @@ export const persistSession = ({
     localStorage.setItem('wardsPortal', 'branch');
     localStorage.setItem('branchUser', JSON.stringify(enrichedUser));
     localStorage.setItem('branchAuthenticatedAt', new Date().toISOString());
+    if (access_token) {
+      localStorage.setItem('branchToken', access_token);
+    }
     localStorage.removeItem('branchSettingsAuthenticated');
     localStorage.removeItem('branchSettingsAuthenticatedAt');
     sessionStorage.removeItem('branchSettingsAuthenticated');
