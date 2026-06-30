@@ -78,7 +78,16 @@ def context_case(test_id: str, scenario: str, actual: str, change_type: str, con
 
 
 def context_domain_case(test_id: str, scenario: str, domain: str, actual: str, change_type: str, context: dict) -> TestCase:
-    return TestCase(test_id, scenario, domain, actual, lambda: context_detection(test_id, change_type, context), wait_seconds=0, target_hint=f"evaluation:{test_id}")
+    enriched = dict(context)
+    if domain == "ai_ml_assets":
+        enriched.setdefault("target_type", "file")
+        enriched.setdefault("method_legitimate", False)
+        enriched.setdefault("content_similarity_score", 0.0)
+    elif domain in {"vm1_database", "vm2_database"}:
+        enriched.setdefault("target_type", "database")
+        enriched.setdefault("method_legitimate", False)
+    target = enriched.get("artifact_path") or enriched.get("target_name") or f"evaluation:{test_id}"
+    return TestCase(test_id, scenario, domain, actual, lambda: context_detection(test_id, change_type, enriched, target=target), wait_seconds=0, target_hint=target)
 
 
 def all_tests() -> list[TestCase]:

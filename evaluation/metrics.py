@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+from datetime import datetime
 from pathlib import Path
 
 from eval_config import RESULTS_CSV, SUMMARY_JSON, SUMMARY_MD, SUMMARY_XLSX
@@ -162,7 +163,13 @@ def write_excel(summary: dict, rows: list[dict]) -> None:
         sheet.freeze_panes = "A2"
 
     SUMMARY_XLSX.parent.mkdir(parents=True, exist_ok=True)
-    wb.save(SUMMARY_XLSX)
+    try:
+        wb.save(SUMMARY_XLSX)
+    except PermissionError:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        fallback = SUMMARY_XLSX.with_name(f"{SUMMARY_XLSX.stem}_{timestamp}{SUMMARY_XLSX.suffix}")
+        wb.save(fallback)
+        print(f"Could not overwrite {SUMMARY_XLSX}; wrote {fallback} instead. Close the open workbook to reuse the default filename.")
 
 
 def write_outputs(summary: dict, csv_path: Path = RESULTS_CSV) -> None:

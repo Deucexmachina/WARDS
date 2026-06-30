@@ -83,7 +83,7 @@ def api_get(path: str, *, headers: dict | None = None) -> object:
         timeout=REQUEST_TIMEOUT_SECONDS,
         verify=VERIFY_TLS,
     )
-    response.raise_for_status()
+    raise_for_status_with_body(response)
     return response.json()
 
 
@@ -95,8 +95,16 @@ def api_post(path: str, payload: dict | None = None, *, headers: dict | None = N
         timeout=REQUEST_TIMEOUT_SECONDS,
         verify=VERIFY_TLS,
     )
-    response.raise_for_status()
+    raise_for_status_with_body(response)
     return response.json()
+
+
+def raise_for_status_with_body(response: requests.Response) -> None:
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        body = response.text[:1000] if response.text else ""
+        raise requests.HTTPError(f"{exc}; response_body={body}", response=response) from exc
 
 
 def trigger_scan_all() -> list[dict]:

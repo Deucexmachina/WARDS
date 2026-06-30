@@ -4573,7 +4573,7 @@ def mark_verified_removal(db: Session, file_entry: SecurityMonitoredFile, reason
         recovery.summary = "Trusted baseline accepted; previous automatic recovery is no longer treated as a security incident."
         db.add(recovery)
 
-    file_entry.current_hash = None
+    file_entry.current_hash = ""
     file_entry.status = reason
     file_entry.last_checked = now_utc()
     db.add(file_entry)
@@ -4609,7 +4609,7 @@ def mark_existing_deletion_incident_verified_rename(db: Session, detection: Secu
         recovery.status = "verified_removal"
         recovery.summary = "Trusted baseline accepted; previous automatic recovery is no longer treated as a security incident."
         db.add(recovery)
-    file_entry.current_hash = None
+    file_entry.current_hash = ""
     file_entry.status = "verified_renamed"
     file_entry.last_checked = now_utc()
     db.add(file_entry)
@@ -4815,7 +4815,7 @@ def scan_single_file(db: Session, file_entry: SecurityMonitoredFile, context: di
 
     if not path.exists():
         if file_entry.status in {"verified_deleted", "verified_renamed"}:
-            file_entry.current_hash = None
+            file_entry.current_hash = ""
             file_entry.last_checked = now_utc()
             db.add(file_entry)
             if commit_clean:
@@ -4828,7 +4828,7 @@ def scan_single_file(db: Session, file_entry: SecurityMonitoredFile, context: di
                 db.commit()
             return None
         file_entry.status = "missing"
-        file_entry.current_hash = None
+        file_entry.current_hash = ""
         file_entry.last_checked = now_utc()
         db.add(file_entry)
         db.commit()
@@ -6284,7 +6284,7 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                         file_entry.baseline_hash = file_entry.current_hash
                         file_entry.status = "clean"
                     else:
-                        file_entry.current_hash = None
+                        file_entry.current_hash = ""
                         file_entry.status = "missing"
                 file_entry.last_checked = now_utc()
                 db.add(file_entry)
@@ -7926,7 +7926,7 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
                 continue
             if _has_open_incident(db, entry, "file_deleted"):
                 entry.status = "missing"
-                entry.current_hash = None
+                entry.current_hash = ""
                 entry.last_checked = now_utc()
                 db.add(entry)
                 continue
@@ -7939,7 +7939,7 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
                 except Exception:
                     pass
             entry.status = "missing"
-            entry.current_hash = None
+            entry.current_hash = ""
             entry.last_checked = now_utc()
             changed += 1
             db.add(entry)
