@@ -72,6 +72,19 @@ Final Risk Score =
 | auth_system_modification | Protect authentication modules |
 | excessive_file_modifications | Detect mass changes |
 | rapid_admin_actions | Detect automation or compromise |
+| database_integrity_deviation | NIST/MITRE database integrity deviation |
+| ai_model_artifact_tamper | MITRE defense evasion against AI assets |
+| destructive_command_pattern | OWASP command injection / MITRE data destruction |
+| webshell_indicator | OWASP web shell / MITRE persistence and execution |
+| session_context_anomaly | UEBA session anomaly / NIST identity assurance |
+
+## Implemented Login Context Collectors
+
+- `first_time_device` is collected server-side from a hashed device context.
+- `first_time_country` is collected from cached IP geolocation and per-admin login history.
+- `geo_distance_from_last_login` is computed when GeoIP latitude/longitude are available.
+- `session_context_anomaly` is collected from recent admin session history.
+- `keystroke_dynamics` is supplied by frontend aggregate timing telemetry; raw keys are not sent.
 
 ## Keep Existing Rule-Based Security Detection
 

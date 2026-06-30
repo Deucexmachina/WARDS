@@ -1084,6 +1084,27 @@ class ActivityLog(Base):
     previous_integrity_hash = Column(String(128), nullable=True)
     integrity_hash = Column(String(128), nullable=True, index=True)
 
+
+class AdminLoginSecurityProfile(Base):
+    __tablename__ = "admin_login_security_profiles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    admin_id = Column(Integer, ForeignKey("admins.id", ondelete="CASCADE"), nullable=False, index=True)
+    device_hash = Column(String(128), nullable=False, index=True)
+    source_ip = Column(String(45), nullable=True, index=True)
+    ip_prefix = Column(String(64), nullable=True, index=True)
+    country = Column(String(128), nullable=True, index=True)
+    country_code = Column(String(2), nullable=True, index=True)
+    city = Column(String(128), nullable=True)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    user_agent_hash = Column(String(128), nullable=True, index=True)
+    login_count = Column(Integer, default=1)
+    first_seen_at = Column(DateTime, default=datetime.utcnow, index=True)
+    last_seen_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    admin = relationship("Admin", backref="login_security_profiles")
+
 class Backup(Base):
     __tablename__ = "backups"
     

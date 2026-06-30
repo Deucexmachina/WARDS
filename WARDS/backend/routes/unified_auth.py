@@ -1,8 +1,11 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
+import hashlib
+import ipaddress
 import json
 import logging
+import math
 import os
 import random
 import secrets
@@ -26,7 +29,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
-from database.models import ActivityLog, Admin, BranchStaff, CitizenUser, EmailOTP, Invite, MFASecret, get_db
+from database.models import ActivityLog, Admin, AdminLoginSecurityProfile, BranchStaff, CitizenUser, EmailOTP, Invite, MFASecret, get_db
 from utils.redis_client import get_redis_client
 from services.email_service import (
     _safe_html,
@@ -250,6 +253,7 @@ class UnifiedLoginRequest(BaseModel):
     portal: Optional[str] = None
     totp_code: Optional[str] = None
     recaptcha_token: Optional[str] = None
+    keystroke_metrics: Optional[dict] = None
 
 
 class UnifiedSetupMFARequest(BaseModel):
@@ -594,24 +598,305 @@ def log_activity(db: Session, action: str, user: str, details: str, log_type: st
     db.commit()
 
 
-def log_unified_security_context(db: Session, *, portal: str, actor: str, client_ip: str, account: object):
+def _sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8", errors="ignore")).hexdigest()
+
+
+def _ip_prefix(ip: str) -> str:
+    try:
+        parsed = ipaddress.ip_address(ip)
+        if parsed.version == 4:
+            parts = str(parsed).split(".")
+            return ".".join(parts[:3]) + ".0/24"
+        network = ipaddress.ip_network(f"{parsed}/64", strict=False)
+        return str(network)
+    except ValueError:
+        return "unknown"
+
+
+def _haversine_km(lat1, lon1, lat2, lon2) -> float | None:
+    try:
+        lat1 = float(lat1)
+        lon1 = float(lon1)
+        lat2 = float(lat2)
+        lon2 = float(lon2)
+    except (TypeError, ValueError):
+        return None
+    radius_km = 6371.0
+    d_lat = math.radians(lat2 - lat1)
+    d_lon = math.radians(lon2 - lon1)
+    a = (
+        math.sin(d_lat / 2) ** 2
+        + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(d_lon / 2) ** 2
+    )
+    return 2 * radius_km * math.asin(math.sqrt(a))
+
+
+def _geo_lookup(client_ip: str) -> dict:
+    try:
+        from services.vpn_detection import detect_vpn
+        geo = detect_vpn(client_ip) or {}
+    except Exception:
+        geo = {}
+
+    # detect_vpn already caches and may use ip-api; if latitude/longitude are not
+    # exposed by that helper, keep geo-distance disabled rather than inventing it.
+    return {
+        "country": geo.get("country"),
+        "country_code": _normalize_country_code(geo.get("country_code") or geo.get("country")),
+        "city": geo.get("city"),
+        "latitude": geo.get("lat") or geo.get("latitude"),
+        "longitude": geo.get("lon") or geo.get("longitude"),
+        "vpn_detection": geo,
+    }
+
+
+_COUNTRY_CODE_BY_NAME = {
+    "PHILIPPINES": "PH",
+    "UNITED STATES": "US",
+    "UNITED STATES OF AMERICA": "US",
+    "UNITED KINGDOM": "GB",
+    "GREAT BRITAIN": "GB",
+    "CANADA": "CA",
+    "AUSTRALIA": "AU",
+    "SINGAPORE": "SG",
+    "JAPAN": "JP",
+    "SOUTH KOREA": "KR",
+    "KOREA, REPUBLIC OF": "KR",
+    "CHINA": "CN",
+    "HONG KONG": "HK",
+    "INDIA": "IN",
+    "GERMANY": "DE",
+    "FRANCE": "FR",
+}
+
+
+def _normalize_country_code(value: str | None) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if len(text) == 2 and text.isalpha():
+        return text.upper()
+    return _COUNTRY_CODE_BY_NAME.get(text.upper())
+
+
+def _safe_int_range(value, *, default: int = 0, minimum: int = 0, maximum: int = 10000) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(parsed, maximum))
+
+
+def _safe_float_range(value, *, default: float = 0.0, minimum: float = 0.0, maximum: float = 10000.0) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    if math.isnan(parsed) or math.isinf(parsed):
+        return default
+    return max(minimum, min(parsed, maximum))
+
+
+def _keystroke_context(metrics: dict | None) -> dict:
+    metrics = metrics if isinstance(metrics, dict) else {}
+    key_events = _safe_int_range(metrics.get("key_events"), maximum=10000)
+    paste_count = _safe_int_range(metrics.get("paste_count"), maximum=100)
+    autofill_used = bool(metrics.get("autofill_used"))
+    avg_dwell = _safe_float_range(metrics.get("avg_dwell_ms"), maximum=5000.0)
+    avg_flight = _safe_float_range(metrics.get("avg_flight_ms"), maximum=10000.0)
+    typing_variance = _safe_float_range(metrics.get("typing_variance_ms"), maximum=50000.0)
+    confidence = 0.0
+    if key_events == 0 and (paste_count > 0 or autofill_used):
+        confidence = 0.35
+    elif key_events > 0:
+        if avg_dwell < 25 or avg_dwell > 450:
+            confidence += 0.35
+        if avg_flight < 20 or avg_flight > 1000:
+            confidence += 0.25
+        if typing_variance > 600:
+            confidence += 0.25
+    return {
+        "keystroke_dynamics_available": key_events > 0,
+        "keystroke_anomaly_confidence": round(min(confidence, 1.0), 4),
+        "pasted_password": paste_count > 0,
+        "password_paste_count": paste_count,
+        "autofill_used": autofill_used,
+        "login_input_method": "paste" if paste_count > 0 else "autofill" if autofill_used else "typed" if key_events > 0 else "unknown",
+    }
+
+
+def build_admin_login_security_context(db: Session, *, request: Request, account: object, session_id: str, keystroke_metrics: dict | None, previous_session_id: str | None = None) -> dict:
+    client_ip = get_client_ip(request)
+    user_agent = request.headers.get("user-agent") or "unknown"
+    accept_language = request.headers.get("accept-language") or ""
+    device_source = "|".join([
+        user_agent,
+        accept_language,
+        _ip_prefix(client_ip),
+        request.headers.get("sec-ch-ua-platform") or "",
+        request.headers.get("sec-ch-ua-mobile") or "",
+    ])
+    device_hash = _sha256_text(device_source)
+    user_agent_hash = _sha256_text(user_agent)
+    now = datetime.utcnow()
+    geo = _geo_lookup(client_ip)
+    country = geo.get("country")
+    country_code = _normalize_country_code(geo.get("country_code") or country)
+    city = geo.get("city")
+    latitude = geo.get("latitude")
+    longitude = geo.get("longitude")
+    ip_prefix = _ip_prefix(client_ip)
+
+    admin_id = getattr(account, "id", None)
+    device_profile = (
+        db.query(AdminLoginSecurityProfile)
+        .filter(
+            AdminLoginSecurityProfile.admin_id == admin_id,
+            AdminLoginSecurityProfile.device_hash == device_hash,
+        )
+        .first()
+    )
+    country_profile = None
+    if country_code:
+        country_profile = (
+            db.query(AdminLoginSecurityProfile)
+            .filter(
+                AdminLoginSecurityProfile.admin_id == admin_id,
+                AdminLoginSecurityProfile.country_code == country_code,
+            )
+            .first()
+        )
+    latest_login = (
+        db.query(AdminLoginSecurityProfile)
+        .filter(AdminLoginSecurityProfile.admin_id == admin_id)
+        .order_by(AdminLoginSecurityProfile.last_seen_at.desc())
+        .first()
+    )
+    previous_with_geo = (
+        db.query(AdminLoginSecurityProfile)
+        .filter(
+            AdminLoginSecurityProfile.admin_id == admin_id,
+            AdminLoginSecurityProfile.latitude.isnot(None),
+            AdminLoginSecurityProfile.longitude.isnot(None),
+        )
+        .order_by(AdminLoginSecurityProfile.last_seen_at.desc())
+        .first()
+    )
+    first_time_device = device_profile is None
+    first_time_country = bool(country_code) and country_profile is None
+    geo_distance = _haversine_km(previous_with_geo.latitude, previous_with_geo.longitude, latitude, longitude) if previous_with_geo else None
+    hours_since_last_login = None
+    if latest_login and latest_login.last_seen_at:
+        hours_since_last_login = max(0.0, (now - latest_login.last_seen_at).total_seconds() / 3600)
+
+    active_session_replaced = bool(previous_session_id and previous_session_id != session_id)
+    session_device_changed = bool(latest_login and latest_login.device_hash and latest_login.device_hash != device_hash)
+    session_country_changed = bool(country_code and latest_login and latest_login.country_code and latest_login.country_code != country_code)
+    multiple_recent_sessions = 0
+    try:
+        redis_client = get_redis_client()
+        if redis_client:
+            recent_key = f"wards:admin:session_history:{account.id}"
+            raw_history = redis_client.lrange(recent_key, 0, 10) or []
+            multiple_recent_sessions = len(raw_history)
+            redis_client.lpush(recent_key, json.dumps({
+                "sid": session_id,
+                "ip_prefix": ip_prefix,
+                "device_hash": device_hash,
+                "country_code": country_code,
+                "seen_at": now.isoformat(),
+            }))
+            redis_client.ltrim(recent_key, 0, 20)
+            redis_client.expire(recent_key, 7 * 24 * 60 * 60)
+    except Exception:
+        pass
+
+    profile = device_profile
+    if profile:
+        profile.source_ip = client_ip
+        profile.ip_prefix = ip_prefix
+        profile.country = country or profile.country
+        profile.country_code = country_code or profile.country_code
+        profile.city = city or profile.city
+        profile.latitude = latitude if latitude is not None else profile.latitude
+        profile.longitude = longitude if longitude is not None else profile.longitude
+        profile.user_agent_hash = user_agent_hash
+        profile.login_count = int(profile.login_count or 0) + 1
+        profile.last_seen_at = now
+    else:
+        profile = AdminLoginSecurityProfile(
+            admin_id=getattr(account, "id", None),
+            device_hash=device_hash,
+            source_ip=client_ip,
+            ip_prefix=ip_prefix,
+            country=country,
+            country_code=country_code,
+            city=city,
+            latitude=latitude,
+            longitude=longitude,
+            user_agent_hash=user_agent_hash,
+            login_count=1,
+            first_seen_at=now,
+            last_seen_at=now,
+        )
+    db.add(profile)
+    db.commit()
+
+    context = {
+        "target_type": "admin_session",
+        "source_ip": client_ip,
+        "admin_id": admin_id,
+        "admin_session_valid": True,
+        "method_legitimate": True,
+        "mfa_verified": True,
+        "device_hash": device_hash,
+        "device_seen_before": not first_time_device,
+        "first_time_device": first_time_device,
+        "country": country,
+        "country_code": country_code,
+        "city": city,
+        "country_seen_before": not first_time_country if country else True,
+        "first_time_country": first_time_country,
+        "geo_distance_from_last_login_km": round(geo_distance, 2) if geo_distance is not None else 0,
+        "hours_since_last_login": round(hours_since_last_login, 2) if hours_since_last_login is not None else 0,
+        "impossible_travel": bool(geo_distance and hours_since_last_login and hours_since_last_login > 0 and geo_distance / hours_since_last_login >= 900),
+        "new_session": True,
+        "active_session_replaced": active_session_replaced,
+        "session_device_changed": session_device_changed,
+        "session_country_changed": session_country_changed,
+        "concurrent_session_detected": active_session_replaced,
+        "multiple_recent_sessions": multiple_recent_sessions,
+        "same_session_different_context": active_session_replaced and (session_device_changed or session_country_changed),
+        "vpn_detection": geo.get("vpn_detection"),
+    }
+    context.update(_keystroke_context(keystroke_metrics))
+    return context
+
+
+def log_unified_security_context(db: Session, *, portal: str, actor: str, client_ip: str, account: object, request: Request | None = None, session_id: str | None = None, keystroke_metrics: dict | None = None, previous_session_id: str | None = None):
     if portal != "admin":
         return
     try:
         from utils.security_client import record_context_detection
+        context = (
+            build_admin_login_security_context(db, request=request, account=account, session_id=session_id or "", keystroke_metrics=keystroke_metrics, previous_session_id=previous_session_id)
+            if request is not None and session_id
+            else {
+                "target_type": "admin_session",
+                "source_ip": client_ip,
+                "admin_id": getattr(account, "id", None),
+                "admin_session_valid": True,
+                "method_legitimate": True,
+            }
+        )
 
         record_context_detection(
             db,
             target_name=f"admin_session:{actor}",
             actor=actor,
             change_type="suspicious_login",
-            context={
-                "target_type": "admin_session",
-                "source_ip": client_ip,
-                "admin_id": getattr(account, "id", None),
-                "admin_session_valid": True,
-                "method_legitimate": True,
-            },
+            context=context,
         )
     except Exception:
         pass
@@ -979,9 +1264,14 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
     refresh_token = create_refresh_token(portal, token_payload)
 
     r = get_redis_client()
+    previous_session_id = None
     if r:
         ttl = PORTAL_CONFIG[portal]["expires_minutes"] * 60
-        r.setex(f"wards:session:{portal}:{account.id}", ttl, session_id)
+        session_key = f"wards:session:{portal}:{account.id}"
+        previous_session_id = r.get(session_key)
+        if isinstance(previous_session_id, bytes):
+            previous_session_id = previous_session_id.decode("utf-8", errors="ignore")
+        r.setex(session_key, ttl, session_id)
     account.last_login = datetime.utcnow()
     if portal == "public":
         apply_citizen_user_security(account)
@@ -1016,7 +1306,17 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
         request=request,
         account=account,
     )
-    log_unified_security_context(db, portal=portal, actor=get_mfa_username(portal, account), client_ip=client_ip, account=account)
+    log_unified_security_context(
+        db,
+        portal=portal,
+        actor=get_mfa_username(portal, account),
+        client_ip=client_ip,
+        account=account,
+        request=request,
+        session_id=session_id,
+        keystroke_metrics=credentials.keystroke_metrics,
+        previous_session_id=previous_session_id,
+    )
 
     # Report MFA setup status truthfully for all portals.
     # Frontend enforces it for admin/branch; citizens see a dismissible prompt.

@@ -49,7 +49,10 @@ def _blank(ip: str, reason: str = "") -> dict[str, Any]:
         "is_hosting": False,
         "provider": None,
         "country": None,
+        "country_code": None,
         "city": None,
+        "latitude": None,
+        "longitude": None,
         "risk_score": 0,
         "signals": [],
         "source": "local",
@@ -101,6 +104,7 @@ def _abuseipdb_lookup(ip: str) -> dict[str, Any]:
         "isp": data.get("isp"),
         "domain": data.get("domain"),
         "country": data.get("countryCode"),
+        "country_code": data.get("countryCode"),
         "source": "abuseipdb",
     }
 
@@ -108,7 +112,7 @@ def _abuseipdb_lookup(ip: str) -> dict[str, Any]:
 def _ip_api_lookup(ip: str) -> dict[str, Any]:
     response = requests.get(
         f"http://ip-api.com/json/{ip}",
-        params={"fields": "status,message,country,city,isp,org,as,proxy,hosting,mobile"},
+        params={"fields": "status,message,country,countryCode,city,lat,lon,isp,org,as,proxy,hosting,mobile"},
         timeout=4,
     )
     response.raise_for_status()
@@ -120,7 +124,10 @@ def _ip_api_lookup(ip: str) -> dict[str, Any]:
         "is_hosting": bool(data.get("hosting")),
         "provider": data.get("org") or data.get("isp") or data.get("as"),
         "country": data.get("country"),
+        "country_code": data.get("countryCode"),
         "city": data.get("city"),
+        "latitude": data.get("lat"),
+        "longitude": data.get("lon"),
         "source": "ip-api",
     }
 
@@ -148,6 +155,7 @@ def detect_vpn(ip: str | None) -> dict[str, Any]:
         if abuse:
             result["source"] = abuse.get("source") or result["source"]
             result["country"] = abuse.get("country") or result["country"]
+            result["country_code"] = abuse.get("country_code") or result["country_code"]
             result["provider"] = abuse.get("isp") or abuse.get("domain") or result["provider"]
             abuse_score = int(abuse.get("abuse_confidence") or 0)
             if abuse_score >= 50:
@@ -167,7 +175,10 @@ def detect_vpn(ip: str | None) -> dict[str, Any]:
                 "is_hosting": bool(geo.get("is_hosting")) or result["is_hosting"],
                 "provider": geo.get("provider") or result["provider"],
                 "country": geo.get("country") or result["country"],
+                "country_code": geo.get("country_code") or result["country_code"],
                 "city": geo.get("city") or result["city"],
+                "latitude": geo.get("latitude"),
+                "longitude": geo.get("longitude"),
                 "source": "vpn_detector",
             })
             if geo.get("is_proxy"):

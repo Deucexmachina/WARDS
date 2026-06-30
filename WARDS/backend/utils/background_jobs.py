@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -39,6 +40,8 @@ class BackgroundJobManager:
         self._locks: dict[str, asyncio.Lock] = {}
         self._last_run: dict[str, float] = {}
         self._min_intervals: dict[str, float] = {}
+        self._max_jobs = max(50, int(os.getenv("BACKGROUND_JOB_MAX_ITEMS", "500")))
+        self._retention_seconds = max(300, int(os.getenv("BACKGROUND_JOB_RETENTION_SECONDS", str(6 * 60 * 60))))
 
     def set_rate_limit(self, job_type: str, min_interval_seconds: float) -> None:
         self._min_intervals[job_type] = min_interval_seconds
@@ -56,12 +59,47 @@ class BackgroundJobManager:
         remaining = min_interval - (time.time() - last)
         return max(0.0, remaining)
 
+    def cleanup(self) -> None:
+        now = time.time()
+        expired = [
+            job_id for job_id, job in self._jobs.items()
+            if job.status in {JobStatus.COMPLETED, JobStatus.FAILED}
+            and job.completed_at
+            and now - job.completed_at > self._retention_seconds
+        ]
+        for job_id in expired:
+            self._jobs.pop(job_id, None)
+            self._locks.pop(job_id, None)
+
+        if len(self._jobs) <= self._max_jobs:
+            return
+        removable = sorted(
+            [
+                job for job in self._jobs.values()
+                if job.status in {JobStatus.COMPLETED, JobStatus.FAILED}
+            ],
+            key=lambda item: item.completed_at or item.created_at,
+        )
+        for job in removable[: max(0, len(self._jobs) - self._max_jobs)]:
+            self._jobs.pop(job.id, None)
+            self._locks.pop(job.id, None)
+
+    def _has_active_job(self, job_type: str) -> bool:
+        return any(
+            job.type == job_type and job.status in {JobStatus.PENDING, JobStatus.RUNNING}
+            for job in self._jobs.values()
+        )
+
     def submit(self, job_type: str) -> Job:
+        self.cleanup()
+        if self._has_active_job(job_type):
+            raise RateLimitExceeded(f"A {job_type} job is already pending or running.")
         if not self._check_rate_limit(job_type):
             raise RateLimitExceeded(
                 f"Rate limit exceeded for {job_type}. "
                 f"Try again in {int(self._rate_limit_remaining(job_type))}s."
             )
+        self._last_run[job_type] = time.time()
         job = Job(id=str(uuid.uuid4()), type=job_type)
         self._jobs[job.id] = job
         return job
@@ -81,7 +119,6 @@ class BackgroundJobManager:
         if job:
             job.status = JobStatus.RUNNING
             job.started_at = time.time()
-            self._last_run[job.type] = time.time()
 
     def _complete(self, job_id: str, result: Any) -> None:
         job = self._jobs.get(job_id)
@@ -116,5 +153,20 @@ class RateLimitExceeded(Exception):
 
 # Global singleton
 job_manager = BackgroundJobManager()
-# Rate-limit full scans to once every 30 seconds
-job_manager.set_rate_limit("security_full_scan", 30)
+for _job_type, _interval in {
+    "security_full_scan": 30,
+    "security_manual_backup": 120,
+    "security_vm1_database_backup": 120,
+    "security_vm2_database_backup": 120,
+    "security_files_backup": 120,
+    "security_ml_backup": 60,
+    "security_full_backup": 180,
+    "security_full_recovery": 300,
+    "security_vm1_database_recovery": 300,
+    "security_vm2_database_recovery": 300,
+    "security_files_recovery": 180,
+    "security_ml_recovery": 120,
+    "security_file_scan": 10,
+    "security_file_recovery": 30,
+}.items():
+    job_manager.set_rate_limit(_job_type, _interval)

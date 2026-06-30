@@ -210,7 +210,7 @@ def scan_single_file(db, file_entry, context=None, commit_clean=True):
         "context": context or {},
         "commit_clean": commit_clean,
     }
-    resp = _sync_post("/v1/scan/file", payload)
+    resp = _sync_post("/v1/scan/file", payload, timeout=600.0)
     # VM2 wraps the detection in {"detection": ...}; unwrap it so callers
     # get the same shape as the local function (detection object/dict or None).
     return resp.get("detection") if isinstance(resp, dict) else resp
@@ -392,7 +392,7 @@ def manual_recover_file(db, file_id, admin_id):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import manual_recover_file as _local
         return _local(db, file_id, admin_id)
-    return _sync_post("/v1/files/recover", {"file_id": file_id, "admin_id": admin_id})
+    return _sync_post("/v1/files/recover", {"file_id": file_id, "admin_id": admin_id}, timeout=600.0)
 
 
 # ---------------------------------------------------------------------------

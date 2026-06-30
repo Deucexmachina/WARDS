@@ -97,7 +97,7 @@ These files have extensions `.html`, `.htm`, `.js`, `.jsx`, `.ts`, `.tsx`, `.py`
 
 | ID | Scenario | File to Modify | Attack Action |
 |---|---|---|---|
-| ATK-F-01 | HTML defacement | `WARDS/frontend/index.html` | Replace entire file content with `<h1>HACKED BY EVALUATOR</h1>` |
+| ATK-F-01 | HTML defacement | `WARDS/frontend/index.html` | Replace entire file content with `<h1>HACKED BY NANO </h1>` it needs to fully cover the page and make it un 
 | ATK-F-02 | HTML script injection | `WARDS/frontend/index.html` | Append `<script>alert('xss')</script>` |
 | ATK-F-03 | JS payload injection | `WARDS/frontend/src/main.jsx` | Append `document.write('<img src=x onerror=alert(1)>');` |
 | ATK-F-04 | Python backend modification | `WARDS/backend/main.py` | Append `# INJECTED: import os; os.system("id")` (comment-embedded payload) |

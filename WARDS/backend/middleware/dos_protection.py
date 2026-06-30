@@ -30,7 +30,7 @@ REQUEST_TIMEOUT_EXEMPT_PATHS = tuple(
     item.strip()
     for item in os.getenv(
         "REQUEST_TIMEOUT_EXEMPT_PATHS",
-        "/api/security/backup,/api/security/recover,/api/security/scan,/security/backup,/security/recover,/security/scan",
+        "/api/security/backup,/api/security/recover,/api/security/scan,/api/security/files,/security/backup,/security/recover,/security/scan,/security/files",
     ).split(",")
     if item.strip()
 )

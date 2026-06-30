@@ -204,6 +204,7 @@ class ScanFileRequest(BaseModel):
 
 
 @app.post("/v1/scan/file", dependencies=[Depends(require_api_key)])
+@rate_limit("scan_file", max_requests=20, window_seconds=60)
 def api_scan_file(payload: ScanFileRequest, db=Depends(get_db)):
     file_entry = None
     if payload.file_id:
@@ -573,45 +574,53 @@ def api_recover_full(payload: dict = {}, background_tasks: BackgroundTasks = Non
 
 
 @app.post("/v1/backup/database", dependencies=[Depends(require_api_key)])
+@rate_limit("backup_database", max_requests=3, window_seconds=300)
 def api_backup_database(payload: dict = {}, db=Depends(get_db)):
     event = create_database_backup(db, _resolve_admin_id(db, payload.get("admin_id")))
     return serialize_recovery(event)
 
 
 @app.post("/v1/backup/files", dependencies=[Depends(require_api_key)])
+@rate_limit("backup_files", max_requests=3, window_seconds=300)
 def api_backup_files(payload: dict = {}, db=Depends(get_db)):
     event = create_files_backup(db, _resolve_admin_id(db, payload.get("admin_id")))
     return serialize_recovery(event)
 
 
 @app.post("/v1/backup/ml", dependencies=[Depends(require_api_key)])
+@rate_limit("backup_ml", max_requests=5, window_seconds=300)
 def api_backup_ml(payload: dict = {}, db=Depends(get_db)):
     event = create_ml_backup(db, _resolve_admin_id(db, payload.get("admin_id")))
     return serialize_recovery(event)
 
 
 @app.post("/v1/backup/full", dependencies=[Depends(require_api_key)])
+@rate_limit("backup_full", max_requests=2, window_seconds=300)
 def api_backup_full(payload: dict = {}, db=Depends(get_db)):
     event = create_full_system_backup(db, _resolve_admin_id(db, payload.get("admin_id")))
     return serialize_recovery(event)
 
 
 @app.post("/v1/recover/database", dependencies=[Depends(require_api_key)])
+@rate_limit("recover_database", max_requests=2, window_seconds=300)
 def api_recover_database(payload: dict = {}, db=Depends(get_db)):
     return serialize_recovery(recover_database(db, _resolve_admin_id(db, payload.get("admin_id"))))
 
 
 @app.post("/v1/recover/files", dependencies=[Depends(require_api_key)])
+@rate_limit("recover_files", max_requests=2, window_seconds=300)
 def api_recover_files(payload: dict = {}, db=Depends(get_db)):
     return recover_files(db, _resolve_admin_id(db, payload.get("admin_id")))
 
 
 @app.post("/v1/recover/ml", dependencies=[Depends(require_api_key)])
+@rate_limit("recover_ml", max_requests=2, window_seconds=300)
 def api_recover_ml(payload: dict = {}, db=Depends(get_db)):
     return serialize_recovery(recover_ml_artifacts(db, _resolve_admin_id(db, payload.get("admin_id"))))
 
 
 @app.post("/v1/files/recover", dependencies=[Depends(require_api_key)])
+@rate_limit("recover_file", max_requests=10, window_seconds=300)
 def api_file_recover(payload: dict = {}, db=Depends(get_db)):
     event = manual_recover_file(db, payload["file_id"], _resolve_admin_id(db, payload.get("admin_id")))
     return serialize_recovery(event)
