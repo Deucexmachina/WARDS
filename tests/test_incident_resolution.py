@@ -165,7 +165,7 @@ def test_resolve_incident_sets_resolved_status(monkeypatch):
 
 
 def test_resolve_vm1_auto_recovered_pending_review_cleans_quarantine(monkeypatch, tmp_path):
-    """For auto_recovered_pending_review, resolve should clean quarantine and confirm recovery."""
+    """For auto_recovered_pending_review, resolve should not claim clean without clean proof."""
     quarantine_file = tmp_path / "quarantine" / "test.html"
     quarantine_file.parent.mkdir(parents=True, exist_ok=True)
     quarantine_file.write_text("original content")
@@ -194,7 +194,7 @@ def test_resolve_vm1_auto_recovered_pending_review_cleans_quarantine(monkeypatch
     monkeypatch.setattr("SECURITY.security_engine.VM1_SNAPSHOT_ROOT", snapshot_root)
     monkeypatch.setattr(
         "SECURITY.security_engine.create_manual_backup",
-        lambda db, initiated_by, label: SimpleNamespace(status="success"),
+        lambda db, initiated_by, label, **_kwargs: SimpleNamespace(status="success"),
     )
 
     def _query(model):
@@ -215,7 +215,9 @@ def test_resolve_vm1_auto_recovered_pending_review_cleans_quarantine(monkeypatch
     assert resolved.status == "resolved"
     # A recovery event should have been added
     assert "SecurityRecoveryEvent" in db.added
-    assert file_entry.status == "clean"
+    # Without the original clean restore command or matching snapshot, VM2 should
+    # not mark the VM1 file clean just because the incident was acknowledged.
+    assert file_entry.status == "modified"
 
 
 # ---------------------------------------------------------------------------

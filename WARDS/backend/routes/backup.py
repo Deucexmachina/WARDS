@@ -7,7 +7,7 @@ from datetime import datetime
 
 from database.models import Backup, get_db, ActivityLog
 from auth import get_current_admin_user, require_main_admin
-from utils.backup_engine import backup_dir, create_database_backup, restore_database_backup
+from utils.backup_engine import backup_dir, create_database_backup, prune_database_backup_records, restore_database_backup
 from utils.request_signing import require_internal_signature
 
 def get_rate_limit_key(request: Request) -> str:
@@ -60,6 +60,8 @@ async def create_backup(
     )
     db.add(log)
     db.commit()
+    if result:
+        prune_database_backup_records(db, Backup)
     db.refresh(backup)
     
     if error_detail:

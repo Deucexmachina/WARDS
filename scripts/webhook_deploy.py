@@ -98,6 +98,26 @@ def _unpause_vm2() -> bool:
     return False
 
 
+def _trigger_vm2_post_deploy_backup_background():
+    """Start the non-critical VM2 backup after deploy without delaying CI."""
+    if not VM2_HOST or not VM2_API_KEY:
+        return
+
+    def _run():
+        try:
+            backup_resp = httpx.post(
+                f"https://{VM2_HOST}/v1/backup/full",
+                headers=_vm2_headers(),
+                timeout=20.0,
+            )
+            backup_resp.raise_for_status()
+            logger.info("VM2 post-deploy backup triggered: %s", backup_resp.json())
+        except Exception as e:
+            logger.error("VM2 post-deploy backup trigger failed: %s", e)
+
+    threading.Thread(target=_run, daemon=True, name="vm2-post-deploy-backup").start()
+
+
 @app.post("/webhook")
 async def github_webhook(request: Request):
     if not VM2_HOST or not VM2_API_KEY:
@@ -136,6 +156,10 @@ async def github_webhook(request: Request):
         return result.stdout.strip() if result.returncode == 0 else ""
 
     def _get_vm2_commit() -> str | None:
+        state = _get_vm2_deploy_state()
+        return state.get("commit") if state else None
+
+    def _get_vm2_deploy_state() -> dict | None:
         try:
             resp = httpx.get(
                 f"https://{VM2_HOST}/internal/deploy-status",
@@ -143,7 +167,7 @@ async def github_webhook(request: Request):
                 timeout=5.0,
             )
             if resp.status_code == 200:
-                return resp.json().get("commit", "")
+                return resp.json()
         except Exception:
             pass
         return None
@@ -155,7 +179,7 @@ async def github_webhook(request: Request):
                 httpx.post(
                     f"https://{VM2_HOST}/internal/deployment-mode",
                     headers=_vm2_headers(),
-                    json={"in_progress": True},
+                    json={"in_progress": True, "target_commit": target_commit},
                     timeout=10.0,
                 )
                 logger.info("VM2 deployment mode enabled")
@@ -211,28 +235,39 @@ async def github_webhook(request: Request):
                 )
             logger.info("VM2 commit verified: %s", vm2_commit)
 
-            # Give monitor loop time to run startup baseline
-            time.sleep(10)
-
-            # --- Step 7: Trigger post-deploy backup ---
-            try:
-                backup_resp = httpx.post(
-                    f"https://{VM2_HOST}/v1/backup/full",
-                    headers=_vm2_headers(),
-                    timeout=120.0,
+            # --- Step 7: Wait for VM1 to upload a paused manifest for the target commit ---
+            logger.info("Waiting for VM1 deployment manifest baseline on VM2...")
+            for attempt in range(60):
+                time.sleep(2)
+                state = _get_vm2_deploy_state() or {}
+                if (
+                    state.get("commit") == target_commit
+                    and state.get("vm1_last_manifest_commit") == target_commit
+                    and state.get("deployment_vm1_baseline_ready") is True
+                ):
+                    logger.info("VM1 baseline manifest verified for commit %s", target_commit)
+                    break
+                logger.info(
+                    "VM1 baseline wait %d/60: vm2=%s vm1_manifest=%s ready=%s",
+                    attempt + 1,
+                    state.get("commit"),
+                    state.get("vm1_last_manifest_commit"),
+                    state.get("deployment_vm1_baseline_ready"),
                 )
-                backup_resp.raise_for_status()
-                logger.info("VM2 post-deploy backup triggered: %s", backup_resp.json())
-            except Exception as e:
-                logger.error("VM2 post-deploy backup trigger failed: %s", e)
-                # Non-fatal: backup failure should not block unpause
+            else:
+                raise RuntimeError("VM1 did not upload a deployment-paused baseline manifest for the target commit")
 
         # --- Step 8: Resume monitoring (success path) ---
         if vm2_pushed_pause:
             if _unpause_vm2():
                 deployment_resumed = True
 
-        # --- Step 9: Restart webhook process to load updated code ---
+        # --- Step 9: Trigger non-critical post-deploy VM2 backup in the background ---
+        # Baselines are already verified before unpause, so this should not
+        # keep GitHub Actions waiting for a backup HTTP request.
+        _trigger_vm2_post_deploy_backup_background()
+
+        # --- Step 10: Restart webhook process to load updated code ---
         # The running Python process still has the OLD code in memory.
         # Schedule an execv replacement so the next webhook uses new code.
         logger.info("Scheduling webhook self-restart in 2s to load updated code")

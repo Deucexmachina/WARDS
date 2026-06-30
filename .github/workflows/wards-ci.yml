@@ -63,6 +63,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: WARDS/backend/requirements.txt
       - name: Install backend dependencies
         run: |
           python -m pip install --upgrade pip
@@ -70,38 +72,7 @@ jobs:
       - name: Compile backend
         run: |
           python -m compileall WARDS/backend SECURITY tests
-      - name: Validate SECURITY engine compilation
-        run: |
-          python -m compileall SECURITY
-      - name: Run security engine tests (scanning, backup, detection, recovery, AI, folder mgmt)
-        env:
-          PYTHONPATH: ${{ github.workspace }}/WARDS/backend:${{ github.workspace }}
-          ADMIN_SECRET_KEY: ci-test-admin-secret
-          USER_SECRET_KEY: ci-test-user-secret
-          BRANCH_SECRET_KEY: ci-test-branch-secret
-          PASSWORD_RESET_SECRET_KEY: ci-test-reset-secret
-          DATA_ENCRYPTION_SECRET: ci-test-data-encryption-secret
-          DATA_HASH_SECRET: ci-test-data-hash-secret
-          LOG_INTEGRITY_SECRET: ci-test-log-integrity-secret
-          BACKUP_INTEGRITY_SECRET: ci-test-backup-integrity-secret
-          RECAPTCHA_SECRET_KEY: ci-test-recaptcha-secret
-          PAYMONGO_WEBHOOK_SECRET: ci-test-webhook-secret
-        run: pytest -q tests/test_security_engine_core.py tests/test_security_engine.py tests/test_incident_resolution.py tests/test_vm1_recovery.py
-      - name: Run blocking/restriction tests (IP blocklist, temporary user restrictions)
-        env:
-          PYTHONPATH: ${{ github.workspace }}/WARDS/backend:${{ github.workspace }}
-          ADMIN_SECRET_KEY: ci-test-admin-secret
-          USER_SECRET_KEY: ci-test-user-secret
-          BRANCH_SECRET_KEY: ci-test-branch-secret
-          PASSWORD_RESET_SECRET_KEY: ci-test-reset-secret
-          DATA_ENCRYPTION_SECRET: ci-test-data-encryption-secret
-          DATA_HASH_SECRET: ci-test-data-hash-secret
-          LOG_INTEGRITY_SECRET: ci-test-log-integrity-secret
-          BACKUP_INTEGRITY_SECRET: ci-test-backup-integrity-secret
-          RECAPTCHA_SECRET_KEY: ci-test-recaptcha-secret
-          PAYMONGO_WEBHOOK_SECRET: ci-test-webhook-secret
-        run: pytest -q tests/test_blocking_restrictions.py
-      - name: Run authentication workflow tests (login, register, MFA, token binding)
+      - name: Run backend/security tests
         env:
           PYTHONPATH: ${{ github.workspace }}/WARDS/backend:${{ github.workspace }}
           ADMIN_SECRET_KEY: ci-test-admin-secret
@@ -115,21 +86,19 @@ jobs:
           RECAPTCHA_SECRET_KEY: ci-test-recaptcha-secret
           PAYMONGO_WEBHOOK_SECRET: ci-test-webhook-secret
           TOKEN_BINDING_STRICT: "true"
-        run: pytest -q tests/test_unified_auth.py tests/test_unified_auth_extended.py tests/test_auth_workflows.py
-      - name: Run deployment hardening tests (request signing, HMAC, ledger)
-        env:
-          PYTHONPATH: ${{ github.workspace }}/WARDS/backend:${{ github.workspace }}
-          ADMIN_SECRET_KEY: ci-test-admin-secret
-          USER_SECRET_KEY: ci-test-user-secret
-          BRANCH_SECRET_KEY: ci-test-branch-secret
-          PASSWORD_RESET_SECRET_KEY: ci-test-reset-secret
-          DATA_ENCRYPTION_SECRET: ci-test-data-encryption-secret
-          DATA_HASH_SECRET: ci-test-data-hash-secret
-          LOG_INTEGRITY_SECRET: ci-test-log-integrity-secret
-          BACKUP_INTEGRITY_SECRET: ci-test-backup-integrity-secret
-          RECAPTCHA_SECRET_KEY: ci-test-recaptcha-secret
-          PAYMONGO_WEBHOOK_SECRET: ci-test-webhook-secret
-        run: pytest -q tests/test_deployment_hardening.py tests/test_auth_issue_regressions.py
+        run: >
+          pytest -q
+          tests/test_security_engine_core.py
+          tests/test_security_engine.py
+          tests/test_incident_resolution.py
+          tests/test_vm1_recovery.py
+          tests/test_monitored_folder_fixes.py
+          tests/test_blocking_restrictions.py
+          tests/test_unified_auth.py
+          tests/test_unified_auth_extended.py
+          tests/test_auth_workflows.py
+          tests/test_deployment_hardening.py
+          tests/test_auth_issue_regressions.py
 
   frontend:
     needs: repository-hygiene
@@ -159,29 +128,49 @@ jobs:
       - name: Wait for VMs to sync
         run: |
           START=$(date +%s)
-          MAX_WAIT=180
+          MAX_WAIT=300
+          TARGET_COMMIT="${GITHUB_SHA}"
+          CURL_OPTS="-sSf --connect-timeout 3 --max-time 5"
           while true; do
-            VM1_COMMIT=$(curl -sSf http://152.42.249.84:9000/deploy-status | jq -r '.commit')
-            VM2_COMMIT=$(curl -sSf http://152.42.249.84:9000/vm2-deploy-status | jq -r '.commit')
-            echo "VM1=$VM1_COMMIT VM2=$VM2_COMMIT"
+            LOOP_START=$(date +%s)
 
-            if [ "$VM1_COMMIT" != "unknown" ] && [ "$VM2_COMMIT" != "unknown" ]; then
-              VM1_ON_MAIN=$(git merge-base --is-ancestor "$VM1_COMMIT" origin/main && echo "yes" || echo "no")
-              VM2_ON_MAIN=$(git merge-base --is-ancestor "$VM2_COMMIT" origin/main && echo "yes" || echo "no")
+            VM1_RAW=$(curl $CURL_OPTS -w "\n%{http_code}" http://152.42.249.84:9000/deploy-status || echo "error")
+            VM1_HTTP_CODE=$(echo "$VM1_RAW" | tail -n1)
+            VM1_JSON=$(echo "$VM1_RAW" | sed '$d')
+            VM1_TIME=$(($(date +%s) - LOOP_START))
 
-              if [ "$VM1_ON_MAIN" = "yes" ] && [ "$VM2_ON_MAIN" = "yes" ]; then
-                if [ "$VM1_COMMIT" = "$VM2_COMMIT" ]; then
-                  echo "VMs synchronized at $VM1_COMMIT (on origin/main) — deploy verified."
-                else
-                  echo "VMs at different commits but both on origin/main — VM1=$VM1_COMMIT VM2=$VM2_COMMIT — deploy verified."
-                fi
+            VM2_START=$(date +%s)
+            VM2_RAW=$(curl $CURL_OPTS -w "\n%{http_code}" http://152.42.249.84:9000/vm2-deploy-status || echo "error")
+            VM2_HTTP_CODE=$(echo "$VM2_RAW" | tail -n1)
+            VM2_JSON=$(echo "$VM2_RAW" | sed '$d')
+            VM2_TIME=$(($(date +%s) - VM2_START))
+
+            VM1_COMMIT=$(echo "$VM1_JSON" | jq -r '.commit // "unknown"')
+            VM2_COMMIT=$(echo "$VM2_JSON" | jq -r '.commit // "unknown"')
+            VM2_BASELINE_READY=$(echo "$VM2_JSON" | jq -r '.deployment_vm1_baseline_ready // false')
+            VM2_VM1_MANIFEST_COMMIT=$(echo "$VM2_JSON" | jq -r '.vm1_last_manifest_commit // ""')
+            VM2_PAUSED=$(echo "$VM2_JSON" | jq -r '.deployment_in_progress // false')
+            echo "target=$TARGET_COMMIT VM1=$VM1_COMMIT(vm1_http=$VM1_HTTP_CODE,${VM1_TIME}s) VM2=$VM2_COMMIT(vm2_http=$VM2_HTTP_CODE,${VM2_TIME}s) vm1_manifest=$VM2_VM1_MANIFEST_COMMIT baseline_ready=$VM2_BASELINE_READY paused=$VM2_PAUSED"
+
+            if [ "$VM1_HTTP_CODE" != "200" ] || [ "$VM2_HTTP_CODE" != "200" ]; then
+              echo "One or both status endpoints unreachable. Will retry..."
+            elif [ "$VM1_COMMIT" = "$TARGET_COMMIT" ] && \
+               [ "$VM2_COMMIT" = "$TARGET_COMMIT" ] && \
+               [ "$VM2_PAUSED" = "false" ]; then
+                  echo "VM1 and VM2 are already synchronized at target commit $TARGET_COMMIT; deploy verified."
                 exit 0
-              fi
+            elif [ "$VM1_COMMIT" = "$TARGET_COMMIT" ] && \
+               [ "$VM2_COMMIT" = "$TARGET_COMMIT" ] && \
+               [ "$VM2_VM1_MANIFEST_COMMIT" = "$TARGET_COMMIT" ] && \
+               [ "$VM2_BASELINE_READY" = "true" ] && \
+               [ "$VM2_PAUSED" = "false" ]; then
+                  echo "VMs synchronized at $TARGET_COMMIT and VM1 baseline manifest verified."
+                exit 0
             fi
 
             ELAPSED=$(($(date +%s) - START))
             if [ "$ELAPSED" -ge "$MAX_WAIT" ]; then
-              echo "Timeout after ${MAX_WAIT}s — VMs still not synchronized."
+              echo "Timeout after ${MAX_WAIT}s — VMs did not reach target commit and verified baseline."
               exit 1
             fi
 

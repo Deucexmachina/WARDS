@@ -127,7 +127,7 @@ def test_ai_predict_returns_structured_result():
         new_content="import os; os.system('ls')",
         context={},
     )
-    assert result.prediction in {"suspicious", "anomalous", "clean"}
+    assert result.prediction in {"normal", "suspicious", "malicious"}
     assert 0.0 <= result.score <= 1.0
     assert 0.0 <= result.confidence <= 1.0
     assert result.basis

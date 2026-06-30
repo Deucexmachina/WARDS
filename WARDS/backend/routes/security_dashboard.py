@@ -4,9 +4,11 @@ import asyncio
 import httpx
 import os
 import sys
+import threading
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi.concurrency import run_in_threadpool
 
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -25,7 +27,7 @@ from auth import get_current_admin_from_token
 from utils.background_jobs import job_manager, JobStatus
 from middleware.dos_protection import get_blocked_ips, unblock_ip, block_ip, account_rate_limit_state, record_rate_limit_detection
 from services.ip_reputation import get_permanent_blocks, add_permanent_block, remove_permanent_block, check_ip_reputation
-from utils.backup_engine import create_database_backup as create_vm1_database_backup, restore_database_backup
+from utils.backup_engine import backup_dir, create_database_backup as create_vm1_database_backup, is_database_backup_record, prune_database_backup_records, restore_database_backup
 from utils.security_client import (
     SECURITY_API_URL,
     active_monitored_files_query,
@@ -41,6 +43,7 @@ from utils.security_client import (
     current_hash_index,
     dashboard_payload,
     full_system_recovery,
+    list_backup_inventory,
     recover_database,
     recover_files,
     recover_ml_artifacts,
@@ -79,6 +82,7 @@ from utils.security_client import (
     set_ai_sensitivity,
     set_backup_location,
     set_setting,
+    seed_initial_ai_training,
     source_ids_for_log_type,
     source_ids_batch,
     update_ai_rules,
@@ -104,6 +108,35 @@ ALLOWED_ENV_KEYS = {
     "SECURITY_SCAN_INTERVAL_SECONDS",
     "SECURITY_MONITORING_ENABLED",
 }
+
+
+def _serialize_job(job, message: str) -> dict:
+    return {
+        "job_id": job.id,
+        "type": job.type,
+        "status": job.status,
+        "progress": job.progress,
+        "current_step": job.current_step,
+        "message": message,
+    }
+
+
+def _submit_security_job(job_type: str, worker, message: str) -> dict:
+    try:
+        job = job_manager.submit(job_type)
+    except Exception as exc:
+        raise HTTPException(status_code=429, detail=str(exc))
+
+    def _run():
+        job_manager._start(job.id)
+        try:
+            result = worker(job.id)
+            job_manager._complete(job.id, result)
+        except Exception as exc:
+            job_manager._fail(job.id, str(exc))
+
+    threading.Thread(target=_run, daemon=True, name=f"wards-{job_type}-{job.id[:8]}").start()
+    return _serialize_job(job, message)
 
 
 def update_backend_env(updates: dict[str, str], env_path: Path = BACKEND_ENV_PATH) -> dict[str, str]:
@@ -235,6 +268,42 @@ class AiSensitivityRequest(BaseModel):
 class BulkIncidentRequest(BaseModel):
     action: str
     confirm_missing_files: bool = False
+
+
+def _latest_vm1_database_backup(db: Session):
+    vm1_types = ["Security VM1 Manual", "Security Full VM1", "Scheduled", "Startup Baseline VM1"]
+    latest = (
+        db.query(Backup)
+        .filter(
+            Backup.status == "Completed",
+            Backup.type.in_(vm1_types),
+        )
+        .order_by(Backup.created_at.desc())
+        .first()
+    )
+    if latest:
+        return latest
+    return (
+        db.query(Backup)
+        .filter(
+            Backup.status == "Completed",
+            Backup.type.ilike("%database%"),
+            Backup.db_type.isnot(None),
+        )
+        .order_by(Backup.created_at.desc())
+        .first()
+    )
+
+
+def _is_vm1_database_backup_row(row) -> bool:
+    return is_database_backup_record(row)
+
+
+def _prune_vm1_database_backup_rows(db: Session) -> int:
+    try:
+        return prune_database_backup_records(db, Backup)
+    except Exception:
+        return 0
 
 
 ROLE_MAIN_ADMIN = "main_admin"
@@ -435,6 +504,73 @@ def backup_history(
         return _paginate([], page, page_size)
 
 
+@router.get("/backups/inventory")
+async def backup_inventory(db: Session = Depends(get_db), admin=Depends(current_admin)):
+    _prune_vm1_database_backup_rows(db)
+    try:
+        inventory = await asyncio.wait_for(
+            run_in_threadpool(lambda: list_backup_inventory(db) or {}),
+            timeout=20.0,
+        )
+    except asyncio.TimeoutError:
+        inventory = {
+            "items": [],
+            "domains": [],
+            "latest_by_domain": {},
+            "timeout": True,
+            "warning": "Backup inventory query timed out. Try again shortly.",
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Unable to load security backup inventory: {exc}")
+
+    items = list(inventory.get("items") or [])
+    try:
+        vm1_rows = (
+            db.query(Backup)
+            .filter(Backup.status == "Completed")
+            .order_by(Backup.created_at.desc())
+            .limit(200)
+            .all()
+        )
+    except Exception:
+        vm1_rows = []
+
+    vm1_candidates = [row for row in vm1_rows if _is_vm1_database_backup_row(row)]
+    latest_vm1 = vm1_candidates[0] if vm1_candidates else None
+    for row in vm1_candidates:
+        filename = str(getattr(row, "filename", "") or "")
+        created_at = getattr(row, "created_at", None)
+        path = backup_dir() / filename if filename else None
+        items.append({
+            "filename": filename,
+            "label": "vm1_database",
+            "timestamp": created_at.isoformat() if created_at else None,
+            "path": str(path) if path else None,
+            "backup_type": getattr(row, "type", None),
+            "manifest_valid": bool(getattr(row, "checksum", None)),
+            "domains": ["vm1_database"],
+            "domain_validity": {"vm1_database": bool(path and path.exists() and getattr(row, "checksum", None))},
+            "latest_domains": ["vm1_database"] if latest_vm1 is row else [],
+            "is_latest": latest_vm1 is row,
+            "file_count": 1,
+            "size_bytes": int(getattr(row, "size", 0) or 0) if str(getattr(row, "size", "") or "0").isdigit() else None,
+            "checksum": getattr(row, "checksum", None),
+            "db_type": getattr(row, "db_type", None),
+        })
+
+    latest_by_domain = dict(inventory.get("latest_by_domain") or {})
+    if latest_vm1:
+        latest_by_domain["vm1_database"] = str(backup_dir() / latest_vm1.filename)
+    domains = list(dict.fromkeys(list(inventory.get("domains") or []) + ["vm1_database"]))
+    items.sort(key=lambda item: item.get("timestamp") or "", reverse=True)
+    return {
+        **inventory,
+        "domains": domains,
+        "latest_by_domain": latest_by_domain,
+        "items": items,
+    }
+
+
 @router.get("/unread-counts")
 def unread_counts(db: Session = Depends(get_db), admin=Depends(current_admin)):
     try:
@@ -602,17 +738,12 @@ def run_full_scan(request: Request, db: Session = Depends(get_db), admin=Depends
         type="security",
     ))
     db.commit()
-    job_manager._start(job.id)
-    try:
-        detections = _run_scan_all_files_sync(job.id)
-        job_manager._complete(job.id, detections)
-        return {
-            "summary": f"{len(detections)} change(s) found." if detections else "No changes found. All monitored files match the trusted backup.",
-            "detections": [serialize_detection(item) for item in detections],
-        }
-    except Exception as exc:
-        job_manager._fail(job.id, str(exc))
-        raise HTTPException(status_code=500, detail=str(exc))
+    threading.Thread(
+        target=lambda: asyncio.run(job_manager.run(job.id, lambda: _run_scan_background(job.id))),
+        daemon=True,
+        name=f"wards-security-scan-{job.id[:8]}",
+    ).start()
+    return {"job_id": job.id, "status": job.status, "message": "Scan job submitted successfully."}
 
 
 @router.get("/scan/status/{job_id}")
@@ -630,6 +761,11 @@ def scan_status(job_id: str, _=Depends(current_admin)):
         "started_at": job.started_at,
         "completed_at": job.completed_at,
     }
+
+
+@router.get("/jobs/status/{job_id}")
+def security_job_status(job_id: str, _=Depends(current_admin)):
+    return scan_status(job_id, _)
 
 
 @router.get("/scan/result/{job_id}")
@@ -650,214 +786,428 @@ def scan_result(job_id: str, _=Depends(current_admin)):
     }
 
 
+@router.get("/jobs/result/{job_id}")
+def security_job_result(job_id: str, _=Depends(current_admin)):
+    job = job_manager.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    if job.status not in {JobStatus.COMPLETED, JobStatus.FAILED}:
+        raise HTTPException(status_code=400, detail=f"Job still in progress ({job.status}).")
+    if job.status == JobStatus.FAILED:
+        raise HTTPException(status_code=500, detail=job.error)
+    return {
+        "job_id": job.id,
+        "type": job.type,
+        "status": job.status,
+        "result": job.result,
+        "completed_at": job.completed_at,
+    }
+
+
 @router.post("/recover/full")
 def recover_full(request: Request, background_tasks: BackgroundTasks = None, db: Session = Depends(get_db), admin=Depends(current_admin)):
-    def _run_recovery():
+    admin_id = admin.id
+    username = admin.username
+    client_ip = request.client.host if request.client else "unknown"
+
+    def _run_recovery(job_id: str):
         db2 = SessionLocal()
         try:
-            full_system_recovery(db2, admin.id)
+            job_manager.update_progress(job_id, 10, "restoring_vm1_database")
+            latest_vm1 = _latest_vm1_database_backup(db2)
+            if latest_vm1:
+                from utils.backup_engine import backup_dir
+                restore_database_backup(
+                    backup_dir() / latest_vm1.filename,
+                    getattr(latest_vm1, "checksum", None),
+                    getattr(latest_vm1, "db_type", None),
+                )
+            job_manager.update_progress(job_id, 35, "restoring_vm2_domains")
+            result = full_system_recovery(db2, admin_id)
+            db2.add(ActivityLog(
+                action="Security Full System Recovery Completed",
+                user=username,
+                details=f"Full system recovery completed. | IP: {client_ip}",
+                type="security",
+            ))
+            db2.commit()
+            return result
         finally:
             db2.close()
 
-    if background_tasks:
-        background_tasks.add_task(_run_recovery)
-    else:
-        import threading
-        threading.Thread(target=_run_recovery, daemon=True).start()
-
     db.add(ActivityLog(
-        action="Security Full System Recovery",
+        action="Security Full System Recovery Submitted",
         user=admin.username,
-        details=f"Full system recovery triggered. | IP: {request.client.host if request.client else 'unknown'}",
+        details=f"Full system recovery submitted. | IP: {client_ip}",
         type="security",
     ))
     db.commit()
-    return {"status": "processing", "message": "Full system recovery started in the background. Check recovery logs for results."}
+    return _submit_security_job("security_full_recovery", _run_recovery, "Full system recovery started in the background.")
 
 
 @router.post("/recover/vm1-database")
 def recover_vm1_database(request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
-    latest = db.query(Backup).filter(Backup.status == "Completed").order_by(Backup.created_at.desc()).first()
-    if not latest:
-        raise HTTPException(status_code=404, detail="No completed VM1 database backup found.")
-    from utils.backup_engine import backup_dir
-    backup_path = backup_dir() / latest.filename
-    try:
-        restore_database_backup(backup_path, getattr(latest, "checksum", None), getattr(latest, "db_type", None))
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"VM1 database restore failed: {exc}")
+    username = admin.username
+    client_ip = request.client.host if request.client else "unknown"
+
+    def _run(job_id: str):
+        db2 = SessionLocal()
+        try:
+            job_manager.update_progress(job_id, 15, "selecting_vm1_database_backup")
+            latest = _latest_vm1_database_backup(db2)
+            if not latest:
+                raise RuntimeError("No completed VM1 database backup found.")
+            backup_path = backup_dir() / latest.filename
+            job_manager.update_progress(job_id, 35, f"restoring {latest.filename}")
+            restore_database_backup(backup_path, getattr(latest, "checksum", None), getattr(latest, "db_type", None))
+            db2.add(ActivityLog(
+                action="Security VM1 Database Recovery Completed",
+                user=username,
+                details=f"VM1 database restored from {latest.filename}. | IP: {client_ip}",
+                type="security",
+            ))
+            db2.commit()
+            return {"restored": True, "filename": latest.filename}
+        finally:
+            db2.close()
+
     db.add(ActivityLog(
-        action="Security VM1 Database Recovery",
+        action="Security VM1 Database Recovery Submitted",
         user=admin.username,
-        details=f"VM1 database restored from {latest.filename}. | IP: {request.client.host if request.client else 'unknown'}",
+        details=f"VM1 database recovery submitted. | IP: {client_ip}",
         type="security",
     ))
     db.commit()
-    return {"restored": True, "filename": latest.filename}
+    return _submit_security_job("security_vm1_database_recovery", _run, "VM1 database recovery started in the background.")
 
 
 @router.post("/recover/vm2-database")
 def recover_vm2_database(request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
-    event = recover_database(db, admin.id)
+    admin_id = admin.id
+    username = admin.username
+    client_ip = request.client.host if request.client else "unknown"
+
+    def _run(job_id: str):
+        db2 = SessionLocal()
+        try:
+            job_manager.update_progress(job_id, 25, "restoring_vm2_database")
+            event = recover_database(db2, admin_id)
+            db2.add(ActivityLog(
+                action="Security VM2 Database Recovery Completed",
+                user=username,
+                details=f"VM2 database recovery completed. | IP: {client_ip}",
+                type="security",
+            ))
+            db2.commit()
+            return serialize_recovery(event)
+        finally:
+            db2.close()
+
     db.add(ActivityLog(
-        action="Security VM2 Database Recovery",
+        action="Security VM2 Database Recovery Submitted",
         user=admin.username,
-        details=f"VM2 database recovery triggered. | IP: {request.client.host if request.client else 'unknown'}",
+        details=f"VM2 database recovery submitted. | IP: {client_ip}",
         type="security",
     ))
     db.commit()
-    return serialize_recovery(event)
+    return _submit_security_job("security_vm2_database_recovery", _run, "VM2 database recovery started in the background.")
 
 
 @router.post("/recover/files")
 def recover_files_route(request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
-    result = recover_files(db, admin.id)
+    admin_id = admin.id
+    username = admin.username
+    client_ip = request.client.host if request.client else "unknown"
+
+    def _run(job_id: str):
+        db2 = SessionLocal()
+        try:
+            job_manager.update_progress(job_id, 25, "restoring_files")
+            result = recover_files(db2, admin_id)
+            db2.add(ActivityLog(
+                action="Security Files Recovery Completed",
+                user=username,
+                details=f"Files recovery completed. Restored: {result.get('restored', 0)}, Failed: {result.get('failed', 0)}. | IP: {client_ip}",
+                type="security",
+            ))
+            db2.commit()
+            return result
+        finally:
+            db2.close()
+
     db.add(ActivityLog(
-        action="Security Files Recovery",
+        action="Security Files Recovery Submitted",
         user=admin.username,
-        details=f"Files recovery triggered. Restored: {result.get('restored', 0)}, Failed: {result.get('failed', 0)}. | IP: {request.client.host if request.client else 'unknown'}",
+        details=f"Files recovery submitted. | IP: {client_ip}",
         type="security",
     ))
     db.commit()
-    return result
+    return _submit_security_job("security_files_recovery", _run, "Files recovery started in the background.")
 
 
 @router.post("/recover/ml")
 def recover_ml_route(request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
-    event = recover_ml_artifacts(db, admin.id)
+    admin_id = admin.id
+    username = admin.username
+    client_ip = request.client.host if request.client else "unknown"
+
+    def _run(job_id: str):
+        db2 = SessionLocal()
+        try:
+            job_manager.update_progress(job_id, 35, "restoring_ml_artifacts")
+            event = recover_ml_artifacts(db2, admin_id)
+            db2.add(ActivityLog(
+                action="Security ML Recovery Completed",
+                user=username,
+                details=f"ML artifacts recovery completed. | IP: {client_ip}",
+                type="security",
+            ))
+            db2.commit()
+            return serialize_recovery(event)
+        finally:
+            db2.close()
+
     db.add(ActivityLog(
-        action="Security ML Recovery",
+        action="Security ML Recovery Submitted",
         user=admin.username,
-        details=f"ML artifacts recovery triggered. | IP: {request.client.host if request.client else 'unknown'}",
+        details=f"ML artifacts recovery submitted. | IP: {client_ip}",
         type="security",
     ))
     db.commit()
-    return serialize_recovery(event)
+    return _submit_security_job("security_ml_recovery", _run, "ML recovery started in the background.")
 
 
 @router.post("/backup/manual")
 def manual_backup(request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
-    event = create_manual_backup(db, admin.id)
+    admin_id = admin.id
+    username = admin.username
+    client_ip = request.client.host if request.client else "unknown"
+
+    def _run(job_id: str):
+        db2 = SessionLocal()
+        try:
+            job_manager.update_progress(job_id, 20, "creating_manual_backup")
+            event = create_manual_backup(db2, admin_id)
+            db2.add(ActivityLog(
+                action="Security Manual Backup Completed",
+                user=username,
+                details=f"Manual backup completed. | IP: {client_ip}",
+                type="security",
+            ))
+            db2.commit()
+            return serialize_recovery(event)
+        finally:
+            db2.close()
+
     db.add(ActivityLog(
-        action="Security Manual Backup",
+        action="Security Manual Backup Submitted",
         user=admin.username,
-        details=f"Manual backup created. | IP: {request.client.host if request.client else 'unknown'}",
+        details=f"Manual backup submitted. | IP: {client_ip}",
         type="security",
     ))
     db.commit()
-    return serialize_recovery(event)
+    return _submit_security_job("security_manual_backup", _run, "Manual backup started in the background.")
 
 
 @router.post("/backup/vm1-database")
 def backup_vm1_database(request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
-    try:
-        result = create_vm1_database_backup()
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"VM1 database backup failed: {exc}")
-    backup = Backup(
-        filename=result.filename,
-        size=str(result.size_bytes),
-        type="Security VM1 Manual",
-        status="Completed",
-        checksum=result.checksum,
-        db_type=result.db_type,
-        retention_days=30,
-    )
-    db.add(backup)
+    username = admin.username
+    client_ip = request.client.host if request.client else "unknown"
+
+    def _run(job_id: str):
+        db2 = SessionLocal()
+        try:
+            job_manager.update_progress(job_id, 20, "dumping_vm1_database")
+            result = create_vm1_database_backup()
+            backup = Backup(
+                filename=result.filename,
+                size=str(result.size_bytes),
+                type="Security VM1 Manual",
+                status="Completed",
+                checksum=result.checksum,
+                db_type=result.db_type,
+                retention_days=30,
+            )
+            db2.add(backup)
+            db2.add(ActivityLog(
+                action="Security VM1 Database Backup Completed",
+                user=username,
+                details=f"VM1 database backup created: {result.filename}; Size: {result.size_bytes}; Checksum: {result.checksum}. | IP: {client_ip}",
+                type="security",
+            ))
+            db2.commit()
+            _prune_vm1_database_backup_rows(db2)
+            db2.refresh(backup)
+            return {
+                "id": backup.id,
+                "filename": result.filename,
+                "size_bytes": result.size_bytes,
+                "checksum": result.checksum,
+                "db_type": result.db_type,
+                "status": "Completed",
+            }
+        finally:
+            db2.close()
+
     db.add(ActivityLog(
-        action="Security VM1 Database Backup",
+        action="Security VM1 Database Backup Submitted",
         user=admin.username,
-        details=f"VM1 database backup created: {result.filename}; Size: {result.size_bytes}; Checksum: {result.checksum}. | IP: {request.client.host if request.client else 'unknown'}",
+        details=f"VM1 database backup submitted. | IP: {client_ip}",
         type="security",
     ))
     db.commit()
-    db.refresh(backup)
-    return {
-        "id": backup.id,
-        "filename": result.filename,
-        "size_bytes": result.size_bytes,
-        "checksum": result.checksum,
-        "db_type": result.db_type,
-        "status": "Completed",
-    }
+    return _submit_security_job("security_vm1_database_backup", _run, "VM1 database backup started in the background.")
 
 
 @router.post("/backup/vm2-database")
 def backup_vm2_database(request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
-    event = create_database_backup(db, admin.id)
+    admin_id = admin.id
+    username = admin.username
+    client_ip = request.client.host if request.client else "unknown"
+
+    def _run(job_id: str):
+        db2 = SessionLocal()
+        try:
+            job_manager.update_progress(job_id, 25, "creating_vm2_database_backup")
+            event = create_database_backup(db2, admin_id)
+            db2.add(ActivityLog(
+                action="Security VM2 Database Backup Completed",
+                user=username,
+                details=f"VM2 database backup completed. | IP: {client_ip}",
+                type="security",
+            ))
+            db2.commit()
+            return serialize_recovery(event)
+        finally:
+            db2.close()
+
     db.add(ActivityLog(
-        action="Security VM2 Database Backup",
+        action="Security VM2 Database Backup Submitted",
         user=admin.username,
-        details=f"VM2 database backup created. | IP: {request.client.host if request.client else 'unknown'}",
+        details=f"VM2 database backup submitted. | IP: {client_ip}",
         type="security",
     ))
     db.commit()
-    return serialize_recovery(event)
+    return _submit_security_job("security_vm2_database_backup", _run, "VM2 database backup started in the background.")
 
 
 @router.post("/backup/files")
 def backup_files(request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
-    event = create_files_backup(db, admin.id)
+    admin_id = admin.id
+    username = admin.username
+    client_ip = request.client.host if request.client else "unknown"
+
+    def _run(job_id: str):
+        db2 = SessionLocal()
+        try:
+            job_manager.update_progress(job_id, 25, "creating_files_backup")
+            event = create_files_backup(db2, admin_id)
+            db2.add(ActivityLog(
+                action="Security Files Backup Completed",
+                user=username,
+                details=f"Files backup completed. | IP: {client_ip}",
+                type="security",
+            ))
+            db2.commit()
+            return serialize_recovery(event)
+        finally:
+            db2.close()
+
     db.add(ActivityLog(
-        action="Security Files Backup",
+        action="Security Files Backup Submitted",
         user=admin.username,
-        details=f"Files backup created. | IP: {request.client.host if request.client else 'unknown'}",
+        details=f"Files backup submitted. | IP: {client_ip}",
         type="security",
     ))
     db.commit()
-    return serialize_recovery(event)
+    return _submit_security_job("security_files_backup", _run, "Files backup started in the background.")
 
 
 @router.post("/backup/ml")
 def backup_ml(request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
-    event = create_ml_backup(db, admin.id)
+    admin_id = admin.id
+    username = admin.username
+    client_ip = request.client.host if request.client else "unknown"
+
+    def _run(job_id: str):
+        db2 = SessionLocal()
+        try:
+            job_manager.update_progress(job_id, 35, "creating_ml_backup")
+            event = create_ml_backup(db2, admin_id)
+            db2.add(ActivityLog(
+                action="Security ML Backup Completed",
+                user=username,
+                details=f"ML backup completed. | IP: {client_ip}",
+                type="security",
+            ))
+            db2.commit()
+            return serialize_recovery(event)
+        finally:
+            db2.close()
+
     db.add(ActivityLog(
-        action="Security ML Backup",
+        action="Security ML Backup Submitted",
         user=admin.username,
-        details=f"ML backup created. | IP: {request.client.host if request.client else 'unknown'}",
+        details=f"ML backup submitted. | IP: {client_ip}",
         type="security",
     ))
     db.commit()
-    return serialize_recovery(event)
+    return _submit_security_job("security_ml_backup", _run, "ML backup started in the background.")
 
 
 @router.post("/backup/full")
 def backup_full(request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
-    # VM1 DB backup
-    try:
-        vm1_result = create_vm1_database_backup()
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"VM1 database backup failed: {exc}")
-    vm1_backup = Backup(
-        filename=vm1_result.filename,
-        size=str(vm1_result.size_bytes),
-        type="Security Full VM1",
-        status="Completed",
-        checksum=vm1_result.checksum,
-        db_type=vm1_result.db_type,
-        retention_days=30,
-    )
-    db.add(vm1_backup)
-    # VM2 full system backup
-    event = create_full_system_backup(db, admin.id)
-    vm2_event_id = event.get("id") if isinstance(event, dict) else getattr(event, "id", None)
+    admin_id = admin.id
+    username = admin.username
+    client_ip = request.client.host if request.client else "unknown"
+
+    def _run(job_id: str):
+        db2 = SessionLocal()
+        try:
+            job_manager.update_progress(job_id, 15, "dumping_vm1_database")
+            vm1_result = create_vm1_database_backup()
+            vm1_backup = Backup(
+                filename=vm1_result.filename,
+                size=str(vm1_result.size_bytes),
+                type="Security Full VM1",
+                status="Completed",
+                checksum=vm1_result.checksum,
+                db_type=vm1_result.db_type,
+                retention_days=30,
+            )
+            db2.add(vm1_backup)
+            job_manager.update_progress(job_id, 45, "creating_vm2_full_backup")
+            event = create_full_system_backup(db2, admin_id)
+            vm2_event_id = event.get("id") if isinstance(event, dict) else getattr(event, "id", None)
+            db2.add(ActivityLog(
+                action="Security Full System Backup Completed",
+                user=username,
+                details=f"Full system backup completed. VM1: {vm1_result.filename}; VM2: Backup #{vm2_event_id}. | IP: {client_ip}",
+                type="security",
+            ))
+            db2.commit()
+            _prune_vm1_database_backup_rows(db2)
+            db2.refresh(vm1_backup)
+            return {
+                "vm1": {
+                    "id": vm1_backup.id,
+                    "filename": vm1_result.filename,
+                    "size_bytes": vm1_result.size_bytes,
+                    "checksum": vm1_result.checksum,
+                },
+                "vm2": serialize_recovery(event),
+            }
+        finally:
+            db2.close()
+
     db.add(ActivityLog(
-        action="Security Full System Backup",
+        action="Security Full System Backup Submitted",
         user=admin.username,
-        details=f"Full system backup created. VM1: {vm1_result.filename}; VM2: Backup #{vm2_event_id}. | IP: {request.client.host if request.client else 'unknown'}",
+        details=f"Full system backup submitted. | IP: {client_ip}",
         type="security",
     ))
     db.commit()
-    db.refresh(vm1_backup)
-    return {
-        "vm1": {
-            "id": vm1_backup.id,
-            "filename": vm1_result.filename,
-            "size_bytes": vm1_result.size_bytes,
-            "checksum": vm1_result.checksum,
-        },
-        "vm2": serialize_recovery(event),
-    }
+    return _submit_security_job("security_full_backup", _run, "Full system backup started in the background.")
 
 
 @router.post("/backup/schedule")
@@ -1005,6 +1355,11 @@ def folder_browser(path: str | None = Query(None), _=Depends(current_admin)):
 @router.post("/ai/retrain")
 def manual_ai_retrain(db: Session = Depends(get_db), admin=Depends(current_admin)):
     return retrain_ai(db, admin.username)
+
+
+@router.post("/ai/seed-initial-training")
+def manual_ai_seed_initial_training(payload: dict = {}, db: Session = Depends(get_db), admin=Depends(current_admin)):
+    return seed_initial_ai_training(db, admin.username, force=bool(payload.get("force", False)))
 
 
 @router.get("/ai/weekly-data")

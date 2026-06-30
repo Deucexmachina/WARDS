@@ -495,7 +495,7 @@ class TestProcessVm1ManifestNormalizesCustomPrefix:
         )
         monkeypatch.setattr(
             "SECURITY.security_engine.now_utc",
-            lambda: None,
+            lambda: __import__("datetime").datetime(2026, 6, 30),
         )
 
         result = process_vm1_file_manifest(db, files)
@@ -503,3 +503,40 @@ class TestProcessVm1ManifestNormalizesCustomPrefix:
         assert call_args.folder_root == "SIGMA"
         assert call_args.relative_path == "SIGMA/config.txt"
         assert call_args.file_path == "vm1://SIGMA/config.txt"
+
+    def test_deployment_manifest_marks_baseline_ready_for_target_commit(self, monkeypatch):
+        from SECURITY.security_engine import process_vm1_file_manifest
+
+        settings = {}
+        db = MagicMock()
+        db.query.return_value.filter.return_value.filter.return_value.first.return_value = None
+
+        monkeypatch.setattr("SECURITY.security_engine.is_deployment_in_progress", lambda _db: True)
+        monkeypatch.setattr("SECURITY.security_engine.load_vm1_monitored_folders", lambda _db: [Path("/opt/wards/app/WARDS")])
+        monkeypatch.setattr("SECURITY.security_engine.file_type", lambda _path: "py")
+        monkeypatch.setattr("SECURITY.security_engine.now_utc", lambda: __import__("datetime").datetime(2026, 6, 30))
+        monkeypatch.setattr("SECURITY.security_engine._store_vm1_snapshot", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr("SECURITY.security_engine.get_setting", lambda _db, key, default="": settings.get(key, default))
+
+        def fake_set_setting(_db, key, value, _actor):
+            settings[key] = value
+
+        monkeypatch.setattr("SECURITY.security_engine.set_setting", fake_set_setting)
+        settings["deployment_target_commit"] = "abc123"
+
+        result = process_vm1_file_manifest(
+            db,
+            [
+                {
+                    "relative_path": "WARDS/backend/main.py",
+                    "folder_root": "VM1_WARDS",
+                    "current_hash": "a" * 64,
+                    "size_bytes": 100,
+                }
+            ],
+            deployment_commit="abc123",
+        )
+
+        assert result["deployment_vm1_baseline_ready"] is True
+        assert settings["deployment_vm1_baseline_ready"] == "true"
+        assert settings["vm1_last_manifest_commit"] == "abc123"

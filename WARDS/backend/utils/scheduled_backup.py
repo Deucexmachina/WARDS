@@ -27,7 +27,7 @@ def start_scheduled_backup_runner():
 
 def _scheduled_backup_loop():
     from database.models import SessionLocal, Backup, ActivityLog
-    from utils.backup_engine import create_database_backup as create_vm1_database_backup
+    from utils.backup_engine import create_database_backup as create_vm1_database_backup, prune_database_backup_records
     from utils.security_client import get_setting, set_setting, create_full_system_backup
 
     _running = False
@@ -117,6 +117,8 @@ def _scheduled_backup_loop():
                 type="security",
             ))
             db.commit()
+            if vm1_result:
+                prune_database_backup_records(db, Backup)
 
             # Calculate next run
             frequency = schedule.get("frequency", "weekly")

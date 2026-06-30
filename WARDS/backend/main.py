@@ -1740,6 +1740,61 @@ from utils.scheduled_backup import start_scheduled_backup_runner
 start_scheduled_backup_runner()
 
 
+def start_vm1_database_startup_baseline_if_configured():
+    deployed = (os.getenv("SECURITY_DEPLOYMENT_MODE") or "development").strip().lower() == "deployed"
+    security_api_url = os.getenv("SECURITY_API_URL", "").strip()
+    enabled = (os.getenv("SECURITY_VM1_STARTUP_DB_BACKUP_ENABLED") or "true").strip().lower() == "true"
+    if not (deployed and security_api_url and enabled):
+        return
+
+    def _run():
+        # Give the database container and migrations a moment to settle after
+        # docker compose restarts VM1 during deployment.
+        time.sleep(max(0, int(os.getenv("SECURITY_VM1_STARTUP_DB_BACKUP_DELAY", "15"))))
+        try:
+            from database.models import ActivityLog, Backup
+            from utils.backup_engine import create_database_backup as create_vm1_database_backup, prune_database_backup_records
+
+            db = SessionLocal()
+            try:
+                recent = (
+                    db.query(Backup)
+                    .filter(Backup.type == "Startup Baseline VM1")
+                    .order_by(Backup.created_at.desc())
+                    .first()
+                )
+                if recent and recent.created_at and (datetime.now() - recent.created_at) < timedelta(minutes=10):
+                    return
+                result = create_vm1_database_backup()
+                db.add(Backup(
+                    filename=result.filename,
+                    size=str(result.size_bytes),
+                    type="Startup Baseline VM1",
+                    status="Completed",
+                    checksum=result.checksum,
+                    db_type=result.db_type,
+                    retention_days=30,
+                ))
+                db.add(ActivityLog(
+                    action="Security VM1 Startup Baseline Backup",
+                    user="system",
+                    details=f"VM1 database startup baseline created: {result.filename}; Checksum: {result.checksum}.",
+                    type="security",
+                ))
+                db.commit()
+                prune_database_backup_records(db, Backup)
+                print(f"[SCHEDULED BACKUP] VM1 startup baseline DB backup created: {result.filename}")
+            finally:
+                db.close()
+        except Exception as exc:
+            print(f"[SCHEDULED BACKUP] VM1 startup baseline DB backup skipped: {exc}")
+
+    threading.Thread(target=_run, daemon=True, name="wards-vm1-startup-db-backup").start()
+
+
+start_vm1_database_startup_baseline_if_configured()
+
+
 @app.on_event("shutdown")
 def stop_database_runtime_monitoring():
     deployed = (os.getenv("SECURITY_DEPLOYMENT_MODE") or "development").strip().lower() == "deployed"

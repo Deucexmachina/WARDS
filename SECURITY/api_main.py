@@ -37,12 +37,15 @@ from SECURITY.security_engine import (
     add_ai_rule,
     available_ai_rule_templates,
     retrain_ai,
+    seed_initial_ai_training,
+    ml_anomaly_score,
     weekly_ai_behavior_data,
     create_manual_backup,
     create_database_backup,
     create_files_backup,
     create_ml_backup,
     create_full_system_backup,
+    list_backup_inventory,
     set_backup_location,
     full_system_recovery,
     recover_database,
@@ -307,6 +310,20 @@ def api_ai_retrain(payload: dict = {}, db=Depends(get_db)):
     return retrain_ai(db, payload.get("actor", "api"))
 
 
+@app.post("/v1/ai/seed-initial-training", dependencies=[Depends(require_api_key)])
+def api_ai_seed_initial_training(payload: dict = {}, db=Depends(get_db)):
+    return seed_initial_ai_training(
+        db,
+        payload.get("actor", "api"),
+        force=bool(payload.get("force", False)),
+    )
+
+
+@app.post("/v1/ai/ml-score", dependencies=[Depends(require_api_key)])
+def api_ai_ml_score(payload: dict = {}, db=Depends(get_db)):
+    return {"ml_anomaly_score": ml_anomaly_score(payload)}
+
+
 @app.get("/v1/ai/weekly-data", dependencies=[Depends(require_api_key)])
 def api_ai_weekly(db=Depends(get_db)):
     return weekly_ai_behavior_data(db)
@@ -470,7 +487,7 @@ def on_shutdown():
 @app.post("/v1/vm1/files/register", dependencies=[Depends(require_api_key)])
 def api_vm1_files_register(payload: dict = {}, db=Depends(get_db)):
     from SECURITY.security_engine import process_vm1_file_manifest
-    return process_vm1_file_manifest(db, payload.get("files", []))
+    return process_vm1_file_manifest(db, payload.get("files", []), deployment_commit=payload.get("commit"))
 
 
 @app.post("/v1/vm1/heartbeat", dependencies=[Depends(require_api_key)])
@@ -526,6 +543,12 @@ def api_backup_location(payload: dict = {}, db=Depends(get_db)):
         payload.get("delete_previous", False),
         payload.get("actor"),
     )
+
+
+@app.get("/v1/backup/inventory", dependencies=[Depends(require_api_key)])
+@rate_limit("backup_inventory", max_requests=20, window_seconds=60)
+def api_backup_inventory(db=Depends(get_db)):
+    return list_backup_inventory(db)
 
 
 @app.post("/v1/recover/full", dependencies=[Depends(require_api_key)])
@@ -796,9 +819,13 @@ def api_mark_stale(db=Depends(get_db)):
 # ---------------------------------------------------------------------------
 @app.post("/internal/deployment-mode", dependencies=[Depends(require_api_key)])
 def api_deployment_mode(payload: dict = {}, db: Session = Depends(get_db)):
-    from SECURITY.security_engine import set_deployment_mode
+    from SECURITY.security_engine import set_deployment_mode, set_setting
     in_progress = payload.get("in_progress", False)
     set_deployment_mode(db, in_progress, updated_by="webhook")
+    target_commit = str(payload.get("target_commit") or "").strip()
+    if in_progress and target_commit:
+        set_setting(db, "deployment_target_commit", target_commit, "webhook")
+        set_setting(db, "deployment_vm1_baseline_ready", "false", "webhook")
     return {"deployment_in_progress": in_progress}
 
 
@@ -867,8 +894,9 @@ def api_internal_deploy(request: Request = None):
 
 
 @app.get("/internal/deploy-status", dependencies=[Depends(require_api_key)])
-def api_internal_deploy_status():
+def api_internal_deploy_status(db: Session = Depends(get_db)):
     import subprocess
+    from SECURITY.security_engine import get_setting, is_deployment_in_progress
     app_dir = os.getenv("VM2_APP_DIR", "/opt/wards/security/app")
     commit = "unknown"
     try:
@@ -881,7 +909,16 @@ def api_internal_deploy_status():
                 commit = result.stdout.strip()
     except Exception:
         pass
-    return {"vm": "vm2", "commit": commit, "deploy_dir": app_dir}
+    return {
+        "vm": "vm2",
+        "commit": commit,
+        "deploy_dir": app_dir,
+        "deployment_in_progress": is_deployment_in_progress(db),
+        "deployment_target_commit": get_setting(db, "deployment_target_commit", ""),
+        "deployment_vm1_baseline_ready": (get_setting(db, "deployment_vm1_baseline_ready", "false") or "false").lower() == "true",
+        "vm1_last_manifest_commit": get_setting(db, "vm1_last_manifest_commit", ""),
+        "vm1_last_manifest_at": get_setting(db, "vm1_last_manifest_at", ""),
+    }
 
 
 @app.post("/v1/admin/clear-all-logs", dependencies=[Depends(require_api_key), Depends(require_admin_secret)])
