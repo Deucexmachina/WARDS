@@ -21,6 +21,14 @@ const recoveryDomainLabels = {
   vm2_database: 'VM2 DB',
   ai_ml_assets: 'ML',
 };
+const backupInventorySortOptions = [
+  { value: 'timestamp', label: 'Timestamp' },
+  { value: 'filename', label: 'Filename' },
+  { value: 'label', label: 'Label' },
+  { value: 'domains', label: 'Domains' },
+  { value: 'latest', label: 'Latest for' },
+  { value: 'status', label: 'Status' },
+];
 const FILE_PAGE_SIZE = 10;
 const buttonBase = 'inline-flex items-center justify-center rounded-lg px-4 py-2.5 text-sm font-semibold shadow-sm transition focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60';
 const buttonStyles = {
@@ -310,6 +318,49 @@ const FolderPicker = ({ picker, onClose, onSelect, onOpen }) => {
 };
 
 const BackupInventoryModal = ({ open, inventory, onClose }) => {
+  const [sort, setSort] = useState({ key: 'timestamp', direction: 'desc' });
+  const items = useMemo(() => {
+    const valueFor = (item) => {
+      if (sort.key === 'timestamp') return item.timestamp ? new Date(item.timestamp).getTime() : 0;
+      if (sort.key === 'label') return String(item.label || item.backup_type || 'unknown').toLowerCase();
+      if (sort.key === 'domains') return (item.domains || []).map((domain) => recoveryDomainLabels[domain] || domain).join(', ').toLowerCase();
+      if (sort.key === 'latest') return (item.latest_domains || []).length
+        ? (item.latest_domains || []).map((domain) => recoveryDomainLabels[domain] || domain).join(', ').toLowerCase()
+        : 'older';
+      if (sort.key === 'status') return item.manifest_valid ? 'verified' : 'unverified';
+      return String(item.filename || '').toLowerCase();
+    };
+    return [...(inventory?.items || [])].sort((left, right) => {
+      const leftValue = valueFor(left);
+      const rightValue = valueFor(right);
+      let result = typeof leftValue === 'number'
+        ? leftValue - rightValue
+        : String(leftValue).localeCompare(String(rightValue));
+      if (result === 0) {
+        result = String(left.filename || '').localeCompare(String(right.filename || ''));
+      }
+      return sort.direction === 'asc' ? result : -result;
+    });
+  }, [inventory?.items, sort]);
+
+  const changeSort = (key) => {
+    setSort((current) => ({
+      key,
+      direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc',
+    }));
+  };
+
+  const SortHeader = ({ column, children }) => (
+    <button
+      type="button"
+      className="inline-flex items-center gap-1 font-bold uppercase tracking-[0.12em] text-slate-500 transition hover:text-primary"
+      onClick={() => changeSort(column)}
+    >
+      {children}
+      {sort.key === column && <span className="text-primary">{sort.direction === 'asc' ? '^' : 'v'}</span>}
+    </button>
+  );
+
   if (!open) return null;
 
   return (
@@ -320,7 +371,7 @@ const BackupInventoryModal = ({ open, inventory, onClose }) => {
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Backup inventory</p>
               <h3 className="mt-2 text-xl font-bold text-slate-900">Saved backups</h3>
-              <p className="mt-1 text-sm text-slate-600">{(inventory?.items || []).length} backup(s) found.</p>
+              <p className="mt-1 text-sm text-slate-600">{items.length} backup(s) found.</p>
             </div>
             <button className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-700" onClick={onClose}>Close</button>
           </div>
@@ -332,23 +383,42 @@ const BackupInventoryModal = ({ open, inventory, onClose }) => {
               {inventory.warning || 'Backup inventory query timed out. Try again shortly.'}
             </div>
           )}
+          <div className="mb-4 grid gap-3 md:grid-cols-[1fr_auto_auto] md:items-center">
+            <div className="text-sm text-slate-600">
+              Sorting by <span className="font-semibold text-slate-900">{backupInventorySortOptions.find((option) => option.value === sort.key)?.label || 'Timestamp'}</span>
+            </div>
+            <select
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+              value={sort.key}
+              onChange={(event) => setSort((current) => ({ ...current, key: event.target.value }))}
+            >
+              {backupInventorySortOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+            <button
+              type="button"
+              className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-200"
+              onClick={() => setSort((current) => ({ ...current, direction: current.direction === 'asc' ? 'desc' : 'asc' }))}
+            >
+              {sort.direction === 'asc' ? 'Ascending' : 'Descending'}
+            </button>
+          </div>
           <div className="overflow-auto rounded-xl border border-slate-200">
             <table className="min-w-[58rem] divide-y divide-slate-100 text-sm">
               <thead className="sticky top-0 bg-white text-left text-xs uppercase tracking-[0.12em] text-slate-500">
                 <tr>
-                  <th className="px-3 py-2">Filename</th>
-                  <th className="px-3 py-2">Label</th>
-                  <th className="px-3 py-2">Timestamp</th>
-                  <th className="px-3 py-2">Domains</th>
-                  <th className="px-3 py-2">Latest for</th>
-                  <th className="px-3 py-2">Status</th>
+                  <th className="px-3 py-2"><SortHeader column="filename">Filename</SortHeader></th>
+                  <th className="px-3 py-2"><SortHeader column="label">Label</SortHeader></th>
+                  <th className="px-3 py-2"><SortHeader column="timestamp">Timestamp</SortHeader></th>
+                  <th className="px-3 py-2"><SortHeader column="domains">Domains</SortHeader></th>
+                  <th className="px-3 py-2"><SortHeader column="latest">Latest for</SortHeader></th>
+                  <th className="px-3 py-2"><SortHeader column="status">Status</SortHeader></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {(inventory?.items || []).length === 0 && (
+                {items.length === 0 && (
                   <tr><td className="px-3 py-4 text-slate-500" colSpan={6}>No backups found.</td></tr>
                 )}
-                {(inventory?.items || []).map((item, index) => (
+                {items.map((item, index) => (
                   <tr key={`${item.path || item.filename}-${index}`} className="align-top">
                     <td className="max-w-[22rem] break-all px-3 py-2 font-semibold text-slate-800">{item.filename || 'Unknown'}</td>
                     <td className="px-3 py-2 text-slate-600">{item.label || item.backup_type || 'unknown'}</td>
