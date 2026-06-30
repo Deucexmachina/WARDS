@@ -25,7 +25,7 @@ from auth import get_current_admin_from_token
 from utils.background_jobs import job_manager, JobStatus
 from middleware.dos_protection import get_blocked_ips, unblock_ip, block_ip, account_rate_limit_state, record_rate_limit_detection
 from services.ip_reputation import get_permanent_blocks, add_permanent_block, remove_permanent_block, check_ip_reputation
-from utils.backup_engine import create_database_backup as create_vm1_database_backup, restore_database_backup
+from utils.backup_engine import backup_dir, create_database_backup as create_vm1_database_backup, restore_database_backup
 from utils.security_client import (
     SECURITY_API_URL,
     active_monitored_files_query,
@@ -41,6 +41,7 @@ from utils.security_client import (
     current_hash_index,
     dashboard_payload,
     full_system_recovery,
+    list_backup_inventory,
     recover_database,
     recover_files,
     recover_ml_artifacts,
@@ -79,6 +80,7 @@ from utils.security_client import (
     set_ai_sensitivity,
     set_backup_location,
     set_setting,
+    seed_initial_ai_training,
     source_ids_for_log_type,
     source_ids_batch,
     update_ai_rules,
@@ -458,6 +460,65 @@ def backup_history(
         return _paginate(items, page, page_size)
     except Exception:
         return _paginate([], page, page_size)
+
+
+@router.get("/backups/inventory")
+def backup_inventory(db: Session = Depends(get_db), admin=Depends(current_admin)):
+    try:
+        inventory = list_backup_inventory(db) or {}
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Unable to load security backup inventory: {exc}")
+
+    items = list(inventory.get("items") or [])
+    try:
+        vm1_rows = (
+            db.query(Backup)
+            .filter(Backup.status == "Completed")
+            .order_by(Backup.created_at.desc())
+            .limit(200)
+            .all()
+        )
+    except Exception:
+        vm1_rows = []
+
+    vm1_candidates = [
+        row for row in vm1_rows
+        if "vm1" in str(getattr(row, "type", "") or "").lower()
+        or str(getattr(row, "filename", "") or "").startswith("database_")
+    ]
+    latest_vm1 = vm1_candidates[0] if vm1_candidates else None
+    for row in vm1_candidates:
+        filename = str(getattr(row, "filename", "") or "")
+        created_at = getattr(row, "created_at", None)
+        path = backup_dir() / filename if filename else None
+        items.append({
+            "filename": filename,
+            "label": "vm1_database",
+            "timestamp": created_at.isoformat() if created_at else None,
+            "path": str(path) if path else None,
+            "backup_type": getattr(row, "type", None),
+            "manifest_valid": bool(getattr(row, "checksum", None)),
+            "domains": ["vm1_database"],
+            "domain_validity": {"vm1_database": bool(path and path.exists() and getattr(row, "checksum", None))},
+            "latest_domains": ["vm1_database"] if latest_vm1 is row else [],
+            "is_latest": latest_vm1 is row,
+            "file_count": 1,
+            "size_bytes": int(getattr(row, "size", 0) or 0) if str(getattr(row, "size", "") or "0").isdigit() else None,
+            "checksum": getattr(row, "checksum", None),
+            "db_type": getattr(row, "db_type", None),
+        })
+
+    latest_by_domain = dict(inventory.get("latest_by_domain") or {})
+    if latest_vm1:
+        latest_by_domain["vm1_database"] = str(backup_dir() / latest_vm1.filename)
+    domains = list(dict.fromkeys(list(inventory.get("domains") or []) + ["vm1_database"]))
+    items.sort(key=lambda item: item.get("timestamp") or "", reverse=True)
+    return {
+        **inventory,
+        "domains": domains,
+        "latest_by_domain": latest_by_domain,
+        "items": items,
+    }
 
 
 @router.get("/unread-counts")
@@ -1038,6 +1099,11 @@ def folder_browser(path: str | None = Query(None), _=Depends(current_admin)):
 @router.post("/ai/retrain")
 def manual_ai_retrain(db: Session = Depends(get_db), admin=Depends(current_admin)):
     return retrain_ai(db, admin.username)
+
+
+@router.post("/ai/seed-initial-training")
+def manual_ai_seed_initial_training(payload: dict = {}, db: Session = Depends(get_db), admin=Depends(current_admin)):
+    return seed_initial_ai_training(db, admin.username, force=bool(payload.get("force", False)))
 
 
 @router.get("/ai/weekly-data")

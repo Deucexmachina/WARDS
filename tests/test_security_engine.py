@@ -20,8 +20,10 @@ from SECURITY.security_engine import (
     backup_folder_sort_key,
     build_feature_vector,
     compute_profile_confidence,
+    content_flags,
     full_system_recovery,
     load_isolation_forest_metadata,
+    list_backup_inventory,
     ml_anomaly_score,
     newest_valid_backup_for_domain,
     newest_valid_backup_for_path,
@@ -29,6 +31,8 @@ from SECURITY.security_engine import (
     prune_backup_type,
     restore_ml_artifacts_from_backup,
     retrain_ai,
+    seed_initial_ai_training,
+    set_backup_location,
     should_create_incident,
     scan_single_file,
     train_isolation_forest,
@@ -492,6 +496,183 @@ def test_ai_predict_fallback_without_ml_model(monkeypatch):
     assert 0.0 <= result.score <= 1.0
     assert 0.0 <= result.confidence <= 1.0
     assert result.basis
+
+
+def test_disabled_ai_rule_suppresses_matching_flag():
+    rules = {
+        **{key: {**value} for key, value in __import__("SECURITY.security_engine", fromlist=["DEFAULT_AI_RULES"]).DEFAULT_AI_RULES.items()},
+        "suspicious_pattern_score": {"enabled": False, "config": {}},
+    }
+
+    flags = content_flags("<script>alert('x')</script>", {"ai_rules": rules}, path=Path("index.html"))
+
+    assert "script_injection" not in flags
+
+
+def test_content_flags_uses_enriched_event_time(monkeypatch):
+    monkeypatch.setattr("SECURITY.security_engine.now_utc", lambda: datetime(2026, 6, 28, 22, 0, 0))
+
+    flags = content_flags(
+        "normal content",
+        {"hour_of_day": 14, "day_of_week": 1},
+        path=Path("notes.txt"),
+    )
+
+    assert "after_hours" not in flags
+    assert "weekend_activity" not in flags
+
+
+def test_content_flags_includes_path_based_ai_flags():
+    flags = content_flags(
+        "print('login update')",
+        {"hour_of_day": 14, "day_of_week": 1, "method_legitimate": False},
+        path=Path("WARDS/backend/auth/login.py"),
+    )
+
+    assert "unauthorized_admin_path" in flags
+    assert "auth_system_modification" in flags
+
+
+def test_disabled_path_ai_rule_suppresses_matching_flag():
+    defaults = __import__("SECURITY.security_engine", fromlist=["DEFAULT_AI_RULES"]).DEFAULT_AI_RULES
+    rules = {
+        **{key: {**value} for key, value in defaults.items()},
+        "auth_system_modification": {**defaults["auth_system_modification"], "enabled": False},
+    }
+
+    flags = content_flags(
+        "print('login update')",
+        {"ai_rules": rules, "hour_of_day": 14, "day_of_week": 1, "method_legitimate": False},
+        path=Path("WARDS/backend/auth/login.py"),
+    )
+
+    assert "auth_system_modification" not in flags
+    assert "unauthorized_admin_path" in flags
+
+
+def test_content_flags_include_context_threshold_flags():
+    flags = content_flags(
+        "new safe content",
+        {
+            "hour_of_day": 14,
+            "day_of_week": 1,
+            "admin_action_rarity_score": 0.9,
+            "restore_count": 3,
+            "backup_integrity_valid": False,
+            "content_similarity_score": 0.2,
+            "affected_files_count": 3,
+        },
+        path=Path("WARDS/backend/main.py"),
+    )
+
+    assert "admin_action_rarity" in flags
+    assert "restore_frequency" in flags
+    assert "backup_integrity_validation" in flags
+    assert "content_similarity_score" in flags
+    assert "affected_files_count" in flags
+
+
+def test_ai_predict_shares_similarity_flag_context_with_callers():
+    context = {"hour_of_day": 14, "day_of_week": 1}
+
+    ai_predict(Path("WARDS/backend/main.py"), "original application content", "x", context)
+    flags = content_flags("x", context, path=Path("WARDS/backend/main.py"))
+
+    assert "content_similarity_score" in flags
+
+
+def test_list_backup_inventory_marks_latest_domain(monkeypatch, tmp_path):
+    older = tmp_path / "manual_backup_20260101_010101"
+    newer = tmp_path / "manual_backup_20260102_010101"
+    older_file = older / "WARDS" / "backend" / "old.py"
+    newer_file = newer / "WARDS" / "backend" / "new.py"
+    older_file.parent.mkdir(parents=True)
+    newer_file.parent.mkdir(parents=True)
+    older_file.write_text("old", encoding="utf-8")
+    newer_file.write_text("new", encoding="utf-8")
+    write_backup_manifest(older)
+    write_backup_manifest(newer)
+
+    monkeypatch.setattr("SECURITY.security_engine.all_backup_roots", lambda _db: [newer, older])
+    monkeypatch.setattr("SECURITY.security_engine.newest_valid_backup_for_domain", lambda _db, domain: newer if domain == RECOVERY_DOMAIN_FILES else None)
+
+    inventory = list_backup_inventory(object())
+
+    assert inventory["items"][0]["filename"] == newer.name
+    assert RECOVERY_DOMAIN_FILES in inventory["items"][0]["latest_domains"]
+
+
+def test_set_backup_location_skips_deleting_parent_of_new_location(monkeypatch, tmp_path):
+    previous = tmp_path / "old_backups"
+    target = previous / "nested_new_backups"
+    previous.mkdir()
+    (previous / "keep.txt").write_text("keep", encoding="utf-8")
+    settings = {}
+
+    monkeypatch.setattr("SECURITY.security_engine.get_setting", lambda *_args, **_kwargs: str(previous))
+    monkeypatch.setattr("SECURITY.security_engine.set_setting", lambda _db, key, value, _actor: settings.__setitem__(key, value))
+    monkeypatch.setattr("SECURITY.security_engine.create_manual_backup", lambda *_args, **_kwargs: SimpleNamespace(id=123))
+
+    result = set_backup_location(object(), str(target), True, "test")
+
+    assert previous.exists()
+    assert target.exists()
+    assert result["previous_deleted"] is False
+    assert result["deletion_skipped_reason"] == "new backup location is inside the previous backup location"
+    assert settings["backup_location"]
+
+
+def test_seed_initial_ai_training_runs_once(monkeypatch, tmp_path):
+    settings = {"ai_initial_training_seeded": "false"}
+    captured_logs = []
+
+    class Query:
+        def filter(self, *_args, **_kwargs):
+            return self
+
+        def first(self):
+            return None
+
+    class Db:
+        def query(self, _model):
+            return Query()
+
+        def add(self, _obj):
+            pass
+
+        def commit(self):
+            pass
+
+    def fake_train(logs):
+        captured_logs.extend(logs)
+        return object()
+
+    def fake_get_setting(_db, key, default=""):
+        return settings.get(key, default)
+
+    def fake_set_setting(_db, key, value, _actor):
+        settings[key] = value
+
+    monkeypatch.setattr("SECURITY.security_engine.MODEL_STATE_PATH", tmp_path / "ml" / "isolation_forest_state.json")
+    monkeypatch.setattr("SECURITY.security_engine.MODEL_METADATA_PATH", tmp_path / "ml" / "isolation_forest_metadata.json")
+    monkeypatch.setattr("SECURITY.security_engine.IFOREST_MODEL_PATH", tmp_path / "ml_models" / "isolation_forest.pkl")
+    monkeypatch.setattr("SECURITY.security_engine.IFOREST_META_PATH", tmp_path / "ml_models" / "model_metadata.json")
+    monkeypatch.setattr("SECURITY.security_engine.load_initial_training_samples", lambda: [{"hour_of_day": 9, "day_of_week": 1, "file_path": "WARDS/backend/main.py", "source_ip": "seed"} for _ in range(12)])
+    monkeypatch.setattr("SECURITY.security_engine.train_isolation_forest", fake_train)
+    monkeypatch.setattr("SECURITY.security_engine.iter_model_artifact_paths", lambda: [])
+    monkeypatch.setattr("SECURITY.security_engine.get_setting", fake_get_setting)
+    monkeypatch.setattr("SECURITY.security_engine.set_setting", fake_set_setting)
+
+    seeded = seed_initial_ai_training(Db(), initiated_by="test")
+    skipped = seed_initial_ai_training(Db(), initiated_by="test")
+    forced = seed_initial_ai_training(Db(), initiated_by="test", force=True)
+
+    assert seeded["normal_samples"] == 12
+    assert captured_logs
+    assert settings["ai_initial_training_seeded"] == "true"
+    assert skipped["status"] == "skipped"
+    assert forced["normal_samples"] == 12
+    assert len(captured_logs) == 24
 
 
 def test_retrain_ai_admin_logs_are_full_ueba_vectors_and_hash_race_safe(monkeypatch, tmp_path):

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import difflib
 import base64
+import csv
 import hashlib
 import hmac
 import json
@@ -88,6 +89,7 @@ VM1_RESTORE_CONTENT_ROOT = VM1_SNAPSHOT_ROOT / ".restore_content"
 DEFAULT_BACKUP_ROOT = SECURITY_ROOT / "local_backups"
 MODEL_STATE_PATH = SECURITY_ROOT / "ml" / "isolation_forest_state.json"
 MODEL_METADATA_PATH = SECURITY_ROOT / "ml" / "isolation_forest_metadata.json"
+INITIAL_TRAINING_SAMPLES_PATH = SECURITY_ROOT / "ml" / "initial_training_samples.csv"
 ML_MODELS_DIR = SECURITY_ROOT / "ml_models"
 IFOREST_MODEL_PATH = ML_MODELS_DIR / "isolation_forest.pkl"
 IFOREST_META_PATH = ML_MODELS_DIR / "model_metadata.json"
@@ -688,11 +690,14 @@ def create_incident_system_alert(db: Session, incident: SecurityIncident, detect
 
 
 def enrich_security_context(db: Session, context: dict | None) -> dict:
+    context = dict(context or {})
+    rules = context.get("ai_rules") or DEFAULT_AI_RULES
+    if not (ai_rule_enabled(rules, "vpn_activity") or ai_rule_enabled(rules, "source_ip_reputation")):
+        return context
     try:
         from services.vpn_detection import detect_vpn
     except Exception:
-        return dict(context or {})
-    context = dict(context or {})
+        return context
     source_ip = context.get("source_ip") or context.get("client_ip") or context.get("ip_address")
     if not source_ip or str(source_ip).lower() == "unknown":
         return context
@@ -706,6 +711,134 @@ def enrich_security_context(db: Session, context: dict | None) -> dict:
         context["ip_reputation_score"] = max(float(context.get("ip_reputation_score") or 0), float(vpn.get("risk_score") or 0))
     if vpn.get("signals"):
         context["vpn_signals"] = vpn.get("signals")
+    return context
+
+
+def enrich_file_ai_context(
+    db: Session,
+    file_entry: SecurityMonitoredFile,
+    change_type: str,
+    old_content: str,
+    new_content: str,
+    context: dict | None,
+) -> dict:
+    """Populate cheap rule inputs for scans; disabled rules avoid extra work."""
+    context = dict(context or {})
+    rules = context.get("ai_rules") or DEFAULT_AI_RULES
+    ts = now_utc()
+    path = Path(file_entry.relative_path or file_entry.file_path or "")
+    old_text = old_content or ""
+    new_text = new_content or ""
+
+    if ai_rule_enabled(rules, "hour_of_day"):
+        context.setdefault("hour_of_day", ts.hour)
+    if ai_rule_enabled(rules, "day_of_week"):
+        context.setdefault("day_of_week", ts.weekday())
+    if ai_rule_enabled(rules, "business_hours"):
+        cfg = ai_rule_config(rules, "business_hours")
+        start = int(cfg.get("safe_start_hour", 8))
+        end = int(cfg.get("safe_end_hour", 18))
+        context.setdefault("business_hours", start <= ts.hour <= end and ts.weekday() < 5)
+    if ai_rule_enabled(rules, "file_size_change"):
+        context.setdefault("file_size_change", len(new_text.encode("utf-8")) - len(old_text.encode("utf-8")))
+    if ai_rule_enabled(rules, "content_length"):
+        context.setdefault("content_length", len(new_text))
+    if ai_rule_enabled(rules, "special_chars_count"):
+        context.setdefault("special_chars_count", sum(new_text.count(char) for char in ["<", ">", "&", '"', "'", "/", "\\"]))
+    if ai_rule_enabled(rules, "file_type_risk"):
+        high_risk = set(ai_rule_config(rules, "file_type_risk").get("high_risk_extensions", [".html", ".jsx", ".js", ".py"]))
+        context.setdefault("file_type_risk", 1 if path.suffix.lower() in high_risk else 0)
+    if ai_rule_enabled(rules, "content_similarity_score"):
+        context.setdefault("content_similarity_score", difflib.SequenceMatcher(None, old_text, new_text).ratio())
+    if ai_rule_enabled(rules, "sensitive_config_change"):
+        cfg = ai_rule_config(rules, "sensitive_config_change")
+        context.setdefault(
+            "sensitive_config_change",
+            path.suffix.lower() in set(cfg.get("extensions", [])) or path.name.lower() in {str(item).lower() for item in cfg.get("filenames", [])},
+        )
+    if ai_rule_enabled(rules, "backup_restore_activity"):
+        keywords = [str(item).lower() for item in ai_rule_config(rules, "backup_restore_activity").get("path_keywords", [])]
+        context.setdefault("backup_restore_activity", any(keyword in str(path).lower() for keyword in keywords))
+    if ai_rule_enabled(rules, "mfa_configuration_change"):
+        keywords = [str(item).lower() for item in ai_rule_config(rules, "mfa_configuration_change").get("path_keywords", [])]
+        context.setdefault("mfa_configuration_change", any(keyword in str(path).lower() for keyword in keywords))
+    if ai_rule_enabled(rules, "auth_system_modification"):
+        keywords = [str(item).lower() for item in ai_rule_config(rules, "auth_system_modification").get("path_keywords", [])]
+        context.setdefault("auth_system_modification", any(keyword in str(path).lower() for keyword in keywords))
+
+    source_ip = context.get("source_ip") or context.get("client_ip") or context.get("ip_address")
+    if ai_rule_enabled(rules, "ip_consistent") and source_ip and str(source_ip).lower() != "unknown":
+        try:
+            known_ip = (
+                db.query(SecurityAdminFileChange)
+                .filter(SecurityAdminFileChange.ip_address == str(source_ip))
+                .filter(SecurityAdminFileChange.timestamp >= ts - timedelta(days=90))
+                .first()
+            )
+            context.setdefault("ip_consistent", bool(known_ip))
+        except Exception:
+            pass
+
+    if ai_rule_enabled(rules, "affected_files_count") or ai_rule_enabled(rules, "excessive_file_modifications"):
+        try:
+            window_minutes = int(ai_rule_config(rules, "affected_files_count").get("window_minutes", 30) or 30)
+            recent_file_ids = (
+                db.query(SecurityDetectionEvent.file_id)
+                .filter(SecurityDetectionEvent.detected_at >= ts - timedelta(minutes=window_minutes))
+                .filter(SecurityDetectionEvent.file_id.isnot(None))
+                .limit(200)
+                .all()
+            )
+            affected_count = len({row[0] for row in recent_file_ids if row and row[0] is not None} | {file_entry.id})
+            context.setdefault("affected_files_count", affected_count)
+            context.setdefault("modified_file_count", affected_count)
+            context.setdefault("files_modified_in_window", affected_count)
+        except Exception:
+            pass
+
+    if ai_rule_enabled(rules, "restore_frequency"):
+        try:
+            window_minutes = int(ai_rule_config(rules, "restore_frequency").get("window_minutes", 30) or 30)
+            restore_count = (
+                db.query(SecurityRecoveryEvent)
+                .filter(SecurityRecoveryEvent.completed_at >= ts - timedelta(minutes=window_minutes))
+                .count()
+            )
+            context.setdefault("restore_count", restore_count)
+            context.setdefault("restores_in_window", restore_count)
+        except Exception:
+            pass
+
+    if ai_rule_enabled(rules, "rapid_admin_actions"):
+        try:
+            action_count = (
+                db.query(SecurityAdminFileChange)
+                .filter(SecurityAdminFileChange.timestamp >= ts - timedelta(minutes=1))
+                .count()
+            )
+            context.setdefault("admin_actions_per_minute", action_count)
+            context.setdefault("privileged_actions_per_minute", action_count)
+        except Exception:
+            pass
+
+    if ai_rule_enabled(rules, "admin_action_rarity"):
+        state = load_ai_model_state()
+        profile = state.get("behavioral_profile") or {}
+        rarity = 0.0
+        if profile:
+            if path.suffix.lower() and path.suffix.lower() not in set(profile.get("common_extensions") or []):
+                rarity += 0.35
+            root = str(path.parts[0]) if path.parts else ""
+            if root and root not in set(profile.get("common_roots") or []):
+                rarity += 0.25
+            if source_ip and profile.get("known_source_ips") and source_ip not in set(profile.get("known_source_ips") or []):
+                rarity += 0.3
+            normal_hours = set(profile.get("normal_hours") or [])
+            if normal_hours and ts.hour not in normal_hours:
+                rarity += 0.2
+        context.setdefault("admin_action_rarity", min(1.0, rarity))
+        context.setdefault("admin_action_rarity_score", min(1.0, rarity))
+
     return context
 
 
@@ -1926,13 +2059,24 @@ def get_ai_rules(db: Session) -> dict:
     approved = {**DEFAULT_AI_RULES, **APPROVED_ADDITIONAL_AI_RULES}
     for key, default in approved.items():
         current = saved.get(key, {}) if isinstance(saved, dict) else {}
-        if key in DEFAULT_AI_RULES or current:
-            merged[key] = {
-                **default,
-                **current,
-                "config": {**default.get("config", {}), **current.get("config", {})},
-            }
+        merged[key] = {
+            **default,
+            **current,
+            "config": {**default.get("config", {}), **current.get("config", {})},
+        }
     return merged
+
+
+def ai_rule_enabled(rules: dict | None, rule_name: str) -> bool:
+    rules = rules or DEFAULT_AI_RULES
+    return bool(rules.get(rule_name, DEFAULT_AI_RULES.get(rule_name, {})).get("enabled", True))
+
+
+def ai_rule_config(rules: dict | None, rule_name: str) -> dict:
+    rules = rules or DEFAULT_AI_RULES
+    default = DEFAULT_AI_RULES.get(rule_name, APPROVED_ADDITIONAL_AI_RULES.get(rule_name, {}))
+    current = rules.get(rule_name, {}) if isinstance(rules, dict) else {}
+    return {**default.get("config", {}), **current.get("config", {})}
 
 
 def available_ai_rule_templates(db: Session) -> list[dict]:
@@ -2419,6 +2563,63 @@ def list_all_backup_folders(backup_location: Path, label: str | None = None) -> 
     return sorted(backups, key=lambda item: item.name)
 
 
+def list_backup_inventory(db: Session) -> dict:
+    roots = all_backup_roots(db)
+    latest_by_domain: dict[str, Path] = {}
+    for domain in RECOVERY_DOMAINS:
+        latest_by_domain[domain] = newest_valid_backup_for_domain(db, domain)
+
+    items = []
+    for root in roots:
+        manifest_path = root / BACKUP_MANIFEST_NAME
+        manifest_payload = {}
+        manifest_valid = False
+        if manifest_path.exists() and manifest_path.is_file():
+            try:
+                manifest_payload = json_loads(manifest_path.read_text(encoding="utf-8"), {})
+                manifest_valid = isinstance(manifest_payload, dict) and verify_backup_manifest_hmac(manifest_payload)
+            except OSError:
+                manifest_payload = {}
+        manifest = backup_manifest_index(root)
+        domains = sorted(manifest_domains(manifest)) if manifest else []
+        domain_validity = {domain: backup_root_has_valid_domain(root, domain) for domain in domains}
+        latest_domains = [
+            domain
+            for domain, latest_root in latest_by_domain.items()
+            if latest_root and latest_root.resolve(strict=False) == root.resolve(strict=False)
+        ]
+        timestamp = None
+        if "_backup_" in root.name:
+            timestamp_text = root.name.rsplit("_backup_", 1)[-1]
+            try:
+                timestamp = datetime.strptime(timestamp_text[:15], "%Y%m%d_%H%M%S").isoformat()
+            except Exception:
+                timestamp = None
+        items.append({
+            "filename": root.name,
+            "label": root.name.split("_backup_", 1)[0] if "_backup_" in root.name else "unknown",
+            "timestamp": timestamp,
+            "path": stored_path_value(root) or str(root),
+            "backup_type": manifest_payload.get("backup_type") if isinstance(manifest_payload, dict) else None,
+            "manifest_valid": manifest_valid,
+            "domains": domains,
+            "domain_validity": domain_validity,
+            "latest_domains": latest_domains,
+            "is_latest": bool(latest_domains),
+            "file_count": len(manifest),
+            "size_bytes": sum(int(meta.get("size_bytes") or 0) for meta in manifest.values()),
+        })
+    return {
+        "backup_locations": sorted({str(root.parent) for root in roots}),
+        "domains": RECOVERY_DOMAINS,
+        "latest_by_domain": {
+            domain: (stored_path_value(root) or str(root)) if root else None
+            for domain, root in latest_by_domain.items()
+        },
+        "items": items,
+    }
+
+
 def prune_backup_type(backup_location: Path, label: str, keep: int = BACKUP_RETENTION_LIMIT) -> int:
     removed = 0
     for old_backup in list_all_backup_folders(backup_location, label=label)[:-keep]:
@@ -2572,6 +2773,55 @@ def generate_initial_training_samples(sample_count: int = 640) -> list[dict]:
             }
         )
     return samples
+
+
+def load_initial_training_samples(path: Path = INITIAL_TRAINING_SAMPLES_PATH) -> list[dict]:
+    if not path.exists() or not path.is_file():
+        return generate_initial_training_samples()
+    samples: list[dict] = []
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        for row in csv.DictReader(handle):
+            sample: dict[str, object] = {}
+            for key, value in row.items():
+                if key == "label":
+                    sample[key] = value
+                    continue
+                try:
+                    sample[key] = float(value)
+                except (TypeError, ValueError):
+                    sample[key] = value
+            sample.setdefault("source_ip", "seeded_admin_profile")
+            sample.setdefault("file_path", "WARDS/backend/routes/security_dashboard.py")
+            samples.append(sample)
+    return samples
+
+
+def behavioral_profile_from_logs(logs: list[dict]) -> dict:
+    hours = sorted({int(log.get("hour_of_day")) for log in logs if log.get("hour_of_day") is not None})
+    weekdays = sorted({int(log.get("day_of_week")) for log in logs if log.get("day_of_week") is not None})
+    extensions = sorted({
+        Path(str(log.get("file_path") or "")).suffix.lower()
+        for log in logs
+        if Path(str(log.get("file_path") or "")).suffix
+    })
+    roots = sorted({
+        Path(str(log.get("file_path") or "")).parts[0]
+        for log in logs
+        if Path(str(log.get("file_path") or "")).parts
+    })
+    source_ips = sorted({
+        str(log.get("source_ip"))
+        for log in logs
+        if log.get("source_ip")
+    })
+    return {
+        "sample_count": len(logs),
+        "normal_hours": hours,
+        "normal_weekdays": weekdays,
+        "common_extensions": extensions,
+        "common_roots": roots,
+        "known_source_ips": source_ips,
+    }
 
 
 def build_behavioral_profile(admin_changes: list[SecurityAdminFileChange]) -> dict:
@@ -3105,39 +3355,141 @@ def retrain_ai(db: Session, initiated_by: str = "system") -> dict:
     return state
 
 
+def seed_initial_ai_training(db: Session, initiated_by: str = "system", force: bool = False) -> dict:
+    if not force and (get_setting(db, "ai_initial_training_seeded", "false") or "false").lower() == "true":
+        state = load_ai_model_state()
+        return {
+            "status": "skipped",
+            "reason": "initial training samples were already seeded",
+            "state": state,
+        }
+
+    now = now_utc()
+    logs = load_initial_training_samples()
+    ml_model = None
+    training_error = None
+    try:
+        ml_model = train_isolation_forest(logs)
+    except Exception as exc:
+        logger.exception("Initial AI seed training failed: %s", exc)
+        training_error = str(exc)
+    ml_meta = load_isolation_forest_metadata()
+    profile = behavioral_profile_from_logs(logs)
+    version = now.strftime("seed-v%Y%m%d%H%M%S")
+    state = {
+        "algorithm": "Hybrid Rules + Behavioral Profile + Isolation Forest",
+        "strategy": "One-time bootstrap from SECURITY/ml/initial_training_samples.csv plus future incremental retraining from admin and detection history",
+        "normal_samples": len(logs),
+        "historical_admin_samples": 0,
+        "detection_samples": 0,
+        "features": FEATURE_NAMES,
+        "behavioral_profile": profile,
+        "updated_at": now.isoformat(),
+        "updated_by": initiated_by,
+        "version": version,
+        "note": "Seeded baseline; future retraining should use production admin-change and detection history.",
+        "report": {
+            "seed_path": stored_path_value(INITIAL_TRAINING_SAMPLES_PATH) or str(INITIAL_TRAINING_SAMPLES_PATH),
+            "training_log_count": len(logs),
+            "ml_training_available": bool(_NUMPY_AVAILABLE and _SKLEARN_AVAILABLE and _JOBLIB_AVAILABLE),
+            "ml_model_trained": bool(ml_model),
+            "ml_model_path": stored_path_value(IFOREST_MODEL_PATH) if IFOREST_MODEL_PATH.exists() else None,
+            "ml_sample_count": ml_meta.get("sample_count", 0),
+            "profile_confidence": compute_profile_confidence(profile),
+            "ml_training_error": training_error,
+        },
+    }
+    metadata = {
+        "model_name": "wards_hybrid_ai_security_model",
+        "version": version,
+        "trained_at": state["updated_at"],
+        "model_type": state["algorithm"],
+        "feature_set": state["features"],
+        "training_parameters": {
+            "strategy": state["strategy"],
+            "bootstrap_samples": len(logs),
+            "historical_admin_samples": 0,
+            "detection_samples": 0,
+            "ml_model_trained": bool(ml_model),
+        },
+        "state_path": stored_path_value(MODEL_STATE_PATH) or str(MODEL_STATE_PATH),
+        "isolation_forest": ml_meta,
+    }
+    MODEL_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        MODEL_STATE_PATH.write_text(json_dumps(state), encoding="utf-8")
+        MODEL_METADATA_PATH.write_text(json_dumps(metadata), encoding="utf-8")
+    except OSError as exc:
+        logger.exception("Initial AI seed persistence failed: %s", exc)
+        state["report"]["persistence_error"] = str(exc)
+        return state
+
+    for artifact_path in iter_model_artifact_paths():
+        try:
+            rel = str(artifact_path.relative_to(MASTER_ROOT)).replace("\\", "/")
+            artifact_hash = sha256_file(artifact_path)
+        except OSError as exc:
+            logger.warning("Skipping seeded ML artifact hash refresh; artifact unavailable: %s (%s)", artifact_path, exc)
+            continue
+        except ValueError:
+            continue
+        entry = db.query(SecurityMonitoredFile).filter(SecurityMonitoredFile.relative_path == rel).first()
+        if entry:
+            entry.current_hash = artifact_hash
+            entry.baseline_hash = artifact_hash
+            entry.status = "clean"
+            entry.last_checked = now_utc()
+            db.add(entry)
+    db.commit()
+    set_setting(db, "ai_initial_training_seeded", "true", initiated_by)
+    set_setting(db, "ai_last_retrained_at", state["updated_at"], initiated_by)
+    set_setting(db, "ai_training_sample_count", str(len(logs)), initiated_by)
+    set_setting(db, "ai_model_version", version, initiated_by)
+    return state
+
+
 def content_flags(content: str, context: dict | None = None, path: Path | None = None) -> list[str]:
     context = context or {}
+    rules = context.get("ai_rules") or DEFAULT_AI_RULES
     lowered = (content or "").lower()
     flags = []
     ts = now_utc()
-    if ts.hour < 8 or ts.hour > 18:
+    try:
+        hour = int(context.get("hour_of_day")) if context.get("hour_of_day") is not None else ts.hour
+    except (TypeError, ValueError):
+        hour = ts.hour
+    try:
+        weekday = int(context.get("day_of_week")) if context.get("day_of_week") is not None else ts.weekday()
+    except (TypeError, ValueError):
+        weekday = ts.weekday()
+    if ai_rule_enabled(rules, "hour_of_day") and (hour < 8 or hour > 18):
         flags.append("after_hours")
-    if ts.weekday() >= 5:
+    if ai_rule_enabled(rules, "day_of_week") and weekday >= 5:
         flags.append("weekend_activity")
-    if context.get("vpn_activity") or context.get("vpn_detected"):
+    if ai_rule_enabled(rules, "vpn_activity") and (context.get("vpn_activity") or context.get("vpn_detected")):
         flags.append("vpn_activity")
     ip_reputation_score = first_present(context, "ip_reputation_score", "source_ip_reputation", default=0)
     ip_reputation = str(context.get("ip_reputation") or context.get("source_ip_reputation") or "").lower()
     try:
-        if float(ip_reputation_score) >= 50:
+        if ai_rule_enabled(rules, "source_ip_reputation") and float(ip_reputation_score) >= 50:
             flags.append("source_ip_reputation")
     except (TypeError, ValueError):
         pass
-    if ip_reputation in {"suspicious", "malicious", "blocked", "abusive"}:
+    if ai_rule_enabled(rules, "source_ip_reputation") and ip_reputation in {"suspicious", "malicious", "blocked", "abusive"}:
         flags.append("source_ip_reputation")
     try:
         keystroke_confidence = float(first_present(context, "keystroke_anomaly_confidence", "keystroke_dynamics", default=0))
     except (TypeError, ValueError):
         keystroke_confidence = 0
-    if context.get("keystroke_anomaly") or context.get("typing_pattern_anomaly") or keystroke_confidence >= 0.7:
+    if ai_rule_enabled(rules, "keystroke_dynamics") and (context.get("keystroke_anomaly") or context.get("typing_pattern_anomaly") or keystroke_confidence >= 0.7):
         flags.append("keystroke_dynamics")
-    if not context.get("admin_session_valid"):
+    if ai_rule_enabled(rules, "admin_session_valid") and not context.get("admin_session_valid"):
         flags.append("unauthenticated_change")
-    if context.get("mfa_verified") is False or context.get("mfa_valid") is False:
+    if ai_rule_enabled(rules, "mfa_verified") and (context.get("mfa_verified") is False or context.get("mfa_valid") is False):
         flags.append("mfa_not_verified")
-    if context.get("first_time_device") or context.get("new_device") or context.get("device_seen_before") is False:
+    if ai_rule_enabled(rules, "first_time_device") and (context.get("first_time_device") or context.get("new_device") or context.get("device_seen_before") is False):
         flags.append("first_time_device")
-    if context.get("first_time_country") or context.get("new_country") or context.get("country_seen_before") is False:
+    if ai_rule_enabled(rules, "first_time_country") and (context.get("first_time_country") or context.get("new_country") or context.get("country_seen_before") is False):
         flags.append("first_time_country")
     try:
         geo_distance_km = float(first_present(context, "geo_distance_from_last_login_km", "geo_distance_km", default=0))
@@ -3145,36 +3497,97 @@ def content_flags(content: str, context: dict | None = None, path: Path | None =
     except (TypeError, ValueError):
         geo_distance_km = 0
         geo_elapsed_hours = 0
-    if context.get("impossible_travel") or geo_distance_km >= 500 or (geo_elapsed_hours > 0 and geo_distance_km / geo_elapsed_hours >= 900):
+    if ai_rule_enabled(rules, "geo_distance_from_last_login") and (context.get("impossible_travel") or geo_distance_km >= 500 or (geo_elapsed_hours > 0 and geo_distance_km / geo_elapsed_hours >= 900)):
         flags.append("geo_distance_from_last_login")
     try:
         peer_login_z_score = float(first_present(context, "peer_login_time_z_score", default=0))
     except (TypeError, ValueError):
         peer_login_z_score = 0
-    if context.get("peer_login_time_deviation") or peer_login_z_score >= 2.5:
+    if ai_rule_enabled(rules, "peer_login_time_deviation") and (context.get("peer_login_time_deviation") or peer_login_z_score >= 2.5):
         flags.append("peer_login_time_deviation")
     try:
         peer_path_z_score = float(first_present(context, "peer_path_access_z_score", default=0))
     except (TypeError, ValueError):
         peer_path_z_score = 0
-    if context.get("peer_path_access_deviation") or peer_path_z_score >= 2.5:
+    if ai_rule_enabled(rules, "peer_path_access_deviation") and (context.get("peer_path_access_deviation") or peer_path_z_score >= 2.5):
         flags.append("peer_path_access_deviation")
     try:
         modified_file_count = int(first_present(context, "modified_file_count", "files_modified_in_window", default=0))
     except (TypeError, ValueError):
         modified_file_count = 0
-    if context.get("excessive_file_modifications") or modified_file_count > 10:
+    if ai_rule_enabled(rules, "excessive_file_modifications") and (context.get("excessive_file_modifications") or modified_file_count > 10):
         flags.append("excessive_file_modifications")
     try:
         admin_actions_per_minute = float(first_present(context, "admin_actions_per_minute", "privileged_actions_per_minute", default=0))
     except (TypeError, ValueError):
         admin_actions_per_minute = 0
-    if context.get("rapid_admin_actions") or admin_actions_per_minute > 12:
+    if ai_rule_enabled(rules, "rapid_admin_actions") and (context.get("rapid_admin_actions") or admin_actions_per_minute > 12):
         flags.append("rapid_admin_actions")
+    if ai_rule_enabled(rules, "admin_action_rarity"):
+        try:
+            rarity_score = float(first_present(context, "admin_action_rarity_score", "admin_action_rarity", default=0))
+        except (TypeError, ValueError):
+            rarity_score = 0
+        if rarity_score >= float(ai_rule_config(rules, "admin_action_rarity").get("high_rarity_score", 0.75)):
+            flags.append("admin_action_rarity")
+    if ai_rule_enabled(rules, "restore_frequency"):
+        try:
+            restore_count = int(first_present(context, "restore_count", "restores_in_window", default=0))
+        except (TypeError, ValueError):
+            restore_count = 0
+        if restore_count >= int(ai_rule_config(rules, "restore_frequency").get("max_restores_per_window", 3)):
+            flags.append("restore_frequency")
+    if ai_rule_enabled(rules, "backup_integrity_validation") and context.get("backup_integrity_valid") is False:
+        flags.append("backup_integrity_validation")
+    if ai_rule_enabled(rules, "content_similarity_score"):
+        try:
+            similarity = float(
+                context.get("content_similarity_score")
+                if context.get("content_similarity_score") is not None
+                else difflib.SequenceMatcher(None, context.get("old_content") or "", content or "").ratio()
+            )
+        except (TypeError, ValueError):
+            similarity = 1
+        if similarity < float(ai_rule_config(rules, "content_similarity_score").get("low_similarity", 0.45)):
+            flags.append("content_similarity_score")
+    if ai_rule_enabled(rules, "affected_files_count"):
+        try:
+            affected_files_count = int(first_present(context, "affected_files_count", "modified_file_count", default=0))
+        except (TypeError, ValueError):
+            affected_files_count = 0
+        cfg = ai_rule_config(rules, "affected_files_count")
+        high_count = int(cfg.get("high_risk_count", 10))
+        medium_count = int(cfg.get("medium_risk_count", 3))
+        if affected_files_count > high_count or affected_files_count >= medium_count:
+            flags.append("affected_files_count")
+    if path is not None:
+        path_text = str(path).lower()
+        if ai_rule_enabled(rules, "unauthorized_admin_path"):
+            path_keywords = ai_rule_config(rules, "unauthorized_admin_path").get("path_keywords", ["admin", "security", "auth", "mfa", "backup", "recovery"])
+            if not context.get("method_legitimate") and any(str(keyword).lower() in path_text for keyword in path_keywords):
+                flags.append("unauthorized_admin_path")
+        if ai_rule_enabled(rules, "sensitive_config_change"):
+            sensitive_config = ai_rule_config(rules, "sensitive_config_change")
+            sensitive_extensions = {str(item).lower() for item in sensitive_config.get("extensions", [".env", ".xml", ".yml", ".yaml", ".sql"])}
+            sensitive_filenames = {str(item).lower() for item in sensitive_config.get("filenames", ["requirements.txt", "package.json"])}
+            if context.get("sensitive_config_change") or path.suffix.lower() in sensitive_extensions or path.name.lower() in sensitive_filenames:
+                flags.append("sensitive_config_change")
+        if ai_rule_enabled(rules, "backup_restore_activity"):
+            path_keywords = ai_rule_config(rules, "backup_restore_activity").get("path_keywords", ["backup", "restore", "recovery", "quarantine"])
+            if context.get("backup_restore_activity") or any(str(keyword).lower() in path_text for keyword in path_keywords):
+                flags.append("backup_restore_activity")
+        if ai_rule_enabled(rules, "mfa_configuration_change"):
+            path_keywords = ai_rule_config(rules, "mfa_configuration_change").get("path_keywords", ["mfa", "authenticator", "two_factor", "2fa"])
+            if context.get("mfa_configuration_change") or any(str(keyword).lower() in path_text for keyword in path_keywords):
+                flags.append("mfa_configuration_change")
+        if ai_rule_enabled(rules, "auth_system_modification"):
+            path_keywords = ai_rule_config(rules, "auth_system_modification").get("path_keywords", ["auth", "login", "jwt", "token", "password", "session", "middleware"])
+            if context.get("auth_system_modification") or any(str(keyword).lower() in path_text for keyword in path_keywords):
+                flags.append("auth_system_modification")
     # Skip content-based injection/defacement pattern matching for documentation
     # files (.md, .txt) that legitimately contain example payloads.
     is_doc_file = path is not None and path.suffix.lower() in {".md", ".txt", ".rst"}
-    if not is_doc_file:
+    if ai_rule_enabled(rules, "suspicious_pattern_score") and not is_doc_file:
         for key, patterns in SUSPICIOUS_PATTERNS.items():
             if any(pattern in lowered for pattern in patterns):
                 flags.append(key)
@@ -3185,6 +3598,8 @@ def content_flags(content: str, context: dict | None = None, path: Path | None =
 
 def ai_predict(path: Path, old_content: str, new_content: str, context: dict | None = None) -> AIPrediction:
     context = context or {}
+    if context.get("content_similarity_score") is None:
+        context["content_similarity_score"] = difflib.SequenceMatcher(None, old_content or "", new_content or "").ratio()
     flags = content_flags(new_content, context, path=path)
     rules = context.get("ai_rules") or DEFAULT_AI_RULES
 
@@ -3229,37 +3644,33 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
         risk += weight("suspicious_pattern_score", 0.32)
     if enabled("suspicious_pattern_score") and ("credential_access" in flags or "sql_injection" in flags):
         risk += 0.18
+    explicitly_scored_flags = {
+        "unauthorized_admin_path",
+        "sensitive_config_change",
+        "backup_restore_activity",
+        "mfa_configuration_change",
+        "auth_system_modification",
+        "admin_action_rarity",
+        "restore_frequency",
+        "backup_integrity_validation",
+        "content_similarity_score",
+        "affected_files_count",
+    }
     for additional_rule in APPROVED_ADDITIONAL_AI_RULES:
+        if additional_rule in explicitly_scored_flags:
+            continue
         if enabled(additional_rule) and additional_rule in flags:
             risk += weight(additional_rule, float(APPROVED_ADDITIONAL_AI_RULES[additional_rule].get("weight", 0.18)))
-    path_text = str(path).lower()
-    if enabled("unauthorized_admin_path"):
-        path_keywords = config("unauthorized_admin_path").get("path_keywords", ["admin", "security", "auth", "mfa", "backup", "recovery"])
-        if not context.get("method_legitimate") and any(str(keyword).lower() in path_text for keyword in path_keywords):
-            flags.append("unauthorized_admin_path")
-            risk += weight("unauthorized_admin_path", 0.22)
-    if enabled("sensitive_config_change"):
-        sensitive_config = config("sensitive_config_change")
-        sensitive_extensions = set(sensitive_config.get("extensions", [".env", ".xml", ".yml", ".yaml", ".sql"]))
-        sensitive_filenames = {str(item).lower() for item in sensitive_config.get("filenames", ["requirements.txt", "package.json"])}
-        if path.suffix.lower() in sensitive_extensions or path.name.lower() in sensitive_filenames:
-            flags.append("sensitive_config_change")
-            risk += weight("sensitive_config_change", 0.26)
-    if enabled("backup_restore_activity"):
-        path_keywords = config("backup_restore_activity").get("path_keywords", ["backup", "restore", "recovery", "quarantine"])
-        if any(str(keyword).lower() in path_text for keyword in path_keywords):
-            flags.append("backup_restore_activity")
-            risk += weight("backup_restore_activity", 0.2)
-    if enabled("mfa_configuration_change"):
-        path_keywords = config("mfa_configuration_change").get("path_keywords", ["mfa", "authenticator", "two_factor", "2fa"])
-        if any(str(keyword).lower() in path_text for keyword in path_keywords):
-            flags.append("mfa_configuration_change")
-            risk += weight("mfa_configuration_change", 0.22)
-    if enabled("auth_system_modification"):
-        path_keywords = config("auth_system_modification").get("path_keywords", ["auth", "login", "jwt", "token", "password", "session", "middleware"])
-        if any(str(keyword).lower() in path_text for keyword in path_keywords):
-            flags.append("auth_system_modification")
-            risk += weight("auth_system_modification", 0.24)
+    if enabled("unauthorized_admin_path") and "unauthorized_admin_path" in flags:
+        risk += weight("unauthorized_admin_path", 0.22)
+    if enabled("sensitive_config_change") and "sensitive_config_change" in flags:
+        risk += weight("sensitive_config_change", 0.26)
+    if enabled("backup_restore_activity") and "backup_restore_activity" in flags:
+        risk += weight("backup_restore_activity", 0.2)
+    if enabled("mfa_configuration_change") and "mfa_configuration_change" in flags:
+        risk += weight("mfa_configuration_change", 0.22)
+    if enabled("auth_system_modification") and "auth_system_modification" in flags:
+        risk += weight("auth_system_modification", 0.24)
     size_delta = abs(len(new_content.encode("utf-8")) - len(old_content.encode("utf-8")))
     if enabled("file_size_change") and size_delta > int(config("file_size_change").get("large_delta_bytes", 2000)):
         risk += weight("file_size_change", 0.12)
@@ -3285,7 +3696,6 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
         except (TypeError, ValueError):
             rarity_score = 0
         if rarity_score >= float(config("admin_action_rarity").get("high_rarity_score", 0.75)):
-            flags.append("admin_action_rarity")
             risk += weight("admin_action_rarity", 0.16) * min(rarity_score, 1)
     if enabled("restore_frequency"):
         try:
@@ -3293,10 +3703,8 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
         except (TypeError, ValueError):
             restore_count = 0
         if restore_count >= int(config("restore_frequency").get("max_restores_per_window", 3)):
-            flags.append("restore_frequency")
             risk += weight("restore_frequency", 0.18)
     if enabled("backup_integrity_validation") and context.get("backup_integrity_valid") is False:
-        flags.append("backup_integrity_validation")
         risk += weight("backup_integrity_validation", 0.24)
     if enabled("content_similarity_score"):
         try:
@@ -3304,7 +3712,6 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
         except (TypeError, ValueError):
             similarity = 1
         if similarity < float(config("content_similarity_score").get("low_similarity", 0.45)):
-            flags.append("content_similarity_score")
             risk += weight("content_similarity_score", 0.2) * (1 - max(0, similarity))
     if enabled("affected_files_count"):
         try:
@@ -3314,10 +3721,8 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
         high_count = int(config("affected_files_count").get("high_risk_count", 10))
         medium_count = int(config("affected_files_count").get("medium_risk_count", 3))
         if affected_files_count > high_count:
-            flags.append("affected_files_count")
             risk += weight("affected_files_count", 0.2)
         elif affected_files_count >= medium_count:
-            flags.append("affected_files_count")
             risk += weight("affected_files_count", 0.2) * 0.5
     model_state = load_ai_model_state()
     profile = model_state.get("behavioral_profile") or {}
@@ -4305,7 +4710,10 @@ def record_detection(db: Session, file_entry: SecurityMonitoredFile, change_type
     ).first()
     if existing_incident:
         return None
-    context = enrich_security_context(db, context or {})
+    context = dict(context or {})
+    context.setdefault("ai_rules", get_ai_rules(db))
+    context = enrich_security_context(db, context)
+    context = enrich_file_ai_context(db, file_entry, change_type, old_content, new_content, context)
     source_ip = context.get("source_ip") or context.get("client_ip") or context.get("ip_address") or "unknown"
     context.setdefault("source_ip", source_ip)
     admin_change = recent_admin_change(db, file_entry.file_path)
@@ -4315,7 +4723,6 @@ def record_detection(db: Session, file_entry: SecurityMonitoredFile, change_type
     else:
         context.setdefault("admin_session_valid", False)
         context.setdefault("method_legitimate", False)
-    context.setdefault("ai_rules", get_ai_rules(db))
 
     prediction = ai_predict(portable_monitored_path(file_entry), old_content, new_content, context)
     flags = content_flags(new_content, context, path=portable_monitored_path(file_entry))
@@ -6122,12 +6529,24 @@ def set_backup_location(db: Session, new_location: str, delete_previous: bool, u
     previous_resolved = previous.expanduser().resolve() if previous.exists() else previous.expanduser()
     set_setting(db, "backup_location", stored_path_value(target) or str(target), updated_by)
     deleted = False
+    deletion_skipped_reason = None
     if delete_previous and previous.exists() and previous_resolved != target:
-        shutil.rmtree(previous, ignore_errors=True)
-        deleted = True
+        if len(previous_resolved.parts) <= 1:
+            deletion_skipped_reason = "previous backup location resolves to a filesystem root"
+        elif path_is_inside(target, previous_resolved):
+            deletion_skipped_reason = "new backup location is inside the previous backup location"
+        else:
+            shutil.rmtree(previous, ignore_errors=True)
+            deleted = True
     backup_event = create_manual_backup(db, initiated_by=None, label="location_changed")
     logger.info("Backup location updated from '%s' to '%s'.", previous_resolved, target)
-    return {"backup_location": stored_path_value(target) or str(target), "previous_deleted": deleted, "absolute_path": str(target), "backup_event_id": getattr(backup_event, 'id', None)}
+    return {
+        "backup_location": stored_path_value(target) or str(target),
+        "previous_deleted": deleted,
+        "deletion_skipped_reason": deletion_skipped_reason,
+        "absolute_path": str(target),
+        "backup_event_id": getattr(backup_event, 'id', None),
+    }
 
 
 def path_is_inside(path: Path, root: Path) -> bool:
@@ -6912,6 +7331,8 @@ def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type
         "background_monitor": True,
         "source_ip": "vm1_internal",
     }
+    context.setdefault("ai_rules", get_ai_rules(db))
+    context = enrich_file_ai_context(db, entry, change_type, old_content, new_content, context)
     prediction = ai_predict(Path(entry.relative_path), old_content, new_content, context)
     flags = content_flags(new_content, context, path=Path(entry.relative_path))
     classification = classify(change_type, prediction, flags, context)

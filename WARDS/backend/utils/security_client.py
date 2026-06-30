@@ -277,6 +277,13 @@ def retrain_ai(db, actor):
     return _sync_post("/v1/ai/retrain", {"actor": actor})
 
 
+def seed_initial_ai_training(db, actor, force: bool = False):
+    if not SECURITY_API_URL:
+        from SECURITY.security_engine import seed_initial_ai_training as _local
+        return _local(db, actor, force=force)
+    return _sync_post("/v1/ai/seed-initial-training", {"actor": actor, "force": force})
+
+
 def set_ai_sensitivity(db, sensitivity: str, actor: str) -> str:
     if not SECURITY_API_URL:
         from SECURITY.security_engine import set_ai_sensitivity as _local
@@ -306,6 +313,13 @@ def set_backup_location(db, path, delete_previous=False, actor=None):
         from SECURITY.security_engine import set_backup_location as _local
         return _local(db, path, delete_previous, actor)
     return _sync_post("/v1/backup/location", {"path": path, "delete_previous": delete_previous, "actor": actor})
+
+
+def list_backup_inventory(db):
+    if not SECURITY_API_URL:
+        from SECURITY.security_engine import list_backup_inventory as _local
+        return _local(db)
+    return _sync_get("/v1/backup/inventory", timeout=30.0)
 
 
 def full_system_recovery(db, admin_id):

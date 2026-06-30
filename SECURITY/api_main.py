@@ -37,6 +37,7 @@ from SECURITY.security_engine import (
     add_ai_rule,
     available_ai_rule_templates,
     retrain_ai,
+    seed_initial_ai_training,
     ml_anomaly_score,
     weekly_ai_behavior_data,
     create_manual_backup,
@@ -44,6 +45,7 @@ from SECURITY.security_engine import (
     create_files_backup,
     create_ml_backup,
     create_full_system_backup,
+    list_backup_inventory,
     set_backup_location,
     full_system_recovery,
     recover_database,
@@ -308,6 +310,15 @@ def api_ai_retrain(payload: dict = {}, db=Depends(get_db)):
     return retrain_ai(db, payload.get("actor", "api"))
 
 
+@app.post("/v1/ai/seed-initial-training", dependencies=[Depends(require_api_key)])
+def api_ai_seed_initial_training(payload: dict = {}, db=Depends(get_db)):
+    return seed_initial_ai_training(
+        db,
+        payload.get("actor", "api"),
+        force=bool(payload.get("force", False)),
+    )
+
+
 @app.post("/v1/ai/ml-score", dependencies=[Depends(require_api_key)])
 def api_ai_ml_score(payload: dict = {}, db=Depends(get_db)):
     return {"ml_anomaly_score": ml_anomaly_score(payload)}
@@ -532,6 +543,12 @@ def api_backup_location(payload: dict = {}, db=Depends(get_db)):
         payload.get("delete_previous", False),
         payload.get("actor"),
     )
+
+
+@app.get("/v1/backup/inventory", dependencies=[Depends(require_api_key)])
+@rate_limit("backup_inventory", max_requests=20, window_seconds=60)
+def api_backup_inventory(db=Depends(get_db)):
+    return list_backup_inventory(db)
 
 
 @app.post("/v1/recover/full", dependencies=[Depends(require_api_key)])

@@ -15,7 +15,23 @@ const sensitivityOptions = [
   { value: 1, label: 'Normal', hint: 'Recommended' },
   { value: 1.5, label: 'High', hint: 'More strict' },
 ];
+const recoveryDomainLabels = {
+  application_files: 'App Files',
+  vm1_database: 'VM1 DB',
+  vm2_database: 'VM2 DB',
+  ai_ml_assets: 'ML',
+};
 const FILE_PAGE_SIZE = 10;
+const buttonBase = 'inline-flex items-center justify-center rounded-lg px-4 py-2.5 text-sm font-semibold shadow-sm transition focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60';
+const buttonStyles = {
+  primary: `${buttonBase} bg-primary text-white hover:bg-blue-900 focus:ring-primary/40`,
+  neutral: `${buttonBase} bg-slate-900 text-white hover:bg-slate-700 focus:ring-slate-400`,
+  subtle: `${buttonBase} bg-slate-100 text-slate-800 hover:bg-slate-200 focus:ring-slate-300`,
+  success: `${buttonBase} bg-green-600 text-white hover:bg-green-700 focus:ring-green-500/40`,
+  warning: `${buttonBase} bg-amber-500 text-white hover:bg-amber-600 focus:ring-amber-500/40`,
+  danger: `${buttonBase} bg-red-600 text-white hover:bg-red-700 focus:ring-red-500/40`,
+  info: `${buttonBase} bg-blue-50 text-primary hover:bg-blue-100 focus:ring-primary/30`,
+};
 
 const ruleHelp = {
   hour_of_day: 'Learns the normal time range for admin changes.',
@@ -302,6 +318,8 @@ const BackupRecovery = () => {
   const [recoveries, setRecoveries] = useState([]);
   const [incidents, setIncidents] = useState([]);
   const [backups, setBackups] = useState([]);
+  const [backupInventory, setBackupInventory] = useState(null);
+  const [showBackupInventory, setShowBackupInventory] = useState(false);
   const [historyPages, setHistoryPages] = useState({
     backups: { page: 1, page_size: 10, total: 0, total_pages: 1 },
     detections: { page: 1, page_size: 10, total: 0, total_pages: 1 },
@@ -421,6 +439,12 @@ const BackupRecovery = () => {
     const response = await api.get('/security/backups', { params });
     setBackups(response.data?.items || []);
     updateHistoryPage('backups', response.data || {});
+  };
+
+  const refreshBackupInventory = async () => {
+    const response = await api.get('/security/backups/inventory');
+    setBackupInventory(response.data || { items: [] });
+    return response;
   };
 
   const refreshDetections = async (page = historyPagesRef.current.detections.page) => {
@@ -593,11 +617,13 @@ const BackupRecovery = () => {
       return;
     }
     if (tab === 'Manual Controls') {
-      await refreshAiRules();
-      await refreshAiSensitivity();
-      await refreshBlockedIps();
-      await refreshPermanentBlocks();
-      await refreshUserRestrictions();
+      await Promise.all([
+        refreshAiRules(),
+        refreshAiSensitivity(),
+        refreshBlockedIps(),
+        refreshPermanentBlocks(),
+        refreshUserRestrictions(),
+      ]);
     }
   };
 
@@ -917,8 +943,12 @@ const BackupRecovery = () => {
       setControls((current) => ({ ...current, backupPath: path }));
       askConfirm(
         'Change backup location?',
-        `WARDS will use ${path} for new trusted backups. The selected folder must be empty so existing files are not mixed with security backups.`,
-        () => api.post('/security/backup/location', { path, delete_previous: controls.deletePrevious }),
+        `WARDS will use ${path} for new trusted backups. The selected folder must be an absolute, writable directory on the security server.`,
+        async () => {
+          const response = await api.post('/security/backup/location', { path, delete_previous: controls.deletePrevious });
+          await refreshBackupInventory();
+          return response;
+        },
         'Backup location updated.',
         'Save location',
       );
@@ -1423,11 +1453,11 @@ const BackupRecovery = () => {
             <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
               <Section title="Integrity and Recovery">
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                  <button disabled={busy} className="rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Manual system scan?', 'WARDS will scan every monitored file and create logs for any changes it finds.', () => api.post('/security/scan'), (result) => result?.data?.summary || 'Full system integrity scan complete.', 'Start scan')}>Manual System Scan</button>
-                  <button disabled={busy} className="rounded-xl bg-primary px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Full system backup?', 'WARDS will back up VM1 database and all VM2 components (database, files, ML).', () => api.post('/security/backup/full'), 'Full system backup created.', 'Full backup')}>Full System Backup</button>
+                  <button disabled={busy} className={buttonStyles.neutral} onClick={() => askConfirm('Manual system scan?', 'WARDS will scan every monitored file and create logs for any changes it finds.', () => api.post('/security/scan'), (result) => result?.data?.summary || 'Full system integrity scan complete.', 'Start scan')}>Manual System Scan</button>
+                  <button disabled={busy} className={buttonStyles.primary} onClick={() => askConfirm('Full system backup?', 'WARDS will back up VM1 database and all VM2 components (database, files, ML).', () => api.post('/security/backup/full'), 'Full system backup created.', 'Full backup')}>Full System Backup</button>
                   <button
                     disabled={busy}
-                    className="rounded-xl bg-red-600 px-4 py-3 font-semibold text-white disabled:opacity-60"
+                    className={buttonStyles.danger}
                     onClick={() => askConfirm('Full system recovery?', 'Are you sure you want to manually restore the system while it is deployed? You will be logged out.', async () => {
                           await api.post('/security/recover/full');
                           localStorage.removeItem('adminToken');
@@ -1448,7 +1478,7 @@ const BackupRecovery = () => {
                 <div className="space-y-3">
                   <div className="grid gap-3 md:grid-cols-[1fr_auto]">
                     <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" type="datetime-local" min={toDateInputMin()} value={controls.backupDate} onChange={(e) => setControls({ ...controls, backupDate: e.target.value })} />
-                    <button disabled={busy} className={`rounded-xl bg-slate-900 px-4 py-2 font-semibold text-white${disabledButtonClass}`} onClick={() => {
+                    <button disabled={busy} className={buttonStyles.neutral} onClick={() => {
                       if (!controls.backupDate || new Date(controls.backupDate) <= new Date()) {
                         setNotice('Choose a future date and time for the scheduled backup.');
                         return;
@@ -1467,28 +1497,81 @@ const BackupRecovery = () => {
                       <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Current backup location</p>
                       <p className="mt-1 break-all text-sm font-semibold text-slate-800">{showBackupPath ? (controls.backupPath || 'No folder selected yet.') : 'File path hidden for security.'}</p>
                     </div>
-                    <button disabled={busy} className={`rounded-xl bg-blue-50 px-4 py-3 font-semibold text-primary${disabledButtonClass}`} onClick={() => setShowBackupPath((value) => !value)}>{showBackupPath ? 'Hide file path' : 'Show file path'}</button>
+                    <button disabled={busy} className={buttonStyles.info} onClick={() => setShowBackupPath((value) => !value)}>{showBackupPath ? 'Hide file path' : 'Show file path'}</button>
                     <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={controls.deletePrevious} onChange={(e) => setControls({ ...controls, deletePrevious: e.target.checked })} /> Delete backups from previous folder after changing location</label>
-                    <button disabled={busy} className={`rounded-xl bg-slate-100 px-4 py-3 font-semibold text-slate-800${disabledButtonClass}`} onClick={() => openFolderPicker('backup', 'Choose backup location', controls.backupPath)}>Backup Location</button>
+                    <button disabled={busy} className={buttonStyles.subtle} onClick={() => openFolderPicker('backup', 'Choose backup location', controls.backupPath)}>Backup Location</button>
+                    <button
+                      disabled={busy}
+                      className={buttonStyles.neutral}
+                      onClick={() => runAction(async () => {
+                        const response = await refreshBackupInventory();
+                        setShowBackupInventory(true);
+                        return { ...response, skipRefresh: true };
+                      }, 'Backup inventory loaded.', 'Loading backup inventory...')}
+                    >
+                      View backups
+                    </button>
+                    {showBackupInventory && (
+                      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                        <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-3 py-2">
+                          <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Saved backups</p>
+                          <button className="text-xs font-semibold text-primary hover:text-blue-900" onClick={() => setShowBackupInventory(false)}>Hide</button>
+                        </div>
+                        <div className="max-h-80 overflow-auto">
+                          <table className="min-w-full divide-y divide-slate-100 text-sm">
+                            <thead className="sticky top-0 bg-white text-left text-xs uppercase tracking-[0.12em] text-slate-500">
+                              <tr>
+                                <th className="px-3 py-2">Filename</th>
+                                <th className="px-3 py-2">Label</th>
+                                <th className="px-3 py-2">Timestamp</th>
+                                <th className="px-3 py-2">Latest for</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {(backupInventory?.items || []).length === 0 && (
+                                <tr><td className="px-3 py-4 text-slate-500" colSpan={4}>No backups found.</td></tr>
+                              )}
+                              {(backupInventory?.items || []).map((item, index) => (
+                                <tr key={`${item.path || item.filename}-${index}`} className="align-top">
+                                  <td className="max-w-[16rem] break-all px-3 py-2 font-semibold text-slate-800">{item.filename || 'Unknown'}</td>
+                                  <td className="px-3 py-2 text-slate-600">{item.label || item.backup_type || 'unknown'}</td>
+                                  <td className="whitespace-nowrap px-3 py-2 text-slate-600">{item.timestamp ? formatDateTime(item.timestamp) : 'Unknown'}</td>
+                                  <td className="px-3 py-2">
+                                    <div className="flex flex-wrap gap-1.5">
+                                      {(item.latest_domains || []).length === 0 && <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-500">Older</span>}
+                                      {(item.latest_domains || []).map((domain) => (
+                                        <span key={domain} className="rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-700">
+                                          {recoveryDomainLabels[domain] || domain}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </Section>
 
               <Section title="Granular Backups">
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <button disabled={busy} className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60" onClick={() => askConfirm('Backup VM1 database?', 'WARDS will create a full dump of the VM1 business database.', () => api.post('/security/backup/vm1-database'), 'VM1 database backup created.', 'Backup VM1 DB')}>VM1 Database Backup</button>
-                  <button disabled={busy} className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60" onClick={() => askConfirm('Backup VM2 database?', 'WARDS will snapshot the VM2 security database.', () => api.post('/security/backup/vm2-database'), 'VM2 database backup created.', 'Backup VM2 DB')}>VM2 Database Backup</button>
-                  <button disabled={busy} className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60" onClick={() => askConfirm('Backup files?', 'WARDS will back up monitored WARDS and OCR files.', () => api.post('/security/backup/files'), 'Files backup created.', 'Backup files')}>Files Backup</button>
-                  <button disabled={busy} className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60" onClick={() => askConfirm('Backup ML artifacts?', 'WARDS will back up ML model state and metadata.', () => api.post('/security/backup/ml'), 'ML backup created.', 'Backup ML')}>ML Backup</button>
+                  <button disabled={busy} className={buttonStyles.neutral} onClick={() => askConfirm('Backup VM1 database?', 'WARDS will create a full dump of the VM1 business database.', () => api.post('/security/backup/vm1-database'), 'VM1 database backup created.', 'Backup VM1 DB')}>VM1 Database Backup</button>
+                  <button disabled={busy} className={buttonStyles.neutral} onClick={() => askConfirm('Backup VM2 database?', 'WARDS will snapshot the VM2 security database.', () => api.post('/security/backup/vm2-database'), 'VM2 database backup created.', 'Backup VM2 DB')}>VM2 Database Backup</button>
+                  <button disabled={busy} className={buttonStyles.neutral} onClick={() => askConfirm('Backup files?', 'WARDS will back up monitored WARDS and OCR files.', () => api.post('/security/backup/files'), 'Files backup created.', 'Backup files')}>Files Backup</button>
+                  <button disabled={busy} className={buttonStyles.neutral} onClick={() => askConfirm('Backup ML artifacts?', 'WARDS will back up ML model state and metadata.', () => api.post('/security/backup/ml'), 'ML backup created.', 'Backup ML')}>ML Backup</button>
                 </div>
               </Section>
 
               <Section title="Granular Recovery">
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <button disabled={busy} className="rounded-lg bg-red-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-600 disabled:opacity-60" onClick={() => askConfirm('Recover VM1 database?', 'Are you sure? This will restore the VM1 business database from the latest backup and log you out.', async () => { await api.post('/security/recover/vm1-database'); localStorage.removeItem('adminToken'); localStorage.removeItem('adminUser'); localStorage.removeItem('securityAuthenticated'); sessionStorage.removeItem('securityAuthenticated'); sessionStorage.removeItem('securityAuthenticatedAt'); navigate('/admin/backup/login'); return { skipRefresh: true }; }, 'VM1 database recovery complete.', 'Recover VM1 DB')}>VM1 Database Recovery</button>
-                  <button disabled={busy} className="rounded-lg bg-red-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-600 disabled:opacity-60" onClick={() => askConfirm('Recover VM2 database?', 'WARDS will restore the VM2 security database from the latest backup.', () => api.post('/security/recover/vm2-database'), 'VM2 database recovery complete.', 'Recover VM2 DB')}>VM2 Database Recovery</button>
-                  <button disabled={busy} className="rounded-lg bg-red-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-600 disabled:opacity-60" onClick={() => askConfirm('Recover files?', 'WARDS will restore monitored files from the latest backup.', () => api.post('/security/recover/files'), 'Files recovery complete.', 'Recover files')}>Files Recovery</button>
-                  <button disabled={busy} className="rounded-lg bg-red-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-600 disabled:opacity-60" onClick={() => askConfirm('Recover ML artifacts?', 'WARDS will restore ML model state from the latest backup.', () => api.post('/security/recover/ml'), 'ML recovery complete.', 'Recover ML')}>ML Recovery</button>
+                  <button disabled={busy} className={buttonStyles.danger} onClick={() => askConfirm('Recover VM1 database?', 'Are you sure? This will restore the VM1 business database from the latest backup and log you out.', async () => { await api.post('/security/recover/vm1-database'); localStorage.removeItem('adminToken'); localStorage.removeItem('adminUser'); localStorage.removeItem('securityAuthenticated'); sessionStorage.removeItem('securityAuthenticated'); sessionStorage.removeItem('securityAuthenticatedAt'); navigate('/admin/backup/login'); return { skipRefresh: true }; }, 'VM1 database recovery complete.', 'Recover VM1 DB')}>VM1 Database Recovery</button>
+                  <button disabled={busy} className={buttonStyles.danger} onClick={() => askConfirm('Recover VM2 database?', 'WARDS will restore the VM2 security database from the latest backup.', () => api.post('/security/recover/vm2-database'), 'VM2 database recovery complete.', 'Recover VM2 DB')}>VM2 Database Recovery</button>
+                  <button disabled={busy} className={buttonStyles.danger} onClick={() => askConfirm('Recover files?', 'WARDS will restore monitored files from the latest backup.', () => api.post('/security/recover/files'), 'Files recovery complete.', 'Recover files')}>Files Recovery</button>
+                  <button disabled={busy} className={buttonStyles.danger} onClick={() => askConfirm('Recover ML artifacts?', 'WARDS will restore ML model state from the latest backup.', () => api.post('/security/recover/ml'), 'ML recovery complete.', 'Recover ML')}>ML Recovery</button>
                 </div>
               </Section>
 
@@ -1502,7 +1585,7 @@ const BackupRecovery = () => {
                       </div>
                       <button
                         disabled={busy}
-                        className={`rounded-xl px-4 py-3 font-semibold text-white ${controls.monitoringEnabled ? 'bg-orange-500' : 'bg-green-600'}${disabledButtonClass}`}
+                        className={controls.monitoringEnabled ? buttonStyles.warning : buttonStyles.success}
                         onClick={() => askConfirm(
                           controls.monitoringEnabled ? 'Turn off automatic scans?' : 'Turn on automatic scans?',
                           controls.monitoringEnabled
@@ -1530,7 +1613,7 @@ const BackupRecovery = () => {
                           onChange={(e) => setControls({ ...controls, scanInterval: e.target.value, scanIntervalDirty: true })}
                         />
                       </label>
-                      <button disabled={busy} className={`rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white${disabledButtonClass}`} onClick={() => askConfirm('Save scan interval?', `Automatic scans will run every ${Number(controls.scanInterval || 0)} seconds while monitoring is enabled.`, saveScanInterval, 'Automatic scan interval saved.', 'Save interval')}>Save Scan Interval</button>
+                      <button disabled={busy} className={buttonStyles.neutral} onClick={() => askConfirm('Save scan interval?', `Automatic scans will run every ${Number(controls.scanInterval || 0)} seconds while monitoring is enabled.`, saveScanInterval, 'Automatic scan interval saved.', 'Save interval')}>Save Scan Interval</button>
                     </div>
                     <p className="mt-2 text-xs leading-5 text-slate-500">Default is 30 seconds. Lower values detect faster but use more backend resources.</p>
                   </div>
@@ -1542,10 +1625,13 @@ const BackupRecovery = () => {
                   <div className="grid gap-3 md:grid-cols-3">
                     <CustomSelect value={controls.aiDay} onChange={(value) => setControls({ ...controls, aiDay: value })} options={['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((item) => ({ value: item, label: item }))} placeholder="Select day" />
                     <input className="rounded-xl border border-slate-200 px-3 py-2 text-sm" type="time" value={controls.aiTime} onChange={(e) => setControls({ ...controls, aiTime: e.target.value })} />
-                    <button disabled={busy} className={`rounded-xl bg-slate-900 px-4 py-2 font-semibold text-white${disabledButtonClass}`} onClick={() => askConfirm('Save AI retraining schedule?', `WARDS will retrain the anomaly model every ${controls.aiDay} at ${controls.aiTime}.`, () => api.post('/security/ai/schedule', { day: controls.aiDay, time: controls.aiTime }), 'AI retraining schedule saved.', 'Save AI schedule')}>Scheduled AI Retrain</button>
+                    <button disabled={busy} className={buttonStyles.neutral} onClick={() => askConfirm('Save AI retraining schedule?', `WARDS will retrain the anomaly model every ${controls.aiDay} at ${controls.aiTime}.`, () => api.post('/security/ai/schedule', { day: controls.aiDay, time: controls.aiTime }), 'AI retraining schedule saved.', 'Save AI schedule')}>Scheduled AI Retrain</button>
                   </div>
-                  <button disabled={busy} className="w-full rounded-xl bg-primary px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Retrain AI model?', 'WARDS will retrain using historical validated behavior and the newest verified activity.', () => api.post('/security/ai/retrain'), 'AI model retrained with historical and recent validated data.', 'Retrain AI')}>Manual AI Retrain</button>
-                  <button disabled={busy} className={`w-full rounded-xl bg-slate-100 px-4 py-3 font-semibold text-slate-800${disabledButtonClass}`} onClick={loadWeeklyAiData}>Show this week's data</button>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <button disabled={busy} className={`${buttonStyles.primary} w-full`} onClick={() => askConfirm('Retrain AI model?', 'WARDS will retrain using historical validated behavior and the newest verified activity.', () => api.post('/security/ai/retrain'), 'AI model retrained with historical and recent validated data.', 'Retrain AI')}>Manual AI Retrain</button>
+                    <button disabled={busy} className={`${buttonStyles.neutral} w-full`} onClick={() => askConfirm('Seed initial AI training?', 'WARDS will use SECURITY/ml/initial_training_samples.csv to bootstrap the behavioral profile and Isolation Forest. This is skipped automatically after it succeeds once.', () => api.post('/security/ai/seed-initial-training'), (result) => result?.data?.status === 'skipped' ? 'Initial AI training was already seeded.' : 'Initial AI training seed completed.', 'Seed AI')}>Seed Initial Training</button>
+                    <button disabled={busy} className={`${buttonStyles.subtle} w-full`} onClick={loadWeeklyAiData}>Show this week's data</button>
+                  </div>
                   {weeklyAiData && (
                     <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                       <p className="font-bold text-slate-900">Behavior data since {formatDateTime(weeklyAiData.since)}</p>
@@ -1601,7 +1687,7 @@ const BackupRecovery = () => {
               <Section
                 title="Behavioral Anomaly Rules"
                 actions={(
-                  <button disabled={busy} className={`rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white${disabledButtonClass}`} onClick={() => setShowAiRules((value) => !value)}>
+                  <button disabled={busy} className={buttonStyles.neutral} onClick={() => setShowAiRules((value) => !value)}>
                     Manage AI Rules
                   </button>
                 )}
@@ -1620,7 +1706,7 @@ const BackupRecovery = () => {
                           </div>
                           <div className="flex items-center gap-3">
                             <CustomSelect value={controls.aiSensitivity} onChange={(value) => setControls({ ...controls, aiSensitivity: value })} options={[{ value: 'low', label: 'Low - 0.85 threshold' }, { value: 'medium', label: 'Medium - 0.70 threshold' }, { value: 'high', label: 'High - 0.55 threshold' }, { value: 'very_high', label: 'Very High - 0.40 threshold' }]} placeholder="Select sensitivity" />
-                            <button disabled={busy} className={`rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white${disabledButtonClass}`} onClick={() => askConfirm('Save AI sensitivity?', 'WARDS will update the global AI sensitivity threshold used by anomaly scoring.', saveAiSensitivity, 'Global AI sensitivity saved.', 'Save sensitivity')}>Save</button>
+                            <button disabled={busy} className={buttonStyles.neutral} onClick={() => askConfirm('Save AI sensitivity?', 'WARDS will update the global AI sensitivity threshold used by anomaly scoring.', saveAiSensitivity, 'Global AI sensitivity saved.', 'Save sensitivity')}>Save</button>
                           </div>
                         </div>
                       </div>
@@ -1629,7 +1715,7 @@ const BackupRecovery = () => {
                         <p className="mt-1 text-xs leading-5 text-blue-900">Only predefined rules based on the defacement dictionary can be added, so every new rule stays compatible with the AI scoring model and receives initial sample patterns.</p>
                         <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto]">
                           <CustomSelect value={controls.aiRuleTemplate} onChange={(value) => setControls({ ...controls, aiRuleTemplate: value })} options={[{ value: '', label: 'Select an approved rule' }, ...aiRuleTemplates.filter((item) => !item.already_added).map((item) => ({ value: item.key, label: item.label }))]} placeholder="Select an approved rule" />
-                          <button disabled={busy} className={`rounded-xl bg-primary px-4 py-2 text-sm font-bold text-white${disabledButtonClass}`} onClick={() => askConfirm('Add AI rule?', 'WARDS will add this approved rule to anomaly scoring with its initial sample configuration.', addSelectedAiRule, 'AI rule added with initial samples.', 'Add rule')}>Add AI Rule</button>
+                          <button disabled={busy} className={buttonStyles.primary} onClick={() => askConfirm('Add AI rule?', 'WARDS will add this approved rule to anomaly scoring with its initial sample configuration.', addSelectedAiRule, 'AI rule added with initial samples.', 'Add rule')}>Add AI Rule</button>
                         </div>
                       </div>
                       <div className="grid gap-3">
@@ -1655,10 +1741,10 @@ const BackupRecovery = () => {
                           </div>
                         ))}
                       </div>
-                      <button disabled={busy} className="w-full rounded-xl bg-primary px-4 py-3 font-semibold text-white disabled:opacity-60" onClick={() => askConfirm('Save AI rules?', 'WARDS will update the enabled rules and advanced rule configuration used by anomaly scoring.', saveAiRules, 'AI behavioral rules saved.', 'Save rules')}>Save AI Rules</button>
+                      <button disabled={busy} className={`${buttonStyles.primary} w-full`} onClick={() => askConfirm('Save AI rules?', 'WARDS will update the enabled rules and advanced rule configuration used by anomaly scoring.', saveAiRules, 'AI behavioral rules saved.', 'Save rules')}>Save AI Rules</button>
                     </>
                   ) : (
-                    <button disabled={busy} className={`rounded-xl bg-blue-50 px-4 py-3 text-sm font-bold text-primary${disabledButtonClass}`} onClick={() => setShowAiRules(true)}>
+                    <button disabled={busy} className={buttonStyles.info} onClick={() => setShowAiRules(true)}>
                       Open Manage AI Rules
                     </button>
                   )}
