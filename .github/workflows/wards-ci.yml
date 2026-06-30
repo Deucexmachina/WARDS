@@ -161,24 +161,36 @@ jobs:
           START=$(date +%s)
           MAX_WAIT=300
           TARGET_COMMIT="${GITHUB_SHA}"
+          CURL_OPTS="-sSf --connect-timeout 5 --max-time 15"
           while true; do
-            VM1_JSON=$(curl -sSf http://152.42.249.84:9000/deploy-status)
-            VM2_JSON=$(curl -sSf http://152.42.249.84:9000/vm2-deploy-status)
-            VM1_COMMIT=$(echo "$VM1_JSON" | jq -r '.commit')
-            VM2_COMMIT=$(echo "$VM2_JSON" | jq -r '.commit')
+            LOOP_START=$(date +%s)
+
+            VM1_RAW=$(curl $CURL_OPTS -w "\n%{http_code}" http://152.42.249.84:9000/deploy-status || echo "error")
+            VM1_HTTP_CODE=$(echo "$VM1_RAW" | tail -n1)
+            VM1_JSON=$(echo "$VM1_RAW" | sed '$d')
+            VM1_TIME=$(($(date +%s) - LOOP_START))
+
+            VM2_START=$(date +%s)
+            VM2_RAW=$(curl $CURL_OPTS -w "\n%{http_code}" http://152.42.249.84:9000/vm2-deploy-status || echo "error")
+            VM2_HTTP_CODE=$(echo "$VM2_RAW" | tail -n1)
+            VM2_JSON=$(echo "$VM2_RAW" | sed '$d')
+            VM2_TIME=$(($(date +%s) - VM2_START))
+
+            VM1_COMMIT=$(echo "$VM1_JSON" | jq -r '.commit // "unknown"')
+            VM2_COMMIT=$(echo "$VM2_JSON" | jq -r '.commit // "unknown"')
             VM2_BASELINE_READY=$(echo "$VM2_JSON" | jq -r '.deployment_vm1_baseline_ready // false')
             VM2_VM1_MANIFEST_COMMIT=$(echo "$VM2_JSON" | jq -r '.vm1_last_manifest_commit // ""')
             VM2_PAUSED=$(echo "$VM2_JSON" | jq -r '.deployment_in_progress // false')
-            echo "target=$TARGET_COMMIT VM1=$VM1_COMMIT VM2=$VM2_COMMIT vm1_manifest=$VM2_VM1_MANIFEST_COMMIT baseline_ready=$VM2_BASELINE_READY paused=$VM2_PAUSED"
+            echo "target=$TARGET_COMMIT VM1=$VM1_COMMIT(vm1_http=$VM1_HTTP_CODE,${VM1_TIME}s) VM2=$VM2_COMMIT(vm2_http=$VM2_HTTP_CODE,${VM2_TIME}s) vm1_manifest=$VM2_VM1_MANIFEST_COMMIT baseline_ready=$VM2_BASELINE_READY paused=$VM2_PAUSED"
 
-            if [ "$VM1_COMMIT" = "$TARGET_COMMIT" ] && \
+            if [ "$VM1_HTTP_CODE" != "200" ] || [ "$VM2_HTTP_CODE" != "200" ]; then
+              echo "One or both status endpoints unreachable. Will retry..."
+            elif [ "$VM1_COMMIT" = "$TARGET_COMMIT" ] && \
                [ "$VM2_COMMIT" = "$TARGET_COMMIT" ] && \
                [ "$VM2_PAUSED" = "false" ]; then
                   echo "VM1 and VM2 are already synchronized at target commit $TARGET_COMMIT; deploy verified."
                 exit 0
-            fi
-
-            if [ "$VM1_COMMIT" = "$TARGET_COMMIT" ] && \
+            elif [ "$VM1_COMMIT" = "$TARGET_COMMIT" ] && \
                [ "$VM2_COMMIT" = "$TARGET_COMMIT" ] && \
                [ "$VM2_VM1_MANIFEST_COMMIT" = "$TARGET_COMMIT" ] && \
                [ "$VM2_BASELINE_READY" = "true" ] && \

@@ -2565,11 +2565,14 @@ def list_all_backup_folders(backup_location: Path, label: str | None = None) -> 
 
 def list_backup_inventory(db: Session) -> dict:
     roots = all_backup_roots(db)
-    latest_by_domain: dict[str, Path] = {}
-    for domain in RECOVERY_DOMAINS:
-        latest_by_domain[domain] = newest_valid_backup_for_domain(db, domain)
 
-    items = []
+    # Pre-load manifests once per root to avoid redundant disk I/O.
+    # backup_manifest_index() reads the file, verifies HMAC, and parses JSON.
+    root_manifests: dict[Path, dict[str, dict[str, object]]] = {}
+    root_manifest_payloads: dict[Path, dict] = {}
+    root_manifest_valid: dict[Path, bool] = {}
+    root_domains: dict[Path, set[str]] = {}
+
     for root in roots:
         manifest_path = root / BACKUP_MANIFEST_NAME
         manifest_payload = {}
@@ -2580,9 +2583,27 @@ def list_backup_inventory(db: Session) -> dict:
                 manifest_valid = isinstance(manifest_payload, dict) and verify_backup_manifest_hmac(manifest_payload)
             except OSError:
                 manifest_payload = {}
+        root_manifest_payloads[root] = manifest_payload
+        root_manifest_valid[root] = manifest_valid
         manifest = backup_manifest_index(root)
-        domains = sorted(manifest_domains(manifest)) if manifest else []
-        domain_validity = {domain: backup_root_has_valid_domain(root, domain) for domain in domains}
+        root_manifests[root] = manifest
+        root_domains[root] = manifest_domains(manifest) if manifest else set()
+
+    # Compute latest by domain from cached data (skip expensive per-file SHA256 re-validation).
+    # For inventory display, a backup is valid for a domain if its manifest lists files for that domain.
+    latest_by_domain: dict[str, Path] = {}
+    for domain in RECOVERY_DOMAINS:
+        for root in roots:
+            if domain in root_domains.get(root, set()):
+                latest_by_domain[domain] = root
+                break
+
+    items = []
+    for root in roots:
+        manifest = root_manifests.get(root, {})
+        domains = sorted(root_domains.get(root, set()))
+        # Lightweight domain check for inventory display (skip expensive SHA256 re-computation).
+        domain_validity = {domain: domain in root_domains.get(root, set()) for domain in domains}
         latest_domains = [
             domain
             for domain, latest_root in latest_by_domain.items()
@@ -2595,13 +2616,14 @@ def list_backup_inventory(db: Session) -> dict:
                 timestamp = datetime.strptime(timestamp_text[:15], "%Y%m%d_%H%M%S").isoformat()
             except Exception:
                 timestamp = None
+        manifest_payload = root_manifest_payloads.get(root, {})
         items.append({
             "filename": root.name,
             "label": root.name.split("_backup_", 1)[0] if "_backup_" in root.name else "unknown",
             "timestamp": timestamp,
             "path": stored_path_value(root) or str(root),
             "backup_type": manifest_payload.get("backup_type") if isinstance(manifest_payload, dict) else None,
-            "manifest_valid": manifest_valid,
+            "manifest_valid": root_manifest_valid.get(root, False),
             "domains": domains,
             "domain_validity": domain_validity,
             "latest_domains": latest_domains,
