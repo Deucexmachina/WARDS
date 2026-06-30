@@ -317,9 +317,7 @@ def payment_matches_assessment(payment: Payment, assessment: TaxAssessmentRecord
     if tax_type == "BT" and payment.source_module == "business_tax_online_payment":
         mayor_permit = (tax_assessment_value(assessment, "mayor_permit_number") or "").strip().upper()
         payment_permit = (get_decrypted_or_raw(payment, "property_ref_number") or payment.property_ref_number or "").strip().upper()
-        if mayor_permit and payment_permit and mayor_permit == payment_permit:
-            return True
-        return amount_matches_assessment(payment, assessment)
+        return bool(mayor_permit and payment_permit and mayor_permit == payment_permit)
 
     return False
 
@@ -333,18 +331,22 @@ def filter_unsettled_public_assessments(
         return []
 
     user_email = citizen_email(current_user)
+    if not user_email:
+        # Cannot safely attribute payments without a known email; returning all
+        # assessments avoids incorrectly hiding them due to cross-citizen matches.
+        return assessments
+
+    normalized_email = user_email.strip().lower()
     candidate_payments = (
         db.query(Payment)
         .filter(Payment.source_module.in_(("rpt_online_payment", "business_tax_online_payment")))
         .order_by(Payment.created_at.desc())
         .all()
     )
-    if user_email:
-        normalized_email = user_email.strip().lower()
-        candidate_payments = [
-            payment for payment in candidate_payments
-            if (get_decrypted_or_raw(payment, "email") or payment.email or "").strip().lower() == normalized_email
-        ]
+    candidate_payments = [
+        payment for payment in candidate_payments
+        if (get_decrypted_or_raw(payment, "email") or payment.email or "").strip().lower() == normalized_email
+    ]
 
     return [
         assessment for assessment in assessments
