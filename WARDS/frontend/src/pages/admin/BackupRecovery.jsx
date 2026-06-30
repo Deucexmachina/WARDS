@@ -319,6 +319,14 @@ const FolderPicker = ({ picker, onClose, onSelect, onOpen }) => {
 
 const BackupInventoryModal = ({ open, inventory, onClose }) => {
   const [sort, setSort] = useState({ key: 'timestamp', direction: 'desc' });
+  const [filters, setFilters] = useState({ keyword: '', label: '', domain: '', latest: '', status: '' });
+  const filterOptions = useMemo(() => {
+    const rawItems = inventory?.items || [];
+    const labels = [...new Set(rawItems.map((item) => item.label || item.backup_type || 'unknown'))].sort();
+    const domains = [...new Set(rawItems.flatMap((item) => item.domains || []))].sort();
+    const latest = [...new Set(rawItems.flatMap((item) => (item.latest_domains || []).length ? item.latest_domains : ['older']))].sort();
+    return { labels, domains, latest };
+  }, [inventory?.items]);
   const items = useMemo(() => {
     const valueFor = (item) => {
       if (sort.key === 'timestamp') return item.timestamp ? new Date(item.timestamp).getTime() : 0;
@@ -330,7 +338,26 @@ const BackupInventoryModal = ({ open, inventory, onClose }) => {
       if (sort.key === 'status') return item.manifest_valid ? 'verified' : 'unverified';
       return String(item.filename || '').toLowerCase();
     };
-    return [...(inventory?.items || [])].sort((left, right) => {
+    const keyword = filters.keyword.trim().toLowerCase();
+    return [...(inventory?.items || [])].filter((item) => {
+      const itemLabel = item.label || item.backup_type || 'unknown';
+      const domains = item.domains || [];
+      const latest = (item.latest_domains || []).length ? item.latest_domains : ['older'];
+      const status = item.manifest_valid ? 'verified' : 'unverified';
+      if (keyword && ![
+        item.filename,
+        itemLabel,
+        item.timestamp,
+        ...domains.map((domain) => recoveryDomainLabels[domain] || domain),
+        ...latest.map((domain) => domain === 'older' ? 'Older' : recoveryDomainLabels[domain] || domain),
+        status,
+      ].some((value) => String(value || '').toLowerCase().includes(keyword))) return false;
+      if (filters.label && itemLabel !== filters.label) return false;
+      if (filters.domain && !domains.includes(filters.domain)) return false;
+      if (filters.latest && !latest.includes(filters.latest)) return false;
+      if (filters.status && status !== filters.status) return false;
+      return true;
+    }).sort((left, right) => {
       const leftValue = valueFor(left);
       const rightValue = valueFor(right);
       let result = typeof leftValue === 'number'
@@ -341,7 +368,7 @@ const BackupInventoryModal = ({ open, inventory, onClose }) => {
       }
       return sort.direction === 'asc' ? result : -result;
     });
-  }, [inventory?.items, sort]);
+  }, [inventory?.items, sort, filters]);
 
   const changeSort = (key) => {
     setSort((current) => ({
@@ -371,28 +398,36 @@ const BackupInventoryModal = ({ open, inventory, onClose }) => {
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Backup inventory</p>
               <h3 className="mt-2 text-xl font-bold text-slate-900">Saved backups</h3>
-              <p className="mt-1 text-sm text-slate-600">{items.length} backup(s) found.</p>
+              <p className="mt-1 text-sm text-slate-600">{items.length} of {(inventory?.items || []).length} backup(s) shown.</p>
             </div>
             <button className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-700" onClick={onClose}>Close</button>
           </div>
-        </div>
-
-        <div className="min-h-0 overflow-auto p-5">
-          {(inventory?.timeout) && (
-            <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700">
-              {inventory.warning || 'Backup inventory query timed out. Try again shortly.'}
-            </div>
-          )}
-          <div className="mb-4 grid gap-3 md:grid-cols-[1fr_auto_auto] md:items-center">
-            <div className="text-sm text-slate-600">
-              Sorting by <span className="font-semibold text-slate-900">{backupInventorySortOptions.find((option) => option.value === sort.key)?.label || 'Timestamp'}</span>
-            </div>
-            <select
+          <div className="mt-4 grid gap-3 lg:grid-cols-[1.4fr_1fr_1fr_1fr_1fr_1fr_auto]">
+            <input
               className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
-              value={sort.key}
-              onChange={(event) => setSort((current) => ({ ...current, key: event.target.value }))}
-            >
-              {backupInventorySortOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              placeholder="Search backups"
+              value={filters.keyword}
+              onChange={(event) => setFilters((current) => ({ ...current, keyword: event.target.value }))}
+            />
+            <select className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700" value={sort.key} onChange={(event) => setSort((current) => ({ ...current, key: event.target.value }))}>
+              {backupInventorySortOptions.map((option) => <option key={option.value} value={option.value}>Sort: {option.label}</option>)}
+            </select>
+            <select className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700" value={filters.label} onChange={(event) => setFilters((current) => ({ ...current, label: event.target.value }))}>
+              <option value="">All labels</option>
+              {filterOptions.labels.map((label) => <option key={label} value={label}>{label}</option>)}
+            </select>
+            <select className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700" value={filters.domain} onChange={(event) => setFilters((current) => ({ ...current, domain: event.target.value }))}>
+              <option value="">All domains</option>
+              {filterOptions.domains.map((domain) => <option key={domain} value={domain}>{recoveryDomainLabels[domain] || domain}</option>)}
+            </select>
+            <select className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700" value={filters.latest} onChange={(event) => setFilters((current) => ({ ...current, latest: event.target.value }))}>
+              <option value="">All latest states</option>
+              {filterOptions.latest.map((domain) => <option key={domain} value={domain}>{domain === 'older' ? 'Older' : recoveryDomainLabels[domain] || domain}</option>)}
+            </select>
+            <select className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700" value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}>
+              <option value="">All statuses</option>
+              <option value="verified">Verified</option>
+              <option value="unverified">Unverified</option>
             </select>
             <button
               type="button"
@@ -402,6 +437,14 @@ const BackupInventoryModal = ({ open, inventory, onClose }) => {
               {sort.direction === 'asc' ? 'Ascending' : 'Descending'}
             </button>
           </div>
+        </div>
+
+        <div className="min-h-0 overflow-auto p-5">
+          {(inventory?.timeout) && (
+            <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700">
+              {inventory.warning || 'Backup inventory query timed out. Try again shortly.'}
+            </div>
+          )}
           <div className="overflow-auto rounded-xl border border-slate-200">
             <table className="min-w-[58rem] divide-y divide-slate-100 text-sm">
               <thead className="sticky top-0 bg-white text-left text-xs uppercase tracking-[0.12em] text-slate-500">
