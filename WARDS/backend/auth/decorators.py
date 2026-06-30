@@ -124,14 +124,25 @@ def require_main_admin():
     return require_admin_role(ROLE_MAIN_ADMIN, ROLE_SUPERADMIN)
 
 
+def require_admin_or_branch_role(*allowed_roles: str):
+    async def role_checker(
+        current_user=Depends(get_current_admin_or_branch_staff),
+    ):
+        if current_user.role not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access denied. Required roles: {', '.join(allowed_roles)}"
+            )
+        return current_user
+    return role_checker
+
+
 def require_branch_admin_or_higher():
-    # Branch admin must use branch-specific auth; this helper is kept for API compat
-    return require_admin_role(ROLE_MAIN_ADMIN, ROLE_SUPERADMIN)
+    return require_admin_or_branch_role(ROLE_BRANCH_ADMIN, ROLE_MAIN_ADMIN, ROLE_SUPERADMIN)
 
 
 def require_any_admin():
-    # Branch staff must use branch-specific auth; this helper is kept for API compat
-    return require_admin_role(ROLE_MAIN_ADMIN, ROLE_SUPERADMIN)
+    return require_admin_or_branch_role(ROLE_BRANCH_STAFF, ROLE_BRANCH_ADMIN, ROLE_MAIN_ADMIN, ROLE_SUPERADMIN)
 
 
 async def get_current_user(
@@ -229,6 +240,62 @@ async def get_current_branch_staff(
         pass
 
     raise credentials_exception
+
+
+async def get_current_admin_or_branch_staff(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
+):
+    token = credentials.credentials
+    if is_token_revoked(db, token):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session has been logged out")
+
+    # Try admin auth first
+    try:
+        payload = decode_token(token, ADMIN_SECRET_KEY)
+        _validate_token_binding(request, payload)
+        _validate_active_session("admin", payload.get("user_id"), payload)
+        email = payload.get("email") or payload.get("sub")
+        username = payload.get("sub")
+        token_type = payload.get("type")
+
+        if token_type == "admin":
+            user = None
+            if email:
+                user = db.query(Admin).filter(Admin.email == email).first()
+            if user is None and username:
+                user = db.query(Admin).filter(Admin.username == username).first()
+            if user and user.status == "Active":
+                return user
+    except (JWTError, HTTPException):
+        pass
+
+    # Fall back to branch auth
+    try:
+        payload = decode_token(token, BRANCH_SECRET_KEY)
+        _validate_token_binding(request, payload)
+        _validate_active_session("branch", payload.get("user_id"), payload)
+        email = payload.get("email") or payload.get("sub")
+        username = payload.get("sub")
+        token_type = payload.get("type")
+
+        if token_type == "branch":
+            staff = None
+            if email:
+                staff = db.query(BranchStaff).filter(BranchStaff.email == email).first()
+            if staff is None and username:
+                staff = db.query(BranchStaff).filter(BranchStaff.username == username).first()
+            if staff and staff.status == "Active":
+                return staff
+    except (JWTError, HTTPException):
+        pass
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 def require_branch_role(*allowed_roles: str):

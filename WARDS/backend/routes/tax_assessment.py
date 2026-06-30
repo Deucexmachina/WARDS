@@ -28,7 +28,7 @@ from database.models import (
     TaxpayerIdentifierSubmission,
     get_db,
 )
-from auth import get_current_user, require_main_admin, verify_account_password
+from auth import get_current_user, require_branch_admin_or_higher, verify_account_password
 from services.email_service import (
     send_account_change_notification_email,
     send_taxpayer_identifier_submission_email,
@@ -937,7 +937,7 @@ async def download_submission_file(
 @router.get("/admin/assessments/unread-count")
 async def get_tax_assessment_unread_count(
     db: Session = Depends(get_db),
-    current_user=Depends(require_main_admin()),
+    current_user=Depends(require_branch_admin_or_higher()),
 ):
     count = (
         db.query(TaxAssessmentRecord)
@@ -957,7 +957,7 @@ async def list_taxpayer_submissions(
     status_filter: str | None = Query(default=None),
     submission_type: str | None = Query(default=None),
     db: Session = Depends(get_db),
-    current_user=Depends(require_main_admin()),
+    current_user=Depends(require_branch_admin_or_higher()),
 ):
     query = db.query(TaxpayerIdentifierSubmission)
     if submission_type:
@@ -981,7 +981,7 @@ async def list_taxpayer_submissions(
 async def download_submission_file_admin(
     submission_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(require_main_admin()),
+    current_user=Depends(require_branch_admin_or_higher()),
 ):
     submission = db.query(TaxpayerIdentifierSubmission).filter(TaxpayerIdentifierSubmission.id == submission_id).first()
     file_path_value = taxpayer_submission_value(submission, "supporting_file_path") if submission else None
@@ -1048,7 +1048,7 @@ async def review_taxpayer_submission(
     submission_id: int,
     payload: SubmissionReviewRequest,
     db: Session = Depends(get_db),
-    current_user=Depends(require_main_admin()),
+    current_user=Depends(require_branch_admin_or_higher()),
 ):
     submission = db.query(TaxpayerIdentifierSubmission).filter(TaxpayerIdentifierSubmission.id == submission_id).first()
     if not submission:
@@ -1097,7 +1097,7 @@ async def review_taxpayer_submission(
 async def delete_taxpayer_submission(
     submission_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(require_main_admin()),
+    current_user=Depends(require_branch_admin_or_higher()),
 ):
     submission = db.query(TaxpayerIdentifierSubmission).filter(TaxpayerIdentifierSubmission.id == submission_id).first()
     if not submission:
@@ -1131,7 +1131,7 @@ async def list_tax_assessments(
     page: int = Query(1, ge=1),
     page_size: int = Query(DEFAULT_ASSESSMENT_PAGE_SIZE, ge=1, le=MAX_ASSESSMENT_PAGE_SIZE),
     db: Session = Depends(get_db),
-    current_user=Depends(require_main_admin()),
+    current_user=Depends(require_branch_admin_or_higher()),
 ):
     query = db.query(TaxAssessmentRecord)
     if tax_type:
@@ -1168,7 +1168,7 @@ async def list_tax_assessments(
 async def upsert_tax_assessment(
     payload: TaxAssessmentUpsertRequest,
     db: Session = Depends(get_db),
-    current_user=Depends(require_main_admin()),
+    current_user=Depends(require_branch_admin_or_higher()),
 ):
     tax_type = normalize_submission_type(payload.tax_type)
     taxpayer_type = normalize_taxpayer_type(payload.taxpayer_type)
@@ -1320,7 +1320,7 @@ async def upsert_tax_assessment(
 async def delete_tax_assessment(
     assessment_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(require_main_admin()),
+    current_user=Depends(require_branch_admin_or_higher()),
 ):
     record = db.query(TaxAssessmentRecord).filter(TaxAssessmentRecord.id == assessment_id).first()
     if not record:
