@@ -184,6 +184,37 @@ def test_evaluation_direct_vm1_manifest_queries_manifest_detection(monkeypatch, 
     assert manifest_calls == [["WARDS/frontend/index.html"], ["WARDS/frontend/index.html"]]
 
 
+def test_evaluation_direct_vm1_manifest_counts_manifest_detection_when_query_misses(monkeypatch, tmp_path):
+    evaluation_dir = Path(__file__).resolve().parents[1] / "evaluation"
+    if str(evaluation_dir) not in sys.path:
+        sys.path.insert(0, str(evaluation_dir))
+
+    import evaluator
+
+    monkeypatch.setattr(evaluator, "RESULTS_CSV", tmp_path / "results.csv")
+    monkeypatch.setattr(evaluator, "VM1_DIRECT_MANIFEST", True)
+    monkeypatch.setattr(evaluator, "CLEANUP_WAIT_SECONDS", 0)
+    monkeypatch.setattr(evaluator, "vm1_manifest_for_targets", lambda _targets: {"changed": 1, "detections": 1, "detection_ids": [777]})
+    monkeypatch.setattr(evaluator, "query_new_detections", lambda _since, target=None: [])
+    monkeypatch.setattr(evaluator, "resolve_incident", lambda _incident_id: True)
+
+    case = evaluator.TestCase(
+        "ATK-MANIFEST",
+        "Manifest-only detection",
+        "application_files",
+        "attack",
+        lambda: None,
+        trigger_scan=True,
+        target_hint="WARDS/frontend/index.html",
+    )
+
+    row = evaluator.run_test(case)
+
+    assert row["result"] == "TP"
+    assert row["detection_id"] == "777"
+    assert "vm1_manifest=registered:0,changed:1,detections:1" in row["notes"]
+
+
 def test_evaluation_ignores_unrelated_recent_detections(monkeypatch, tmp_path):
     evaluation_dir = Path(__file__).resolve().parents[1] / "evaluation"
     if str(evaluation_dir) not in sys.path:
@@ -209,6 +240,36 @@ def test_evaluation_ignores_unrelated_recent_detections(monkeypatch, tmp_path):
         lambda: None,
         wait_seconds=0,
         target_hint="evaluation:BEN-EVAL",
+    )
+
+    row = evaluator.run_test(case)
+
+    assert row["result"] == "TN"
+
+
+def test_evaluation_benign_without_target_does_not_count_ambient_detection(monkeypatch, tmp_path):
+    evaluation_dir = Path(__file__).resolve().parents[1] / "evaluation"
+    if str(evaluation_dir) not in sys.path:
+        sys.path.insert(0, str(evaluation_dir))
+
+    import evaluator
+
+    monkeypatch.setattr(evaluator, "RESULTS_CSV", tmp_path / "results.csv")
+    monkeypatch.setattr(evaluator, "SCAN_WAIT_SECONDS", 0)
+    monkeypatch.setattr(evaluator, "CLEANUP_WAIT_SECONDS", 0)
+    monkeypatch.setattr(
+        evaluator,
+        "query_new_detections",
+        lambda _since, target=None: [{"id": 999, "target_name": "WARDS/frontend/index.html"}],
+    )
+
+    case = evaluator.TestCase(
+        "BEN-API",
+        "Benign API read",
+        "api_controls",
+        "benign",
+        lambda: None,
+        wait_seconds=0,
     )
 
     row = evaluator.run_test(case)

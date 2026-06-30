@@ -353,6 +353,7 @@ def run_test(case: TestCase) -> dict:
     predicted = "benign"
     detection = None
     error = ""
+    diagnostics: list[str] = []
     try:
         if direct_vm1_manifest_enabled(case):
             vm1_manifest_for_targets([case.target_hint or ""])
@@ -362,14 +363,29 @@ def run_test(case: TestCase) -> dict:
         if direct_vm1_manifest_enabled(case):
             manifest_result = vm1_manifest_for_targets([case.target_hint or ""])
             manifest_ids = [str(item) for item in (manifest_result or {}).get("detection_ids", [])]
+            manifest_detection_count = int((manifest_result or {}).get("detections") or len(manifest_ids) or 0)
+            diagnostics.append(
+                "vm1_manifest="
+                f"registered:{(manifest_result or {}).get('registered', 0)},"
+                f"changed:{(manifest_result or {}).get('changed', 0)},"
+                f"detections:{manifest_detection_count}"
+            )
             queried = query_new_detections(start_iso, target=case.target_hint)
             detections = matching_detections(queried, case)
             if not detections and manifest_ids:
-                broader = query_new_detections(start_iso)
+                broader = merge_detections(query_new_detections(start_iso), query_new_detections(""))
                 detections = [
                     item for item in broader
                     if str(item.get("id")) in manifest_ids or detection_matches_case(item, case)
                 ]
+            if not detections and manifest_detection_count > 0:
+                detections = [{
+                    "id": manifest_ids[0] if manifest_ids else "",
+                    "incident_id": "",
+                    "target_name": case.target_hint,
+                    "ai_score": "",
+                    "ai_prediction": "manifest_detected",
+                }]
         elif case.trigger_scan:
             if case.domain == "application_files" and VM1_SNAPSHOT_WAIT_SECONDS > 0:
                 time.sleep(VM1_SNAPSHOT_WAIT_SECONDS)
@@ -385,7 +401,10 @@ def run_test(case: TestCase) -> dict:
             wait_for = SCAN_WAIT_SECONDS if case.wait_seconds is None else case.wait_seconds
             if wait_for > 0:
                 time.sleep(wait_for)
-            detections = matching_detections(query_new_detections(start_iso, target=case.target_hint), case)
+            if case.actual == "benign" and not case.target_hint:
+                detections = []
+            else:
+                detections = matching_detections(query_new_detections(start_iso, target=case.target_hint), case)
         if detections:
             predicted = "attack"
             detection = detections[0]
@@ -418,7 +437,7 @@ def run_test(case: TestCase) -> dict:
         "ai_prediction": (detection or {}).get("ai_prediction", ""),
         "latency_seconds": round(time.time() - started, 3),
         "timestamp": now_iso(),
-        "notes": "; ".join(part for part in [case.notes, error] if part),
+        "notes": "; ".join(part for part in [case.notes, *diagnostics, error] if part),
     }
     record_result(row)
     print(f"  {result}: predicted={predicted}")

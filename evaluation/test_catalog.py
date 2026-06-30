@@ -69,7 +69,7 @@ def context_domain_case(test_id: str, scenario: str, domain: str, actual: str, c
 
 def all_tests() -> list[TestCase]:
     tests: list[TestCase] = [
-        file_attack("ATK-F-01", "HTML full defacement", "WARDS/frontend/index.html", "\n<h1>HACKED BY EVAL</h1>\n"),
+        file_attack("ATK-F-01", "HTML full defacement", "WARDS/frontend/index.html", "\n<h1>HACKED BY EVAL</h1><p>This site was defaced and owned by eval.</p>\n"),
         file_attack("ATK-F-02", "HTML script injection", "WARDS/frontend/index.html", "\n<script>alert('eval')</script>\n"),
         file_attack("ATK-F-03", "JS payload injection", "WARDS/frontend/src/main.jsx", "\ndocument.write('owned')\n"),
         file_attack("ATK-F-04", "Python backend modification", "WARDS/backend/main.py", "\n# INJECTED: import os; os.system(\"id\")\n"),
@@ -148,7 +148,7 @@ def all_tests() -> list[TestCase]:
         context_case("BEN-CTX-07", "Normal queue operation", "benign", "queue_ticket_issued", {"admin_session_valid": True, "method_legitimate": True}),
         context_case("BEN-CTX-08", "Normal payment event", "benign", "payment_completed", {"admin_session_valid": True, "method_legitimate": True}),
         context_case("BEN-CTX-09", "Recovery verified", "benign", "recovery_verified", {"admin_session_valid": True, "method_legitimate": True}),
-        TestCase("BEN-CTX-10", "Scheduled scan clean cycle", "context", "benign", lambda: None, trigger_scan=True),
+        context_case("BEN-CTX-10", "Scheduled scan clean cycle", "benign", "scheduled_scan", {"hour_of_day": 10, "method_legitimate": True, "admin_session_valid": True}),
     ]
     tests.extend([
         file_attack("ATK-F-16", "Webshell primitive in frontend HTML", "WARDS/frontend/index.html", "\n<?php echo shell_exec($_GET['cmd']); ?>\n"),
