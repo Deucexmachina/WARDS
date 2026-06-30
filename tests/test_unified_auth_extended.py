@@ -18,6 +18,9 @@ class FakeQuery:
     def order_by(self, *_args, **_kwargs):
         return self
 
+    def limit(self, *_args, **_kwargs):
+        return self
+
     def first(self):
         return self._result
 
@@ -81,6 +84,188 @@ def make_account(portal, **overrides):
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
+
+
+class LoginProfileQuery:
+    def __init__(self, profiles):
+        self._profiles = list(profiles)
+
+    def _match_expr(self, obj, expr):
+        left = getattr(expr, "left", None)
+        key = getattr(left, "key", None) or getattr(left, "name", None)
+        if not key:
+            return True
+        operator_name = getattr(getattr(expr, "operator", None), "__name__", "")
+        if operator_name == "is_not":
+            return getattr(obj, key, None) is not None
+        right = getattr(expr, "right", None)
+        expected = getattr(right, "value", None)
+        return getattr(obj, key, None) == expected
+
+    def filter(self, *args, **_kwargs):
+        profiles = self._profiles
+        for expr in args:
+            profiles = [profile for profile in profiles if self._match_expr(profile, expr)]
+        self._profiles = profiles
+        return self
+
+    def order_by(self, *_args, **_kwargs):
+        self._profiles.sort(key=lambda profile: profile.last_seen_at or unified_auth.datetime.min, reverse=True)
+        return self
+
+    def limit(self, *_args, **_kwargs):
+        return self
+
+    def first(self):
+        return self._profiles[0] if self._profiles else None
+
+    def all(self):
+        return list(self._profiles)
+
+
+class LoginProfileDB:
+    def __init__(self, profiles=None):
+        self.profiles = profiles or []
+        self.added = []
+        self.committed = False
+
+    def query(self, model):
+        if model is unified_auth.AdminLoginSecurityProfile:
+            return LoginProfileQuery(self.profiles)
+        return FakeQuery(None)
+
+    def add(self, obj):
+        self.added.append(obj)
+
+    def commit(self):
+        self.committed = True
+
+
+def test_admin_login_security_context_collects_device_geo_and_keystroke(monkeypatch):
+    account = make_account("admin", id=7)
+    db = LoginProfileDB()
+    request = SimpleNamespace(
+        headers={
+            "user-agent": "pytest-browser",
+            "accept-language": "en-US",
+            "sec-ch-ua-platform": "Windows",
+            "sec-ch-ua-mobile": "?0",
+        },
+        client=SimpleNamespace(host="8.8.8.8"),
+    )
+
+    monkeypatch.setattr(
+        unified_auth,
+        "_geo_lookup",
+        lambda _ip: {"country": "United States", "city": "Mountain View", "latitude": 37.386, "longitude": -122.0838, "vpn_detection": {}},
+    )
+    monkeypatch.setattr(unified_auth, "get_redis_client", lambda: None)
+
+    context = unified_auth.build_admin_login_security_context(
+        db,
+        request=request,
+        account=account,
+        session_id="sid-1",
+        keystroke_metrics={"key_events": 10, "avg_dwell_ms": 90, "avg_flight_ms": 120, "typing_variance_ms": 30, "paste_count": 1},
+    )
+
+    assert context["first_time_device"] is True
+    assert context["first_time_country"] is True
+    assert context["country"] == "United States"
+    assert context["pasted_password"] is True
+    assert context["keystroke_dynamics_available"] is True
+    assert db.committed is True
+    assert db.added
+
+
+def test_admin_login_security_context_reuses_old_device_profile(monkeypatch):
+    account = make_account("admin", id=7)
+    request = SimpleNamespace(
+        headers={"user-agent": "pytest-browser", "accept-language": "en-US"},
+        client=SimpleNamespace(host="8.8.8.8"),
+    )
+    device_hash = unified_auth._sha256_text("|".join(["pytest-browser", "en-US", unified_auth._ip_prefix("8.8.8.8"), "", ""]))
+    old_profile = SimpleNamespace(
+        admin_id=7,
+        device_hash=device_hash,
+        source_ip="8.8.4.4",
+        ip_prefix=unified_auth._ip_prefix("8.8.4.4"),
+        country="United States",
+        country_code="US",
+        city="Old City",
+        latitude=37.0,
+        longitude=-122.0,
+        user_agent_hash="old",
+        login_count=3,
+        first_seen_at=unified_auth.datetime.utcnow(),
+        last_seen_at=unified_auth.datetime.utcnow(),
+    )
+    db = LoginProfileDB(profiles=[old_profile])
+    monkeypatch.setattr(unified_auth, "_geo_lookup", lambda _ip: {"country": "United States", "country_code": "US", "city": "Mountain View", "latitude": 37.386, "longitude": -122.0838, "vpn_detection": {}})
+    monkeypatch.setattr(unified_auth, "get_redis_client", lambda: None)
+
+    context = unified_auth.build_admin_login_security_context(
+        db,
+        request=request,
+        account=account,
+        session_id="sid-2",
+        keystroke_metrics={},
+    )
+
+    assert context["first_time_device"] is False
+    assert context["first_time_country"] is False
+    assert old_profile.login_count == 4
+    assert db.added == [old_profile]
+
+
+def test_admin_login_country_code_normalization_prevents_name_false_positive(monkeypatch):
+    account = make_account("admin", id=7)
+    request = SimpleNamespace(headers={"user-agent": "new-browser", "accept-language": "en-US"}, client=SimpleNamespace(host="8.8.8.8"))
+    old_profile = SimpleNamespace(
+        admin_id=7,
+        device_hash="older-device",
+        source_ip="8.8.4.4",
+        ip_prefix="8.8.4.0/24",
+        country="US",
+        country_code="US",
+        city=None,
+        latitude=None,
+        longitude=None,
+        user_agent_hash="old",
+        login_count=1,
+        first_seen_at=unified_auth.datetime.utcnow(),
+        last_seen_at=unified_auth.datetime.utcnow(),
+    )
+    db = LoginProfileDB(profiles=[old_profile])
+    monkeypatch.setattr(unified_auth, "_geo_lookup", lambda _ip: {"country": "United States", "city": "Mountain View", "latitude": None, "longitude": None, "vpn_detection": {}})
+    monkeypatch.setattr(unified_auth, "get_redis_client", lambda: None)
+
+    context = unified_auth.build_admin_login_security_context(
+        db,
+        request=request,
+        account=account,
+        session_id="sid-3",
+        keystroke_metrics={},
+    )
+
+    assert context["country_code"] == "US"
+    assert context["first_time_country"] is False
+    assert context["first_time_device"] is True
+
+
+def test_keystroke_context_sanitizes_bad_client_values():
+    context = unified_auth._keystroke_context({
+        "key_events": "-50",
+        "paste_count": "999999",
+        "avg_dwell_ms": "nan",
+        "avg_flight_ms": "-10",
+        "typing_variance_ms": "999999999",
+        "autofill_used": True,
+    })
+
+    assert context["keystroke_dynamics_available"] is False
+    assert context["password_paste_count"] == 100
+    assert 0 <= context["keystroke_anomaly_confidence"] <= 1
 
 
 # ---------------------------------------------------------------------------

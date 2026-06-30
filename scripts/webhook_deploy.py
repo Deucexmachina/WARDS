@@ -108,7 +108,7 @@ def _trigger_vm2_post_deploy_backup_background():
             backup_resp = httpx.post(
                 f"https://{VM2_HOST}/v1/backup/full",
                 headers=_vm2_headers(),
-                timeout=20.0,
+                timeout=600.0,
             )
             backup_resp.raise_for_status()
             logger.info("VM2 post-deploy backup triggered: %s", backup_resp.json())

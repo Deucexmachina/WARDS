@@ -19,7 +19,9 @@ from middleware import dos_protection
 from middleware.https import HttpsEnforcementMiddleware
 from database.models import Backup, BranchSystemSetting, Service, SystemSetting
 from routes import public
+from routes import security_dashboard
 from utils import backup_engine
+from utils.background_jobs import BackgroundJobManager, RateLimitExceeded
 from utils import security_client
 from utils.file_validation import SafeFileType, validate_upload_file
 from utils.request_signing import sign_request
@@ -46,6 +48,7 @@ def test_security_timeout_exempts_long_running_routes():
     assert any("/api/security/backup" in item for item in exempt)
     assert any("/api/security/recover" in item for item in exempt)
     assert any("/api/security/scan" in item for item in exempt)
+    assert any("/api/security/files" in item for item in exempt)
 
 
 def test_security_client_uses_long_timeout_for_background_operations(monkeypatch):
@@ -61,9 +64,53 @@ def test_security_client_uses_long_timeout_for_background_operations(monkeypatch
     security_client.create_full_system_backup(None, 1)
     security_client.create_files_backup(None, 1)
     security_client.recover_files(None, 1)
+    security_client.scan_single_file(None, SimpleNamespace(id=89686, relative_path=None), context={"manual_scan": True})
+    security_client.manual_recover_file(None, 89686, 1)
 
     assert calls
     assert all(timeout >= 600.0 for _path, timeout in calls)
+
+
+def test_background_job_manager_rejects_duplicate_active_job():
+    manager = BackgroundJobManager()
+    manager.set_rate_limit("security_full_backup", 0)
+
+    manager.submit("security_full_backup")
+
+    with pytest.raises(RateLimitExceeded, match="already pending or running"):
+        manager.submit("security_full_backup")
+
+
+def test_deployed_scan_file_returns_serialized_dict_without_double_serializing(monkeypatch):
+    detection = {"id": 42, "change_type": "content_modified", "target_name": "WARDS/backend/main.py"}
+    db = SimpleNamespace(add=lambda _item: None, commit=lambda: None)
+    request = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"))
+    admin = SimpleNamespace(username="admin")
+
+    monkeypatch.setattr(security_dashboard, "SECURITY_API_URL", "https://security.example")
+    monkeypatch.setattr(security_dashboard, "scan_single_file", lambda *_args, **_kwargs: detection)
+
+    result = security_dashboard.scan_file(89686, request, db=db, admin=admin)
+
+    assert result["detection"] is detection
+
+
+def test_scan_result_normalizes_vm2_detection_response(monkeypatch):
+    detection = {"id": 7, "change_type": "content_modified"}
+    job = SimpleNamespace(
+        id="job-1",
+        type="security_full_scan",
+        status=security_dashboard.JobStatus.COMPLETED,
+        result={"detections": [detection]},
+        error=None,
+    )
+
+    monkeypatch.setattr(security_dashboard.job_manager, "get", lambda _job_id: job)
+
+    result = security_dashboard.scan_result("job-1", _=object())
+
+    assert result["summary"] == "1 change(s) found."
+    assert result["detections"] == [detection]
 
 
 def test_request_signing_accepts_valid_signature(monkeypatch):

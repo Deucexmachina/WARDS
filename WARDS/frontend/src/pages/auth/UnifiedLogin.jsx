@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import ReCAPTCHA from 'react-google-recaptcha';
@@ -111,6 +111,15 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
   const [recoveryOtpCode, setRecoveryOtpCode] = useState('');
   const [recoveryOtpError, setRecoveryOtpError] = useState('');
   const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const keystrokeRef = useRef({
+    downs: {},
+    dwell: [],
+    flight: [],
+    lastKeyUp: null,
+    keyEvents: 0,
+    pasteCount: 0,
+    autofillUsed: false,
+  });
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -153,6 +162,62 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
       return 'This account is currently inactive. Please contact an administrator.';
     }
     return normalizedMessage;
+  };
+
+  const resetKeystrokeMetrics = () => {
+    keystrokeRef.current = {
+      downs: {},
+      dwell: [],
+      flight: [],
+      lastKeyUp: null,
+      keyEvents: 0,
+      pasteCount: 0,
+      autofillUsed: false,
+    };
+  };
+
+  const recordPasswordKeyDown = (event) => {
+    if (event.key.length > 1 && event.key !== 'Backspace') return;
+    const now = performance.now();
+    keystrokeRef.current.downs[event.code || event.key] = now;
+    keystrokeRef.current.keyEvents += 1;
+    if (keystrokeRef.current.lastKeyUp !== null) {
+      keystrokeRef.current.flight.push(Math.max(0, now - keystrokeRef.current.lastKeyUp));
+    }
+  };
+
+  const recordPasswordKeyUp = (event) => {
+    const key = event.code || event.key;
+    const downAt = keystrokeRef.current.downs[key];
+    if (downAt !== undefined) {
+      const now = performance.now();
+      keystrokeRef.current.dwell.push(Math.max(0, now - downAt));
+      keystrokeRef.current.lastKeyUp = now;
+      delete keystrokeRef.current.downs[key];
+    }
+  };
+
+  const average = (values) => {
+    if (!values.length) return 0;
+    return values.reduce((sum, value) => sum + value, 0) / values.length;
+  };
+
+  const variance = (values) => {
+    if (values.length < 2) return 0;
+    const mean = average(values);
+    return average(values.map((value) => (value - mean) ** 2));
+  };
+
+  const buildKeystrokeMetrics = () => {
+    const data = keystrokeRef.current;
+    return {
+      key_events: data.keyEvents,
+      avg_dwell_ms: Math.round(average(data.dwell)),
+      avg_flight_ms: Math.round(average(data.flight)),
+      typing_variance_ms: Math.round(Math.sqrt(variance([...data.dwell, ...data.flight]))),
+      paste_count: data.pasteCount,
+      autofill_used: data.autofillUsed,
+    };
   };
 
   const getRequestedPortal = () => {
@@ -552,6 +617,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
         password,
         portal: getSubmissionPortal(),
         recaptcha_token: recaptchaToken || undefined,
+        keystroke_metrics: buildKeystrokeMetrics(),
       });
 
       setShowForgotPassword(false);
@@ -664,6 +730,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
         portal: getSubmissionPortal(),
         totp_code: totpCode,
         recaptcha_token: recaptchaToken || undefined,
+        keystroke_metrics: buildKeystrokeMetrics(),
       });
 
       clearGuardState(identifier, response.data.portal);
@@ -852,9 +919,25 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
                     type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={(event) => {
+                      if (event.target.value && keystrokeRef.current.keyEvents === 0 && keystrokeRef.current.pasteCount === 0) {
+                        keystrokeRef.current.autofillUsed = true;
+                      }
+                      if (!event.target.value) {
+                        resetKeystrokeMetrics();
+                      }
                       setPassword(event.target.value);
                       setPasswordError(validatePassword(event.target.value));
                       setError('');
+                    }}
+                    onKeyDown={recordPasswordKeyDown}
+                    onKeyUp={recordPasswordKeyUp}
+                    onPaste={() => {
+                      keystrokeRef.current.pasteCount += 1;
+                    }}
+                    onInput={(event) => {
+                      if (event.nativeEvent?.inputType === 'insertReplacementText') {
+                        keystrokeRef.current.autofillUsed = true;
+                      }
                     }}
                     aria-invalid={passwordError ? 'true' : 'false'}
                     className={`w-full px-4 py-2.5 text-sm border rounded-xl bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:border-transparent transition ${copy.focusRing} ${showPasswordToggle ? 'pr-12' : ''} ${passwordError ? 'border-red-400 bg-red-50' : 'border-gray-200'}`}

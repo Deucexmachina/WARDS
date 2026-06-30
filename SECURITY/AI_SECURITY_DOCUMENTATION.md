@@ -62,6 +62,11 @@ Initial sample data is stored in `SECURITY/ml/initial_training_samples.csv`. The
 | backup_integrity_validation | UEBA BackupIntegrity | Blocks recovery risk acceptance when backup hash validation fails before restoration. |
 | content_similarity_score | UEBA ContentAnomaly | Raises risk when modified content is substantially different from the approved baseline even if length is similar. |
 | affected_files_count | UEBA MassModification | Raises risk when many protected files are modified in a short time window. |
+| database_integrity_deviation | NIST/MITRE Integrity Monitoring | Detects unauthorized database audit, snapshot, checksum, or security table tampering. |
+| ai_model_artifact_tamper | MITRE Defense Evasion / ML Asset Integrity | Detects changes to model, metadata, state, and training-data artifacts. |
+| destructive_command_pattern | OWASP/MITRE Command/Data Destruction | Detects dangerous shell, SQL, and file-destruction commands in protected content. |
+| webshell_indicator | OWASP/MITRE Web Shell | Detects common web-shell execution and request-control primitives. |
+| session_context_anomaly | UEBA Session Anomaly / NIST IA | Raises risk when a session appears from unusual device, IP, country, or concurrent-session context. |
 
 ## Default AI Rules
 
@@ -84,6 +89,11 @@ These rules are enabled by default because they directly protect admin identity,
 | backup_integrity_validation | Default | Backup integrity check before recovery acceptance. |
 | content_similarity_score | Default | UEBA semantic content change detection. |
 | affected_files_count | Default | UEBA mass modification detection for rapid file changes. |
+| database_integrity_deviation | Default | NIST integrity monitoring and MITRE data manipulation detection. |
+| ai_model_artifact_tamper | Default | MITRE defense evasion and model/training-data integrity validation. |
+| destructive_command_pattern | Default | OWASP command injection and MITRE data destruction indicators. |
+| webshell_indicator | Default | OWASP web shell and MITRE persistence/execution indicators. |
+| session_context_anomaly | Default | UEBA session anomaly and NIST identity/session assurance. |
 | suspicious_pattern_score | Default | OWASP injection/defacement indicators and MITRE malicious code mapping. |
 | vpn_activity | Default | Threat intelligence and UEBA source anomaly enrichment. |
 | source_ip_reputation | Default | AbuseIPDB reputation and threat intelligence enrichment. |
@@ -121,7 +131,17 @@ The global sensitivity is applied in `ai_predict()` when determining whether the
 
 VPN detection enriches AI context with `vpn_detected`, `vpn_activity`, `vpn_provider`, `vpn_risk_score`, `vpn_signals`, and full `vpn_detection` metadata. Local/private addresses are ignored. AbuseIPDB is used when configured, and public geolocation/provider data is checked best-effort.
 
-Risk-only detections are stored in `security_detection_events` even when no incident is created. Examples include VPN/proxy login, invalid admin session, after-hours activity, keystroke anomaly, suspicious IP reputation, MFA-not-verified activity, first-time device/country, impossible travel, or sensitive path activity that does not include concrete tamper evidence.
+Risk-only detections are stored in `security_detection_events` even when no incident is created. Examples include VPN/proxy login, invalid admin session, after-hours activity, keystroke anomaly, suspicious IP reputation, MFA-not-verified activity, first-time device/country, impossible travel, session-context anomaly, or sensitive path activity that does not include concrete tamper evidence.
+
+## Login Context Collection
+
+Admin logins now generate concrete UEBA context before calling `record_context_detection`:
+
+- `first_time_device` is derived from a SHA-256 hash of user-agent, accept-language, client hints, and IP prefix.
+- `first_time_country` is derived from cached VPN/IP geolocation and per-admin login history.
+- `geo_distance_from_last_login` is computed when latitude/longitude are available from the cached IP lookup.
+- `session_context_anomaly` uses session history to detect same-session context changes and excessive recent sessions.
+- `keystroke_dynamics` receives aggregate frontend metrics only: key-event count, average dwell/flight time, timing variance, paste count, and autofill indicator. Raw keys are not sent.
 
 Incident creation is intentionally stricter than detection logging. WARDS creates a Security Incident when the file is deleted, the AI prediction is malicious, concrete tamper evidence exists (`script_injection`, `iframe_injection`, `defacement_keywords`, `credential_access`, `sql_injection`), or the CVSS-style score reaches high severity.
 

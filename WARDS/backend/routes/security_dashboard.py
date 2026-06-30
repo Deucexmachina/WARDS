@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import httpx
 import os
+import requests
 import sys
 import threading
+from types import SimpleNamespace
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
@@ -119,6 +121,22 @@ def _serialize_job(job, message: str) -> dict:
         "current_step": job.current_step,
         "message": message,
     }
+
+
+def _serialize_detection_maybe(item):
+    if not item:
+        return None
+    if isinstance(item, dict):
+        return item
+    return serialize_detection(item)
+
+
+def _normalize_detection_result(result) -> list:
+    if not result:
+        return []
+    if isinstance(result, dict):
+        return list(result.get("detections") or [])
+    return list(result)
 
 
 def _submit_security_job(job_type: str, worker, message: str) -> dict:
@@ -365,6 +383,28 @@ def list_files(db: Session = Depends(get_db), _=Depends(current_admin)):
 @router.post("/files/{file_id}/scan")
 def scan_file(file_id: int, request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
     from SECURITY.security_models import SecurityMonitoredFile
+    if SECURITY_API_URL:
+        try:
+            detection = scan_single_file(
+                db,
+                SimpleNamespace(id=file_id, relative_path=None, file_path=None, folder_root=None),
+                context={"manual_scan": True},
+            )
+        except requests.HTTPError as exc:
+            if exc.response is not None and exc.response.status_code == 404:
+                raise HTTPException(status_code=404, detail="File not found on security server")
+            raise HTTPException(status_code=502, detail=f"Security service scan failed: {exc}")
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Security service scan failed: {exc}")
+        db.add(ActivityLog(
+            action="Security File Scan",
+            user=admin.username,
+            details=f"Scanned remote file id={file_id}. Detection: {detection is not None} | IP: {request.client.host if request.client else 'unknown'}",
+            type="security",
+        ))
+        db.commit()
+        return {"message": "Scan complete", "detection": _serialize_detection_maybe(detection)}
+
     file_entry = db.query(SecurityMonitoredFile).filter(SecurityMonitoredFile.id == file_id).first()
     if not file_entry:
         raise HTTPException(status_code=404, detail="File not found")
@@ -379,13 +419,17 @@ def scan_file(file_id: int, request: Request, db: Session = Depends(get_db), adm
         type="security",
     ))
     db.commit()
-    return {"message": "Scan complete", "detection": serialize_detection(detection) if detection else None}
+    return {"message": "Scan complete", "detection": _serialize_detection_maybe(detection)}
 
 
 @router.post("/files/{file_id}/recover")
 def recover_file(file_id: int, request: Request, db: Session = Depends(get_db), admin=Depends(current_admin)):
     try:
         event = manual_recover_file(db, file_id, admin.id)
+    except requests.HTTPError as exc:
+        if exc.response is not None and exc.response.status_code == 404:
+            raise HTTPException(status_code=404, detail="File not found on security server")
+        raise HTTPException(status_code=502, detail=f"Security service recovery failed: {exc}")
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     db.add(ActivityLog(
@@ -777,12 +821,12 @@ def scan_result(job_id: str, _=Depends(current_admin)):
         raise HTTPException(status_code=400, detail=f"Scan still in progress ({job.status}).")
     if job.status == JobStatus.FAILED:
         raise HTTPException(status_code=500, detail=job.error)
-    detections = job.result or []
+    detections = _normalize_detection_result(job.result)
     return {
         "job_id": job.id,
         "status": job.status,
         "summary": f"{len(detections)} change(s) found." if detections else "No changes found. All monitored files match the trusted backup.",
-        "detections": [serialize_detection(item) for item in detections],
+        "detections": [_serialize_detection_maybe(item) for item in detections],
     }
 
 

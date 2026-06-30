@@ -202,6 +202,8 @@ SUSPICIOUS_PATTERNS = {
     "defacement_keywords": ("hacked", "defaced", "owned", "pwned"),
     "credential_access": ("password=", "token=", "secret=", "api_key"),
     "sql_injection": ("' or '1'='1", "union select", "drop table"),
+    "destructive_command_pattern": ("rm -rf", "del /f", "format ", "truncate table", "delete from", "drop database"),
+    "webshell_indicator": ("cmd=", "shell_exec", "passthru(", "system($_", "eval($_", "base64_decode("),
 }
 
 BEHAVIOR_LABELS = {
@@ -230,6 +232,11 @@ BEHAVIOR_LABELS = {
     "peer_path_access_deviation": "Peer path access deviation",
     "excessive_file_modifications": "Excessive file modification rate",
     "rapid_admin_actions": "Rapid admin action rate",
+    "database_integrity_deviation": "Database integrity deviation",
+    "ai_model_artifact_tamper": "AI model artifact tamper",
+    "destructive_command_pattern": "Destructive command pattern",
+    "webshell_indicator": "Web shell indicator",
+    "session_context_anomaly": "Session context anomaly",
 }
 
 DEFAULT_AI_RULES = {
@@ -435,6 +442,41 @@ DEFAULT_AI_RULES = {
         "enabled": True,
         "weight": 0.2,
         "config": {"medium_risk_count": 3, "high_risk_count": 10},
+    },
+    "database_integrity_deviation": {
+        "label": "Database Integrity Deviation",
+        "description": "Detects unauthorized database audit, snapshot, checksum, or security table tampering.",
+        "enabled": True,
+        "weight": 0.28,
+        "config": {"path_keywords": ["database", "checksum", "snapshot", "audit_log", "security_incidents", "security_detection_events"]},
+    },
+    "ai_model_artifact_tamper": {
+        "label": "AI Model Artifact Tamper",
+        "description": "Detects changes to AI model, metadata, state, and training-data artifacts.",
+        "enabled": True,
+        "weight": 0.3,
+        "config": {"path_keywords": ["security/ml", "security/ml_models", "isolation_forest", "initial_training_samples", "model_metadata"]},
+    },
+    "destructive_command_pattern": {
+        "label": "Destructive Command Pattern",
+        "description": "Detects dangerous shell, SQL, and file-destruction commands in protected content.",
+        "enabled": True,
+        "weight": 0.28,
+        "config": {},
+    },
+    "webshell_indicator": {
+        "label": "Web Shell Indicator",
+        "description": "Detects common web-shell execution and request-control primitives.",
+        "enabled": True,
+        "weight": 0.3,
+        "config": {},
+    },
+    "session_context_anomaly": {
+        "label": "Session Context Anomaly",
+        "description": "Raises risk when an admin session appears from unusual device, IP, country, or concurrent-session context.",
+        "enabled": True,
+        "weight": 0.2,
+        "config": {"max_recent_sessions": 3},
     },
 }
 
@@ -765,6 +807,12 @@ def enrich_file_ai_context(
     if ai_rule_enabled(rules, "auth_system_modification"):
         keywords = [str(item).lower() for item in ai_rule_config(rules, "auth_system_modification").get("path_keywords", [])]
         context.setdefault("auth_system_modification", any(keyword in str(path).lower() for keyword in keywords))
+    if ai_rule_enabled(rules, "database_integrity_deviation"):
+        keywords = [str(item).lower() for item in ai_rule_config(rules, "database_integrity_deviation").get("path_keywords", [])]
+        context.setdefault("database_integrity_deviation", is_database_entry(file_entry) or any(keyword in str(path).lower() for keyword in keywords))
+    if ai_rule_enabled(rules, "ai_model_artifact_tamper"):
+        keywords = [str(item).lower() for item in ai_rule_config(rules, "ai_model_artifact_tamper").get("path_keywords", [])]
+        context.setdefault("ai_model_artifact_tamper", any(keyword in str(path).lower().replace("\\", "/") for keyword in keywords))
 
     source_ip = context.get("source_ip") or context.get("client_ip") or context.get("ip_address")
     if ai_rule_enabled(rules, "ip_consistent") and source_ip and str(source_ip).lower() != "unknown":
@@ -2830,6 +2878,11 @@ def generate_initial_training_samples(sample_count: int = 640) -> list[dict]:
                 "backup_integrity_validation": 1,
                 "content_similarity_score": 1,
                 "affected_files_count": 0,
+                "database_integrity_deviation": 0,
+                "ai_model_artifact_tamper": 0,
+                "destructive_command_pattern": 0,
+                "webshell_indicator": 0,
+                "session_context_anomaly": 0,
             }
         )
     return samples
@@ -2938,6 +2991,7 @@ FEATURE_NAMES = [
     "backup_restore_activity",
     "mfa_configuration_change",
     "auth_system_modification",
+    "session_context_anomaly",
     "admin_action_rarity",
     "restore_frequency",
     "affected_files_count",
@@ -2962,7 +3016,7 @@ def first_present(mapping: dict | None, *keys: str, default=None):
 
 
 def build_feature_vector(log: dict) -> list[float]:
-    """Convert one security/admin event into the stable 28-feature ML vector."""
+    """Convert one security/admin event into the stable ML feature vector."""
     log = log or {}
 
     def safe_int(x, default=0):
@@ -3015,6 +3069,12 @@ def build_feature_vector(log: dict) -> list[float]:
         1.0 if log.get("backup_restore_activity") else 0.0,
         1.0 if log.get("mfa_configuration_change") else 0.0,
         1.0 if log.get("auth_system_modification") else 0.0,
+        1.0 if (
+            log.get("session_context_anomaly")
+            or log.get("active_session_replaced")
+            or log.get("concurrent_session_detected")
+            or log.get("same_session_different_context")
+        ) else 0.0,
         safe_float(first_present(log, "admin_action_rarity", "admin_action_rarity_score", default=0.0)),
         float(safe_int(first_present(log, "restore_frequency", "restores_in_window", "restore_count", default=0))),
         float(safe_int(first_present(log, "affected_files_count", "modified_file_count", "files_modified_in_window", default=0))),
@@ -3599,6 +3659,33 @@ def content_flags(content: str, context: dict | None = None, path: Path | None =
             flags.append("restore_frequency")
     if ai_rule_enabled(rules, "backup_integrity_validation") and context.get("backup_integrity_valid") is False:
         flags.append("backup_integrity_validation")
+    if ai_rule_enabled(rules, "database_integrity_deviation") and (
+        context.get("database_integrity_deviation")
+        or context.get("database_unauthorized_audit_changes")
+        or context.get("database_checksum_mismatch")
+    ):
+        flags.append("database_integrity_deviation")
+    if ai_rule_enabled(rules, "ai_model_artifact_tamper") and (
+        context.get("ai_model_artifact_tamper")
+        or context.get("model_artifact_tamper")
+        or context.get("ml_artifact_modified")
+    ):
+        flags.append("ai_model_artifact_tamper")
+    if ai_rule_enabled(rules, "session_context_anomaly"):
+        try:
+            recent_session_count = int(first_present(context, "multiple_recent_sessions", "active_session_count", default=0))
+        except (TypeError, ValueError):
+            recent_session_count = 0
+        max_recent_sessions = int(ai_rule_config(rules, "session_context_anomaly").get("max_recent_sessions", 3))
+        if (
+            context.get("same_session_different_context")
+            or context.get("active_session_replaced")
+            or context.get("concurrent_session_detected")
+            or context.get("session_device_changed")
+            or context.get("session_country_changed")
+            or recent_session_count > max_recent_sessions
+        ):
+            flags.append("session_context_anomaly")
     if ai_rule_enabled(rules, "content_similarity_score"):
         try:
             similarity = float(
@@ -3644,11 +3731,22 @@ def content_flags(content: str, context: dict | None = None, path: Path | None =
             path_keywords = ai_rule_config(rules, "auth_system_modification").get("path_keywords", ["auth", "login", "jwt", "token", "password", "session", "middleware"])
             if context.get("auth_system_modification") or any(str(keyword).lower() in path_text for keyword in path_keywords):
                 flags.append("auth_system_modification")
+        if ai_rule_enabled(rules, "database_integrity_deviation"):
+            path_keywords = ai_rule_config(rules, "database_integrity_deviation").get("path_keywords", [])
+            if context.get("database_integrity_deviation") or any(str(keyword).lower() in path_text for keyword in path_keywords):
+                flags.append("database_integrity_deviation")
+        if ai_rule_enabled(rules, "ai_model_artifact_tamper"):
+            path_keywords = ai_rule_config(rules, "ai_model_artifact_tamper").get("path_keywords", [])
+            normalized_path_text = path_text.replace("\\", "/")
+            if context.get("ai_model_artifact_tamper") or any(str(keyword).lower() in normalized_path_text for keyword in path_keywords):
+                flags.append("ai_model_artifact_tamper")
     # Skip content-based injection/defacement pattern matching for documentation
     # files (.md, .txt) that legitimately contain example payloads.
     is_doc_file = path is not None and path.suffix.lower() in {".md", ".txt", ".rst"}
     if ai_rule_enabled(rules, "suspicious_pattern_score") and not is_doc_file:
         for key, patterns in SUSPICIOUS_PATTERNS.items():
+            if key in rules and not ai_rule_enabled(rules, key):
+                continue
             if any(pattern in lowered for pattern in patterns):
                 flags.append(key)
     if context.get("rapid_change"):
@@ -3715,6 +3813,11 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
         "backup_integrity_validation",
         "content_similarity_score",
         "affected_files_count",
+        "database_integrity_deviation",
+        "ai_model_artifact_tamper",
+        "destructive_command_pattern",
+        "webshell_indicator",
+        "session_context_anomaly",
     }
     for additional_rule in APPROVED_ADDITIONAL_AI_RULES:
         if additional_rule in explicitly_scored_flags:
@@ -3784,6 +3887,16 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
             risk += weight("affected_files_count", 0.2)
         elif affected_files_count >= medium_count:
             risk += weight("affected_files_count", 0.2) * 0.5
+    if enabled("database_integrity_deviation") and "database_integrity_deviation" in flags:
+        risk += weight("database_integrity_deviation", 0.28)
+    if enabled("ai_model_artifact_tamper") and "ai_model_artifact_tamper" in flags:
+        risk += weight("ai_model_artifact_tamper", 0.3)
+    if enabled("destructive_command_pattern") and "destructive_command_pattern" in flags:
+        risk += weight("destructive_command_pattern", 0.28)
+    if enabled("webshell_indicator") and "webshell_indicator" in flags:
+        risk += weight("webshell_indicator", 0.3)
+    if enabled("session_context_anomaly") and "session_context_anomaly" in flags:
+        risk += weight("session_context_anomaly", 0.2)
     model_state = load_ai_model_state()
     profile = model_state.get("behavioral_profile") or {}
     profile_context = {
@@ -3799,6 +3912,10 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
         or "source_ip_reputation" in flags
         or "keystroke_dynamics" in flags
         or "vpn_activity" in flags
+        or "first_time_device" in flags
+        or "first_time_country" in flags
+        or "geo_distance_from_last_login" in flags
+        or "session_context_anomaly" in flags
         or learned_warning
     )
     if context.get("admin_session_valid") and context.get("method_legitimate") and enabled("admin_session_valid") and enabled("method_legitimate") and not identity_warning:
@@ -3856,6 +3973,16 @@ def classify(change_type: str, prediction: AIPrediction, flags: list[str], conte
         score += 0.7
     if "sql_injection" in flags:
         score += 1.0
+    if "database_integrity_deviation" in flags:
+        score += 2.0
+    if "ai_model_artifact_tamper" in flags:
+        score += 2.0
+    if "destructive_command_pattern" in flags:
+        score += 2.0
+    if "webshell_indicator" in flags:
+        score += 2.2
+    if "session_context_anomaly" in flags:
+        score += 1.6
     if context.get("mass_modification"):
         score += 1.5
     score = round(max(0.0, min(10.0, score)), 1)
@@ -3876,6 +4003,26 @@ def classify(change_type: str, prediction: AIPrediction, flags: list[str], conte
         nist = "CAT 1 - Unauthorized Access"
         enisa = "Identity Fraud"
         vector = "AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N"
+    elif "webshell_indicator" in flags or "ai_model_artifact_tamper" in flags:
+        incident_type = "malicious_code"
+        nist = "CAT 3 - Malicious Code"
+        enisa = "Web Application Attack"
+        vector = "AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H"
+    elif "database_integrity_deviation" in flags:
+        incident_type = "unauthorized_access"
+        nist = "CAT 1 - Unauthorized Access"
+        enisa = "Data Breach"
+        vector = "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N"
+    elif "session_context_anomaly" in flags:
+        incident_type = "suspicious_session"
+        nist = "CAT 1 - Unauthorized Access"
+        enisa = "Identity Fraud"
+        vector = "AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:N"
+    elif "destructive_command_pattern" in flags:
+        incident_type = "denial_of_service"
+        nist = "CAT 2 - Denial of Service"
+        enisa = "Denial of Service"
+        vector = "AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:H"
     elif context.get("mass_modification") or "rapid_change" in flags:
         incident_type = "mass_defacement"
         nist = "CAT 3 - Malicious Code"

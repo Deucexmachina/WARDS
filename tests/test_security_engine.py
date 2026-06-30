@@ -19,6 +19,7 @@ from SECURITY.security_engine import (
     backup_ml_artifacts,
     backup_folder_sort_key,
     build_feature_vector,
+    classify,
     compute_profile_confidence,
     content_flags,
     full_system_recovery,
@@ -316,7 +317,7 @@ def test_build_feature_vector_is_deterministic():
     v1 = build_feature_vector(log)
     v2 = build_feature_vector(log)
     assert v1 == v2
-    assert len(v1) == 28
+    assert len(v1) == len(__import__("SECURITY.security_engine", fromlist=["FEATURE_NAMES"]).FEATURE_NAMES)
 
 
 def test_build_feature_vector_preserves_zero_over_fallback_values():
@@ -613,6 +614,71 @@ def test_content_flags_include_context_threshold_flags():
     assert "backup_integrity_validation" in flags
     assert "content_similarity_score" in flags
     assert "affected_files_count" in flags
+
+
+def test_content_flags_include_integrity_and_ai_artifact_flags():
+    db_flags = content_flags(
+        "checksum changed",
+        {"hour_of_day": 14, "day_of_week": 1},
+        path=Path("DATABASE/wards_db_checksum.json"),
+    )
+    model_flags = content_flags(
+        '{"poisoned": true}',
+        {"hour_of_day": 14, "day_of_week": 1},
+        path=Path("SECURITY/ml_models/model_metadata.json"),
+    )
+
+    assert "database_integrity_deviation" in db_flags
+    assert "ai_model_artifact_tamper" in model_flags
+
+
+def test_content_flags_include_destructive_and_webshell_patterns():
+    flags = content_flags(
+        "<?php echo shell_exec($_GET['cmd']); ?> rm -rf /tmp/wards",
+        {"hour_of_day": 14, "day_of_week": 1},
+        path=Path("WARDS/frontend/src/main.php"),
+    )
+
+    assert "destructive_command_pattern" in flags
+    assert "webshell_indicator" in flags
+
+
+def test_new_ai_rules_have_specific_incident_taxonomy():
+    malicious = AIPrediction("malicious", 0.9, 0.9, "test")
+
+    webshell = classify("content_modified", malicious, ["webshell_indicator"], {})
+    db_tamper = classify("content_modified", malicious, ["database_integrity_deviation"], {})
+    destructive = classify("content_modified", malicious, ["destructive_command_pattern"], {})
+
+    assert webshell["incident_type"] == "malicious_code"
+    assert webshell["nist_category"] == "CAT 3 - Malicious Code"
+    assert db_tamper["incident_type"] == "unauthorized_access"
+    assert db_tamper["nist_category"] == "CAT 1 - Unauthorized Access"
+    assert destructive["incident_type"] == "denial_of_service"
+    assert destructive["nist_category"] == "CAT 2 - Denial of Service"
+
+
+def test_session_context_anomaly_flag_and_taxonomy():
+    flags = content_flags(
+        "admin session context",
+        {"same_session_different_context": True, "hour_of_day": 14, "day_of_week": 1},
+        path=Path("admin_session:test"),
+    )
+    classification = classify("suspicious_login", AIPrediction("suspicious", 0.75, 0.75, "test"), flags, {})
+
+    assert "session_context_anomaly" in flags
+    assert classification["incident_type"] == "suspicious_session"
+    assert classification["nist_category"] == "CAT 1 - Unauthorized Access"
+
+
+def test_session_context_anomaly_is_in_ml_feature_vector():
+    from SECURITY import security_engine
+
+    vector = build_feature_vector({"session_context_anomaly": True})
+
+    assert "session_context_anomaly" in security_engine.FEATURE_NAMES
+    assert len(vector) == len(security_engine.FEATURE_NAMES)
+    assert vector[security_engine.FEATURE_NAMES.index("session_context_anomaly")] == 1.0
 
 
 def test_ai_predict_shares_similarity_flag_context_with_callers():
