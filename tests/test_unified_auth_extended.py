@@ -195,7 +195,7 @@ def test_public_login_without_mfa_succeeds_with_setup_flag():
         assert result["mfa_setup_required"] is True
         assert result["requires_mfa"] is False
         # access_token now delivered via HttpOnly cookie
-        assert "wards_user_access_token" in response.cookies
+        assert "wards_public_access_token" in response.cookies
     finally:
         unified_auth.find_account_for_portal = original_find
         unified_auth.log_activity = original_log

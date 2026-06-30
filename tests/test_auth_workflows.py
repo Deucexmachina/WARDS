@@ -135,7 +135,7 @@ def test_citizen_register_verify_and_login_workflow(monkeypatch):
     assert login_response.status_code == 200
     assert login_response.json()["portal"] == "public"
     # access_token now delivered via HttpOnly cookie
-    assert "wards_user_access_token" in login_response.cookies
+    assert "wards_public_access_token" in login_response.cookies
 
     app.dependency_overrides.clear()
     client.close()
