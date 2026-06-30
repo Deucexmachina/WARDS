@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from eval_config import FINAL_CLEANUP_ENABLED, RESULTS_CSV, VM1_DIRECT_MANIFEST, validate_required
-from evaluator import cleanup_after_evaluation, print_diagnostics, run_test, vm1_manifest_for_targets, wait_for_vm1_targets
+from evaluator import cleanup_after_evaluation, list_vm1_database_backups, print_diagnostics, run_test, vm1_manifest_for_targets, wait_for_vm1_targets
 from metrics import compute_and_print
 from test_catalog import all_tests
 
@@ -26,6 +26,7 @@ def main() -> None:
     parser.add_argument("--no-cleanup-rebuild", action="store_true", help="During cleanup, restore/reset files but do not rebuild containers.")
     parser.add_argument("--no-cleanup-git-reset", action="store_true", help="During cleanup, do not git reset deployed source to origin/main.")
     parser.add_argument("--restore-vm1-db", action="store_true", help="During cleanup, restore VM1 MySQL from the newest completed VM1 database backup.")
+    parser.add_argument("--list-vm1-db-backups", action="store_true", help="List VM1 database backup rows and dump files, then exit.")
     args = parser.parse_args()
 
     tests = all_tests()
@@ -36,6 +37,9 @@ def main() -> None:
         return
 
     validate_required()
+    if args.list_vm1_db_backups:
+        print(list_vm1_database_backups())
+        return
     if args.cleanup_only:
         notes = cleanup_after_evaluation(
             git_reset=not args.no_cleanup_git_reset,

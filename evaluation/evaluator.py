@@ -603,6 +603,7 @@ from utils.backup_engine import backup_dir, is_database_backup_record, restore_d
 
 db = SessionLocal()
 try:
+    location = backup_dir()
     rows = (
         db.query(Backup)
         .filter(Backup.status == "Completed")
@@ -610,21 +611,72 @@ try:
         .limit(100)
         .all()
     )
-    candidates = [row for row in rows if is_database_backup_record(row)]
+    candidates = [
+        row for row in rows
+        if is_database_backup_record(row)
+        and getattr(row, "filename", None)
+        and (location / row.filename).exists()
+    ]
     if not candidates:
-        raise RuntimeError("No completed VM1 database backup found.")
-    latest = candidates[0]
-    restore_database_backup(
-        backup_dir() / latest.filename,
-        getattr(latest, "checksum", None),
-        getattr(latest, "db_type", None),
-    )
-    print(latest.filename)
+        files = sorted(location.glob("database_*.sql.gz"), key=lambda item: item.name, reverse=True)
+        if not files:
+            raise RuntimeError(f"No restorable VM1 database dump found in {location}. Backup rows may be stale or backup storage is not mounted.")
+        latest_file = files[0]
+        restore_database_backup(latest_file, None, None)
+        print(latest_file.name)
+    else:
+        latest = candidates[0]
+        restore_database_backup(
+            location / latest.filename,
+            getattr(latest, "checksum", None),
+            getattr(latest, "db_type", None),
+        )
+        print(latest.filename)
 finally:
     db.close()
 '''
     filename = vm1(f"cd {q(VM1_APP_DIR)} && docker compose exec -T backend python - <<'PY'\n{script}\nPY", timeout=max(REQUEST_TIMEOUT_SECONDS, 300)).strip().splitlines()[-1]
     return f"vm1_database_restored:{filename}"
+
+
+def list_vm1_database_backups() -> str:
+    script = r'''
+import sys
+sys.path.insert(0, "/app")
+from database.models import Backup, SessionLocal
+from utils.backup_engine import backup_dir, is_database_backup_record
+
+location = backup_dir()
+print(f"backup_dir={location}")
+files = sorted(location.glob("database_*.sql.gz"), key=lambda item: item.name, reverse=True)
+print("disk_files=" + (",".join(item.name for item in files[:20]) if files else "NONE"))
+
+db = SessionLocal()
+try:
+    rows = (
+        db.query(Backup)
+        .filter(Backup.status == "Completed")
+        .order_by(Backup.created_at.desc())
+        .limit(20)
+        .all()
+    )
+    filtered = [row for row in rows if is_database_backup_record(row)]
+    if not filtered:
+        print("backup_rows=NONE")
+    for row in filtered:
+        filename = getattr(row, "filename", "") or ""
+        print(
+            "backup_row="
+            f"id:{getattr(row, 'id', '')},"
+            f"filename:{filename},"
+            f"exists:{(location / filename).exists()},"
+            f"checksum:{bool(getattr(row, 'checksum', None))},"
+            f"db_type:{getattr(row, 'db_type', None)}"
+        )
+finally:
+    db.close()
+'''
+    return vm1(f"cd {q(VM1_APP_DIR)} && docker compose exec -T backend python - <<'PY'\n{script}\nPY", timeout=REQUEST_TIMEOUT_SECONDS)
 
 
 def sql_quote(value: str) -> str:
