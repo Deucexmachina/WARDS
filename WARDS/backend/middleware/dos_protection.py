@@ -26,6 +26,14 @@ from utils.redis_client import get_redis_client
 MAX_REQUEST_SIZE = int(os.getenv("MAX_REQUEST_SIZE_BYTES", 50 * 1024 * 1024))  # 50MB
 MAX_FILES_PER_REQUEST = int(os.getenv("MAX_FILES_PER_REQUEST", 5))
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT_SECONDS", 120))
+REQUEST_TIMEOUT_EXEMPT_PATHS = tuple(
+    item.strip()
+    for item in os.getenv(
+        "REQUEST_TIMEOUT_EXEMPT_PATHS",
+        "/api/security/backup,/api/security/recover,/api/security/scan,/security/backup,/security/recover,/security/scan",
+    ).split(",")
+    if item.strip()
+)
 MAX_CONCURRENT_REQUESTS_PER_IP = int(os.getenv("MAX_CONCURRENT_REQUESTS_PER_IP", 50))
 ABUSE_THRESHOLD = int(os.getenv("ABUSE_THRESHOLD_REQUESTS", 300))
 ABUSE_WINDOW = int(os.getenv("ABUSE_WINDOW_SECONDS", 60))
@@ -559,6 +567,9 @@ class RequestTimeoutMiddleware(BaseHTTPMiddleware):
     """Enforce timeout on all requests to prevent slowloris attacks"""
     
     async def dispatch(self, request: Request, call_next):
+        path = request.url.path or ""
+        if any(path.startswith(prefix) for prefix in REQUEST_TIMEOUT_EXEMPT_PATHS):
+            return await call_next(request)
         try:
             return await asyncio.wait_for(call_next(request), timeout=REQUEST_TIMEOUT)
         except asyncio.TimeoutError:

@@ -970,7 +970,10 @@ const BackupRecovery = () => {
     setNotice('');
     try {
       const result = await action();
-      setNotice(typeof success === 'function' ? success(result) : success);
+      const jobMessage = result?.data?.job_id
+        ? `${result.data.message || 'Security job started in the background.'} Job ID: ${result.data.job_id}`
+        : null;
+      setNotice(jobMessage || (typeof success === 'function' ? success(result) : success));
       if (!result?.skipRefresh) {
         await refreshDashboard();
         await refreshActiveTab();

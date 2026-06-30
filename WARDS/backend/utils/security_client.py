@@ -305,7 +305,7 @@ def create_manual_backup(db, admin_id, label: str = "manual"):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import create_manual_backup as _local
         return _local(db, admin_id, label=label)
-    return _sync_post("/v1/backup/manual", {"admin_id": admin_id, "label": label})
+    return _sync_post("/v1/backup/manual", {"admin_id": admin_id, "label": label}, timeout=600.0)
 
 
 def set_backup_location(db, path, delete_previous=False, actor=None):
@@ -329,63 +329,63 @@ def full_system_recovery(db, admin_id):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import full_system_recovery as _local
         return _local(db, admin_id)
-    return _sync_post("/v1/recover/full", {"admin_id": admin_id}, timeout=30.0)
+    return _sync_post("/v1/recover/full", {"admin_id": admin_id}, timeout=600.0)
 
 
 def create_database_backup(db, admin_id):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import create_database_backup as _local
         return _local(db, admin_id)
-    return _sync_post("/v1/backup/database", {"admin_id": admin_id}, timeout=30.0)
+    return _sync_post("/v1/backup/database", {"admin_id": admin_id}, timeout=600.0)
 
 
 def create_files_backup(db, admin_id):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import create_files_backup as _local
         return _local(db, admin_id)
-    return _sync_post("/v1/backup/files", {"admin_id": admin_id}, timeout=30.0)
+    return _sync_post("/v1/backup/files", {"admin_id": admin_id}, timeout=600.0)
 
 
 def create_ml_backup(db, admin_id):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import create_ml_backup as _local
         return _local(db, admin_id)
-    return _sync_post("/v1/backup/ml", {"admin_id": admin_id}, timeout=30.0)
+    return _sync_post("/v1/backup/ml", {"admin_id": admin_id}, timeout=600.0)
 
 
 def create_full_system_backup(db, admin_id):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import create_full_system_backup as _local
         return _local(db, admin_id)
-    return _sync_post("/v1/backup/full", {"admin_id": admin_id}, timeout=30.0)
+    return _sync_post("/v1/backup/full", {"admin_id": admin_id}, timeout=600.0)
 
 
 def recover_database(db, admin_id):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import recover_database as _local
         return _local(db, admin_id)
-    return _sync_post("/v1/recover/database", {"admin_id": admin_id})
+    return _sync_post("/v1/recover/database", {"admin_id": admin_id}, timeout=600.0)
 
 
 def recover_files(db, admin_id):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import recover_files as _local
         return _local(db, admin_id)
-    return _sync_post("/v1/recover/files", {"admin_id": admin_id})
+    return _sync_post("/v1/recover/files", {"admin_id": admin_id}, timeout=600.0)
 
 
 def recover_ml_artifacts(db, admin_id):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import recover_ml_artifacts as _local
         return _local(db, admin_id)
-    return _sync_post("/v1/recover/ml", {"admin_id": admin_id})
+    return _sync_post("/v1/recover/ml", {"admin_id": admin_id}, timeout=600.0)
 
 
 def recover_full_system(db, admin_id):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import recover_full_system as _local
         return _local(db, admin_id)
-    return _sync_post("/v1/recover/full", {"admin_id": admin_id})
+    return _sync_post("/v1/recover/full", {"admin_id": admin_id}, timeout=600.0)
 
 
 def manual_recover_file(db, file_id, admin_id):

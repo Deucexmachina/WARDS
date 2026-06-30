@@ -15,10 +15,12 @@ from sqlalchemy.orm import sessionmaker
 
 from auth import USER_SECRET_KEY, create_access_token, create_refresh_token
 from auth.jwt_utils import ALGORITHM
+from middleware import dos_protection
 from middleware.https import HttpsEnforcementMiddleware
 from database.models import Backup, BranchSystemSetting, Service, SystemSetting
 from routes import public
 from utils import backup_engine
+from utils import security_client
 from utils.file_validation import SafeFileType, validate_upload_file
 from utils.request_signing import sign_request
 
@@ -37,6 +39,31 @@ def test_https_middleware_redirects_when_enabled(monkeypatch):
 
     assert response.status_code == 308
     assert response.headers["location"].startswith("https://wards.example/")
+
+
+def test_security_timeout_exempts_long_running_routes():
+    exempt = dos_protection.REQUEST_TIMEOUT_EXEMPT_PATHS
+    assert any("/api/security/backup" in item for item in exempt)
+    assert any("/api/security/recover" in item for item in exempt)
+    assert any("/api/security/scan" in item for item in exempt)
+
+
+def test_security_client_uses_long_timeout_for_background_operations(monkeypatch):
+    calls = []
+    monkeypatch.setattr(security_client, "SECURITY_API_URL", "http://security-api")
+
+    def fake_post(path, payload=None, timeout=10.0):
+        calls.append((path, timeout))
+        return {"ok": True}
+
+    monkeypatch.setattr(security_client, "_sync_post", fake_post)
+
+    security_client.create_full_system_backup(None, 1)
+    security_client.create_files_backup(None, 1)
+    security_client.recover_files(None, 1)
+
+    assert calls
+    assert all(timeout >= 600.0 for _path, timeout in calls)
 
 
 def test_request_signing_accepts_valid_signature(monkeypatch):
