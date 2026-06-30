@@ -45,7 +45,7 @@ const BranchSystemSettingsProtectedRoute = ({ children }) => {
 
       try {
         const [verifyResponse, accessResponse] = await Promise.all([
-          api.get('/auth/unified/verify'),
+          api.get('/auth/unified/verify', { params: { portal: 'branch' } }),
           api.get('/branch/settings/access'),
         ]);
 

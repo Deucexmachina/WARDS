@@ -31,6 +31,7 @@ const UserProtectedRoute = ({ children }) => {
 
     try {
       const response = await api.get('/auth/unified/verify', {
+        params: { portal: 'public' },
         timeout: AUTH_VERIFY_TIMEOUT_MS,
       });
 

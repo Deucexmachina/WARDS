@@ -742,6 +742,58 @@ def test_setup_mfa_authenticated_succeeds_with_valid_token():
         client.close()
 
 
+def test_verify_endpoint_honors_requested_portal_when_multiple_cookies(monkeypatch):
+    admin = make_account("admin", id=1, username="superadmin", email="super@example.com", role="superadmin")
+    branch = make_account("branch", id=2, username="branchadmin", email="branch@example.com", role="branch_admin", branch_id=10)
+    admin_token = unified_auth.create_access_token(
+        "admin",
+        {"sub": admin.username, "email": admin.email, "type": "admin", "role": "admin", "user_id": admin.id},
+    )
+    branch_token = unified_auth.create_access_token(
+        "branch",
+        {"sub": branch.username, "email": branch.email, "type": "branch", "role": "branch", "user_id": branch.id},
+    )
+    db = FakeDB(admin=admin, branch=branch)
+    app, client = make_client(db)
+    monkeypatch.setattr(unified_auth, "get_mfa_secret", lambda *_args, **_kwargs: "secret")
+
+    try:
+        client.cookies.set("wards_admin_access_token", admin_token)
+        client.cookies.set("wards_branch_access_token", branch_token)
+
+        response = client.get("/api/auth/unified/verify?portal=branch")
+
+        assert response.status_code == 200
+        assert response.json()["portal"] == "branch"
+        assert response.json()["user"]["role"] == "branch"
+    finally:
+        app.dependency_overrides.clear()
+        client.close()
+
+
+def test_verify_endpoint_rejects_wrong_portal_authorization_header(monkeypatch):
+    admin = make_account("admin", id=1, username="superadmin", email="super@example.com", role="superadmin")
+    admin_token = unified_auth.create_access_token(
+        "admin",
+        {"sub": admin.username, "email": admin.email, "type": "admin", "role": "admin", "user_id": admin.id},
+    )
+    db = FakeDB(admin=admin)
+    app, client = make_client(db)
+    monkeypatch.setattr(unified_auth, "get_mfa_secret", lambda *_args, **_kwargs: "secret")
+
+    try:
+        response = client.get(
+            "/api/auth/unified/verify?portal=branch",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        assert response.status_code == 401
+        assert "portal mismatch" in response.json()["detail"].lower()
+    finally:
+        app.dependency_overrides.clear()
+        client.close()
+
+
 # ---------------------------------------------------------------------------
 # 12. Check contact endpoint
 # ---------------------------------------------------------------------------

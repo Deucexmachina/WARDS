@@ -36,16 +36,6 @@ export const getStoredPortal = () => {
   if (portal) {
     return portal;
   }
-  // Fallback: legacy token detection during transition
-  if (localStorage.getItem('adminToken')) {
-    return 'admin';
-  }
-  if (localStorage.getItem('branchToken')) {
-    return 'branch';
-  }
-  if (localStorage.getItem('userToken')) {
-    return 'public';
-  }
   return null;
 };
 

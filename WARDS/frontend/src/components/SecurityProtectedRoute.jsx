@@ -44,7 +44,9 @@ const SecurityProtectedRoute = ({ children }) => {
       }
 
       try {
-        const response = await api.get('/auth/unified/verify');
+        const response = await api.get('/auth/unified/verify', {
+          params: { portal: 'admin' },
+        });
         const serverStartedAt = Date.parse(response.data.server_started_at || '');
         if (!response.data.valid || response.data.user?.role !== 'admin' || (serverStartedAt && adminAuthenticatedAt <= serverStartedAt)) {
           clearAdminSession();

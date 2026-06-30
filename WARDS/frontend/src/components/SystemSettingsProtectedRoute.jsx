@@ -49,7 +49,7 @@ const SystemSettingsProtectedRoute = ({ children }) => {
 
       try {
         const [verifyResponse, accessResponse] = await Promise.all([
-          api.get('/auth/unified/verify'),
+          api.get('/auth/unified/verify', { params: { portal: 'admin' } }),
           api.get('/settings/access'),
         ]);
 

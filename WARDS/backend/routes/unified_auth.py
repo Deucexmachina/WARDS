@@ -1869,7 +1869,15 @@ async def unified_mfa_recovery_verify_otp(
 @limiter.limit("30/minute")
 async def unified_verify(request: Request, db: Session = Depends(get_db)):
     token = None
-    for portal in ("admin", "branch", "public"):
+    requested_portal = (request.query_params.get("portal") or request.headers.get("X-WARDS-Portal") or "").strip().lower()
+    if requested_portal and requested_portal not in {"admin", "branch", "public"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid portal.",
+        )
+
+    portals_to_check = (requested_portal,) if requested_portal else ("admin", "branch", "public")
+    for portal in portals_to_check:
         token = _extract_token_from_request(request, _get_cookie_name(portal))
         if token:
             break
@@ -1886,6 +1894,11 @@ async def unified_verify(request: Request, db: Session = Depends(get_db)):
         )
 
     portal, account, _payload = decode_active_account_from_bearer_token(token, db)
+    if requested_portal and portal != requested_portal:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session portal mismatch.",
+        )
     mfa_setup_required = get_mfa_secret(db, portal, get_mfa_username(portal, account)) is None
 
     return {

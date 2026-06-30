@@ -33,6 +33,7 @@ const BranchProtectedRoute = ({ children, requiredInternalRole = null }) => {
 
     try {
       const response = await api.get('/auth/unified/verify', {
+        params: { portal: 'branch' },
         timeout: AUTH_VERIFY_TIMEOUT_MS,
       });
 

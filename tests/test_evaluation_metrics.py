@@ -53,6 +53,46 @@ def test_evaluation_metrics_writes_excel_outputs(tmp_path, monkeypatch):
     assert xlsx_path.exists()
 
 
+def test_evaluation_metrics_deduplicates_rerun_rows(tmp_path, monkeypatch):
+    evaluation_dir = Path(__file__).resolve().parents[1] / "evaluation"
+    if str(evaluation_dir) not in sys.path:
+        sys.path.insert(0, str(evaluation_dir))
+
+    import metrics
+
+    csv_path = tmp_path / "evaluation_results.csv"
+    json_path = tmp_path / "summary.json"
+    md_path = tmp_path / "summary.md"
+    xlsx_path = tmp_path / "confusion_matrix_results.xlsx"
+    fields = [
+        "test_id", "scenario", "domain", "actual", "predicted", "result",
+        "incident_id", "detection_id", "ai_score", "ai_prediction",
+        "latency_seconds", "timestamp", "notes",
+    ]
+    rows = [
+        {"test_id": "ATK-X", "scenario": "attack", "domain": "context", "actual": "attack", "predicted": "benign", "result": "FN", "latency_seconds": "1.5"},
+        {"test_id": "BEN-X", "scenario": "benign", "domain": "context", "actual": "benign", "predicted": "benign", "result": "TN", "latency_seconds": "0.5"},
+        # Re-run ATK-X now passes (TP)
+        {"test_id": "ATK-X", "scenario": "attack", "domain": "context", "actual": "attack", "predicted": "attack", "result": "TP", "latency_seconds": "2.0"},
+    ]
+    with csv_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+
+    monkeypatch.setattr(metrics, "SUMMARY_JSON", json_path)
+    monkeypatch.setattr(metrics, "SUMMARY_MD", md_path)
+    monkeypatch.setattr(metrics, "SUMMARY_XLSX", xlsx_path)
+
+    summary = metrics.compute_and_print(csv_path)
+
+    assert summary["tp"] == 1
+    assert summary["tn"] == 1
+    assert summary["fn"] == 0
+    assert summary["total"] == 2
+
+
 def test_evaluation_scan_payload_forces_vm1_manual_scan(monkeypatch):
     evaluation_dir = Path(__file__).resolve().parents[1] / "evaluation"
     if str(evaluation_dir) not in sys.path:

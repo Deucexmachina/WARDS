@@ -52,6 +52,7 @@ const ProtectedRoute = ({ children }) => {
 
     try {
       const response = await api.get('/auth/unified/verify', {
+        params: { portal: 'admin' },
         timeout: AUTH_VERIFY_TIMEOUT_MS,
       });
 

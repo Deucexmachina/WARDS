@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import axios from 'axios';
 import ReCAPTCHA from 'react-google-recaptcha';
 import {
   clearSettingsSession,
@@ -9,7 +8,7 @@ import {
 } from '../../utils/settingsSecurity';
 import { AUTH_GRADIENTS } from '../../utils/authTheme';
 
-import { API_HOST } from '../../services/api';
+import api, { unifiedAuthAPI } from '../../services/api';
 import { getStoredPortal } from '../../utils/auth';
 
 const RECAPTCHA_SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY || '';
@@ -79,9 +78,7 @@ const SystemSettingsLogin = () => {
       }
 
       try {
-        await axios.get(`${API_HOST}/api/settings/access`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        await api.get('/settings/access');
       } catch (accessError) {
         if (active) {
           navigate('/admin', { replace: true });
@@ -133,7 +130,7 @@ const SystemSettingsLogin = () => {
         return;
       }
 
-      const response = await axios.post(`${API_HOST}/api/auth/unified/login`, {
+      const response = await unifiedAuthAPI.login({
         identifier,
         password,
         portal: 'admin',

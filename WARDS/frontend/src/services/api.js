@@ -54,44 +54,9 @@ const isBranchPortalContext = () => {
 };
 
 api.interceptors.request.use((config) => {
-  if (config.headers?.Authorization) {
-    return config;
-  }
-
-  // Determine which token to use based on the route
-  let token = null;
-  const url = config.url || '';
-  
-  if (url.includes('/public-content')) {
-    token = isBranchPortalContext()
-      ? (localStorage.getItem('branchToken') || localStorage.getItem('adminToken'))
-      : (localStorage.getItem('adminToken') || localStorage.getItem('branchToken'));
-  } else if (url.includes('/alerts')) {
-    token = isBranchPortalContext()
-      ? (localStorage.getItem('branchToken') || localStorage.getItem('adminToken'))
-      : (localStorage.getItem('adminToken') || localStorage.getItem('branchToken'));
-  } else if (url.includes('/accounts')) {
-    token = isBranchPortalContext()
-      ? (localStorage.getItem('branchToken') || localStorage.getItem('adminToken'))
-      : (localStorage.getItem('adminToken') || localStorage.getItem('branchToken'));
-  } else if (url.includes('/activity-logs')) {
-    token = isBranchPortalContext()
-      ? (localStorage.getItem('branchToken') || localStorage.getItem('adminToken'))
-      : (localStorage.getItem('adminToken') || localStorage.getItem('branchToken'));
-  } else if (isBranchApiRequest(url)) {
-    token = localStorage.getItem('branchToken');
-  } else if (isAdminApiRequest(url)) {
-    token = localStorage.getItem('adminToken');
-  } else {
-    // Default to checking all tokens for public routes
-    token = localStorage.getItem('userToken') || 
-            localStorage.getItem('branchToken') || 
-            localStorage.getItem('adminToken');
-  }
-    
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
+  // Auth is handled by HttpOnly cookies. Explicit Authorization headers are
+  // still respected when a caller deliberately supplies one for a non-browser
+  // or legacy integration, but stale localStorage tokens are never injected.
   return config;
 });
 
@@ -120,7 +85,7 @@ api.interceptors.response.use(
       }));
     }
 
-    const hasAdminToken = Boolean(localStorage.getItem('adminToken'));
+    const hasAdminSession = localStorage.getItem('wardsPortal') === 'admin' || Boolean(localStorage.getItem('adminUser'));
     const isAdminRequest =
       isAdminApiRequest(url) ||
       url.includes('/alerts') ||
@@ -148,7 +113,7 @@ api.interceptors.response.use(
     const isBranchPortalRequest = isBranchPortalContext() || url.startsWith('/branch/');
     const isSuperadminAccessRequest = /\/branches\/\d+\/superadmin-access/.test(url);
 
-    if (hasAdminToken && isAdminRequest && isSessionExpirationError && !isBranchPortalRequest && !isSuperadminAccessRequest) {
+    if (hasAdminSession && isAdminRequest && isSessionExpirationError && !isBranchPortalRequest && !isSuperadminAccessRequest) {
       // Don't redirect if it's a password confirmation error - let the component handle it
       if (isPasswordConfirmationError || (url.includes('/accounts') && isProtectedPasswordRequest)) {
         return Promise.reject(error);

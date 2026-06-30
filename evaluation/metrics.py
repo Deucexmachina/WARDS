@@ -15,29 +15,32 @@ def compute(csv_path: Path = RESULTS_CSV) -> dict:
     tp = fp = tn = fn = errors = 0
     latencies: list[float] = []
     domains: dict[str, dict[str, int]] = {}
+    rows_by_id: dict[str, dict] = {}
     with Path(csv_path).open(newline="", encoding="utf-8") as handle:
         for row in csv.DictReader(handle):
-            result = row["result"]
-            domain = row["domain"]
-            domains.setdefault(domain, {"TP": 0, "FP": 0, "TN": 0, "FN": 0, "ERROR": 0})
-            if result in {"TP", "FP", "TN", "FN"}:
-                domains[domain][result] += 1
-            else:
-                domains[domain]["ERROR"] += 1
-            if result == "TP":
-                tp += 1
-            elif result == "FP":
-                fp += 1
-            elif result == "TN":
-                tn += 1
-            elif result == "FN":
-                fn += 1
-            else:
-                errors += 1
-            try:
-                latencies.append(float(row.get("latency_seconds") or 0))
-            except ValueError:
-                pass
+            rows_by_id[row["test_id"]] = row
+    for row in rows_by_id.values():
+        result = row["result"]
+        domain = row["domain"]
+        domains.setdefault(domain, {"TP": 0, "FP": 0, "TN": 0, "FN": 0, "ERROR": 0})
+        if result in {"TP", "FP", "TN", "FN"}:
+            domains[domain][result] += 1
+        else:
+            domains[domain]["ERROR"] += 1
+        if result == "TP":
+            tp += 1
+        elif result == "FP":
+            fp += 1
+        elif result == "TN":
+            tn += 1
+        elif result == "FN":
+            fn += 1
+        else:
+            errors += 1
+        try:
+            latencies.append(float(row.get("latency_seconds") or 0))
+        except ValueError:
+            pass
     total = tp + fp + tn + fn
     summary = {
         "tp": tp,

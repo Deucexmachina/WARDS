@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import axios from 'axios';
 import ReCAPTCHA from 'react-google-recaptcha';
 import { AUTH_GRADIENTS } from '../../utils/authTheme';
 import { getBranchPortalPath, getStoredPortal } from '../../utils/auth';
@@ -10,7 +9,7 @@ import {
   startBranchSettingsSession,
 } from '../../utils/settingsSecurity';
 
-import api, { API_HOST } from '../../services/api';
+import api, { unifiedAuthAPI } from '../../services/api';
 
 const RECAPTCHA_SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY || '';
 
@@ -92,7 +91,7 @@ const BranchSystemSettingsLogin = () => {
         const requests = [api.get('/branch/settings/access')];
 
         if (isSuperadminManagedBranch) {
-          requests.push(api.get('/auth/unified/verify'));
+          requests.push(api.get('/auth/unified/verify', { params: { portal: 'admin' } }));
         }
 
         await Promise.all(requests);
@@ -149,7 +148,7 @@ const BranchSystemSettingsLogin = () => {
         return;
       }
 
-      const response = await axios.post(`${API_HOST}/api/auth/unified/login`, {
+      const response = await unifiedAuthAPI.login({
         identifier,
         password,
         portal: isSuperadminManagedBranch ? 'admin' : 'branch',

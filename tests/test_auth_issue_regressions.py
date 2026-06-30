@@ -140,3 +140,23 @@ assert.equal(getStoredPortal(), null);
     )
 
     assert result.returncode == 0, result.stderr
+
+
+def test_frontend_auth_uses_cookie_aware_client_for_deployed_login_flows():
+    watched_files = [
+        "WARDS/frontend/src/pages/auth/UnifiedLogin.jsx",
+        "WARDS/frontend/src/pages/admin/SecurityBackupLogin.jsx",
+        "WARDS/frontend/src/pages/admin/SystemSettingsLogin.jsx",
+        "WARDS/frontend/src/pages/branch/BranchSystemSettingsLogin.jsx",
+    ]
+
+    for path in watched_files:
+        source = open(path, encoding="utf-8").read()
+        assert "axios.post(`${API_HOST}/api/auth/unified/" not in source
+        assert "import axios from 'axios';" not in source
+
+    api_source = open("WARDS/frontend/src/services/api.js", encoding="utf-8").read()
+    assert "localStorage.getItem('adminToken')" not in api_source
+    assert "localStorage.getItem('branchToken')" not in api_source
+    assert "localStorage.getItem('userToken')" not in api_source
+    assert "config.headers.Authorization = `Bearer ${token}`;" not in api_source

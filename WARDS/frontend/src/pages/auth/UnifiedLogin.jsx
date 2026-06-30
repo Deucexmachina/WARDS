@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import axios from 'axios';
 import ReCAPTCHA from 'react-google-recaptcha';
 
 import { getPortalHome, getStoredPortal, persistSession } from '../../utils/auth';
@@ -8,7 +7,6 @@ import { unifiedAuthAPI } from '../../services/api';
 import { AUTH_GRADIENTS } from '../../utils/authTheme';
 import cityHall from '../../assets/branding/qc_city_hall.jpg';
 
-import { API_HOST } from '../../services/api';
 const RECAPTCHA_SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY || '';
 const CAPTCHA_THRESHOLD = 3;
 const FIRST_STRIKE_THRESHOLD = 5;
@@ -553,7 +551,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
     setNotice('');
 
     try {
-      const response = await axios.post(`${API_HOST}/api/auth/unified/setup-mfa`, {
+      const response = await unifiedAuthAPI.setupMfa({
         identifier,
         password,
         portal: requestedPortal,
@@ -612,7 +610,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
     setShowMfaSetup(false);
 
     try {
-      const response = await axios.post(`${API_HOST}/api/auth/unified/login`, {
+      const response = await unifiedAuthAPI.login({
         identifier,
         password,
         portal: getSubmissionPortal(),
@@ -724,7 +722,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
     setNotice('');
 
     try {
-      const response = await axios.post(`${API_HOST}/api/auth/unified/login`, {
+      const response = await unifiedAuthAPI.login({
         identifier,
         password,
         portal: getSubmissionPortal(),
@@ -832,14 +830,14 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
     setError('');
     setNotice('');
     try {
-      await axios.post(`${API_HOST}/api/auth/unified/verify-mfa-setup`, {
+      await unifiedAuthAPI.verifyMfaSetup({
         identifier,
         password,
         portal: getSubmissionPortal(),
         totp_code: totpCode,
       });
 
-      const loginResponse = await axios.post(`${API_HOST}/api/auth/unified/login`, {
+      const loginResponse = await unifiedAuthAPI.login({
         identifier,
         password,
         portal: getSubmissionPortal(),
