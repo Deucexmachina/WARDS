@@ -62,6 +62,43 @@ def prune_database_backups(backup_location: Path | None = None, keep: int | None
     return removed
 
 
+def is_database_backup_record(row) -> bool:
+    backup_type = str(getattr(row, "type", "") or "").lower()
+    filename = str(getattr(row, "filename", "") or "")
+    return (
+        "vm1" in backup_type
+        or backup_type in {"manual", "scheduled", "startup baseline vm1"}
+        or filename.startswith("database_")
+    )
+
+
+def prune_database_backup_records(db, backup_model, keep: int | None = None) -> int:
+    """Keep only the newest VM1 database backup rows and matching dump files."""
+    keep_count = database_backup_retention_limit() if keep is None else max(1, int(keep))
+    prune_database_backups(backup_dir(), keep=keep_count)
+    rows = (
+        db.query(backup_model)
+        .filter(backup_model.status == "Completed")
+        .order_by(backup_model.created_at.desc())
+        .limit(500)
+        .all()
+    )
+    database_rows = [row for row in rows if is_database_backup_record(row)]
+    removed = 0
+    for row in database_rows[keep_count:]:
+        filename = str(getattr(row, "filename", "") or "")
+        if filename:
+            try:
+                (backup_dir() / filename).unlink(missing_ok=True)
+            except OSError as exc:
+                logger.warning("Failed to remove old VM1 database backup %s: %s", filename, exc)
+        db.delete(row)
+        removed += 1
+    if removed:
+        db.commit()
+    return removed
+
+
 def _db_type(database_url: str) -> str:
     scheme = urlparse(database_url).scheme.lower()
     if scheme.startswith("postgres"):

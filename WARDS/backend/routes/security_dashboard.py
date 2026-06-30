@@ -26,7 +26,7 @@ from auth import get_current_admin_from_token
 from utils.background_jobs import job_manager, JobStatus
 from middleware.dos_protection import get_blocked_ips, unblock_ip, block_ip, account_rate_limit_state, record_rate_limit_detection
 from services.ip_reputation import get_permanent_blocks, add_permanent_block, remove_permanent_block, check_ip_reputation
-from utils.backup_engine import backup_dir, create_database_backup as create_vm1_database_backup, restore_database_backup
+from utils.backup_engine import backup_dir, create_database_backup as create_vm1_database_backup, is_database_backup_record, prune_database_backup_records, restore_database_backup
 from utils.security_client import (
     SECURITY_API_URL,
     active_monitored_files_query,
@@ -241,7 +241,7 @@ class BulkIncidentRequest(BaseModel):
 
 
 def _latest_vm1_database_backup(db: Session):
-    vm1_types = ["Security VM1 Manual", "Security Full VM1", "Scheduled"]
+    vm1_types = ["Security VM1 Manual", "Security Full VM1", "Scheduled", "Startup Baseline VM1"]
     latest = (
         db.query(Backup)
         .filter(
@@ -263,6 +263,17 @@ def _latest_vm1_database_backup(db: Session):
         .order_by(Backup.created_at.desc())
         .first()
     )
+
+
+def _is_vm1_database_backup_row(row) -> bool:
+    return is_database_backup_record(row)
+
+
+def _prune_vm1_database_backup_rows(db: Session) -> int:
+    try:
+        return prune_database_backup_records(db, Backup)
+    except Exception:
+        return 0
 
 
 ROLE_MAIN_ADMIN = "main_admin"
@@ -465,6 +476,7 @@ def backup_history(
 
 @router.get("/backups/inventory")
 async def backup_inventory(db: Session = Depends(get_db), admin=Depends(current_admin)):
+    _prune_vm1_database_backup_rows(db)
     try:
         inventory = await asyncio.wait_for(
             run_in_threadpool(lambda: list_backup_inventory(db) or {}),
@@ -493,11 +505,7 @@ async def backup_inventory(db: Session = Depends(get_db), admin=Depends(current_
     except Exception:
         vm1_rows = []
 
-    vm1_candidates = [
-        row for row in vm1_rows
-        if "vm1" in str(getattr(row, "type", "") or "").lower()
-        or str(getattr(row, "filename", "") or "").startswith("database_")
-    ]
+    vm1_candidates = [row for row in vm1_rows if _is_vm1_database_backup_row(row)]
     latest_vm1 = vm1_candidates[0] if vm1_candidates else None
     for row in vm1_candidates:
         filename = str(getattr(row, "filename", "") or "")
@@ -877,6 +885,7 @@ def backup_vm1_database(request: Request, db: Session = Depends(get_db), admin=D
         type="security",
     ))
     db.commit()
+    _prune_vm1_database_backup_rows(db)
     db.refresh(backup)
     return {
         "id": backup.id,
@@ -954,6 +963,7 @@ def backup_full(request: Request, db: Session = Depends(get_db), admin=Depends(c
         type="security",
     ))
     db.commit()
+    _prune_vm1_database_backup_rows(db)
     db.refresh(vm1_backup)
     return {
         "vm1": {

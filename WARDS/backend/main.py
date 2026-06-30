@@ -1753,7 +1753,7 @@ def start_vm1_database_startup_baseline_if_configured():
         time.sleep(max(0, int(os.getenv("SECURITY_VM1_STARTUP_DB_BACKUP_DELAY", "15"))))
         try:
             from database.models import ActivityLog, Backup
-            from utils.backup_engine import create_database_backup as create_vm1_database_backup
+            from utils.backup_engine import create_database_backup as create_vm1_database_backup, prune_database_backup_records
 
             db = SessionLocal()
             try:
@@ -1782,6 +1782,7 @@ def start_vm1_database_startup_baseline_if_configured():
                     type="security",
                 ))
                 db.commit()
+                prune_database_backup_records(db, Backup)
                 print(f"[SCHEDULED BACKUP] VM1 startup baseline DB backup created: {result.filename}")
             finally:
                 db.close()

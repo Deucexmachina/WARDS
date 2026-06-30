@@ -29,6 +29,7 @@ from SECURITY.security_engine import (
     newest_valid_backup_for_path,
     record_detection,
     prune_backup_type,
+    prune_backup_type_across_locations,
     restore_ml_artifacts_from_backup,
     retrain_ai,
     seed_initial_ai_training,
@@ -94,6 +95,48 @@ def test_prune_backup_type_is_per_label():
         assert removed == 2
         assert len(manual_remaining) == 10
         assert len(full_remaining) == 12
+
+
+def test_prune_backup_type_across_locations_keeps_ten_per_label(monkeypatch, tmp_path):
+    configured = tmp_path / "configured"
+    fallback = tmp_path / "fallback"
+    configured.mkdir()
+    fallback.mkdir()
+    for idx in range(8):
+        (configured / f"post_resolve_backup_20260101_0000{idx:02d}").mkdir()
+    for idx in range(8, 15):
+        (fallback / f"post_resolve_backup_20260101_0000{idx:02d}").mkdir()
+    (configured / "manual_backup_20260101_000000").mkdir()
+
+    monkeypatch.setattr("SECURITY.security_engine.get_setting", lambda _db, key, default="": str(configured) if key == "backup_location" else default)
+    monkeypatch.setattr("SECURITY.security_engine.DEFAULT_BACKUP_ROOT", fallback)
+
+    removed = prune_backup_type_across_locations(SimpleNamespace(), "post_resolve", keep=10)
+
+    remaining_post_resolve = list(configured.glob("post_resolve_backup_*")) + list(fallback.glob("post_resolve_backup_*"))
+    assert removed == 5
+    assert len(remaining_post_resolve) == 10
+    assert (configured / "manual_backup_20260101_000000").exists()
+
+
+def test_backup_inventory_enforces_cross_location_retention(monkeypatch, tmp_path):
+    configured = tmp_path / "configured"
+    fallback = tmp_path / "fallback"
+    configured.mkdir()
+    fallback.mkdir()
+    for idx in range(6):
+        (configured / f"false_positive_bulk_backup_20260101_0000{idx:02d}").mkdir()
+    for idx in range(6, 14):
+        (fallback / f"false_positive_bulk_backup_20260101_0000{idx:02d}").mkdir()
+
+    monkeypatch.setattr("SECURITY.security_engine.get_setting", lambda _db, key, default="": str(configured) if key == "backup_location" else default)
+    monkeypatch.setattr("SECURITY.security_engine.DEFAULT_BACKUP_ROOT", fallback)
+
+    inventory = list_backup_inventory(SimpleNamespace())
+
+    remaining = list(configured.glob("false_positive_bulk_backup_*")) + list(fallback.glob("false_positive_bulk_backup_*"))
+    assert len(remaining) == 10
+    assert sum(1 for item in inventory["items"] if item["label"] == "false_positive_bulk") == 10
 
 
 def test_all_backup_roots_sorts_by_folder_timestamp_across_locations(monkeypatch, tmp_path):

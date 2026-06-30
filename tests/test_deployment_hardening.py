@@ -2,6 +2,7 @@ import gzip
 import asyncio
 import subprocess
 import time
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,11 +10,13 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from jose import jwt
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import sessionmaker
 
 from auth import USER_SECRET_KEY, create_access_token, create_refresh_token
 from auth.jwt_utils import ALGORITHM
 from middleware.https import HttpsEnforcementMiddleware
-from database.models import BranchSystemSetting, Service, SystemSetting
+from database.models import Backup, BranchSystemSetting, Service, SystemSetting
 from routes import public
 from utils import backup_engine
 from utils.file_validation import SafeFileType, validate_upload_file
@@ -118,6 +121,44 @@ def test_prune_database_backups_is_configurable_and_scoped(tmp_path):
     assert removed == 2
     assert len(list(tmp_path.glob("database_*.sql.gz"))) == 3
     assert (tmp_path / "database_notes.txt").exists()
+
+
+def test_prune_database_backup_records_keeps_ten_rows(monkeypatch, tmp_path):
+    monkeypatch.setenv("BACKUP_DIR", str(tmp_path))
+    engine = create_engine(f"sqlite:///{(tmp_path / 'rows.db').as_posix()}", connect_args={"check_same_thread": False})
+    event.listen(engine, "connect", lambda connection, _record: connection.create_collation("utf8mb4_bin", lambda a, b: (a > b) - (a < b)))
+    Backup.__table__.create(bind=engine)
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        for idx in range(13):
+            filename = f"database_20260101_0000{idx:02d}.sql.gz"
+            (tmp_path / filename).write_bytes(b"dump")
+            db.add(Backup(
+                filename=filename,
+                size="4",
+                type="Scheduled" if idx % 2 else "Startup Baseline VM1",
+                status="Completed",
+                created_at=datetime(2026, 1, 1, 0, idx),
+            ))
+        db.add(Backup(
+            filename="files_backup_20260101_000000",
+            size="4",
+            type="Files",
+            status="Completed",
+            created_at=datetime(2026, 1, 1, 1, 0),
+        ))
+        db.commit()
+
+        removed = backup_engine.prune_database_backup_records(db, Backup, keep=10)
+
+        remaining = db.query(Backup).filter(Backup.filename.like("database_%")).count()
+        assert removed == 3
+        assert remaining == 10
+        assert db.query(Backup).filter(Backup.filename == "files_backup_20260101_000000").count() == 1
+        assert len(list(tmp_path.glob("database_*.sql.gz"))) == 10
+    finally:
+        db.close()
 
 
 def test_refresh_tokens_are_separate_from_access_tokens():

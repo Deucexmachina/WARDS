@@ -2045,7 +2045,7 @@ def seed_settings(db: Session) -> None:
     sync_runtime_env_settings(db)
     sync_configured_monitored_folders(db, refresh_existing=True)
     backup_location = writable_backup_location(db, "startup")
-    prune_all_backup_types(backup_location, keep=BACKUP_RETENTION_LIMIT)
+    prune_all_backup_types_across_locations(db, keep=BACKUP_RETENTION_LIMIT)
     refresh_backup_integrity_manifests(backup_location, force=False)
     try:
         sync_wazuh_monitored_folders(db)
@@ -2169,13 +2169,7 @@ def backup_folder_sort_key(path: Path) -> tuple[datetime, float, str]:
 
 
 def all_backup_roots(db: Session) -> list[Path]:
-    locations_to_check = []
-    configured = resolve_stored_path(get_setting(db, "backup_location", ""))
-    if configured:
-        locations_to_check.append(configured.resolve(strict=False))
-    fallback = DEFAULT_BACKUP_ROOT.resolve()
-    if fallback not in locations_to_check:
-        locations_to_check.append(fallback)
+    locations_to_check = backup_locations_to_check(db)
     backups: list[Path] = []
     for location in locations_to_check:
         if location.exists() and location.is_dir():
@@ -2183,6 +2177,17 @@ def all_backup_roots(db: Session) -> list[Path]:
     result = sorted(set(backups), key=backup_folder_sort_key, reverse=True)
     logger.info("all_backup_roots found %s backup(s) in %s", len(result), [str(p) for p in locations_to_check])
     return result
+
+
+def backup_locations_to_check(db: Session) -> list[Path]:
+    locations_to_check = []
+    configured = resolve_stored_path(get_setting(db, "backup_location", ""))
+    if configured:
+        locations_to_check.append(configured.resolve(strict=False))
+    fallback = DEFAULT_BACKUP_ROOT.resolve()
+    if fallback not in locations_to_check:
+        locations_to_check.append(fallback)
+    return locations_to_check
 
 
 def backup_file_path(backup_root: Path, relative_path: str) -> Path:
@@ -2564,6 +2569,10 @@ def list_all_backup_folders(backup_location: Path, label: str | None = None) -> 
 
 
 def list_backup_inventory(db: Session) -> dict:
+    try:
+        prune_all_backup_types_across_locations(db, keep=BACKUP_RETENTION_LIMIT)
+    except Exception:
+        logger.exception("Backup inventory retention pruning failed; continuing inventory load.")
     roots = all_backup_roots(db)
 
     # Pre-load manifests once per root to avoid redundant disk I/O.
@@ -2654,6 +2663,21 @@ def prune_backup_type(backup_location: Path, label: str, keep: int = BACKUP_RETE
     return removed
 
 
+def prune_backup_type_across_locations(db: Session, label: str, keep: int = BACKUP_RETENTION_LIMIT) -> int:
+    backups: list[Path] = []
+    for location in backup_locations_to_check(db):
+        backups.extend(list_all_backup_folders(location, label=label))
+    removed = 0
+    for old_backup in sorted(set(backups), key=backup_folder_sort_key)[:-keep]:
+        try:
+            shutil.rmtree(old_backup)
+            removed += 1
+            logger.info("Removed old backup '%s' during cross-location retention enforcement.", old_backup)
+        except Exception:
+            logger.exception("Failed to remove old backup '%s'.", old_backup)
+    return removed
+
+
 def prune_all_backup_types(backup_location: Path, keep: int = BACKUP_RETENTION_LIMIT) -> int:
     removed = 0
     try:
@@ -2667,6 +2691,20 @@ def prune_all_backup_types(backup_location: Path, keep: int = BACKUP_RETENTION_L
     except Exception:
         logger.exception("Backup retention scan failed for '%s'.", backup_location)
     return removed
+
+
+def prune_all_backup_types_across_locations(db: Session, keep: int = BACKUP_RETENTION_LIMIT) -> int:
+    labels = set()
+    for location in backup_locations_to_check(db):
+        try:
+            labels.update(
+                item.name.split("_backup_", 1)[0]
+                for item in location.iterdir()
+                if item.is_dir() and "_backup_" in item.name
+            )
+        except Exception:
+            logger.exception("Backup retention label scan failed for '%s'.", location)
+    return sum(prune_backup_type_across_locations(db, label, keep=keep) for label in labels)
 
 
 def register_initial_files(db: Session, ensure_backup: bool = True, refresh_existing: bool = True, incremental: bool = False) -> int:
@@ -5119,7 +5157,7 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
             f"manifest: {manifest_path.name})."
         )
         set_setting(db, "latest_backup_path", stored_path_value(backup_root) or str(backup_root), str(initiated_by) if initiated_by else "system")
-        removed_backups = prune_backup_type(backup_location, label, keep=BACKUP_RETENTION_LIMIT)
+        removed_backups = prune_backup_type_across_locations(db, label, keep=BACKUP_RETENTION_LIMIT)
         logger.info(
             "Backup %s completed successfully. Retention kept the newest %s completed '%s' backup(s) and removed %s old backup(s).",
             event_id,
@@ -5225,9 +5263,7 @@ def _finalize_backup_event(
             stored_path_value(backup_root) or str(backup_root),
             str(event.initiated_by) if event.initiated_by else "system",
         )
-        removed_backups = prune_backup_type(
-            Path(writable_backup_location(db)), label, keep=BACKUP_RETENTION_LIMIT
-        )
+        removed_backups = prune_backup_type_across_locations(db, label, keep=BACKUP_RETENTION_LIMIT)
         logger.info(
             "Backup %s completed successfully. Retention kept the newest %s completed '%s' backup(s) and removed %s old backup(s).",
             event.id,
