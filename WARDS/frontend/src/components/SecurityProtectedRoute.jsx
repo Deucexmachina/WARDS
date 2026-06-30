@@ -1,6 +1,7 @@
 import { Navigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import api from '../services/api';
+import { getStoredPortal } from '../utils/auth';
 
 const clearSecuritySession = () => {
   localStorage.removeItem('securityAuthenticated');
@@ -10,6 +11,7 @@ const clearSecuritySession = () => {
 };
 
 const clearAdminSession = () => {
+  localStorage.removeItem('wardsPortal');
   localStorage.removeItem('adminToken');
   localStorage.removeItem('adminUser');
   localStorage.removeItem('adminAuthenticatedAt');
@@ -25,12 +27,12 @@ const SecurityProtectedRoute = ({ children }) => {
 
   useEffect(() => {
     const verify = async () => {
-      const token = localStorage.getItem('adminToken');
+      const portal = getStoredPortal();
       const securityReady = sessionStorage.getItem('securityAuthenticated') === 'true';
       const adminAuthenticatedAt = Date.parse(localStorage.getItem('adminAuthenticatedAt') || '');
       const securityAuthenticatedAt = Date.parse(sessionStorage.getItem('securityAuthenticatedAt') || '');
 
-      if (!token) {
+      if (portal !== 'admin') {
         setAllowed(false);
         return;
       }
@@ -42,9 +44,7 @@ const SecurityProtectedRoute = ({ children }) => {
       }
 
       try {
-        const response = await api.get('/auth/unified/verify', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const response = await api.get('/auth/unified/verify');
         const serverStartedAt = Date.parse(response.data.server_started_at || '');
         if (!response.data.valid || response.data.user?.role !== 'admin' || (serverStartedAt && adminAuthenticatedAt <= serverStartedAt)) {
           clearAdminSession();
@@ -77,7 +77,7 @@ const SecurityProtectedRoute = ({ children }) => {
   }
 
   if (!allowed) {
-    return <Navigate to={localStorage.getItem('adminToken') ? '/admin/backup/login' : '/login'} replace />;
+    return <Navigate to={getStoredPortal() === 'admin' ? '/admin/backup/login' : '/login'} replace />;
   }
 
   return children;

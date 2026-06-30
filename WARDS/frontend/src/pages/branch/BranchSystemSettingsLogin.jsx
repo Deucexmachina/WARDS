@@ -3,14 +3,14 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import axios from 'axios';
 import ReCAPTCHA from 'react-google-recaptcha';
 import { AUTH_GRADIENTS } from '../../utils/authTheme';
-import { getBranchPortalPath } from '../../utils/auth';
+import { getBranchPortalPath, getStoredPortal } from '../../utils/auth';
 import {
   clearBranchSettingsSession,
   isBranchSettingsRoleAllowed,
   startBranchSettingsSession,
 } from '../../utils/settingsSecurity';
 
-import { API_HOST } from '../../services/api';
+import { api, API_HOST } from '../../services/api';
 
 const RECAPTCHA_SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY || '';
 
@@ -69,8 +69,7 @@ const BranchSystemSettingsLogin = () => {
     let active = true;
 
     const verifyAccess = async () => {
-      const token = localStorage.getItem('branchToken');
-      if (!token) {
+      if (getStoredPortal() !== 'branch') {
         navigate('/login?portal=branch', { replace: true });
         return;
       }
@@ -83,26 +82,17 @@ const BranchSystemSettingsLogin = () => {
       }
 
       if (isSuperadminManagedBranch) {
-        const adminToken = localStorage.getItem('adminToken');
-        if (!adminToken || currentAdmin?.internal_role !== 'superadmin') {
+        if (currentAdmin?.internal_role !== 'superadmin') {
           navigate(dashboardPath, { replace: true });
           return;
         }
       }
 
       try {
-        const requests = [
-          axios.get(`${API_HOST}/api/branch/settings/access`, {
-            headers: { Authorization: `Bearer ${token}` },
-          }),
-        ];
+        const requests = [api.get('/branch/settings/access')];
 
         if (isSuperadminManagedBranch) {
-          requests.push(
-            axios.get(`${API_HOST}/api/auth/unified/verify`, {
-              headers: { Authorization: `Bearer ${localStorage.getItem('adminToken')}` },
-            }),
-          );
+          requests.push(api.get('/auth/unified/verify'));
         }
 
         await Promise.all(requests);
@@ -185,7 +175,6 @@ const BranchSystemSettingsLogin = () => {
           return;
         }
 
-        localStorage.setItem('adminToken', response.data.access_token);
         localStorage.setItem('adminUser', JSON.stringify(response.data.user));
         if (!localStorage.getItem('adminAuthenticatedAt')) {
           localStorage.setItem('adminAuthenticatedAt', new Date(Date.now() - 1000).toISOString());
@@ -209,7 +198,6 @@ const BranchSystemSettingsLogin = () => {
           return;
         }
 
-        localStorage.setItem('branchToken', response.data.access_token);
         localStorage.setItem('branchUser', JSON.stringify(response.data.user));
         if (!localStorage.getItem('branchAuthenticatedAt')) {
           localStorage.setItem('branchAuthenticatedAt', new Date(Date.now() - 1000).toISOString());

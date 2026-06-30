@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
-import { getBranchPortalPath } from '../../utils/auth';
+import { getBranchPortalPath, persistSession } from '../../utils/auth';
 import { getEmailValidationMessage } from '../../utils/validation';
 import PasswordField from '../../components/PasswordField';
 
@@ -76,17 +76,8 @@ const InviteRegister = () => {
       });
 
       const { user, access_token } = response.data;
-      if (user.role === 'admin') {
-        localStorage.setItem('adminToken', access_token);
-        localStorage.setItem('adminUser', JSON.stringify(user));
-      } else if (user.role === 'branch') {
-        localStorage.setItem('branchToken', access_token);
-        localStorage.setItem('branchUser', JSON.stringify(user));
-      } else {
-        localStorage.setItem('userToken', access_token);
-        localStorage.setItem('user', JSON.stringify(user));
-      }
-
+      const portal = user.role === 'admin' ? 'admin' : user.role === 'branch' ? 'branch' : 'public';
+      persistSession({ portal, access_token, user });
       redirectByUser(user, navigate);
     } catch (err) {
       setError(err.response?.data?.detail || 'Invite registration failed.');

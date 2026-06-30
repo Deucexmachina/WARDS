@@ -32,18 +32,20 @@ export const getBranchPortalPath = (branchUser) => {
 };
 
 export const getStoredPortal = () => {
+  const portal = localStorage.getItem('wardsPortal');
+  if (portal) {
+    return portal;
+  }
+  // Fallback: legacy token detection during transition
   if (localStorage.getItem('adminToken')) {
     return 'admin';
   }
-
   if (localStorage.getItem('branchToken')) {
     return 'branch';
   }
-
   if (localStorage.getItem('userToken')) {
     return 'public';
   }
-
   return null;
 };
 
@@ -76,7 +78,7 @@ export const persistSession = ({
     : user;
 
   if (portal === 'admin') {
-    localStorage.setItem('adminToken', access_token);
+    localStorage.setItem('wardsPortal', 'admin');
     localStorage.setItem('adminUser', JSON.stringify(enrichedUser));
     localStorage.setItem('adminAuthenticatedAt', new Date().toISOString());
     localStorage.removeItem('securityAuthenticated');
@@ -87,6 +89,7 @@ export const persistSession = ({
     sessionStorage.removeItem('securityAuthenticatedAt');
     sessionStorage.removeItem('settingsAuthenticated');
     sessionStorage.removeItem('settingsAuthenticatedAt');
+    // Clean up legacy tokens
     localStorage.removeItem('branchToken');
     localStorage.removeItem('branchUser');
     localStorage.removeItem('userToken');
@@ -95,7 +98,7 @@ export const persistSession = ({
   }
 
   if (portal === 'branch') {
-    localStorage.setItem('branchToken', access_token);
+    localStorage.setItem('wardsPortal', 'branch');
     localStorage.setItem('branchUser', JSON.stringify(enrichedUser));
     localStorage.setItem('branchAuthenticatedAt', new Date().toISOString());
     localStorage.removeItem('branchSettingsAuthenticated');
@@ -103,18 +106,20 @@ export const persistSession = ({
     sessionStorage.removeItem('branchSettingsAuthenticated');
     sessionStorage.removeItem('branchSettingsAuthenticatedAt');
     if (!preserveAdminSession) {
-      localStorage.removeItem('adminToken');
       localStorage.removeItem('adminUser');
       localStorage.removeItem('adminAuthenticatedAt');
     }
+    // Clean up legacy tokens
     localStorage.removeItem('userToken');
+    localStorage.removeItem('adminToken');
     clearStoredPublicUser();
     return;
   }
 
-  localStorage.setItem('userToken', access_token);
+  localStorage.setItem('wardsPortal', 'public');
   setStoredPublicUser(enrichedUser);
   localStorage.setItem('userAuthenticatedAt', new Date().toISOString());
+  // Clean up legacy tokens
   localStorage.removeItem('adminToken');
   localStorage.removeItem('adminUser');
   localStorage.removeItem('branchToken');
@@ -123,6 +128,7 @@ export const persistSession = ({
 
 export const clearSession = (portal) => {
   if (portal === 'admin') {
+    localStorage.removeItem('wardsPortal');
     localStorage.removeItem('adminToken');
     localStorage.removeItem('adminUser');
     localStorage.removeItem('adminAuthenticatedAt');
@@ -138,6 +144,7 @@ export const clearSession = (portal) => {
   }
 
   if (portal === 'branch') {
+    localStorage.removeItem('wardsPortal');
     localStorage.removeItem('branchToken');
     localStorage.removeItem('branchUser');
     localStorage.removeItem('branchAuthenticatedAt');
@@ -148,6 +155,7 @@ export const clearSession = (portal) => {
     return;
   }
 
+  localStorage.removeItem('wardsPortal');
   localStorage.removeItem('userToken');
   clearStoredPublicUser();
   localStorage.removeItem('userAuthenticatedAt');

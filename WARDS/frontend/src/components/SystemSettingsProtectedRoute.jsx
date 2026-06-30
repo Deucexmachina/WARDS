@@ -1,6 +1,7 @@
 import { Navigate } from 'react-router-dom';
 import { useEffect, useRef, useState } from 'react';
 import api from '../services/api';
+import { getStoredPortal } from '../utils/auth';
 import {
   clearSettingsSession,
   isSettingsRoleAllowed,
@@ -8,6 +9,7 @@ import {
 } from '../utils/settingsSecurity';
 
 const clearAdminSession = () => {
+  localStorage.removeItem('wardsPortal');
   localStorage.removeItem('adminToken');
   localStorage.removeItem('adminUser');
   localStorage.removeItem('adminAuthenticatedAt');
@@ -29,11 +31,11 @@ const SystemSettingsProtectedRoute = ({ children }) => {
     }, 0);
 
     const verify = async () => {
-      const token = localStorage.getItem('adminToken');
+      const portal = getStoredPortal();
       const adminAuthenticatedAt = Date.parse(localStorage.getItem('adminAuthenticatedAt') || '');
       const settingsAuthenticatedAt = Date.parse(sessionStorage.getItem('settingsAuthenticatedAt') || '');
 
-      if (!token) {
+      if (portal !== 'admin') {
         clearSettingsSession();
         if (active) setAllowed(false);
         return;
@@ -47,12 +49,8 @@ const SystemSettingsProtectedRoute = ({ children }) => {
 
       try {
         const [verifyResponse, accessResponse] = await Promise.all([
-          api.get('/auth/unified/verify', {
-            headers: { Authorization: `Bearer ${token}` },
-          }),
-          api.get('/settings/access', {
-            headers: { Authorization: `Bearer ${token}` },
-          }),
+          api.get('/auth/unified/verify'),
+          api.get('/settings/access'),
         ]);
 
         const serverStartedAt = Date.parse(verifyResponse.data.server_started_at || '');
@@ -106,7 +104,7 @@ const SystemSettingsProtectedRoute = ({ children }) => {
   }
 
   if (!allowed) {
-    return <Navigate to={localStorage.getItem('adminToken') ? '/admin/settings/login' : '/login'} replace />;
+    return <Navigate to={getStoredPortal() === 'admin' ? '/admin/settings/login' : '/login'} replace />;
   }
 
   return children;

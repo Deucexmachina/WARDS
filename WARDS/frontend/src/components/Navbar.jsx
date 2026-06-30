@@ -3,13 +3,13 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import PublicBrandLogo from './PublicBrandLogo';
 import ActionConfirmationModal from './ActionConfirmationModal';
 import api from '../services/api';
-import { clearSession } from '../utils/auth';
+import { clearSession, getStoredPortal } from '../utils/auth';
 import { clearStoredPublicUser, getStoredPublicUser, PUBLIC_USER_STORAGE_EVENT } from '../utils/publicSession';
 import { appendLanguageParam, usePublicLanguage } from '../utils/publicLanguage';
 
 const hasPublicSession = () =>
   Boolean(
-    localStorage.getItem('userToken') ||
+    getStoredPortal() === 'public' ||
     localStorage.getItem('user')
   );
 

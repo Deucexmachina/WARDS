@@ -24,6 +24,7 @@ from auth.password_utils import (
     verify_account_password,
 )
 from auth.decorators import (
+    clear_auth_cookies,
     decode_active_account_from_bearer_token,
     get_current_admin_from_token,
     get_current_admin_or_branch_staff,
@@ -40,6 +41,8 @@ from auth.decorators import (
     require_branch_role,
     require_main_admin,
     require_window_staff,
+    set_auth_cookie,
+    set_refresh_cookie,
     verify_branch_access,
 )
 from auth.helpers import (
@@ -93,6 +96,7 @@ __all__ = [
     "verify_password",
     "verify_account_password",
     # decorators
+    "clear_auth_cookies",
     "decode_active_account_from_bearer_token",
     "get_current_admin_from_token",
     "get_current_admin_or_branch_staff",
@@ -109,6 +113,8 @@ __all__ = [
     "require_branch_role",
     "require_main_admin",
     "require_window_staff",
+    "set_auth_cookie",
+    "set_refresh_cookie",
     "verify_branch_access",
     # permissions
     "ROLE_BRANCH_ADMIN",

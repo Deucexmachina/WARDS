@@ -10,6 +10,7 @@ import {
 import { AUTH_GRADIENTS } from '../../utils/authTheme';
 
 import { API_HOST } from '../../services/api';
+import { getStoredPortal } from '../../utils/auth';
 
 const RECAPTCHA_SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY || '';
 
@@ -65,8 +66,7 @@ const SystemSettingsLogin = () => {
     let active = true;
 
     const verifyAccess = async () => {
-      const token = localStorage.getItem('adminToken');
-      if (!token) {
+      if (getStoredPortal() !== 'admin') {
         navigate('/login', { replace: true });
         return;
       }
@@ -164,7 +164,6 @@ const SystemSettingsLogin = () => {
         return;
       }
 
-      localStorage.setItem('adminToken', response.data.access_token);
       localStorage.setItem('adminUser', JSON.stringify(response.data.user));
       if (!localStorage.getItem('adminAuthenticatedAt')) {
         localStorage.setItem('adminAuthenticatedAt', new Date(Date.now() - 1000).toISOString());

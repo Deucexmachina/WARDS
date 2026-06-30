@@ -1,6 +1,7 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import api from '../services/api';
+import { getStoredPortal } from '../utils/auth';
 import { clearBranchSettingsSession } from '../utils/settingsSecurity';
 
 const AUTH_VERIFY_TIMEOUT_MS = 8000;
@@ -19,9 +20,9 @@ const BranchProtectedRoute = ({ children, requiredInternalRole = null }) => {
   }, []);
 
   const verifyToken = async () => {
-    const token = localStorage.getItem('branchToken');
-    
-    if (!token) {
+    const portal = getStoredPortal();
+
+    if (portal && portal !== 'branch') {
       setIsAuthenticated(false);
       setIsLoading(false);
       sessionStorage.setItem('redirectAfterLogin', location.pathname);
@@ -32,9 +33,6 @@ const BranchProtectedRoute = ({ children, requiredInternalRole = null }) => {
 
     try {
       const response = await api.get('/auth/unified/verify', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
         timeout: AUTH_VERIFY_TIMEOUT_MS,
       });
 
@@ -42,6 +40,7 @@ const BranchProtectedRoute = ({ children, requiredInternalRole = null }) => {
       const serverStartedAt = Date.parse(response.data.server_started_at || '');
       if (serverStartedAt && (!branchAuthenticatedAt || branchAuthenticatedAt <= serverStartedAt)) {
         setIsAuthenticated(false);
+        localStorage.removeItem('wardsPortal');
         localStorage.removeItem('branchToken');
         localStorage.removeItem('branchUser');
         localStorage.removeItem('branchAuthenticatedAt');
@@ -68,6 +67,7 @@ const BranchProtectedRoute = ({ children, requiredInternalRole = null }) => {
         }
       } else {
         setIsAuthenticated(false);
+        localStorage.removeItem('wardsPortal');
         localStorage.removeItem('branchToken');
         localStorage.removeItem('branchUser');
         localStorage.removeItem('branchAuthenticatedAt');
@@ -82,6 +82,7 @@ const BranchProtectedRoute = ({ children, requiredInternalRole = null }) => {
         return;
       }
       setIsAuthenticated(false);
+      localStorage.removeItem('wardsPortal');
       localStorage.removeItem('branchToken');
       localStorage.removeItem('branchUser');
       localStorage.removeItem('branchAuthenticatedAt');

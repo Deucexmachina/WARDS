@@ -12,6 +12,7 @@ export const API_HOST = rawBaseUrl.startsWith('/')
 
 const api = axios.create({
   baseURL: API_BASE_URL,
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -425,11 +426,9 @@ export const activityLogAPI = {
   getAll: (params) => api.get('/activity-logs', { params }),
 };
 
-const buildPortalAuthHeaders = (portal = 'admin') => {
-  const token = portal === 'branch'
-    ? localStorage.getItem('branchToken')
-    : localStorage.getItem('adminToken');
-  return token ? { Authorization: `Bearer ${token}` } : {};
+const buildPortalAuthHeaders = () => {
+  // Auth is now handled via HttpOnly cookies; no manual Authorization header needed.
+  return {};
 };
 
 export const publicContentAPI = {

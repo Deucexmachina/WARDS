@@ -72,12 +72,15 @@ from auth import (
     hash_mfa_recovery_code,
     issue_mfa_recovery_otp,
     save_mfa_secret,
+    clear_auth_cookies,
     decode_active_account_from_bearer_token,
     get_current_admin_user,
     get_current_branch_staff,
     get_current_user,
     require_window_staff,
     revoke_token,
+    set_auth_cookie,
+    set_refresh_cookie,
     verify_account_password,
     verify_password,
     hash_password,
@@ -284,7 +287,7 @@ class UnifiedToken(BaseModel):
 
 
 class RefreshTokenRequest(BaseModel):
-    refresh_token: str
+    refresh_token: Optional[str] = None
 
 
 class UnifiedPasswordResetRequest(BaseModel):
@@ -1017,25 +1020,40 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
     # Frontend enforces it for admin/branch; citizens see a dismissible prompt.
     mfa_setup_required = get_mfa_secret(db, portal, get_mfa_username(portal, account)) is None
 
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "token_type": "bearer",
-        "portal": portal,
-        "user": build_user_response(portal, account, mfa_setup_required),
-        "requires_mfa": False,
-        "mfa_setup_required": mfa_setup_required,
-    }
+    response = JSONResponse(
+        content={
+            "token_type": "bearer",
+            "portal": portal,
+            "user": build_user_response(portal, account, mfa_setup_required),
+            "requires_mfa": False,
+            "mfa_setup_required": mfa_setup_required,
+        }
+    )
+    set_auth_cookie(response, portal, access_token)
+    set_refresh_cookie(response, portal, refresh_token)
+    return response
 
 
 @router.post("/logout")
 async def unified_logout(request: Request, db: Session = Depends(get_db)):
-    auth_header = request.headers.get("Authorization", "")
+    # Try to extract token from cookies or Authorization header
+    token = None
+    for candidate_portal, config in PORTAL_CONFIG.items():
+        if candidate_portal == "unknown":
+            continue
+        cookie_name = f"wards_{candidate_portal}_access_token"
+        token = request.cookies.get(cookie_name)
+        if token:
+            break
+
+    if not token:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header.split(" ", 1)[1]
+
     portal = None
     user_identifier = "unknown"
-    token = None
-    if auth_header.startswith("Bearer "):
-        token = auth_header.split(" ", 1)[1]
+    if token:
         user_id = None
         sid = None
         payload = None
@@ -1081,25 +1099,42 @@ async def unified_logout(request: Request, db: Session = Depends(get_db)):
         request=request,
         account=account,
     )
-    return {"message": "Logged out successfully"}
+    response = JSONResponse(content={"message": "Logged out successfully"})
+    clear_auth_cookies(response)
+    return response
 
 
 @router.post("/refresh")
 @limiter.limit("10/minute")
 async def unified_refresh_token(request: Request, payload: RefreshTokenRequest, db: Session = Depends(get_db)):
-    decoded = None
+    # Try refresh token from cookies first, then request body
+    refresh_token = None
     portal = None
     for candidate_portal, config in PORTAL_CONFIG.items():
         if candidate_portal == "unknown":
             continue
-        try:
-            candidate = decode_token(payload.refresh_token, config["secret_key"])
-        except JWTError:
-            continue
-        if candidate.get("type") == "refresh":
-            decoded = candidate
-            portal = candidate.get("portal") or candidate_portal
+        cookie_name = f"wards_{candidate_portal}_refresh_token"
+        refresh_token = request.cookies.get(cookie_name)
+        if refresh_token:
+            portal = candidate_portal
             break
+
+    if not refresh_token and payload.refresh_token:
+        refresh_token = payload.refresh_token
+
+    decoded = None
+    if refresh_token:
+        for candidate_portal, config in PORTAL_CONFIG.items():
+            if candidate_portal == "unknown":
+                continue
+            try:
+                candidate = decode_token(refresh_token, config["secret_key"])
+            except JWTError:
+                continue
+            if candidate.get("type") == "refresh":
+                decoded = candidate
+                portal = candidate.get("portal") or candidate_portal
+                break
 
     if not decoded or portal not in {"public", "admin", "branch"}:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token")
@@ -1139,13 +1174,19 @@ async def unified_refresh_token(request: Request, payload: RefreshTokenRequest, 
         r.setex(f"wards:session:{portal}:{user_id}", ttl, sid)
 
     mfa_setup_required = get_mfa_secret(db, portal, get_mfa_username(portal, account)) is None
+    access_token = create_access_token(portal, token_payload)
+    new_refresh_token = create_refresh_token(portal, token_payload)
 
-    return {
-        "access_token": create_access_token(portal, token_payload),
-        "token_type": "bearer",
-        "portal": portal,
-        "user": build_user_response(portal, account, mfa_setup_required),
-    }
+    response = JSONResponse(
+        content={
+            "token_type": "bearer",
+            "portal": portal,
+            "user": build_user_response(portal, account, mfa_setup_required),
+        }
+    )
+    set_auth_cookie(response, portal, access_token)
+    set_refresh_cookie(response, portal, new_refresh_token)
+    return response
 
 
 @router.post("/setup-mfa")
@@ -1970,16 +2011,20 @@ async def unified_invite_register(
         account=account,
     )
 
-    user_response = build_user_response(
-        "public" if portal not in ("admin", "main_admin", "superadmin", "branch") else ("admin" if portal in ("admin", "main_admin", "superadmin") else "branch"),
-        account,
+    token_portal = (
+        "public" if portal not in ("admin", "main_admin", "superadmin", "branch")
+        else ("admin" if portal in ("admin", "main_admin", "superadmin") else "branch")
     )
+    user_response = build_user_response(token_portal, account)
 
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": user_response,
-    }
+    response = JSONResponse(
+        content={
+            "token_type": "bearer",
+            "user": user_response,
+        }
+    )
+    set_auth_cookie(response, token_portal, access_token)
+    return response
 
 
 # ---------------------------------------------------------------------------

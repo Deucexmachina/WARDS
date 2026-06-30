@@ -66,16 +66,77 @@ from auth.permissions import (
     ROLE_BRANCH_STAFF,
 )
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 optional_user_security = HTTPBearer(auto_error=False)
+
+# Cookie names for each portal
+def _get_cookie_name(portal: str) -> str:
+    return f"wards_{portal}_access_token"
+
+
+def _get_refresh_cookie_name(portal: str) -> str:
+    return f"wards_{portal}_refresh_token"
+
+
+COOKIE_PORTALS = ("admin", "branch", "user")
+
+
+def _extract_token_from_request(request: Request, cookie_name: str) -> str | None:
+    """Extract JWT from HttpOnly cookie first, then Authorization header."""
+    token = request.cookies.get(cookie_name)
+    if token:
+        return token
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        return auth_header.split(" ", 1)[1]
+    return None
+
+
+def set_auth_cookie(response, portal: str, token: str, max_age: int = 1800):
+    """Set HttpOnly, Secure, SameSite=Lax auth cookie on a response."""
+    response.set_cookie(
+        key=_get_cookie_name(portal),
+        value=token,
+        httponly=True,
+        secure=True,
+        samesite="Lax",
+        max_age=max_age,
+        path="/",
+    )
+
+
+def set_refresh_cookie(response, portal: str, token: str, max_age: int = 604800):
+    """Set HttpOnly, Secure, SameSite=Lax refresh cookie on a response."""
+    response.set_cookie(
+        key=_get_refresh_cookie_name(portal),
+        value=token,
+        httponly=True,
+        secure=True,
+        samesite="Lax",
+        max_age=max_age,
+        path="/",
+    )
+
+
+def clear_auth_cookies(response):
+    """Clear all auth and refresh cookies."""
+    for portal in COOKIE_PORTALS:
+        response.delete_cookie(key=_get_cookie_name(portal), path="/")
+        response.delete_cookie(key=_get_refresh_cookie_name(portal), path="/")
 
 
 async def get_current_admin_user(
     request: Request,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: Session = Depends(get_db),
 ) -> Admin | BranchStaff:
-    token = credentials.credentials
+    token = _extract_token_from_request(request, _get_cookie_name("admin")) or (credentials.credentials if credentials else None)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     if is_token_revoked(db, token):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session has been logged out")
 
@@ -147,10 +208,16 @@ def require_any_admin():
 
 async def get_current_user(
     request: Request,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: Session = Depends(get_db),
 ) -> CitizenUser:
-    token = credentials.credentials
+    token = _extract_token_from_request(request, _get_cookie_name("user")) or (credentials.credentials if credentials else None)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     if is_token_revoked(db, token):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session has been logged out")
 
@@ -182,10 +249,10 @@ async def get_optional_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(optional_user_security),
     db: Session = Depends(get_db),
 ) -> CitizenUser | None:
-    if credentials is None:
+    token = _extract_token_from_request(request, _get_cookie_name("user")) or (credentials.credentials if credentials else None)
+    if not token:
         return None
 
-    token = credentials.credentials
     if is_token_revoked(db, token):
         return None
 
@@ -207,10 +274,16 @@ async def get_optional_current_user(
 
 async def get_current_branch_staff(
     request: Request,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: Session = Depends(get_db),
 ) -> BranchStaff:
-    token = credentials.credentials
+    token = _extract_token_from_request(request, _get_cookie_name("branch")) or (credentials.credentials if credentials else None)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     if is_token_revoked(db, token):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session has been logged out")
 
@@ -244,10 +317,21 @@ async def get_current_branch_staff(
 
 async def get_current_admin_or_branch_staff(
     request: Request,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: Session = Depends(get_db),
 ):
-    token = credentials.credentials
+    # Try admin cookie first, then branch cookie, then Authorization header
+    admin_token = _extract_token_from_request(request, _get_cookie_name("admin"))
+    branch_token = _extract_token_from_request(request, _get_cookie_name("branch"))
+    header_token = credentials.credentials if credentials else None
+    token = admin_token or branch_token or header_token
+
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     if is_token_revoked(db, token):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session has been logged out")
 

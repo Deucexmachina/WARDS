@@ -4,7 +4,7 @@ import WardsPageHero from '../../components/WardsPageHero';
 import SystemMessageModal from '../../components/SystemMessageModal';
 import CollectionReportView from '../../components/admin/CollectionReportView';
 
-import { API_BASE_URL } from '../../services/api';
+import { api, API_BASE_URL } from '../../services/api';
 const PAYMENT_TIME_ZONE = 'Asia/Manila';
 const LEDGER_PER_PAGE = 5;
 
@@ -308,21 +308,19 @@ const PaymentManagement = () => {
     try {
       setPageError('');
       const user = JSON.parse(localStorage.getItem('user') || '{}');
-      const token = localStorage.getItem('adminToken');
-      let url = `${API_BASE_URL}/payments`;
+      let url = '/payments';
 
       if (user.role === 'branch_admin' || user.role === 'branch_staff') {
-        const branchResponse = await axios.get(`${API_BASE_URL}/public/branches`);
+        const branchResponse = await api.get('/public/branches');
         const branch = branchResponse.data.find((item) => item.id === user.branch_id);
         if (branch) {
           url += `?branch=${encodeURIComponent(branch.name)}`;
         }
       }
 
-      const headers = token ? { Authorization: `Bearer ${token}` } : {};
       const [response, branchesResponse] = await Promise.all([
-        axios.get(url, { headers }),
-        axios.get(`${API_BASE_URL}/public/branches`),
+        api.get(url),
+        api.get('/public/branches'),
       ]);
       setPayments(response.data || []);
       setBranches(branchesResponse.data || []);
@@ -336,11 +334,8 @@ const PaymentManagement = () => {
   };
 
   const fetchRemittances = async () => {
-    const token = localStorage.getItem('adminToken');
     try {
-      const response = await axios.get(`${API_BASE_URL}/payments/remittances`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const response = await api.get('/payments/remittances');
       setRemittanceData(response.data);
     } catch (error) {
       console.error('Failed to fetch remittances:', error);
@@ -350,10 +345,7 @@ const PaymentManagement = () => {
 
   const reviewRemittance = async (remittanceId, action) => {
     try {
-      const token = localStorage.getItem('adminToken');
-      await axios.post(`${API_BASE_URL}/payments/remittances/${remittanceId}/${action}`, {}, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      await api.post(`/payments/remittances/${remittanceId}/${action}`);
       setSuccessMessage(`Remittance ${action === 'accept' ? 'accepted' : 'rejected'} successfully.`);
       window.dispatchEvent(new CustomEvent('remittance-reviewed'));
       await fetchRemittances();
@@ -365,10 +357,8 @@ const PaymentManagement = () => {
 
   const downloadRemittanceReport = async (remittance) => {
     try {
-      const token = localStorage.getItem('adminToken');
-      const response = await axios.get(`${API_BASE_URL}/payments/remittances/${remittance.id}/report`, {
+      const response = await api.get(`/payments/remittances/${remittance.id}/report`, {
         responseType: 'blob',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       const blobUrl = window.URL.createObjectURL(response.data);
       const link = document.createElement('a');
@@ -386,10 +376,7 @@ const PaymentManagement = () => {
 
   const handleVerifyPayment = async (paymentId) => {
     try {
-      const token = localStorage.getItem('adminToken');
-      await axios.put(`${API_BASE_URL}/payments/${paymentId}/verify`, {}, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      await api.put(`/payments/${paymentId}/verify`);
       window.dispatchEvent(new CustomEvent('receipt-payment-updated', { detail: { action: 'verified', paymentId } }));
       window.dispatchEvent(new CustomEvent('branch-payment-updated', { detail: { action: 'verified', paymentId } }));
       setMessageModal({

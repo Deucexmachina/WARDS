@@ -1,6 +1,7 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import api from '../services/api';
+import { getStoredPortal } from '../utils/auth';
 import { clearStoredPublicUser, setStoredPublicUser } from '../utils/publicSession';
 
 const AUTH_VERIFY_TIMEOUT_MS = 8000;
@@ -19,21 +20,17 @@ const UserProtectedRoute = ({ children }) => {
   }, []);
 
   const verifyToken = async () => {
-    const token = localStorage.getItem('userToken');
-    
-    if (!token) {
+    const portal = getStoredPortal();
+
+    if (portal && portal !== 'public') {
       setIsAuthenticated(false);
       setIsLoading(false);
-      // Store the intended destination
       sessionStorage.setItem('redirectAfterLogin', location.pathname);
       return;
     }
 
     try {
       const response = await api.get('/auth/unified/verify', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
         timeout: AUTH_VERIFY_TIMEOUT_MS,
       });
 
@@ -41,6 +38,7 @@ const UserProtectedRoute = ({ children }) => {
       const serverStartedAt = Date.parse(response.data.server_started_at || '');
       if (serverStartedAt && (!userAuthenticatedAt || userAuthenticatedAt <= serverStartedAt)) {
         setIsAuthenticated(false);
+        localStorage.removeItem('wardsPortal');
         localStorage.removeItem('userToken');
         clearStoredPublicUser();
         localStorage.removeItem('userAuthenticatedAt');
@@ -57,6 +55,7 @@ const UserProtectedRoute = ({ children }) => {
         }
       } else {
         setIsAuthenticated(false);
+        localStorage.removeItem('wardsPortal');
         localStorage.removeItem('userToken');
         clearStoredPublicUser();
         localStorage.removeItem('userAuthenticatedAt');
@@ -68,6 +67,7 @@ const UserProtectedRoute = ({ children }) => {
         return;
       }
       setIsAuthenticated(false);
+      localStorage.removeItem('wardsPortal');
       localStorage.removeItem('userToken');
       clearStoredPublicUser();
       localStorage.removeItem('userAuthenticatedAt');

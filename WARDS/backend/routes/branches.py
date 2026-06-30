@@ -5,6 +5,7 @@ import secrets
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
@@ -43,7 +44,7 @@ from utils.field_crypto import apply_invite_security, find_active_invite_by_emai
 from auth import get_current_admin_user, require_main_admin
 from services.email_service import send_branch_access_email, send_new_window_accounts_email, smtp_is_configured
 from utils.field_crypto import build_redacted_text, get_decrypted_or_raw, set_encrypted_hash_companions
-from auth import create_access_token
+from auth import create_access_token, set_auth_cookie
 from auth import hash_password, verify_password, verify_account_password, delete_mfa_secret
 from auth import get_branch_dashboard_url, get_session_timeout_minutes, slugify_branch_name
 from utils.security_validation import (
@@ -379,40 +380,43 @@ async def create_superadmin_branch_session(
     ))
     db.commit()
 
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": {
-            "id": staff.id,
-            "username": "superadmin",
-            "email": staff.email,
-            "full_name": "superadmin",
-            "role": "branch",
-            "internal_role": staff.role,
-            "branch_id": staff.branch_id,
-            "dashboard_url": get_branch_dashboard_url(staff),
-            "status": staff.status,
-            "account_scope": staff.account_scope or "full_branch",
-            "service_window": staff.service_window,
-            "service_window_label": get_window_display_label(staff),
-            "window_label": get_window_display_label(staff),
-            "assigned_window_number": staff.assigned_window_number,
-            "superadmin_managed_branch": True,
-            "branch_name": get_decrypted_or_raw(branch, "name"),
-            "window_accounts": [
-                {
-                    "id": account.id,
-                    "username": account.username,
-                    "full_name": account.full_name,
-                    "service_window": account.service_window,
-                    "service_window_label": get_window_display_label(account),
-                    "assigned_window_number": account.assigned_window_number or default_assigned_window_number(account.service_window),
-                    "window_label": get_window_display_label(account),
-                }
-                for account in window_accounts
-            ],
-        },
-    }
+    response = JSONResponse(
+        content={
+            "token_type": "bearer",
+            "user": {
+                "id": staff.id,
+                "username": "superadmin",
+                "email": staff.email,
+                "full_name": "superadmin",
+                "role": "branch",
+                "internal_role": staff.role,
+                "branch_id": staff.branch_id,
+                "dashboard_url": get_branch_dashboard_url(staff),
+                "status": staff.status,
+                "account_scope": staff.account_scope or "full_branch",
+                "service_window": staff.service_window,
+                "service_window_label": get_window_display_label(staff),
+                "window_label": get_window_display_label(staff),
+                "assigned_window_number": staff.assigned_window_number,
+                "superadmin_managed_branch": True,
+                "branch_name": get_decrypted_or_raw(branch, "name"),
+                "window_accounts": [
+                    {
+                        "id": account.id,
+                        "username": account.username,
+                        "full_name": account.full_name,
+                        "service_window": account.service_window,
+                        "service_window_label": get_window_display_label(account),
+                        "assigned_window_number": account.assigned_window_number or default_assigned_window_number(account.service_window),
+                        "window_label": get_window_display_label(account),
+                    }
+                    for account in window_accounts
+                ],
+            },
+        }
+    )
+    set_auth_cookie(response, "branch", access_token)
+    return response
 
 @router.post("/")
 async def create_branch(

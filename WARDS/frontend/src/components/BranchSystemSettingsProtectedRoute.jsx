@@ -1,6 +1,7 @@
 import { Navigate } from 'react-router-dom';
 import { useEffect, useRef, useState } from 'react';
 import api from '../services/api';
+import { getStoredPortal } from '../utils/auth';
 import {
   clearBranchSettingsSession,
   isBranchSettingsRoleAllowed,
@@ -8,6 +9,7 @@ import {
 } from '../utils/settingsSecurity';
 
 const clearBranchSession = () => {
+  localStorage.removeItem('wardsPortal');
   localStorage.removeItem('branchToken');
   localStorage.removeItem('branchUser');
   localStorage.removeItem('branchAuthenticatedAt');
@@ -25,11 +27,11 @@ const BranchSystemSettingsProtectedRoute = ({ children }) => {
     }, 0);
 
     const verify = async () => {
-      const token = localStorage.getItem('branchToken');
+      const portal = getStoredPortal();
       const branchAuthenticatedAt = Date.parse(localStorage.getItem('branchAuthenticatedAt') || '');
       const settingsAuthenticatedAt = Date.parse(sessionStorage.getItem('branchSettingsAuthenticatedAt') || '');
 
-      if (!token) {
+      if (portal !== 'branch') {
         clearBranchSettingsSession();
         if (active) setAllowed(false);
         return;
@@ -43,12 +45,8 @@ const BranchSystemSettingsProtectedRoute = ({ children }) => {
 
       try {
         const [verifyResponse, accessResponse] = await Promise.all([
-          api.get('/auth/unified/verify', {
-            headers: { Authorization: `Bearer ${token}` },
-          }),
-          api.get('/branch/settings/access', {
-            headers: { Authorization: `Bearer ${token}` },
-          }),
+          api.get('/auth/unified/verify'),
+          api.get('/branch/settings/access'),
         ]);
 
         const serverStartedAt = Date.parse(verifyResponse.data.server_started_at || '');
@@ -102,7 +100,7 @@ const BranchSystemSettingsProtectedRoute = ({ children }) => {
   }
 
   if (!allowed) {
-    return <Navigate to={localStorage.getItem('branchToken') ? '../settings/login' : '/login?portal=branch'} replace />;
+    return <Navigate to={getStoredPortal() === 'branch' ? '../settings/login' : '/login?portal=branch'} replace />;
   }
 
   return children;

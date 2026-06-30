@@ -30,16 +30,12 @@ const AdminLayout = () => {
 
     try {
       setIsLoggingOut(true);
-      const token = localStorage.getItem('adminToken');
       
-      // Call backend logout endpoint
-      await api.post('/auth/unified/logout', {}, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      // Call backend logout endpoint (cookie handles auth)
+      await api.post('/auth/unified/logout');
       
       // Clear local storage
+      localStorage.removeItem('wardsPortal');
       localStorage.removeItem('adminToken');
       localStorage.removeItem('adminUser');
       localStorage.removeItem('adminAuthenticatedAt');

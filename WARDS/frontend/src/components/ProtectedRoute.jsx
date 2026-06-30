@@ -1,6 +1,7 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import api from '../services/api';
+import { getStoredPortal } from '../utils/auth';
 
 const ALLOWED_ADMIN_INTERNAL_ROLES = new Set(['main_admin', 'superadmin']);
 const AUTH_VERIFY_TIMEOUT_MS = 8000;
@@ -39,9 +40,10 @@ const ProtectedRoute = ({ children }) => {
   };
 
   const verifyToken = async () => {
-    const token = localStorage.getItem('adminToken');
-    
-    if (!token) {
+    const portal = getStoredPortal();
+
+    // Fast-fail if user is clearly in a different portal
+    if (portal && portal !== 'admin') {
       setIsAuthenticated(false);
       setIsLoading(false);
       setAdminLoginRedirectState('Please login with your admin account to continue.');
@@ -50,9 +52,6 @@ const ProtectedRoute = ({ children }) => {
 
     try {
       const response = await api.get('/auth/unified/verify', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
         timeout: AUTH_VERIFY_TIMEOUT_MS,
       });
 
