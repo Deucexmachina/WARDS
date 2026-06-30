@@ -426,14 +426,18 @@ async def verify_branch_access(
 
 
 async def get_current_admin_from_token(request: Request, db: Session) -> Admin:
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
+    token = _extract_token_from_request(request, _get_cookie_name("admin"))
+    if not token:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ", 1)[1]
+
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid authorization header"
+            detail="Missing or invalid authorization"
         )
 
-    token = auth_header.split(" ")[1]
     if is_token_revoked(db, token):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session has been logged out")
 
