@@ -19,6 +19,7 @@ from SECURITY.security_engine import (
     backup_ml_artifacts,
     backup_folder_sort_key,
     build_feature_vector,
+    commit_backup_file_progress,
     classify,
     compute_profile_confidence,
     content_flags,
@@ -43,6 +44,7 @@ from SECURITY.security_engine import (
     write_backup_manifest,
     ai_predict,
 )
+from sqlalchemy.orm.exc import StaleDataError
 from SECURITY.security_models import (
     SecurityAdminFileChange,
     SecurityDetectionEvent,
@@ -641,6 +643,74 @@ def test_content_flags_include_destructive_and_webshell_patterns():
 
     assert "destructive_command_pattern" in flags
     assert "webshell_indicator" in flags
+
+
+def test_default_ai_rule_configs_are_not_empty():
+    from SECURITY import security_engine
+
+    empty_defaults = [
+        key
+        for key, rule in security_engine.DEFAULT_AI_RULES.items()
+        if not isinstance(rule.get("config"), dict) or not rule.get("config")
+    ]
+
+    assert empty_defaults == []
+
+
+def test_configured_destructive_and_webshell_patterns_are_used():
+    from SECURITY import security_engine
+
+    rules = {key: {**value, "config": dict(value.get("config", {}))} for key, value in security_engine.DEFAULT_AI_RULES.items()}
+    rules["destructive_command_pattern"]["config"] = {"patterns": ["custom_wipe_all"]}
+    rules["webshell_indicator"]["config"] = {"patterns": ["custom_shell_gate"]}
+
+    flags = content_flags(
+        "custom_wipe_all(); custom_shell_gate();",
+        {"ai_rules": rules, "hour_of_day": 14, "day_of_week": 1},
+        path=Path("WARDS/backend/main.py"),
+    )
+
+    assert "destructive_command_pattern" in flags
+    assert "webshell_indicator" in flags
+
+
+def test_paste_only_login_flags_keystroke_without_content_similarity():
+    flags = content_flags(
+        "admin login context",
+        {
+            "target_type": "admin_session",
+            "pasted_password": True,
+            "keystroke_dynamics_available": False,
+            "content_similarity_score": 1.0,
+            "hour_of_day": 14,
+            "day_of_week": 1,
+        },
+        path=Path("admin_session:admin"),
+    )
+
+    assert "keystroke_dynamics" in flags
+    assert "content_similarity_score" not in flags
+
+
+def test_backup_progress_commit_tolerates_stale_monitored_file_rows():
+    class DummyDb:
+        rolled_back = False
+        expired = False
+
+        def commit(self):
+            raise StaleDataError("expected to update 3 row(s); 0 were matched")
+
+        def rollback(self):
+            self.rolled_back = True
+
+        def expire_all(self):
+            self.expired = True
+
+    db = DummyDb()
+
+    assert commit_backup_file_progress(db) is False
+    assert db.rolled_back is True
+    assert db.expired is True
 
 
 def test_new_ai_rules_have_specific_incident_taxonomy():

@@ -1868,14 +1868,6 @@ const BackupRecovery = () => {
                           </div>
                         </div>
                       </div>
-                      <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
-                        <p className="text-sm font-bold text-blue-950">Add approved defacement rule</p>
-                        <p className="mt-1 text-xs leading-5 text-blue-900">Only predefined rules based on the defacement dictionary can be added, so every new rule stays compatible with the AI scoring model and receives initial sample patterns.</p>
-                        <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto]">
-                          <CustomSelect value={controls.aiRuleTemplate} onChange={(value) => setControls({ ...controls, aiRuleTemplate: value })} options={[{ value: '', label: 'Select an approved rule' }, ...aiRuleTemplates.filter((item) => !item.already_added).map((item) => ({ value: item.key, label: item.label }))]} placeholder="Select an approved rule" />
-                          <button disabled={busy} className={buttonStyles.primary} onClick={() => askConfirm('Add AI rule?', 'WARDS will add this approved rule to anomaly scoring with its initial sample configuration.', addSelectedAiRule, 'AI rule added with initial samples.', 'Add rule')}>Add AI Rule</button>
-                        </div>
-                      </div>
                       <div className="grid gap-3">
                         {Object.entries(aiRules).map(([key, rule]) => (
                           <div key={key} className="rounded-xl border border-slate-200 p-4">
@@ -1901,11 +1893,7 @@ const BackupRecovery = () => {
                       </div>
                       <button disabled={busy} className={`${buttonStyles.primary} w-full`} onClick={() => askConfirm('Save AI rules?', 'WARDS will update the enabled rules and advanced rule configuration used by anomaly scoring.', saveAiRules, 'AI behavioral rules saved.', 'Save rules')}>Save AI Rules</button>
                     </>
-                  ) : (
-                    <button disabled={busy} className={buttonStyles.info} onClick={() => setShowAiRules(true)}>
-                      Open Manage AI Rules
-                    </button>
-                  )}
+                  ) : null}
                 </div>
               </Section>
 

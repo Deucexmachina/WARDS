@@ -29,6 +29,7 @@ import requests
 from sqlalchemy import MetaData, Table, inspect, or_, text
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import StaleDataError
 from database.models import Admin, Alert, SessionLocal
 from utils.log_integrity import verify_record_integrity
 
@@ -287,7 +288,7 @@ DEFAULT_AI_RULES = {
         "description": "Whether a WARDS admin JWT/MFA session was present.",
         "enabled": True,
         "weight": 0.22,
-        "config": {},
+        "config": {"required": True},
     },
     "mfa_verified": {
         "label": "MFA Verified",
@@ -301,7 +302,7 @@ DEFAULT_AI_RULES = {
         "description": "Whether source looks consistent with normal admin use.",
         "enabled": True,
         "weight": 0.08,
-        "config": {},
+        "config": {"treat_unknown_as_inconsistent": False},
     },
     "source_ip_reputation": {
         "label": "Source IP Reputation",
@@ -315,14 +316,14 @@ DEFAULT_AI_RULES = {
         "description": "Uses aggregate typing-pattern anomaly signals when available.",
         "enabled": True,
         "weight": 0.1,
-        "config": {"minimum_confidence": 0.7},
+        "config": {"minimum_confidence": 0.7, "flag_paste_or_autofill_without_typing": True},
     },
     "method_legitimate": {
         "label": "Legitimate Method",
         "description": "Whether change came through an approved admin workflow.",
         "enabled": True,
         "weight": 0.18,
-        "config": {},
+        "config": {"approved_workflows": ["admin_change", "deployment", "backup", "recovery"]},
     },
     "business_hours": {
         "label": "Business Hours",
@@ -357,14 +358,14 @@ DEFAULT_AI_RULES = {
         "description": "Raises risk when an admin action comes from a device not seen in the learned profile.",
         "enabled": True,
         "weight": 0.14,
-        "config": {},
+        "config": {"history_scope": "per_admin", "match_field": "device_hash"},
     },
     "first_time_country": {
         "label": "First-Time Country",
         "description": "Raises risk when an admin action comes from a country not seen in the learned profile.",
         "enabled": True,
         "weight": 0.16,
-        "config": {},
+        "config": {"history_scope": "per_admin", "match_field": "country_code"},
     },
     "geo_distance_from_last_login": {
         "label": "Geo Distance From Last Login",
@@ -427,7 +428,7 @@ DEFAULT_AI_RULES = {
         "description": "Blocks recovery risk acceptance when backup hash validation fails before restoration.",
         "enabled": True,
         "weight": 0.24,
-        "config": {},
+        "config": {"require_manifest_hmac": True, "require_file_hash_match": True},
     },
     "content_similarity_score": {
         "label": "Content Similarity Score",
@@ -462,14 +463,14 @@ DEFAULT_AI_RULES = {
         "description": "Detects dangerous shell, SQL, and file-destruction commands in protected content.",
         "enabled": True,
         "weight": 0.28,
-        "config": {},
+        "config": {"patterns": ["rm -rf", "del /f", "format ", "truncate table", "delete from", "drop database"]},
     },
     "webshell_indicator": {
         "label": "Web Shell Indicator",
         "description": "Detects common web-shell execution and request-control primitives.",
         "enabled": True,
         "weight": 0.3,
-        "config": {},
+        "config": {"patterns": ["cmd=", "shell_exec", "passthru(", "system($_", "eval($_", "base64_decode("]},
     },
     "session_context_anomaly": {
         "label": "Session Context Anomaly",
@@ -910,6 +911,8 @@ def record_context_detection(
     context.setdefault("method_legitimate", change_type not in {"invalid_admin_session", "suspicious_login"})
     context.setdefault("business_hours", 8 <= now_utc().hour <= 18)
     context.setdefault("ai_rules", get_ai_rules(db))
+    if (context.get("target_type") or "admin_session") not in {"file", "application_file", "vm1_file", "database"}:
+        context.setdefault("content_similarity_score", 1.0)
     flags = content_flags(synthetic_content, context)
     if force_flag:
         flags.append(force_flag)
@@ -3601,7 +3604,18 @@ def content_flags(content: str, context: dict | None = None, path: Path | None =
         keystroke_confidence = float(first_present(context, "keystroke_anomaly_confidence", "keystroke_dynamics", default=0))
     except (TypeError, ValueError):
         keystroke_confidence = 0
-    if ai_rule_enabled(rules, "keystroke_dynamics") and (context.get("keystroke_anomaly") or context.get("typing_pattern_anomaly") or keystroke_confidence >= 0.7):
+    keystroke_config = ai_rule_config(rules, "keystroke_dynamics")
+    paste_without_typing = (
+        bool(keystroke_config.get("flag_paste_or_autofill_without_typing", True))
+        and (context.get("pasted_password") or context.get("autofill_used"))
+        and not context.get("keystroke_dynamics_available")
+    )
+    if ai_rule_enabled(rules, "keystroke_dynamics") and (
+        context.get("keystroke_anomaly")
+        or context.get("typing_pattern_anomaly")
+        or keystroke_confidence >= float(keystroke_config.get("minimum_confidence", 0.7))
+        or paste_without_typing
+    ):
         flags.append("keystroke_dynamics")
     if ai_rule_enabled(rules, "admin_session_valid") and not context.get("admin_session_valid"):
         flags.append("unauthenticated_change")
@@ -3747,6 +3761,9 @@ def content_flags(content: str, context: dict | None = None, path: Path | None =
         for key, patterns in SUSPICIOUS_PATTERNS.items():
             if key in rules and not ai_rule_enabled(rules, key):
                 continue
+            rule_patterns = ai_rule_config(rules, key).get("patterns") if key in rules else None
+            if isinstance(rule_patterns, list) and rule_patterns:
+                patterns = tuple(str(pattern).lower() for pattern in rule_patterns if str(pattern).strip())
             if any(pattern in lowered for pattern in patterns):
                 flags.append(key)
     if context.get("rapid_change"):
@@ -5113,6 +5130,21 @@ def mark_stale_backup_events_failed(db: Session, max_age_minutes: int = 10) -> i
     return len(stale_events)
 
 
+def commit_backup_file_progress(db: Session) -> bool:
+    """Commit monitored-file backup progress without failing the backup on reporter races."""
+    try:
+        db.commit()
+        return True
+    except StaleDataError as exc:
+        logger.warning("Skipping stale monitored-file progress update during backup: %s", exc)
+        try:
+            db.rollback()
+            db.expire_all()
+        except Exception:
+            pass
+        return False
+
+
 def create_manual_backup(db: Session, initiated_by: int | None, label: str = "manual", skip_database_snapshot: bool = False, skip_file_registration: bool = False) -> SecurityRecoveryEvent:
     # FK safety: initiated_by may reference a VM1 admin ID that doesn't exist
     # in the security DB. Fall back to None to avoid IntegrityError.
@@ -5281,8 +5313,8 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
             # Incremental commit every 50 entries to avoid holding hundreds
             # of row locks at once (prevents MySQL deadlock with monitor loop).
             if processed % 50 == 0:
-                db.commit()
-        db.commit()
+                commit_backup_file_progress(db)
+        commit_backup_file_progress(db)
         model_artifact_count = backup_ml_artifacts(
             backup_root,
             manifest_files,
