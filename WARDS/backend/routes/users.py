@@ -41,7 +41,7 @@ def _get_client_ip(request: Request) -> str:
 limiter = Limiter(key_func=get_rate_limit_key)
 
 router = APIRouter()
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 
 async def get_accounts_current_user(

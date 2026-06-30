@@ -88,6 +88,8 @@ from auth import (
     verify_password,
     hash_password,
     delete_mfa_secret,
+    _extract_token_from_request,
+    _get_cookie_name,
 )
 
 router = APIRouter()
@@ -1866,14 +1868,23 @@ async def unified_mfa_recovery_verify_otp(
 @router.get("/verify")
 @limiter.limit("30/minute")
 async def unified_verify(request: Request, db: Session = Depends(get_db)):
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
+    token = None
+    for portal in ("admin", "branch", "public"):
+        token = _extract_token_from_request(request, _get_cookie_name(portal))
+        if token:
+            break
+
+    if not token:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header.split(" ", 1)[1]
+
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid authorization header",
+            detail="Missing or invalid authorization",
         )
 
-    token = auth_header.split(" ", 1)[1]
     portal, account, _payload = decode_active_account_from_bearer_token(token, db)
     mfa_setup_required = get_mfa_secret(db, portal, get_mfa_username(portal, account)) is None
 
@@ -1887,14 +1898,23 @@ async def unified_verify(request: Request, db: Session = Depends(get_db)):
 
 @router.post("/setup-mfa-authenticated")
 async def unified_setup_mfa_authenticated(request: Request, db: Session = Depends(get_db)):
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
+    token = None
+    for portal in ("admin", "branch", "public"):
+        token = _extract_token_from_request(request, _get_cookie_name(portal))
+        if token:
+            break
+
+    if not token:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header.split(" ", 1)[1]
+
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid authorization header",
+            detail="Missing or invalid authorization",
         )
 
-    token = auth_header.split(" ", 1)[1]
     portal, account, _payload = decode_active_account_from_bearer_token(token, db)
 
     if portal not in {"public", "admin", "branch"}:
@@ -1922,14 +1942,23 @@ async def unified_setup_mfa_authenticated(request: Request, db: Session = Depend
 
 @router.get("/me")
 async def unified_me(request: Request, db: Session = Depends(get_db)):
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
+    token = None
+    for portal in ("admin", "branch", "public"):
+        token = _extract_token_from_request(request, _get_cookie_name(portal))
+        if token:
+            break
+
+    if not token:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header.split(" ", 1)[1]
+
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid authorization header",
+            detail="Missing or invalid authorization",
         )
 
-    token = auth_header.split(" ", 1)[1]
     portal, account, _payload = decode_active_account_from_bearer_token(token, db)
     mfa_setup_required = get_mfa_secret(db, portal, get_mfa_username(portal, account)) is None
     return build_user_response(portal, account, mfa_setup_required)

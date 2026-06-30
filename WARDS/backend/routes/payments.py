@@ -35,7 +35,7 @@ from database.models import (
     get_db,
 )
 from auth import require_main_admin, get_current_user
-from auth.decorators import decode_active_account_from_bearer_token, _validate_token_binding
+from auth.decorators import decode_active_account_from_bearer_token, _extract_token_from_request, _get_cookie_name, _validate_token_binding
 from services.email_service import send_payment_receipt_email
 from services.paymongo import paymongo_service
 from utils.branch_system_settings import get_branch_setting_value
@@ -54,16 +54,26 @@ def get_rate_limit_key(request: Request) -> str:
     return get_remote_address(request)
 
 
+def _resolve_token_from_request(request: Request) -> str | None:
+    for portal in ("admin", "branch", "public"):
+        token = _extract_token_from_request(request, _get_cookie_name(portal))
+        if token:
+            return token
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        return auth_header.split(" ", 1)[1]
+    return None
+
+
 async def resolve_auth_from_request(request: Request, db: Session = Depends(get_db)):
     """Decode any valid Bearer token (public, admin, or branch) and return (portal, account)."""
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
+    token = _resolve_token_from_request(request)
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    token = auth_header.split(" ", 1)[1]
     portal, account, payload = decode_active_account_from_bearer_token(
         token, db, allowed_portals=("public", "admin", "branch")
     )
@@ -73,10 +83,9 @@ async def resolve_auth_from_request(request: Request, db: Session = Depends(get_
 
 async def resolve_optional_auth_from_request(request: Request, db: Session = Depends(get_db)):
     """Decode any valid Bearer token if present; return (portal, account) or (None, None)."""
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
+    token = _resolve_token_from_request(request)
+    if not token:
         return None, None
-    token = auth_header.split(" ", 1)[1]
     try:
         portal, account, payload = decode_active_account_from_bearer_token(
             token, db, allowed_portals=("public", "admin", "branch")
