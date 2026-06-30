@@ -113,6 +113,71 @@ def test_evaluation_scan_payload_forces_vm1_manual_scan(monkeypatch):
     assert calls[0][1]["context"]["force_full_registration"] is True
 
 
+def test_evaluation_scan_tests_query_detections_created_during_wait(monkeypatch, tmp_path):
+    evaluation_dir = Path(__file__).resolve().parents[1] / "evaluation"
+    if str(evaluation_dir) not in sys.path:
+        sys.path.insert(0, str(evaluation_dir))
+
+    import evaluator
+
+    monkeypatch.setattr(evaluator, "RESULTS_CSV", tmp_path / "results.csv")
+    monkeypatch.setattr(evaluator, "VM1_SNAPSHOT_WAIT_SECONDS", 0)
+    monkeypatch.setattr(evaluator, "CLEANUP_WAIT_SECONDS", 0)
+    monkeypatch.setattr(evaluator, "trigger_scan_all", lambda: [])
+    monkeypatch.setattr(
+        evaluator,
+        "query_new_detections",
+        lambda _since, target=None: [{"id": 123, "incident_id": 456, "target_name": target, "ai_score": 0.9, "ai_prediction": "suspicious"}],
+    )
+    monkeypatch.setattr(evaluator, "resolve_incident", lambda _incident_id: True)
+
+    case = evaluator.TestCase(
+        "ATK-EVAL",
+        "Reporter-created detection",
+        "application_files",
+        "attack",
+        lambda: None,
+        trigger_scan=True,
+        target_hint="WARDS/backend/main.py",
+    )
+
+    row = evaluator.run_test(case)
+
+    assert row["result"] == "TP"
+    assert row["detection_id"] == 123
+
+
+def test_evaluation_ignores_unrelated_recent_detections(monkeypatch, tmp_path):
+    evaluation_dir = Path(__file__).resolve().parents[1] / "evaluation"
+    if str(evaluation_dir) not in sys.path:
+        sys.path.insert(0, str(evaluation_dir))
+
+    import evaluator
+
+    monkeypatch.setattr(evaluator, "RESULTS_CSV", tmp_path / "results.csv")
+    monkeypatch.setattr(evaluator, "SCAN_WAIT_SECONDS", 0)
+    monkeypatch.setattr(evaluator, "CLEANUP_WAIT_SECONDS", 0)
+    monkeypatch.setattr(
+        evaluator,
+        "query_new_detections",
+        lambda _since, target=None: [{"id": 999, "target_name": "WARDS/frontend/index.html"}],
+    )
+
+    case = evaluator.TestCase(
+        "BEN-EVAL",
+        "Unrelated recent detection",
+        "context",
+        "benign",
+        lambda: None,
+        wait_seconds=0,
+        target_hint="evaluation:BEN-EVAL",
+    )
+
+    row = evaluator.run_test(case)
+
+    assert row["result"] == "TN"
+
+
 def test_evaluation_catalog_has_100_cases_and_no_outside_file_attack_paths():
     evaluation_dir = Path(__file__).resolve().parents[1] / "evaluation"
     if str(evaluation_dir) not in sys.path:
@@ -127,3 +192,5 @@ def test_evaluation_catalog_has_100_cases_and_no_outside_file_attack_paths():
     assert len(ids) == 100
     assert "ATK-F-10" in ids
     assert {"BEN-F-03", "BEN-F-04", "BEN-F-10"}.issubset(ids)
+    cases_by_id = {case.test_id: case for case in cases}
+    assert cases_by_id["ATK-F-09"].action is not None

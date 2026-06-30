@@ -7,7 +7,7 @@ import shlex
 import subprocess
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -15,6 +15,7 @@ import requests
 
 from eval_config import (
     CLEANUP_WAIT_SECONDS,
+    DETECTION_LOOKBACK_SECONDS,
     REQUEST_TIMEOUT_SECONDS,
     RESULTS_CSV,
     SCAN_BACKOFF_SECONDS,
@@ -59,6 +60,7 @@ class TestCase:
     wait_seconds: int | None = None
     cleanup: Callable[[], None] | None = None
     notes: str = ""
+    target_hint: str | None = None
 
 
 def now_iso() -> str:
@@ -102,13 +104,41 @@ def trigger_scan_all() -> list[dict]:
     return list((result or {}).get("detections") or [])
 
 
-def query_new_detections(since_iso: str) -> list[dict]:
+def query_new_detections(since_iso: str, *, target: str | None = None) -> list[dict]:
     rows = api_post(
         "/v1/detections/query",
-        {"sort": "newest", "limit": 100, "date_from": since_iso},
+        {"sort": "newest", "limit": 100, "date_from": since_iso, "target": target},
         headers=HEADERS,
     )
     return list(rows or [])
+
+
+def merge_detections(*groups: list[dict]) -> list[dict]:
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for group in groups:
+        for detection in group or []:
+            key = str(detection.get("id") or detection.get("incident_id") or json.dumps(detection, sort_keys=True))
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(detection)
+    return merged
+
+
+def detection_matches_case(detection: dict, case: TestCase) -> bool:
+    if not case.target_hint:
+        return True
+    haystack = " ".join(
+        str(detection.get(key) or "")
+        for key in ("target_name", "trigger_summary", "change_type", "actor")
+    ).replace("\\", "/").lower()
+    return case.target_hint.replace("\\", "/").lower() in haystack
+
+
+def matching_detections(detections: list[dict], case: TestCase) -> list[dict]:
+    matched = [item for item in detections if detection_matches_case(item, case)]
+    return matched or ([] if case.target_hint else detections)
 
 
 def resolve_incident(incident_id: int | str | None) -> bool:
@@ -164,7 +194,7 @@ def classify_result(actual: str, predicted: str) -> str:
 
 def run_test(case: TestCase) -> dict:
     print(f"[{case.test_id}] {case.scenario}")
-    start_iso = now_iso()
+    start_iso = (datetime.now(timezone.utc) - timedelta(seconds=DETECTION_LOOKBACK_SECONDS)).isoformat()
     started = time.time()
     predicted = "benign"
     detection = None
@@ -174,12 +204,19 @@ def run_test(case: TestCase) -> dict:
         if case.trigger_scan:
             if case.domain == "application_files" and VM1_SNAPSHOT_WAIT_SECONDS > 0:
                 time.sleep(VM1_SNAPSHOT_WAIT_SECONDS)
-            detections = trigger_scan_all()
+            scan_detections = trigger_scan_all()
+            # VM1 file detections can be created by the reporter during the
+            # snapshot wait, before /scan/all returns. Query the detection log
+            # as well so the evaluator does not count real detections as FNs.
+            detections = matching_detections(
+                merge_detections(scan_detections, query_new_detections(start_iso, target=case.target_hint)),
+                case,
+            )
         else:
             wait_for = SCAN_WAIT_SECONDS if case.wait_seconds is None else case.wait_seconds
             if wait_for > 0:
                 time.sleep(wait_for)
-            detections = query_new_detections(start_iso)
+            detections = matching_detections(query_new_detections(start_iso, target=case.target_hint), case)
         if detections:
             predicted = "attack"
             detection = detections[0]

