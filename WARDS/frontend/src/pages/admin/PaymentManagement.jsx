@@ -1,10 +1,9 @@
 import { useMemo, useState, useEffect } from 'react';
-import axios from 'axios';
 import WardsPageHero from '../../components/WardsPageHero';
 import SystemMessageModal from '../../components/SystemMessageModal';
 import CollectionReportView from '../../components/admin/CollectionReportView';
 
-import { api, API_BASE_URL } from '../../services/api';
+import api from '../../services/api';
 const PAYMENT_TIME_ZONE = 'Asia/Manila';
 const LEDGER_PER_PAGE = 5;
 

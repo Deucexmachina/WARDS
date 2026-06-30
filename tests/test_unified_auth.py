@@ -172,7 +172,8 @@ def test_unified_login_succeeds_with_valid_totp():
         result = response.json()
         assert result["requires_mfa"] is False
         assert result["portal"] == "admin"
-        assert result["access_token"]
+        # access_token now delivered via HttpOnly cookie; assert cookie is set
+        assert "wards_admin_access_token" in response.cookies
         assert result["user"]["internal_role"] == "main_admin"
     finally:
         unified_auth.find_account_for_portal = original_find

@@ -10,7 +10,7 @@ import {
   startBranchSettingsSession,
 } from '../../utils/settingsSecurity';
 
-import { api, API_HOST } from '../../services/api';
+import api, { API_HOST } from '../../services/api';
 
 const RECAPTCHA_SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY || '';
 

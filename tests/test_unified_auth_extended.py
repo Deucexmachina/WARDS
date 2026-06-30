@@ -106,7 +106,8 @@ def test_admin_login_without_mfa_succeeds():
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["access_token"] != ""
+        # access_token now delivered via HttpOnly cookie
+        assert "wards_admin_access_token" in response.cookies
         assert data["token_type"] == "bearer"
         assert data["portal"] == "admin"
         assert "user" in data
@@ -142,7 +143,8 @@ def test_branch_login_without_mfa_succeeds():
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["access_token"] != ""
+        # access_token now delivered via HttpOnly cookie
+        assert "wards_branch_access_token" in response.cookies
         assert data["token_type"] == "bearer"
         assert data["portal"] == "branch"
         assert "user" in data
@@ -192,7 +194,8 @@ def test_public_login_without_mfa_succeeds_with_setup_flag():
         assert result["portal"] == "public"
         assert result["mfa_setup_required"] is True
         assert result["requires_mfa"] is False
-        assert result["access_token"]
+        # access_token now delivered via HttpOnly cookie
+        assert "wards_user_access_token" in response.cookies
     finally:
         unified_auth.find_account_for_portal = original_find
         unified_auth.log_activity = original_log

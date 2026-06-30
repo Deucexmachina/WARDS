@@ -134,7 +134,8 @@ def test_citizen_register_verify_and_login_workflow(monkeypatch):
     )
     assert login_response.status_code == 200
     assert login_response.json()["portal"] == "public"
-    assert login_response.json()["access_token"]
+    # access_token now delivered via HttpOnly cookie
+    assert "wards_user_access_token" in login_response.cookies
 
     app.dependency_overrides.clear()
     client.close()
@@ -214,11 +215,13 @@ def test_superadmin_branch_session_preserves_unified_branch_payload():
         )
     )
 
-    assert response["access_token"]
-    assert response["user"]["role"] == "branch"
-    assert response["user"]["internal_role"] == "branch_admin"
-    assert response["user"]["superadmin_managed_branch"] is True
-    assert response["user"]["branch_name"] == "Galas"
+    import json as _json
+    body = _json.loads(response.body)
+    assert "wards_branch_access_token" in response.headers.get("set-cookie", "")
+    assert body["user"]["role"] == "branch"
+    assert body["user"]["internal_role"] == "branch_admin"
+    assert body["user"]["superadmin_managed_branch"] is True
+    assert body["user"]["branch_name"] == "Galas"
 
 
 def test_branch_admin_can_access_activity_logs(monkeypatch):

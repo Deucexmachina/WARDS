@@ -106,8 +106,10 @@ persistSession({
   preserveAdminSession: true,
 });
 
-assert.equal(localStorage.getItem('adminToken'), 'admin-token');
-assert.equal(localStorage.getItem('branchToken'), 'branch-token');
+// Tokens are no longer stored in localStorage (HttpOnly cookies instead)
+assert.equal(localStorage.getItem('wardsPortal'), 'branch');
+assert.equal(localStorage.getItem('adminToken'), null);
+assert.equal(localStorage.getItem('branchToken'), null);
 assert.equal(isSafeUrl('/branch-dashboard/galas-branch'), true);
 assert.equal(isSafeUrl('//evil.example/branch-dashboard'), false);
 assert.equal(isSafeUrl('javascript:alert(1)'), false);
@@ -121,10 +123,13 @@ const windowObj = {
 assert.equal(safeNavigate('/branch-dashboard/galas-branch', windowObj), true);
 assert.equal(assignedTo, '/branch-dashboard/galas-branch');
 
-localStorage.removeItem('branchToken');
 localStorage.removeItem('branchUser');
 localStorage.removeItem('branchAuthenticatedAt');
-assert.equal(getStoredPortal(), 'admin');
+assert.equal(getStoredPortal(), 'branch');
+
+// Clearing branch portal should fall back to admin via legacy detection
+localStorage.removeItem('wardsPortal');
+assert.equal(getStoredPortal(), null);
 """
     result = subprocess.run(
         ["node", "--experimental-specifier-resolution=node", "--input-type=module", "-e", script],
