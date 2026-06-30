@@ -81,6 +81,9 @@ export const persistSession = ({
     localStorage.setItem('wardsPortal', 'admin');
     localStorage.setItem('adminUser', JSON.stringify(enrichedUser));
     localStorage.setItem('adminAuthenticatedAt', new Date().toISOString());
+    if (access_token) {
+      localStorage.setItem('adminToken', access_token);
+    }
     localStorage.removeItem('securityAuthenticated');
     localStorage.removeItem('securityAuthenticatedAt');
     localStorage.removeItem('settingsAuthenticated');

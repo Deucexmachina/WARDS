@@ -1324,6 +1324,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
 
     response = JSONResponse(
         content={
+            "access_token": access_token,
             "token_type": "bearer",
             "portal": portal,
             "user": build_user_response(portal, account, mfa_setup_required),
@@ -1481,6 +1482,7 @@ async def unified_refresh_token(request: Request, payload: RefreshTokenRequest, 
 
     response = JSONResponse(
         content={
+            "access_token": access_token,
             "token_type": "bearer",
             "portal": portal,
             "user": build_user_response(portal, account, mfa_setup_required),

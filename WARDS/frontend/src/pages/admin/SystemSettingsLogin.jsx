@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import axios from 'axios';
 import ReCAPTCHA from 'react-google-recaptcha';
+import api from '../../services/api';
 import {
   clearSettingsSession,
   isSettingsRoleAllowed,
@@ -9,7 +9,6 @@ import {
 } from '../../utils/settingsSecurity';
 import { AUTH_GRADIENTS } from '../../utils/authTheme';
 
-import { API_HOST } from '../../services/api';
 import { getStoredPortal } from '../../utils/auth';
 
 const RECAPTCHA_SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY || '';
@@ -79,9 +78,7 @@ const SystemSettingsLogin = () => {
       }
 
       try {
-        await axios.get(`${API_HOST}/api/settings/access`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        await api.get('/settings/access');
       } catch (accessError) {
         if (active) {
           navigate('/admin', { replace: true });
@@ -133,7 +130,7 @@ const SystemSettingsLogin = () => {
         return;
       }
 
-      const response = await axios.post(`${API_HOST}/api/auth/unified/login`, {
+      const response = await api.post('/auth/unified/login', {
         identifier,
         password,
         portal: 'admin',
@@ -165,6 +162,9 @@ const SystemSettingsLogin = () => {
       }
 
       localStorage.setItem('adminUser', JSON.stringify(response.data.user));
+      if (response.data.access_token) {
+        localStorage.setItem('adminToken', response.data.access_token);
+      }
       if (!localStorage.getItem('adminAuthenticatedAt')) {
         localStorage.setItem('adminAuthenticatedAt', new Date(Date.now() - 1000).toISOString());
       }
