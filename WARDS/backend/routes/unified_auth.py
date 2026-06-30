@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse
 from jose import JWTError, jwt
 from pydantic import BaseModel, EmailStr
+from passlib.exc import UnknownHashError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -1139,7 +1140,16 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
             content={"detail": "Invalid credentials or account status.", **info},
         )
 
-    password_valid = pwd_context.verify(credentials.password, account.hashed_password)
+    try:
+        password_valid = pwd_context.verify(credentials.password, account.hashed_password)
+    except UnknownHashError:
+        logger.error(
+            "[LOGIN] stored password hash is invalid for %s (portal=%s, account_id=%s)",
+            credentials.identifier,
+            portal,
+            getattr(account, "id", None),
+        )
+        password_valid = False
     logger.warning("[LOGIN] password_valid=%s for %s (portal=%s)", password_valid, credentials.identifier, portal)
     if not password_valid:
         record_failed_attempt(portal, credentials.identifier, client_ip)

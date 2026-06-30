@@ -40,6 +40,12 @@ PREFLIGHT_WAIT_SECONDS = int(env("EVAL_PREFLIGHT_WAIT_SECONDS", "60") or "60")
 PREFLIGHT_POLL_SECONDS = int(env("EVAL_PREFLIGHT_POLL_SECONDS", "5") or "5")
 REQUEST_TIMEOUT_SECONDS = int(env("EVAL_REQUEST_TIMEOUT_SECONDS", "180") or "180")
 SSH_RETRIES = int(env("EVAL_SSH_RETRIES", "2") or "2")
+FINAL_CLEANUP_ENABLED = env("EVAL_FINAL_CLEANUP", "true").lower() not in {"0", "false", "no"}
+FINAL_CLEANUP_REBUILD = env("EVAL_FINAL_CLEANUP_REBUILD", "true").lower() not in {"0", "false", "no"}
+FINAL_CLEANUP_GIT_RESET = env("EVAL_FINAL_CLEANUP_GIT_RESET", "true").lower() not in {"0", "false", "no"}
+FINAL_CLEANUP_RESTORE_VM1_DB = env("EVAL_FINAL_CLEANUP_RESTORE_VM1_DB", "false").lower() in {"1", "true", "yes"}
+REPAIR_ADMIN_EMAIL = env("EVAL_REPAIR_ADMIN_EMAIL")
+REPAIR_ADMIN_PASSWORD = env("EVAL_REPAIR_ADMIN_PASSWORD")
 VERIFY_TLS = env("EVAL_VERIFY_TLS", "true").lower() not in {"0", "false", "no"}
 
 ROOT = Path(__file__).resolve().parent

@@ -16,9 +16,14 @@ import requests
 from eval_config import (
     CLEANUP_WAIT_SECONDS,
     DETECTION_LOOKBACK_SECONDS,
+    FINAL_CLEANUP_GIT_RESET,
+    FINAL_CLEANUP_REBUILD,
+    FINAL_CLEANUP_RESTORE_VM1_DB,
     PREFLIGHT_POLL_SECONDS,
     PREFLIGHT_WAIT_SECONDS,
     REQUEST_TIMEOUT_SECONDS,
+    REPAIR_ADMIN_EMAIL,
+    REPAIR_ADMIN_PASSWORD,
     RESULTS_CSV,
     SCAN_BACKOFF_SECONDS,
     SCAN_WAIT_SECONDS,
@@ -549,6 +554,131 @@ def vm2_backup(relative_path: str) -> str:
 def vm2_restore(relative_path: str) -> None:
     backup = f"{vm2_path(relative_path)}.evalbak"
     vm2(f"if [ -f {q(backup)} ]; then mv {q(backup)} {q(vm2_path(relative_path))}; else rm -f {q(vm2_path(relative_path))}; fi")
+
+
+def _restore_eval_backups_script(app_dir: str, *, git_reset: bool, rebuild: bool, compose_file: str = "docker-compose.yml") -> str:
+    reset_cmd = "git fetch origin main && git reset --hard origin/main" if git_reset else "true"
+    compose_arg = f"-f {compose_file}" if compose_file else ""
+    rebuild_cmd = f"docker compose {compose_arg} up -d --build" if rebuild else "docker compose ps || true"
+    return f"""
+set -e
+cd {q(app_dir)}
+find . -name '*.evalbak' -type f -exec sh -c 'for backup do original="${{backup%.evalbak}}"; mkdir -p "$(dirname "$original")"; mv "$backup" "$original"; done' sh {{}} +
+rm -rf WARDS/backend/evaluation_logs WARDS/frontend/evaluation_logs
+{reset_cmd}
+{rebuild_cmd}
+""".strip()
+
+
+def repair_vm1_admin_password_if_configured() -> str:
+    if not REPAIR_ADMIN_EMAIL or not REPAIR_ADMIN_PASSWORD:
+        return "admin_password_repair=skipped"
+    script = r'''
+import os
+import sys
+sys.path.insert(0, "/app")
+from auth import hash_password
+print(hash_password(os.environ["EVAL_REPAIR_ADMIN_PASSWORD"]))
+'''
+    hash_cmd = (
+        f"docker compose exec -T -e EVAL_REPAIR_ADMIN_PASSWORD={q(REPAIR_ADMIN_PASSWORD)} "
+        f"backend python - <<'PY'\n{script}\nPY"
+    )
+    password_hash = vm1(f"cd {q(VM1_APP_DIR)} && {hash_cmd}", timeout=REQUEST_TIMEOUT_SECONDS).strip().splitlines()[-1]
+    sql = (
+        "UPDATE admins "
+        f"SET hashed_password={sql_quote(password_hash)} "
+        f"WHERE email={sql_quote(REPAIR_ADMIN_EMAIL)};"
+    )
+    vm1_mysql(sql)
+    return f"admin_password_repair=updated:{REPAIR_ADMIN_EMAIL}"
+
+
+def restore_latest_vm1_database_backup() -> str:
+    script = r'''
+import sys
+sys.path.insert(0, "/app")
+from database.models import Backup, SessionLocal
+from utils.backup_engine import backup_dir, is_database_backup_record, restore_database_backup
+
+db = SessionLocal()
+try:
+    rows = (
+        db.query(Backup)
+        .filter(Backup.status == "Completed")
+        .order_by(Backup.created_at.desc())
+        .limit(100)
+        .all()
+    )
+    candidates = [row for row in rows if is_database_backup_record(row)]
+    if not candidates:
+        raise RuntimeError("No completed VM1 database backup found.")
+    latest = candidates[0]
+    restore_database_backup(
+        backup_dir() / latest.filename,
+        getattr(latest, "checksum", None),
+        getattr(latest, "db_type", None),
+    )
+    print(latest.filename)
+finally:
+    db.close()
+'''
+    filename = vm1(f"cd {q(VM1_APP_DIR)} && docker compose exec -T backend python - <<'PY'\n{script}\nPY", timeout=max(REQUEST_TIMEOUT_SECONDS, 300)).strip().splitlines()[-1]
+    return f"vm1_database_restored:{filename}"
+
+
+def sql_quote(value: str) -> str:
+    return "'" + str(value).replace("\\", "\\\\").replace("'", "''") + "'"
+
+
+def cleanup_vm1_after_evaluation(
+    *,
+    git_reset: bool = FINAL_CLEANUP_GIT_RESET,
+    rebuild: bool = FINAL_CLEANUP_REBUILD,
+    restore_vm1_db: bool = FINAL_CLEANUP_RESTORE_VM1_DB,
+) -> list[str]:
+    notes = []
+    vm1(_restore_eval_backups_script(VM1_APP_DIR, git_reset=git_reset, rebuild=rebuild), timeout=max(REQUEST_TIMEOUT_SECONDS, 300))
+    notes.append("vm1_files_restored")
+    if restore_vm1_db:
+        try:
+            notes.append(restore_latest_vm1_database_backup())
+        except Exception as exc:
+            notes.append(f"vm1_database_restore_failed:{exc}")
+    try:
+        vm1_mysql("DELETE FROM admins WHERE email='eval_intruder@example.com' OR username='eval_intruder';")
+        notes.append("vm1_eval_intruder_removed")
+    except Exception as exc:
+        notes.append(f"vm1_eval_intruder_cleanup_failed:{exc}")
+    try:
+        notes.append(repair_vm1_admin_password_if_configured())
+    except Exception as exc:
+        notes.append(f"admin_password_repair_failed:{exc}")
+    return notes
+
+
+def cleanup_vm2_after_evaluation(*, git_reset: bool = FINAL_CLEANUP_GIT_RESET, rebuild: bool = FINAL_CLEANUP_REBUILD) -> list[str]:
+    compose_file = "docker-compose.security.yml"
+    vm2(_restore_eval_backups_script(VM2_APP_DIR, git_reset=git_reset, rebuild=rebuild, compose_file=compose_file), timeout=max(REQUEST_TIMEOUT_SECONDS, 300))
+    return ["vm2_files_restored"]
+
+
+def cleanup_after_evaluation(
+    *,
+    git_reset: bool = FINAL_CLEANUP_GIT_RESET,
+    rebuild: bool = FINAL_CLEANUP_REBUILD,
+    restore_vm1_db: bool = FINAL_CLEANUP_RESTORE_VM1_DB,
+) -> list[str]:
+    notes = []
+    try:
+        notes.extend(cleanup_vm1_after_evaluation(git_reset=git_reset, rebuild=rebuild, restore_vm1_db=restore_vm1_db))
+    except Exception as exc:
+        notes.append(f"vm1_cleanup_failed:{exc}")
+    try:
+        notes.extend(cleanup_vm2_after_evaluation(git_reset=git_reset, rebuild=rebuild))
+    except Exception as exc:
+        notes.append(f"vm2_cleanup_failed:{exc}")
+    return notes
 
 
 def vm1_mysql(sql: str) -> None:
