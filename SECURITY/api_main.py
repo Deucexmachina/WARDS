@@ -502,7 +502,11 @@ def on_shutdown():
 @app.post("/v1/vm1/files/register", dependencies=[Depends(require_api_key)])
 def api_vm1_files_register(payload: dict = {}, db=Depends(get_db)):
     from SECURITY.security_engine import process_vm1_file_manifest
-    return process_vm1_file_manifest(db, payload.get("files", []), deployment_commit=payload.get("commit"))
+    try:
+        return process_vm1_file_manifest(db, payload.get("files", []), deployment_commit=payload.get("commit"))
+    except Exception as exc:
+        logger.exception("VM1 file manifest registration failed.")
+        raise HTTPException(status_code=500, detail=f"VM1 file manifest registration failed: {exc}") from exc
 
 
 @app.post("/v1/vm1/heartbeat", dependencies=[Depends(require_api_key)])

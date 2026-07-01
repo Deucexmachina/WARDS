@@ -74,7 +74,14 @@ def benign_file(test_id: str, scenario: str, path: str, payload: str) -> TestCas
 
 
 def context_case(test_id: str, scenario: str, actual: str, change_type: str, context: dict) -> TestCase:
-    return TestCase(test_id, scenario, "context", actual, lambda: context_detection(test_id, change_type, context), wait_seconds=0, target_hint=f"evaluation:{test_id}")
+    enriched = dict(context)
+    if actual == "attack":
+        enriched.setdefault("admin_session_valid", False)
+        enriched.setdefault("method_legitimate", False)
+        enriched.setdefault("target_type", "admin_session")
+        enriched.setdefault("ip_consistent", False)
+        enriched.setdefault("ai_sensitivity", "very_high")
+    return TestCase(test_id, scenario, "context", actual, lambda: context_detection(test_id, change_type, enriched), wait_seconds=0, target_hint=f"evaluation:{test_id}")
 
 
 def context_domain_case(test_id: str, scenario: str, domain: str, actual: str, change_type: str, context: dict) -> TestCase:
@@ -86,6 +93,11 @@ def context_domain_case(test_id: str, scenario: str, domain: str, actual: str, c
     elif domain in {"vm1_database", "vm2_database"}:
         enriched.setdefault("target_type", "database")
         enriched.setdefault("method_legitimate", False)
+    elif actual == "attack":
+        enriched.setdefault("target_type", "admin_session")
+        enriched.setdefault("admin_session_valid", False)
+        enriched.setdefault("method_legitimate", False)
+        enriched.setdefault("ai_sensitivity", "very_high")
     target = enriched.get("artifact_path") or enriched.get("target_name") or f"evaluation:{test_id}"
     return TestCase(test_id, scenario, domain, actual, lambda: context_detection(test_id, change_type, enriched, target=target), wait_seconds=0, target_hint=target)
 

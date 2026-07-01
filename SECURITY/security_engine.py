@@ -3632,6 +3632,8 @@ def content_flags(content: str, context: dict | None = None, path: Path | None =
         pass
     if ai_rule_enabled(rules, "source_ip_reputation") and ip_reputation in {"suspicious", "malicious", "blocked", "abusive"}:
         flags.append("source_ip_reputation")
+    if context.get("credential_access") or context.get("credential_exposure") or context.get("secret_exposure"):
+        flags.append("credential_access")
     try:
         keystroke_confidence = float(first_present(context, "keystroke_anomaly_confidence", "keystroke_dynamics", default=0))
     except (TypeError, ValueError):
@@ -3717,6 +3719,18 @@ def content_flags(content: str, context: dict | None = None, path: Path | None =
         or context.get("ml_artifact_modified")
     ):
         flags.append("ai_model_artifact_tamper")
+    if ai_rule_enabled(rules, "destructive_command_pattern") and (
+        context.get("destructive_command_pattern")
+        or context.get("destructive_command")
+        or context.get("dangerous_command")
+    ):
+        flags.append("destructive_command_pattern")
+    if ai_rule_enabled(rules, "webshell_indicator") and (
+        context.get("webshell_indicator")
+        or context.get("webshell_activity")
+        or context.get("remote_command_execution")
+    ):
+        flags.append("webshell_indicator")
     if ai_rule_enabled(rules, "session_context_anomaly"):
         try:
             recent_session_count = int(first_present(context, "multiple_recent_sessions", "active_session_count", default=0))
@@ -5551,12 +5565,16 @@ def create_database_backup(
             entry.file_type = file_type(checksum_path)
             entry.size_bytes = checksum_path.stat().st_size
             entry.last_checked = now_utc()
-        db.commit()
+        commit_backup_file_progress(db)
         return _finalize_backup_event(
             db, event, backup_root, label, manifest_files, 0,
             removal_summary, register_count, started, status="success",
         )
     except Exception as exc:
+        try:
+            db.rollback()
+        except Exception:
+            pass
         return _finalize_backup_event(
             db, event, backup_root, label, manifest_files, 0,
             removal_summary, register_count, started, status="failed", error=str(exc),
@@ -5646,12 +5664,16 @@ def create_files_backup(
             entry.file_type = file_type(path)
             entry.size_bytes = path.stat().st_size
             entry.last_checked = now_utc()
-        db.commit()
+        commit_backup_file_progress(db)
         return _finalize_backup_event(
             db, event, backup_root, label, manifest_files, 0,
             removal_summary, register_count, started, status="success",
         )
     except Exception as exc:
+        try:
+            db.rollback()
+        except Exception:
+            pass
         return _finalize_backup_event(
             db, event, backup_root, label, manifest_files, 0,
             removal_summary, register_count, started, status="failed", error=str(exc),
@@ -5685,6 +5707,10 @@ def create_ml_backup(
             removal_summary, register_count, started, status="success",
         )
     except Exception as exc:
+        try:
+            db.rollback()
+        except Exception:
+            pass
         return _finalize_backup_event(
             db, event, backup_root, label, manifest_files, 0,
             removal_summary, register_count, started, status="failed", error=str(exc),

@@ -335,7 +335,6 @@ def resolve_incident(incident_id: int | str | None) -> bool:
 
 def record_result(row: dict) -> None:
     RESULTS_CSV.parent.mkdir(parents=True, exist_ok=True)
-    exists = RESULTS_CSV.exists()
     fields = [
         "test_id",
         "scenario",
@@ -351,11 +350,22 @@ def record_result(row: dict) -> None:
         "timestamp",
         "notes",
     ]
-    with RESULTS_CSV.open("a", newline="", encoding="utf-8") as handle:
+    rows: list[dict] = []
+    replaced = False
+    if RESULTS_CSV.exists():
+        with RESULTS_CSV.open(newline="", encoding="utf-8") as handle:
+            for existing in csv.DictReader(handle):
+                if existing.get("test_id") == row.get("test_id"):
+                    rows.append({field: row.get(field, "") for field in fields})
+                    replaced = True
+                else:
+                    rows.append({field: existing.get(field, "") for field in fields})
+    if not replaced:
+        rows.append({field: row.get(field, "") for field in fields})
+    with RESULTS_CSV.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
-        if not exists:
-            writer.writeheader()
-        writer.writerow({field: row.get(field, "") for field in fields})
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def classify_result(actual: str, predicted: str) -> str:

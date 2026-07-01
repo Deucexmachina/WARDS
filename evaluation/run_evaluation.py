@@ -79,7 +79,8 @@ def main() -> None:
                 print(f"  - {target}")
             print("Run with --diagnose for reporter status, or --skip-preflight to run anyway.")
             raise SystemExit(2)
-    if args.fresh and RESULTS_CSV.exists():
+    partial_selection = bool(args.only or args.domain or args.actual)
+    if args.fresh and RESULTS_CSV.exists() and not partial_selection:
         RESULTS_CSV.unlink()
 
     print(f"Running {len(selected)} of {len(tests)} registered tests")
