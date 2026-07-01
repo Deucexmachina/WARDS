@@ -18,22 +18,38 @@ from pathlib import Path
 
 
 def load_scores(csv_path: Path) -> tuple[list[float], list[int]]:
-    """Load ai_score and actual labels from evaluation_results.csv."""
+    """Load ai_score and actual labels from evaluation_results.csv.
+
+    Benign cases that did not trigger a detection have no ai_score in the CSV.
+    For those true-negative cases we assign the engine's minimum risk floor
+    (0.01), which is the lowest value ai_predict() can emit.  This lets the
+    ROC curve contrast the full set of positives against the full set of
+    negatives.
+    """
     scores: list[float] = []
     labels: list[int] = []
 
     with csv_path.open(newline="", encoding="utf-8") as handle:
         for row in csv.DictReader(handle):
             actual = row.get("actual", "").strip().lower()
+            predicted = row.get("predicted", "").strip().lower()
             ai_score_raw = row.get("ai_score", "").strip()
 
-            if not actual or not ai_score_raw:
+            if not actual:
                 continue
 
-            try:
-                ai_score = float(ai_score_raw)
-            except ValueError:
-                continue
+            if not ai_score_raw:
+                # Benign cases that were correctly not detected have no score.
+                # Use the engine's minimum risk floor so they appear on the ROC.
+                if actual == "benign" and predicted == "benign":
+                    ai_score = 0.01
+                else:
+                    continue
+            else:
+                try:
+                    ai_score = float(ai_score_raw)
+                except ValueError:
+                    continue
 
             # 1 = attack (positive), 0 = benign (negative)
             label = 1 if actual == "attack" else 0
