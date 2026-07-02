@@ -3128,9 +3128,15 @@ const QueueManagement = () => {
                   }} disabled={savingReceipt} className="rounded-xl bg-slate-200 px-5 py-3 font-semibold text-slate-700 transition hover:bg-slate-300 disabled:opacity-60">
                     Back
                   </button>
-                  <button type="button" onClick={saveReceiptAndCompleteQueue} disabled={savingReceipt || receiptDraftSaveBlocked} className="rounded-xl bg-emerald-600 px-5 py-3 font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60">
-                    {savingReceipt ? 'Saving...' : receiptDraftSaveBlocked ? 'Review Blocked' : 'Save Receipt'}
-                  </button>
+                  {mobileSession ? (
+                    <span className="rounded-xl bg-emerald-100 px-5 py-3 text-sm font-semibold text-emerald-700">
+                      Waiting for mobile device to save receipt...
+                    </span>
+                  ) : (
+                    <button type="button" onClick={saveReceiptAndCompleteQueue} disabled={savingReceipt || receiptDraftSaveBlocked} className="rounded-xl bg-emerald-600 px-5 py-3 font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60">
+                      {savingReceipt ? 'Saving...' : receiptDraftSaveBlocked ? 'Review Blocked' : 'Save Receipt'}
+                    </button>
+                  )}
                 </div>
               </div>
             ) : null}
