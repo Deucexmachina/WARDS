@@ -12,6 +12,7 @@ from SECURITY.security_engine import (
     resolve_incident,
     mark_false_positive,
     _record_vm1_detection,
+    bulk_update_incidents,
 )
 from SECURITY.security_models import (
     SecurityIncident,
@@ -54,6 +55,8 @@ class MockDb:
         self._recoveries = {r.id: r for r in (recoveries or [])}
         self.added = []
         self.committed = False
+        self.rolled_back = False
+        self.expired = False
 
     def query(self, *models):
         model = models[0] if models else None
@@ -78,6 +81,12 @@ class MockDb:
     def commit(self):
         self.committed = True
 
+    def rollback(self):
+        self.rolled_back = True
+
+    def expire_all(self):
+        self.expired = True
+
     def refresh(self, obj):
         pass
 
@@ -91,6 +100,12 @@ def _make_incident(status="open", response_action="vm1_restore_pending", quarant
         severity_level="high",
     )
     inc.id = 1
+    return inc
+
+
+def _make_incident_with_id(incident_id, status="open", response_action="vm1_restore_pending", quarantine_paths=None):
+    inc = _make_incident(status=status, response_action=response_action, quarantine_paths=quarantine_paths)
+    inc.id = incident_id
     return inc
 
 
@@ -345,6 +360,39 @@ def test_mark_false_positive_vm1_auto_recovered_pending_review_reverts(monkeypat
 # ---------------------------------------------------------------------------
 # _record_vm1_detection
 # ---------------------------------------------------------------------------
+
+def test_bulk_update_rolls_back_failed_incident_and_continues(monkeypatch):
+    incidents = [
+        _make_incident_with_id(1),
+        _make_incident_with_id(2),
+    ]
+    db = MockDb(incidents=incidents)
+    calls = []
+
+    monkeypatch.setattr("SECURITY.security_engine.migrate_portable_monitored_files", lambda _db: None)
+    monkeypatch.setattr("SECURITY.security_engine.dedupe_monitored_files_by_relative_path", lambda _db: None)
+    monkeypatch.setattr("SECURITY.security_engine.ensure_missing_file_confirmation", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("SECURITY.security_engine._valid_admin_id", lambda _db, admin_id: admin_id)
+    monkeypatch.setattr("SECURITY.security_engine.create_system_alert", lambda *_args, **_kwargs: None)
+
+    def fake_resolve(_db, incident_id, *_args, **_kwargs):
+        calls.append(incident_id)
+        if incident_id == 1:
+            raise RuntimeError("simulated failure")
+        incidents[1].status = "resolved"
+        return incidents[1]
+
+    monkeypatch.setattr("SECURITY.security_engine.resolve_incident", fake_resolve)
+
+    result = bulk_update_incidents(db, "resolve", admin_id=99)
+
+    assert calls == [1, 2]
+    assert db.rolled_back is True
+    assert db.expired is True
+    assert result["updated"] == 1
+    assert result["failed"] == 1
+    assert result["failed_details"][0]["incident_id"] == 1
+
 
 def test_record_vm1_detection_web_file_auto_recover_keeps_incident_open(monkeypatch, tmp_path):
     """Web/code file changes should queue auto-recovery but keep the incident open."""

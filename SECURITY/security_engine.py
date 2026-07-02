@@ -715,7 +715,18 @@ def dispatch_system_alert_email(
     return result
 
 
-def create_system_alert(db: Session, alert_key: str, message: str, severity: str = "low", *, title: str | None = None, dedupe_key: str | None = None) -> Alert | None:
+def create_system_alert(
+    db: Session,
+    alert_key: str,
+    message: str,
+    severity: str = "low",
+    *,
+    title: str | None = None,
+    dedupe_key: str | None = None,
+    detection: dict | None = None,
+    incident: dict | None = None,
+    recoveries: list[dict] | None = None,
+) -> Alert | None:
     try:
         if "alerts" not in inspect(db.bind).get_table_names():
             return None
@@ -735,7 +746,7 @@ def create_system_alert(db: Session, alert_key: str, message: str, severity: str
     db.commit()
     db.refresh(alert)
     try:
-        dispatch_system_alert_email(db, alert)
+        dispatch_system_alert_email(db, alert, incident=incident, detection=detection, recoveries=recoveries)
     except Exception:
         logger.exception("Failed to dispatch system alert email for alert %s", alert.id)
     return alert
@@ -756,6 +767,36 @@ def create_incident_system_alert(db: Session, incident: SecurityIncident, detect
         incident.severity_level or "high",
         title=f"Security Incident {dedupe_key}",
         dedupe_key=dedupe_key,
+    )
+
+
+def create_detection_system_alert(db: Session, detection: SecurityDetectionEvent) -> Alert | None:
+    dedupe_key = f"Detection #{detection.id}"
+    message = (
+        f"{dedupe_key}: {detection.trigger_summary or 'Security detection logged.'} "
+        f"Target: {detection.target_name or 'unknown'}; type: {detection.change_type or 'unknown'}."
+    )
+    detection_payload = {
+        "id": detection.id,
+        "target_name": detection.target_name,
+        "target_type": detection.target_type,
+        "change_type": detection.change_type,
+        "trigger_summary": detection.trigger_summary,
+        "ai_score": detection.ai_score,
+        "ai_prediction": detection.ai_prediction,
+        "confidence": detection.confidence,
+        "severity_level": detection.severity_level,
+        "nist_category": detection.nist_category,
+        "enisa_threat_type": detection.enisa_threat_type,
+    }
+    return create_system_alert(
+        db,
+        "detection_logged",
+        message,
+        detection.severity_level or "medium",
+        title=f"Security Detection {detection.id}",
+        dedupe_key=dedupe_key,
+        detection=detection_payload,
     )
 
 
@@ -983,6 +1024,7 @@ def record_context_detection(
         else:
             raise
     db.refresh(detection)
+    create_detection_system_alert(db, detection)
     if "vpn_activity" in flags:
         create_system_alert(
             db,
@@ -5192,6 +5234,7 @@ def record_detection(db: Session, file_entry: SecurityMonitoredFile, change_type
     db.add(detection)
     db.commit()
     db.refresh(detection)
+    create_detection_system_alert(db, detection)
 
     if not is_legitimate:
         quarantine_path = quarantine_file(portable_monitored_path(file_entry), detection.id)
@@ -6715,17 +6758,22 @@ def bulk_update_incidents(db: Session, action: str, admin_id: int, confirm_missi
     rows = db.query(SecurityIncident).filter(SecurityIncident.status.in_(["open", "investigating"])).order_by(SecurityIncident.id.asc()).all()
     if action in {"resolve", "false_positive"}:
         ensure_missing_file_confirmation(db, rows, action, confirm_missing_files)
+    incident_ids = [incident.id for incident in rows if incident.id is not None]
     started = time.time()
     failed = 0
-    for incident in rows:
+    failed_details: list[dict[str, str | int]] = []
+    for incident_id in incident_ids:
         try:
             if action == "resolve":
-                resolve_incident(db, incident.id, admin_id, confirm_missing_files=confirm_missing_files, create_event=False)
+                resolve_incident(db, incident_id, admin_id, confirm_missing_files=confirm_missing_files, create_event=False)
                 updated += 1
             elif action == "false_positive":
-                mark_false_positive(db, incident.id, admin_id, refresh_backup=False, confirm_missing_files=confirm_missing_files, create_event=False)
+                mark_false_positive(db, incident_id, admin_id, refresh_backup=False, confirm_missing_files=confirm_missing_files, create_event=False)
                 updated += 1
             elif action == "investigating":
+                incident = db.query(SecurityIncident).filter(SecurityIncident.id == incident_id).first()
+                if not incident:
+                    raise ValueError("Incident not found")
                 incident.status = "investigating"
                 incident.response_action = "under_review"
                 db.add(incident)
@@ -6733,8 +6781,15 @@ def bulk_update_incidents(db: Session, action: str, admin_id: int, confirm_missi
                 updated += 1
             else:
                 raise ValueError("Unsupported bulk incident action")
-        except Exception:
+        except Exception as exc:
+            try:
+                db.rollback()
+                db.expire_all()
+            except Exception:
+                pass
             failed += 1
+            failed_details.append({"incident_id": incident_id, "error": str(exc)[:300]})
+            logger.warning("Bulk %s failed for SEC-%s: %s", action, incident_id, exc)
     if action == "false_positive" and updated:
         def _bulk_fp_backup():
             bg_db = SessionLocal()
@@ -6752,12 +6807,14 @@ def bulk_update_incidents(db: Session, action: str, admin_id: int, confirm_missi
         completed_at=now_utc(),
         recovery_duration_ms=int((time.time() - started) * 1000),
         summary=f"Bulk {action}: {updated} incident(s) updated, {failed} failed.",
+        error_message=json_dumps(failed_details[:20]) if failed_details else None,
     )
     db.add(recovery)
     db.commit()
     db.refresh(recovery)
-    create_system_alert(db, "bulk_incident_update", f"Bulk {action}: {updated} incident(s) updated, {failed} failed.", "low", dedupe_key=f"bulk-{action}-{updated}")
-    return {"updated": updated, "failed": failed, "action": action, "recovery_event_id": recovery.id}
+    alert_severity = "medium" if failed else "low"
+    create_system_alert(db, "bulk_incident_update", f"Bulk {action}: {updated} incident(s) updated, {failed} failed.", alert_severity, dedupe_key=f"bulk-{action}-{updated}-{failed}")
+    return {"updated": updated, "failed": failed, "action": action, "recovery_event_id": recovery.id, "failed_details": failed_details[:20]}
 
 
 def dashboard_payload(db: Session) -> dict:
@@ -7819,6 +7876,7 @@ def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type
     db.add(detection)
     db.commit()
     db.refresh(detection)
+    create_detection_system_alert(db, detection)
 
     # Deduplication: skip if an open incident already exists for this file and change type
     existing_incident = db.query(SecurityIncident).join(SecurityDetectionEvent).filter(
@@ -8414,6 +8472,7 @@ def check_vm1_heartbeat_timeout(db: Session) -> SecurityDetectionEvent | None:
     db.add(detection)
     db.commit()
     db.refresh(detection)
+    create_detection_system_alert(db, detection)
 
     incident = create_incident(
         db, detection,

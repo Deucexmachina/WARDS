@@ -826,6 +826,41 @@ def test_traffic_features_are_in_ml_vector():
     assert vector[security_engine.FEATURE_NAMES.index("traffic_unique_ip_count")] == 25.0
 
 
+def test_detection_system_alert_uses_detection_logged_email_path(monkeypatch):
+    from SECURITY import security_engine
+
+    calls = []
+    detection = SecurityDetectionEvent(
+        target_type="file",
+        target_name="WARDS/backend/main.py",
+        actor="scanner",
+        change_type="content_modified",
+        trigger_summary="Source IP: vm1_internal | test detection",
+        ai_score=0.8,
+        ai_prediction="suspicious",
+        confidence=0.8,
+        severity_level="high",
+        nist_category="CAT 3 - Malicious Code",
+        enisa_threat_type="Web Application Attack",
+    )
+    detection.id = 456
+
+    monkeypatch.setattr(
+        security_engine,
+        "create_system_alert",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or None,
+    )
+
+    security_engine.create_detection_system_alert(object(), detection)
+
+    assert calls
+    args, kwargs = calls[0]
+    assert args[1] == "detection_logged"
+    assert "Detection #456" in args[2]
+    assert kwargs["detection"]["id"] == 456
+    assert kwargs["detection"]["target_name"] == "WARDS/backend/main.py"
+
+
 def test_backup_progress_commit_tolerates_stale_monitored_file_rows():
     class DummyDb:
         rolled_back = False
@@ -1247,7 +1282,7 @@ def test_record_detection_logs_alert_when_no_incident(monkeypatch):
 
     assert detection.id == 123
     assert detection.ai_prediction == "normal"
-    assert alert_calls == ["alert"]
+    assert alert_calls == ["alert", "alert"]
 
 
 def test_scan_single_file_reports_deletion(monkeypatch):
