@@ -1848,7 +1848,15 @@ const QueueManagement = () => {
       setCompletionMode('options');
     } catch (err) {
       const detail = err.response?.data?.detail;
-      setCompletionError((typeof detail === 'object' ? detail?.message : detail) || 'Failed to save receipt.');
+      const errorMessage = (typeof detail === 'object' ? detail?.message : detail) || 'Failed to save receipt.';
+      if (typeof errorMessage === 'string' && errorMessage.includes('already exists as record')) {
+        const completed = await completeQueueDirectly(completionQueue);
+        if (!completed) {
+          setCompletionError(errorMessage);
+        }
+        return;
+      }
+      setCompletionError(errorMessage);
     } finally {
       setSavingReceipt(false);
     }
