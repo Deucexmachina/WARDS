@@ -554,35 +554,6 @@ const MobileReceiptUpload = () => {
                         className="aspect-[3/4] w-full rounded-2xl bg-slate-900 object-cover"
                       />
                       <canvas ref={analysisCanvasRef} className="hidden" />
-                      <div className={`absolute left-3 right-3 top-3 rounded-xl px-3 py-2 text-xs font-semibold backdrop-blur-sm ${
-                        validation.isValid
-                          ? 'bg-emerald-500/90 text-white'
-                          : 'bg-amber-500/90 text-white'
-                      }`}>
-                        <div className="flex items-center gap-2">
-                          {validation.checking ? (
-                            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                          ) : (
-                            <span className={`inline-block h-2 w-2 rounded-full ${validation.isValid ? 'bg-emerald-200' : 'bg-amber-200'}`} />
-                          )}
-                          {validation.message}
-                        </div>
-                      </div>
-                      {debugMetrics && (
-                        <div className="absolute bottom-3 left-3 right-3 rounded-xl bg-black/70 px-2 py-1.5 text-[9px] font-mono text-white/90 backdrop-blur-sm">
-                          <div className="grid grid-cols-3 gap-x-1 gap-y-0.5">
-                            <span>bright:{Math.round(debugMetrics.avgBrightness)}</span>
-                            <span>std:{Math.round(debugMetrics.brightnessStdDev)}</span>
-                            <span>warm:{Math.round(debugMetrics.warmRatio * 100)}%</span>
-                            <span>edge:{Math.round(debugMetrics.centerEdgeRatio * 1000) / 10}%</span>
-                            <span>line:{debugMetrics.avgLineScore}</span>
-                            <span>blur:{debugMetrics.lapVar}</span>
-                            <span>uniform:{debugMetrics.isUniform ? 'Y' : 'N'}</span>
-                            <span>face:{debugMetrics.isLikelyFace ? 'Y' : 'N'}</span>
-                            <span>doc:{debugMetrics.hasDocument ? 'Y' : 'N'}</span>
-                          </div>
-                        </div>
-                      )}
                     </div>
                     <div className="grid gap-3 sm:grid-cols-2">
                       <button
