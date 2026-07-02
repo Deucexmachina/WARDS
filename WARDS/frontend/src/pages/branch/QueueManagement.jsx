@@ -1667,7 +1667,7 @@ const QueueManagement = () => {
       setCompletingQueueId(queue.id);
       setCompletionError('');
       setCompletionNotice('');
-      await api.post(`/branch/queue/${queue.id}/complete`);
+      await api.post(`/branch/queue/${queue.id}/complete`, null, { suppressGlobalErrorModal: true });
       updateQueuesLocally((currentQueues) => currentQueues.filter((entry) => entry.id !== queue.id));
       clearLastCalledQueue(queue.id);
       await fetchQueues();
