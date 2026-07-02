@@ -1581,6 +1581,16 @@ const QueueManagement = () => {
     setSkippedPage(1);
   }, [queueTypeFilter, statusFilter, dateFilter, timeSlotFilter, serviceTypeFilter, windowFilter, queueNumberFilter, searchFilter]);
 
+  useEffect(() => {
+    if (completionMode !== 'mobile' || !mobileSession?.token) {
+      return;
+    }
+    const check = () => checkMobileReceiptUploadRef.current(true);
+    check();
+    const interval = setInterval(check, 5000);
+    return () => clearInterval(interval);
+  }, [completionMode, mobileSession?.token]);
+
   const windowOptions = useMemo(() => {
     const fromAccounts = managedWindowAccounts.map((account) => ({
       key: account.service_window,
@@ -1731,12 +1741,12 @@ const QueueManagement = () => {
     }
   };
 
-  const checkMobileReceiptUpload = async () => {
+  const checkMobileReceiptUpload = async (silent = false) => {
     if (!mobileSession?.token) {
       return;
     }
     try {
-      setProcessingReceipt(true);
+      if (!silent) setProcessingReceipt(true);
       setCompletionError('');
       const response = await receiptAPI.getMobileUploadSession(mobileSession.token);
       setMobileSession((current) => ({ ...current, ...response.data }));
@@ -1768,9 +1778,14 @@ const QueueManagement = () => {
     } catch (err) {
       setCompletionError(err.response?.data?.detail || 'Failed to check mobile upload status.');
     } finally {
-      setProcessingReceipt(false);
+      if (!silent) setProcessingReceipt(false);
     }
   };
+
+  const checkMobileReceiptUploadRef = useRef(checkMobileReceiptUpload);
+  useEffect(() => {
+    checkMobileReceiptUploadRef.current = checkMobileReceiptUpload;
+  }, [checkMobileReceiptUpload]);
 
   const handleReceiptDraftChange = (event) => {
     const { name, value } = event.target;
