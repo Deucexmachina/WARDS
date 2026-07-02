@@ -194,6 +194,15 @@ const buildScheduleSummary = (config = {}) => ([
   { label: 'Date Overrides', value: formatOverrideSummary(config.date_overrides || []) },
 ]);
 
+const buildWindowServicesSummary = (config = {}) => {
+  const services = config.window_services || [];
+  if (!services.length) return [{ label: 'Window Assignments', value: 'No assignments recorded' }];
+  return services.map((item) => ({
+    label: `Window ${item.assigned_window_number}`,
+    value: `${item.window_label || item.service_window || 'Unassigned'}${item.username ? ` (${item.username})` : ''}`,
+  }));
+};
+
 const getViewedPublishedHistoryStorageKey = (branchUser) => {
   const branchId = branchUser?.branch_id || 'unknown-branch';
   const username = branchUser?.username || branchUser?.full_name || 'unknown-user';
@@ -1257,34 +1266,36 @@ const BranchSettings = () => {
               <tbody className="divide-y divide-gray-100 bg-white">
                 {historyState.items.map((entry) => {
                   const isSystemSettingsEntry = entry.audit_type === 'system_settings';
+                  const isWindowServicesEntry = entry.audit_type === 'window_services';
                   const isPublishedScheduleEntry = entry.action === 'published';
                   const isHighlighted = entry.id === highlightedPublishedHistoryId && isPublishedScheduleEntry;
                   return (
                     <tr key={entry.id} className={`hover:bg-gray-50 ${isHighlighted ? 'bg-green-50' : ''}`}>
                       <td className="px-5 py-4">
                         <p className="font-semibold text-primary">
-                          {isSystemSettingsEntry ? 'Branch System Settings Updated' : isPublishedScheduleEntry ? 'Published Branch Schedule' : 'Saved Draft Schedule'}
+                          {isSystemSettingsEntry ? 'Branch System Settings Updated' : isWindowServicesEntry ? 'Window Services Reassigned' : isPublishedScheduleEntry ? 'Published Branch Schedule' : 'Saved Draft Schedule'}
                         </p>
                         {isHighlighted && (
                           <span className="mt-1 inline-block rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
                             Recently Published
                           </span>
                         )}
-                        {isSystemSettingsEntry && (
+                        {(isSystemSettingsEntry || isWindowServicesEntry) && (
                           <p className="mt-0.5 text-xs text-gray-500">{entry.branch_name || ''}</p>
                         )}
                       </td>
                       <td className="px-5 py-4">
                         <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
                           isSystemSettingsEntry ? 'bg-blue-100 text-blue-800'
-                            : isPublishedScheduleEntry ? 'bg-green-100 text-green-800'
-                              : 'bg-gray-100 text-gray-700'
+                            : isWindowServicesEntry ? 'bg-purple-100 text-purple-800'
+                              : isPublishedScheduleEntry ? 'bg-green-100 text-green-800'
+                                : 'bg-gray-100 text-gray-700'
                         }`}>
-                          {isSystemSettingsEntry ? 'System Settings' : isPublishedScheduleEntry ? 'Published' : 'Draft'}
+                          {isSystemSettingsEntry ? 'System Settings' : isWindowServicesEntry ? 'Window Services' : isPublishedScheduleEntry ? 'Published' : 'Draft'}
                         </span>
                       </td>
                       <td className="whitespace-nowrap px-5 py-4 text-gray-600">
-                        {isSystemSettingsEntry
+                        {isSystemSettingsEntry || isWindowServicesEntry
                           ? (entry.changed_at ? formatUtc8DateTime(entry.changed_at) : 'N/A')
                           : `Effective ${entry.effective_date}`}
                       </td>
@@ -1355,7 +1366,9 @@ const BranchSettings = () => {
                   <h3 className="mt-1 text-xl font-bold text-white">
                     {selectedHistoryEntry.audit_type === 'system_settings'
                       ? 'Branch System Settings Updated'
-                      : selectedHistoryEntry.action === 'published' ? 'Published Configuration' : 'Saved Draft'}
+                      : selectedHistoryEntry.audit_type === 'window_services'
+                        ? 'Window Services Reassigned'
+                        : selectedHistoryEntry.action === 'published' ? 'Published Configuration' : 'Saved Draft'}
                   </h3>
                 </div>
                 <button onClick={closeHistoryModal} className="shrink-0 rounded-lg p-1.5 text-white/70 transition hover:bg-white/20 hover:text-white">
@@ -1389,7 +1402,9 @@ const BranchSettings = () => {
                   <div className="divide-y divide-gray-100">
                     {(selectedHistoryEntry.audit_type === 'system_settings'
                       ? buildSystemSettingsSummary(selectedHistoryEntry.previous_config || {})
-                      : buildScheduleSummary(selectedHistoryEntry.previous_config || {})
+                      : selectedHistoryEntry.audit_type === 'window_services'
+                        ? buildWindowServicesSummary(selectedHistoryEntry.previous_config || {})
+                        : buildScheduleSummary(selectedHistoryEntry.previous_config || {})
                     ).map((item) => (
                       <div key={item.label} className="px-5 py-3">
                         <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">{item.label}</p>
@@ -1407,7 +1422,9 @@ const BranchSettings = () => {
                   <div className="divide-y divide-green-100">
                     {(selectedHistoryEntry.audit_type === 'system_settings'
                       ? buildSystemSettingsSummary(selectedHistoryEntry.new_config || {})
-                      : buildScheduleSummary(selectedHistoryEntry.new_config || {})
+                      : selectedHistoryEntry.audit_type === 'window_services'
+                        ? buildWindowServicesSummary(selectedHistoryEntry.new_config || {})
+                        : buildScheduleSummary(selectedHistoryEntry.new_config || {})
                     ).map((item) => (
                       <div key={item.label} className="px-5 py-3">
                         <p className="text-xs font-semibold uppercase tracking-wider text-green-500">{item.label}</p>
@@ -1426,8 +1443,8 @@ const BranchSettings = () => {
                 <div className="grid grid-cols-1 gap-0 divide-y divide-gray-100 sm:grid-cols-4 sm:divide-x sm:divide-y-0">
                   {[
                     {
-                      label: selectedHistoryEntry.audit_type === 'system_settings' ? 'Branch' : 'Effective Date',
-                      value: selectedHistoryEntry.audit_type === 'system_settings'
+                      label: selectedHistoryEntry.audit_type === 'system_settings' || selectedHistoryEntry.audit_type === 'window_services' ? 'Branch' : 'Effective Date',
+                      value: selectedHistoryEntry.audit_type === 'system_settings' || selectedHistoryEntry.audit_type === 'window_services'
                         ? (selectedHistoryEntry.branch_name || 'N/A')
                         : (selectedHistoryEntry.effective_date || 'N/A'),
                     },

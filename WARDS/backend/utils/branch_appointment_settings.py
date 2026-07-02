@@ -174,6 +174,14 @@ def _deserialize_audit_payload(action: str, raw_value: Optional[str]) -> dict:
         except json.JSONDecodeError:
             return {}
         return parsed if isinstance(parsed, dict) else {}
+    if action == "window_services_reassigned":
+        if not raw_value:
+            return {}
+        try:
+            parsed = json.loads(raw_value)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
     return _deserialize_config(raw_value)
 
 
@@ -385,7 +393,11 @@ def _build_change_summary(previous_config: dict, new_config: dict) -> list[str]:
 def _serialize_audit_entry(entry: BranchAppointmentScheduleAudit) -> dict:
     previous_payload = _deserialize_audit_payload(entry.action, entry.previous_config)
     new_payload = _deserialize_audit_payload(entry.action, entry.new_config)
-    audit_type = "system_settings" if entry.action == "system_settings_updated" else "appointment_schedule"
+    audit_type = (
+        "system_settings" if entry.action == "system_settings_updated"
+        else "window_services" if entry.action == "window_services_reassigned"
+        else "appointment_schedule"
+    )
     previous_config = previous_payload.get("settings", {}) if audit_type == "system_settings" else previous_payload
     new_config = new_payload.get("settings", {}) if audit_type == "system_settings" else new_payload
     return {

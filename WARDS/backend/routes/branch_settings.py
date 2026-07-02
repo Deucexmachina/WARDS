@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -8,7 +9,7 @@ from slowapi.util import get_remote_address
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
-from database.models import ActivityLog, Branch, BranchStaff, BranchSystemSetting, Service, get_db
+from database.models import ActivityLog, Branch, BranchAppointmentScheduleAudit, BranchStaff, BranchSystemSetting, Service, get_db
 from auth import require_branch_admin, verify_account_password
 from utils.branch_appointment_settings import (
     delete_branch_schedule_history_entry,
@@ -280,6 +281,17 @@ async def reassign_branch_window_services(
     )
     accounts_by_window = {a.assigned_window_number: a for a in existing_accounts}
 
+    previous_assignments = [
+        {
+            "assigned_window_number": account.assigned_window_number,
+            "service_window": account.service_window,
+            "window_label": _get_window_display_label(account),
+            "username": account.username,
+        }
+        for account in existing_accounts
+        if account.assigned_window_number <= branch.counters
+    ]
+
     used_services: set[str] = set()
     updated_accounts = []
 
@@ -339,6 +351,56 @@ async def reassign_branch_window_services(
         f"Window {a['assigned_window_number']}={a['window_label']}"
         for a in updated_accounts
     )
+
+    new_assignments = [
+        {
+            "assigned_window_number": a["assigned_window_number"],
+            "service_window": a["service_window"],
+            "window_label": a["window_label"],
+            "username": a["username"],
+        }
+        for a in updated_accounts
+    ]
+    change_summary = []
+    for previous in previous_assignments:
+        updated = next(
+            (a for a in new_assignments if a["assigned_window_number"] == previous["assigned_window_number"]),
+            None,
+        )
+        if updated and updated["service_window"] != previous["service_window"]:
+            change_summary.append(
+                f"Window {previous['assigned_window_number']} changed from {previous['window_label']} to {updated['window_label']}"
+            )
+    if not change_summary:
+        change_summary.append("Window service assignments updated.")
+
+    previous_audit_payload = {
+        "audit_type": "window_services",
+        "branch_name": branch_name,
+        "changed_by_username": current_staff.username,
+        "changed_by_full_name": getattr(current_staff, "full_name", None) or current_staff.username,
+        "user_role": "branch_admin",
+        "window_services": previous_assignments,
+    }
+    new_audit_payload = {
+        "audit_type": "window_services",
+        "branch_name": branch_name,
+        "changed_by_username": current_staff.username,
+        "changed_by_full_name": getattr(current_staff, "full_name", None) or current_staff.username,
+        "user_role": "branch_admin",
+        "window_services": new_assignments,
+    }
+    db.add(BranchAppointmentScheduleAudit(
+        branch_id=branch.id,
+        action="window_services_reassigned",
+        change_summary="\n".join(change_summary),
+        previous_config=json.dumps(previous_audit_payload, sort_keys=True),
+        new_config=json.dumps(new_audit_payload, sort_keys=True),
+        effective_date=datetime.utcnow().date().isoformat(),
+        changed_by=current_staff.username,
+        reason=None,
+    ))
+
     db.add(ActivityLog(
         action="Branch Window Services Reassigned",
         user=current_staff.username,
