@@ -573,9 +573,15 @@ def _maybe_record_traffic_ai_detection(current_time: float) -> None:
         len(prune_timestamps(list(timestamps), current_time, window))
         for timestamps in request_history.values()
     ]
+    recent_by_ip = {
+        ip: len(prune_timestamps(list(timestamps), current_time, window))
+        for ip, timestamps in request_history.items()
+    }
     total_requests = sum(recent_counts)
     unique_ips = sum(1 for count in recent_counts if count > 0)
+    peak_source_ip, peak_source_count = max(recent_by_ip.items(), key=lambda item: item[1], default=("unknown", 0))
     current_rps = total_requests / float(window)
+    peak_source_rps = peak_source_count / float(window)
     baseline_rps = _traffic_baseline_rps or current_rps
     if _traffic_baseline_rps <= 0:
         _traffic_baseline_rps = max(current_rps, 0.01)
@@ -593,6 +599,10 @@ def _maybe_record_traffic_ai_detection(current_time: float) -> None:
             "baseline_requests_per_second": max(baseline_rps, 0.01),
             "unique_ip_count": unique_ips,
             "active_connection_count": sum(active_requests.values()),
+            "peak_source_ip": peak_source_ip,
+            "peak_source_request_count": peak_source_count,
+            "peak_source_requests_per_second": peak_source_rps,
+            "peak_source_active_connections": active_requests.get(peak_source_ip, 0),
             "source_ip_count": unique_ips,
             "target_type": "traffic",
             "actor": "dos_protection",

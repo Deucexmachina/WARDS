@@ -251,6 +251,7 @@ BEHAVIOR_LABELS = {
     "session_context_anomaly": "Session context anomaly",
     "traffic_spike": "Sudden site traffic spike",
     "ddos_attack": "Distributed denial-of-service traffic pattern",
+    "single_ip_traffic_abuse": "Single-source high-volume traffic abuse",
 }
 
 DEFAULT_AI_RULES = {
@@ -505,6 +506,13 @@ DEFAULT_AI_RULES = {
         "enabled": True,
         "weight": 0.34,
         "config": {"min_requests": 300, "min_unique_ips": 20, "min_requests_per_second": 5.0, "min_active_connections": 40, "window_seconds": 60},
+    },
+    "single_ip_traffic_abuse": {
+        "label": "Single-IP Traffic Abuse",
+        "description": "Detects one source IP generating abusive request volume, such as a local Locust/load-test style attack.",
+        "enabled": True,
+        "weight": 0.3,
+        "config": {"min_requests": 120, "min_requests_per_second": 2.0, "min_active_connections": 10, "window_seconds": 60},
     },
 }
 
@@ -2271,12 +2279,39 @@ def detect_ddos_attack(context: dict | None, rules: dict | None = None) -> dict 
     return None
 
 
+def detect_single_ip_traffic_abuse(context: dict | None, rules: dict | None = None) -> dict | None:
+    """Detect high-volume abuse from one source IP."""
+    context = context or {}
+    rules = rules or context.get("ai_rules") or DEFAULT_AI_RULES
+    if not ai_rule_enabled(rules, "single_ip_traffic_abuse"):
+        return None
+    cfg = ai_rule_config(rules, "single_ip_traffic_abuse")
+    window = max(1.0, _context_float(context, "traffic_window_seconds", default=float(cfg.get("window_seconds", 60))))
+    peak_count = _context_int(context, "peak_source_request_count", "max_requests_per_ip", "single_ip_request_count", default=0)
+    peak_rps = _context_float(context, "peak_source_requests_per_second", "single_ip_requests_per_second", default=peak_count / window)
+    active_for_ip = _context_int(context, "peak_source_active_connections", "single_ip_active_connections", default=0)
+    high_volume = peak_count >= int(cfg.get("min_requests", 120)) and peak_rps >= float(cfg.get("min_requests_per_second", 2.0))
+    saturated = active_for_ip >= int(cfg.get("min_active_connections", 10))
+    if high_volume or saturated:
+        return {
+            "source_ip": context.get("peak_source_ip") or context.get("source_ip") or "unknown",
+            "request_count": peak_count,
+            "requests_per_second": round(peak_rps, 4),
+            "active_connection_count": active_for_ip,
+            "window_seconds": int(window),
+            "high_volume": high_volume,
+            "saturated": saturated,
+        }
+    return None
+
+
 def record_traffic_detection(db: Session, context: dict | None) -> SecurityDetectionEvent | None:
     """Record a traffic anomaly detection using the same AI-rule pipeline as other context events."""
     context = dict(context or {})
     context.setdefault("ai_rules", get_ai_rules(db))
     rules = context.get("ai_rules") or DEFAULT_AI_RULES
     ddos = detect_ddos_attack(context, rules)
+    single_ip = detect_single_ip_traffic_abuse(context, rules)
     spike = detect_traffic_spike(context, rules)
     if ddos:
         context.update({"ddos_attack": True, "traffic_detection": ddos, "target_type": "traffic"})
@@ -2287,6 +2322,16 @@ def record_traffic_detection(db: Session, context: dict | None) -> SecurityDetec
             change_type="ddos_attack",
             context=context,
             force_flag="ddos_attack",
+        )
+    if single_ip:
+        context.update({"single_ip_traffic_abuse": True, "traffic_detection": single_ip, "target_type": "traffic"})
+        return record_context_detection(
+            db,
+            target_name="site_traffic",
+            actor=str(context.get("actor") or "dos_protection"),
+            change_type="single_ip_traffic_abuse",
+            context=context,
+            force_flag="single_ip_traffic_abuse",
         )
     if spike:
         context.update({"traffic_spike": True, "traffic_detection": spike, "target_type": "traffic"})
@@ -3194,6 +3239,8 @@ FEATURE_NAMES = [
     "traffic_spike_ratio",
     "traffic_request_rate",
     "traffic_unique_ip_count",
+    "traffic_peak_source_rate",
+    "traffic_peak_source_connections",
 ]
 
 
@@ -3246,6 +3293,8 @@ def build_feature_vector(log: dict) -> list[float]:
     traffic_rps = safe_float(first_present(log, "requests_per_second", "traffic_rps", default=request_count / window_seconds))
     baseline_rps = max(0.01, safe_float(first_present(log, "baseline_requests_per_second", "baseline_traffic_rps", default=traffic_rps or 0.01)))
     traffic_spike_ratio = traffic_rps / baseline_rps if baseline_rps else 0.0
+    peak_source_count = safe_float(first_present(log, "peak_source_request_count", "max_requests_per_ip", "single_ip_request_count", default=0.0))
+    peak_source_rps = safe_float(first_present(log, "peak_source_requests_per_second", "single_ip_requests_per_second", default=peak_source_count / window_seconds))
 
     return [
         float(hour),
@@ -3285,6 +3334,8 @@ def build_feature_vector(log: dict) -> list[float]:
         traffic_spike_ratio,
         traffic_rps,
         float(safe_int(first_present(log, "unique_ip_count", "source_ip_count", "distinct_source_ips", default=0))),
+        peak_source_rps,
+        float(safe_int(first_present(log, "peak_source_active_connections", "single_ip_active_connections", default=0))),
     ]
 
 
@@ -3922,6 +3973,8 @@ def content_flags(content: str, context: dict | None = None, path: Path | None =
         flags.append("traffic_spike")
     if detect_ddos_attack(context, rules):
         flags.append("ddos_attack")
+    if detect_single_ip_traffic_abuse(context, rules):
+        flags.append("single_ip_traffic_abuse")
     if ai_rule_enabled(rules, "content_similarity_score"):
         try:
             similarity = float(
@@ -4059,6 +4112,7 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
         "session_context_anomaly",
         "traffic_spike",
         "ddos_attack",
+        "single_ip_traffic_abuse",
     }
     for additional_rule in APPROVED_ADDITIONAL_AI_RULES:
         if additional_rule in explicitly_scored_flags:
@@ -4144,6 +4198,8 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
         risk += weight("traffic_spike", 0.2) * min(1.5, max(1.0, ratio / 3.0))
     if enabled("ddos_attack") and "ddos_attack" in flags:
         risk += weight("ddos_attack", 0.34)
+    if enabled("single_ip_traffic_abuse") and "single_ip_traffic_abuse" in flags:
+        risk += weight("single_ip_traffic_abuse", 0.3)
     model_state = load_ai_model_state()
     profile = model_state.get("behavioral_profile") or {}
     profile_context = {
@@ -4179,6 +4235,9 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
         "requests_per_second": context.get("requests_per_second"),
         "baseline_requests_per_second": context.get("baseline_requests_per_second"),
         "unique_ip_count": context.get("unique_ip_count"),
+        "peak_source_request_count": context.get("peak_source_request_count"),
+        "peak_source_requests_per_second": context.get("peak_source_requests_per_second"),
+        "peak_source_active_connections": context.get("peak_source_active_connections"),
     }
     for flag in flags:
         ml_log.setdefault(flag, 1)
@@ -4239,6 +4298,8 @@ def classify(change_type: str, prediction: AIPrediction, flags: list[str], conte
         score += 1.5
     if "ddos_attack" in flags:
         score += 3.0
+    if "single_ip_traffic_abuse" in flags:
+        score += 2.4
     if context.get("mass_modification"):
         score += 1.5
     score = round(max(0.0, min(10.0, score)), 1)
@@ -4274,7 +4335,12 @@ def classify(change_type: str, prediction: AIPrediction, flags: list[str], conte
         nist = "CAT 1 - Unauthorized Access"
         enisa = "Identity Fraud"
         vector = "AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:N"
-    elif "ddos_attack" in flags or "traffic_spike" in flags or change_type in {"ddos_attack", "traffic_spike"}:
+    elif (
+        "ddos_attack" in flags
+        or "traffic_spike" in flags
+        or "single_ip_traffic_abuse" in flags
+        or change_type in {"ddos_attack", "traffic_spike", "single_ip_traffic_abuse"}
+    ):
         incident_type = "denial_of_service"
         nist = "CAT 2 - Denial of Service"
         enisa = "Denial of Service"

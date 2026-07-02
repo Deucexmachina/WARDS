@@ -809,6 +809,36 @@ def test_ddos_rule_detection_and_taxonomy():
     assert classification["nist_category"] == "CAT 2 - Denial of Service"
 
 
+def test_single_ip_traffic_abuse_detection_and_taxonomy():
+    from SECURITY import security_engine
+
+    context = {
+        "request_count": 160,
+        "traffic_window_seconds": 60,
+        "requests_per_second": 2.67,
+        "baseline_requests_per_second": 1.0,
+        "unique_ip_count": 1,
+        "peak_source_ip": "203.0.113.10",
+        "peak_source_request_count": 160,
+        "peak_source_requests_per_second": 2.67,
+        "peak_source_active_connections": 4,
+        "hour_of_day": 14,
+        "day_of_week": 1,
+        "target_type": "traffic",
+    }
+
+    abuse = security_engine.detect_single_ip_traffic_abuse(context)
+    flags = content_flags("site traffic telemetry", context, path=Path("site_traffic"))
+    prediction = ai_predict(Path("site_traffic"), "", "site traffic telemetry", context)
+    classification = classify("single_ip_traffic_abuse", prediction, flags, context)
+
+    assert abuse is not None
+    assert abuse["source_ip"] == "203.0.113.10"
+    assert "single_ip_traffic_abuse" in flags
+    assert classification["incident_type"] == "denial_of_service"
+    assert classification["nist_category"] == "CAT 2 - Denial of Service"
+
+
 def test_traffic_features_are_in_ml_vector():
     from SECURITY import security_engine
 
@@ -818,12 +848,16 @@ def test_traffic_features_are_in_ml_vector():
         "requests_per_second": 5,
         "baseline_requests_per_second": 1,
         "unique_ip_count": 25,
+        "peak_source_request_count": 180,
+        "peak_source_active_connections": 12,
     })
 
     assert "traffic_spike_ratio" in security_engine.FEATURE_NAMES
     assert vector[security_engine.FEATURE_NAMES.index("traffic_spike_ratio")] == 5.0
     assert vector[security_engine.FEATURE_NAMES.index("traffic_request_rate")] == 5.0
     assert vector[security_engine.FEATURE_NAMES.index("traffic_unique_ip_count")] == 25.0
+    assert vector[security_engine.FEATURE_NAMES.index("traffic_peak_source_rate")] == 3.0
+    assert vector[security_engine.FEATURE_NAMES.index("traffic_peak_source_connections")] == 12.0
 
 
 def test_detection_system_alert_uses_detection_logged_email_path(monkeypatch):
