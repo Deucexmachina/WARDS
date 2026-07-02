@@ -60,6 +60,11 @@ EXEMPT_IPS = {
 
 # Track active requests per IP
 active_requests: Dict[str, int] = defaultdict(int)
+_traffic_ai_last_recorded_at: Dict[str, float] = defaultdict(float)
+_traffic_ai_last_evaluated_at = 0.0
+_traffic_baseline_rps = 0.0
+TRAFFIC_AI_EVALUATION_INTERVAL = float(os.getenv("TRAFFIC_AI_EVALUATION_INTERVAL_SECONDS", "5"))
+TRAFFIC_AI_DETECTION_COOLDOWN = float(os.getenv("TRAFFIC_AI_DETECTION_COOLDOWN_SECONDS", "300"))
 
 _DOS_STATE_PATH = Path(os.getenv("DOS_STATE_PATH", "./dos_state.json"))
 _DOS_STATE_SAVE_INTERVAL = float(os.getenv("DOS_STATE_SAVE_INTERVAL", "5"))  # seconds
@@ -257,6 +262,49 @@ def is_exempt_ip(ip: str) -> bool:
     except ValueError:
         return False
     return EXEMPT_PRIVATE_IPS and (parsed.is_loopback or parsed.is_private)
+
+
+def get_client_ip(request: Request) -> str:
+    """Extract the original client IP from trusted proxy/CDN headers."""
+    if request is None:
+        return "unknown"
+    for header in ("cf-connecting-ip", "true-client-ip", "x-real-ip"):
+        value = request.headers.get(header)
+        if value:
+            candidate = value.split(",", 1)[0].strip()
+            if _valid_ip(candidate):
+                return candidate
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        for part in forwarded.split(","):
+            candidate = part.strip()
+            if _valid_ip(candidate):
+                return candidate
+    forwarded_rfc = request.headers.get("forwarded")
+    if forwarded_rfc and "for=" in forwarded_rfc.lower():
+        for segment in forwarded_rfc.split(","):
+            for item in segment.split(";"):
+                if item.strip().lower().startswith("for="):
+                    candidate = item.split("=", 1)[1].strip().strip('"').strip("[]")
+                    if _valid_ip(candidate):
+                        return candidate
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def _valid_ip(value: str) -> bool:
+    try:
+        ipaddress.ip_address(value)
+        return True
+    except ValueError:
+        return False
+
+
+def invalidate_permanent_block_cache() -> None:
+    global _permanent_blocks_cache_time
+    _permanent_blocks_cache.clear()
+    _permanent_blocks_cache_time = 0
 
 
 def register_block_strike(ip: str, current_time: float) -> int:
@@ -513,6 +561,56 @@ def block_response(ip: str, duration: int, scope: str, strikes: int, reason: str
     )
 
 
+def _maybe_record_traffic_ai_detection(current_time: float) -> None:
+    """Periodically send cheap aggregate traffic metrics to the AI detector."""
+    global _traffic_ai_last_evaluated_at, _traffic_baseline_rps
+    if current_time - _traffic_ai_last_evaluated_at < TRAFFIC_AI_EVALUATION_INTERVAL:
+        return
+    _traffic_ai_last_evaluated_at = current_time
+
+    window = max(1, ABUSE_WINDOW)
+    recent_counts = [
+        len(prune_timestamps(list(timestamps), current_time, window))
+        for timestamps in request_history.values()
+    ]
+    total_requests = sum(recent_counts)
+    unique_ips = sum(1 for count in recent_counts if count > 0)
+    current_rps = total_requests / float(window)
+    baseline_rps = _traffic_baseline_rps or current_rps
+    if _traffic_baseline_rps <= 0:
+        _traffic_baseline_rps = max(current_rps, 0.01)
+    else:
+        _traffic_baseline_rps = (_traffic_baseline_rps * 0.85) + (current_rps * 0.15)
+
+    try:
+        from database.models import SessionLocal, authorize_database_session
+        from SECURITY.security_engine import record_traffic_detection
+
+        context = {
+            "request_count": total_requests,
+            "traffic_window_seconds": window,
+            "requests_per_second": current_rps,
+            "baseline_requests_per_second": max(baseline_rps, 0.01),
+            "unique_ip_count": unique_ips,
+            "active_connection_count": sum(active_requests.values()),
+            "source_ip_count": unique_ips,
+            "target_type": "traffic",
+            "actor": "dos_protection",
+        }
+        if current_time - max(_traffic_ai_last_recorded_at.values() or [0]) < TRAFFIC_AI_DETECTION_COOLDOWN:
+            return
+        db = SessionLocal()
+        try:
+            authorize_database_session(db, context="traffic_ai_detection", actor="dos_protection")
+            detection = record_traffic_detection(db, context)
+            if detection:
+                _traffic_ai_last_recorded_at[str(detection.change_type or "traffic")] = current_time
+        finally:
+            db.close()
+    except Exception:
+        pass
+
+
 def rate_limit_for_path(path: str) -> tuple[str, int, int]:
     if is_search_path(path):
         return "search", SEARCH_ABUSE_THRESHOLD, SEARCH_ABUSE_WINDOW
@@ -584,7 +682,7 @@ class ConnectionLimitMiddleware(BaseHTTPMiddleware):
     
     async def dispatch(self, request: Request, call_next):
         global _permanent_blocks_cache_time
-        client_ip = request.client.host if request.client else "unknown"
+        client_ip = get_client_ip(request)
         if is_exempt_ip(client_ip):
             return await call_next(request)
 
@@ -659,7 +757,7 @@ class AbuseDetectionMiddleware(BaseHTTPMiddleware):
     
     async def dispatch(self, request: Request, call_next):
         global _permanent_blocks_cache_time
-        client_ip = request.client.host if request.client else "unknown"
+        client_ip = get_client_ip(request)
         if is_exempt_ip(client_ip):
             return await call_next(request)
         current_time = time.time()
@@ -743,6 +841,7 @@ class AbuseDetectionMiddleware(BaseHTTPMiddleware):
         endpoint_request_history[history_key].append(current_time)
         request_history[client_ip] = prune_timestamps(request_history[client_ip], current_time, ABUSE_WINDOW)
         request_history[client_ip].append(current_time)
+        _maybe_record_traffic_ai_detection(current_time)
 
         failed_auth_history[client_ip] = prune_timestamps(failed_auth_history[client_ip], current_time, AUTH_ABUSE_WINDOW)
         if is_login_path(path) and len(failed_auth_history[client_ip]) >= AUTH_ABUSE_THRESHOLD:

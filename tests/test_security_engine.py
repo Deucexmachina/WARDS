@@ -759,6 +759,73 @@ def test_paste_only_login_flags_keystroke_without_content_similarity():
     assert "content_similarity_score" not in flags
 
 
+def test_traffic_spike_rule_detection_and_scoring():
+    from SECURITY import security_engine
+
+    context = {
+        "request_count": 180,
+        "traffic_window_seconds": 60,
+        "requests_per_second": 3.0,
+        "baseline_requests_per_second": 0.5,
+        "unique_ip_count": 8,
+        "hour_of_day": 14,
+        "day_of_week": 1,
+        "target_type": "traffic",
+    }
+
+    spike = security_engine.detect_traffic_spike(context)
+    flags = content_flags("site traffic telemetry", context, path=Path("site_traffic"))
+    prediction = ai_predict(Path("site_traffic"), "", "site traffic telemetry", context)
+
+    assert spike is not None
+    assert spike["spike_ratio"] == 6.0
+    assert "traffic_spike" in flags
+    assert prediction.prediction in {"suspicious", "malicious"}
+
+
+def test_ddos_rule_detection_and_taxonomy():
+    from SECURITY import security_engine
+
+    context = {
+        "request_count": 420,
+        "traffic_window_seconds": 60,
+        "requests_per_second": 7.0,
+        "baseline_requests_per_second": 1.0,
+        "unique_ip_count": 32,
+        "active_connection_count": 45,
+        "hour_of_day": 14,
+        "day_of_week": 1,
+        "target_type": "traffic",
+    }
+
+    ddos = security_engine.detect_ddos_attack(context)
+    flags = content_flags("site traffic telemetry", context, path=Path("site_traffic"))
+    prediction = ai_predict(Path("site_traffic"), "", "site traffic telemetry", context)
+    classification = classify("ddos_attack", prediction, flags, context)
+
+    assert ddos is not None
+    assert "ddos_attack" in flags
+    assert classification["incident_type"] == "denial_of_service"
+    assert classification["nist_category"] == "CAT 2 - Denial of Service"
+
+
+def test_traffic_features_are_in_ml_vector():
+    from SECURITY import security_engine
+
+    vector = build_feature_vector({
+        "request_count": 300,
+        "traffic_window_seconds": 60,
+        "requests_per_second": 5,
+        "baseline_requests_per_second": 1,
+        "unique_ip_count": 25,
+    })
+
+    assert "traffic_spike_ratio" in security_engine.FEATURE_NAMES
+    assert vector[security_engine.FEATURE_NAMES.index("traffic_spike_ratio")] == 5.0
+    assert vector[security_engine.FEATURE_NAMES.index("traffic_request_rate")] == 5.0
+    assert vector[security_engine.FEATURE_NAMES.index("traffic_unique_ip_count")] == 25.0
+
+
 def test_backup_progress_commit_tolerates_stale_monitored_file_rows():
     class DummyDb:
         rolled_back = False

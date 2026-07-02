@@ -249,6 +249,8 @@ BEHAVIOR_LABELS = {
     "destructive_command_pattern": "Destructive command pattern",
     "webshell_indicator": "Web shell indicator",
     "session_context_anomaly": "Session context anomaly",
+    "traffic_spike": "Sudden site traffic spike",
+    "ddos_attack": "Distributed denial-of-service traffic pattern",
 }
 
 DEFAULT_AI_RULES = {
@@ -489,6 +491,20 @@ DEFAULT_AI_RULES = {
         "enabled": True,
         "weight": 0.2,
         "config": {"max_recent_sessions": 3},
+    },
+    "traffic_spike": {
+        "label": "Traffic Spike",
+        "description": "Detects a sudden increase in site request volume from lightweight rolling traffic counters.",
+        "enabled": True,
+        "weight": 0.2,
+        "config": {"min_requests": 120, "min_requests_per_second": 2.0, "spike_ratio": 3.0, "window_seconds": 60},
+    },
+    "ddos_attack": {
+        "label": "DDoS Attack",
+        "description": "Detects distributed high-volume traffic using request rate, source diversity, and active connection metrics.",
+        "enabled": True,
+        "weight": 0.34,
+        "config": {"min_requests": 300, "min_unique_ips": 20, "min_requests_per_second": 5.0, "min_active_connections": 40, "window_seconds": 60},
     },
 }
 
@@ -2140,6 +2156,109 @@ def ai_rule_config(rules: dict | None, rule_name: str) -> dict:
     return {**default.get("config", {}), **current.get("config", {})}
 
 
+def _context_float(context: dict | None, *keys: str, default: float = 0.0) -> float:
+    try:
+        value = first_present(context or {}, *keys, default=default)
+        value = float(value)
+        if math.isnan(value) or math.isinf(value):
+            return default
+        return value
+    except (TypeError, ValueError):
+        return default
+
+
+def _context_int(context: dict | None, *keys: str, default: int = 0) -> int:
+    try:
+        return int(_context_float(context or {}, *keys, default=float(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def detect_traffic_spike(context: dict | None, rules: dict | None = None) -> dict | None:
+    """Detect sudden site traffic spikes from pre-aggregated counters."""
+    context = context or {}
+    rules = rules or context.get("ai_rules") or DEFAULT_AI_RULES
+    if not ai_rule_enabled(rules, "traffic_spike"):
+        return None
+    cfg = ai_rule_config(rules, "traffic_spike")
+    window = max(1.0, _context_float(context, "traffic_window_seconds", default=float(cfg.get("window_seconds", 60))))
+    request_count = _context_int(context, "request_count", "requests_in_window", "total_requests", default=0)
+    rps = _context_float(context, "requests_per_second", "traffic_rps", default=request_count / window)
+    baseline_rps = max(0.01, _context_float(context, "baseline_requests_per_second", "baseline_traffic_rps", default=0.01))
+    spike_ratio = rps / baseline_rps
+    if (
+        request_count >= int(cfg.get("min_requests", 120))
+        and rps >= float(cfg.get("min_requests_per_second", 2.0))
+        and spike_ratio >= float(cfg.get("spike_ratio", 3.0))
+    ):
+        return {
+            "request_count": request_count,
+            "requests_per_second": round(rps, 4),
+            "baseline_requests_per_second": round(baseline_rps, 4),
+            "spike_ratio": round(spike_ratio, 4),
+            "window_seconds": int(window),
+        }
+    return None
+
+
+def detect_ddos_attack(context: dict | None, rules: dict | None = None) -> dict | None:
+    """Detect distributed denial-of-service patterns from aggregate traffic counters."""
+    context = context or {}
+    rules = rules or context.get("ai_rules") or DEFAULT_AI_RULES
+    if not ai_rule_enabled(rules, "ddos_attack"):
+        return None
+    cfg = ai_rule_config(rules, "ddos_attack")
+    window = max(1.0, _context_float(context, "traffic_window_seconds", default=float(cfg.get("window_seconds", 60))))
+    request_count = _context_int(context, "request_count", "requests_in_window", "total_requests", default=0)
+    unique_ips = _context_int(context, "unique_ip_count", "source_ip_count", "distinct_source_ips", default=0)
+    active_connections = _context_int(context, "active_connection_count", "concurrent_requests", default=0)
+    rps = _context_float(context, "requests_per_second", "traffic_rps", default=request_count / window)
+    high_volume = request_count >= int(cfg.get("min_requests", 300)) and rps >= float(cfg.get("min_requests_per_second", 5.0))
+    distributed = unique_ips >= int(cfg.get("min_unique_ips", 20))
+    saturated = active_connections >= int(cfg.get("min_active_connections", 40))
+    if high_volume and (distributed or saturated):
+        return {
+            "request_count": request_count,
+            "requests_per_second": round(rps, 4),
+            "unique_ip_count": unique_ips,
+            "active_connection_count": active_connections,
+            "window_seconds": int(window),
+            "distributed": distributed,
+            "saturated": saturated,
+        }
+    return None
+
+
+def record_traffic_detection(db: Session, context: dict | None) -> SecurityDetectionEvent | None:
+    """Record a traffic anomaly detection using the same AI-rule pipeline as other context events."""
+    context = dict(context or {})
+    context.setdefault("ai_rules", get_ai_rules(db))
+    rules = context.get("ai_rules") or DEFAULT_AI_RULES
+    ddos = detect_ddos_attack(context, rules)
+    spike = detect_traffic_spike(context, rules)
+    if ddos:
+        context.update({"ddos_attack": True, "traffic_detection": ddos, "target_type": "traffic"})
+        return record_context_detection(
+            db,
+            target_name="site_traffic",
+            actor=str(context.get("actor") or "dos_protection"),
+            change_type="ddos_attack",
+            context=context,
+            force_flag="ddos_attack",
+        )
+    if spike:
+        context.update({"traffic_spike": True, "traffic_detection": spike, "target_type": "traffic"})
+        return record_context_detection(
+            db,
+            target_name="site_traffic",
+            actor=str(context.get("actor") or "dos_protection"),
+            change_type="traffic_spike",
+            context=context,
+            force_flag="traffic_spike",
+        )
+    return None
+
+
 def high_risk_file_extensions(rules: dict | None = None) -> set[str]:
     return {
         str(item).lower()
@@ -3030,6 +3149,9 @@ FEATURE_NAMES = [
     "admin_action_rarity",
     "restore_frequency",
     "affected_files_count",
+    "traffic_spike_ratio",
+    "traffic_request_rate",
+    "traffic_unique_ip_count",
 ]
 
 
@@ -3077,6 +3199,11 @@ def build_feature_vector(log: dict) -> list[float]:
     path_obj = Path(str(file_path)) if file_path else Path("unknown")
     source_ip_reputation = safe_float(first_present(log, "source_ip_reputation", "ip_reputation_score", default=0.0))
     geo_distance = safe_float(first_present(log, "geo_distance_from_last_login", "geo_distance_from_last_login_km", "geo_distance_km", default=0.0))
+    request_count = safe_float(first_present(log, "request_count", "requests_in_window", "total_requests", default=0.0))
+    window_seconds = max(1.0, safe_float(first_present(log, "traffic_window_seconds", "window_seconds", default=60.0), 60.0))
+    traffic_rps = safe_float(first_present(log, "requests_per_second", "traffic_rps", default=request_count / window_seconds))
+    baseline_rps = max(0.01, safe_float(first_present(log, "baseline_requests_per_second", "baseline_traffic_rps", default=traffic_rps or 0.01)))
+    traffic_spike_ratio = traffic_rps / baseline_rps if baseline_rps else 0.0
 
     return [
         float(hour),
@@ -3113,6 +3240,9 @@ def build_feature_vector(log: dict) -> list[float]:
         safe_float(first_present(log, "admin_action_rarity", "admin_action_rarity_score", default=0.0)),
         float(safe_int(first_present(log, "restore_frequency", "restores_in_window", "restore_count", default=0))),
         float(safe_int(first_present(log, "affected_files_count", "modified_file_count", "files_modified_in_window", default=0))),
+        traffic_spike_ratio,
+        traffic_rps,
+        float(safe_int(first_present(log, "unique_ip_count", "source_ip_count", "distinct_source_ips", default=0))),
     ]
 
 
@@ -3746,6 +3876,10 @@ def content_flags(content: str, context: dict | None = None, path: Path | None =
             or recent_session_count > max_recent_sessions
         ):
             flags.append("session_context_anomaly")
+    if detect_traffic_spike(context, rules):
+        flags.append("traffic_spike")
+    if detect_ddos_attack(context, rules):
+        flags.append("ddos_attack")
     if ai_rule_enabled(rules, "content_similarity_score"):
         try:
             similarity = float(
@@ -3881,6 +4015,8 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
         "destructive_command_pattern",
         "webshell_indicator",
         "session_context_anomaly",
+        "traffic_spike",
+        "ddos_attack",
     }
     for additional_rule in APPROVED_ADDITIONAL_AI_RULES:
         if additional_rule in explicitly_scored_flags:
@@ -3960,6 +4096,12 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
         risk += weight("webshell_indicator", 0.3)
     if enabled("session_context_anomaly") and "session_context_anomaly" in flags:
         risk += weight("session_context_anomaly", 0.2)
+    if enabled("traffic_spike") and "traffic_spike" in flags:
+        spike = detect_traffic_spike(context, rules) or {}
+        ratio = float(spike.get("spike_ratio") or 1.0)
+        risk += weight("traffic_spike", 0.2) * min(1.5, max(1.0, ratio / 3.0))
+    if enabled("ddos_attack") and "ddos_attack" in flags:
+        risk += weight("ddos_attack", 0.34)
     model_state = load_ai_model_state()
     profile = model_state.get("behavioral_profile") or {}
     profile_context = {
@@ -3990,6 +4132,11 @@ def ai_predict(path: Path, old_content: str, new_content: str, context: dict | N
         "content_length": len(new_content or ""),
         "special_chars_count": sum((new_content or "").count(char) for char in ["<", ">", "&", '"', "'", "/", "\\"]),
         "file_type_risk": 1 if is_high_risk_file_path(path, rules) else 0,
+        "request_count": context.get("request_count"),
+        "traffic_window_seconds": context.get("traffic_window_seconds"),
+        "requests_per_second": context.get("requests_per_second"),
+        "baseline_requests_per_second": context.get("baseline_requests_per_second"),
+        "unique_ip_count": context.get("unique_ip_count"),
     }
     for flag in flags:
         ml_log.setdefault(flag, 1)
@@ -4046,6 +4193,10 @@ def classify(change_type: str, prediction: AIPrediction, flags: list[str], conte
         score += 2.2
     if "session_context_anomaly" in flags:
         score += 1.6
+    if "traffic_spike" in flags:
+        score += 1.5
+    if "ddos_attack" in flags:
+        score += 3.0
     if context.get("mass_modification"):
         score += 1.5
     score = round(max(0.0, min(10.0, score)), 1)
@@ -4081,6 +4232,11 @@ def classify(change_type: str, prediction: AIPrediction, flags: list[str], conte
         nist = "CAT 1 - Unauthorized Access"
         enisa = "Identity Fraud"
         vector = "AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:N"
+    elif "ddos_attack" in flags or "traffic_spike" in flags or change_type in {"ddos_attack", "traffic_spike"}:
+        incident_type = "denial_of_service"
+        nist = "CAT 2 - Denial of Service"
+        enisa = "Denial of Service"
+        vector = "AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
     elif "destructive_command_pattern" in flags:
         incident_type = "denial_of_service"
         nist = "CAT 2 - Denial of Service"
