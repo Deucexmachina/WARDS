@@ -24,7 +24,8 @@ from sqlalchemy.orm import Session
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
-from database.models import ActivityLog, Branch, CitizenUser, Payment, Queue, ReceiptRecord, ReceiptRequest, ReceiptRequestHistory, get_db
+from database.models import ActivityLog, Branch, BranchStaff, CitizenUser, Payment, Queue, ReceiptRecord, ReceiptRequest, ReceiptRequestHistory, get_db
+from routes.branch_portal import archive_completed_queue
 from auth import get_current_branch_staff
 from services.ocr_runtime import run_ocr_in_executor
 from services.ocr_service import OCRProcessingError, ocr_service
@@ -2556,6 +2557,30 @@ async def save_mobile_receipt_record(
     )
     db.commit()
     db.refresh(record)
+
+    queue = db.query(Queue).filter(
+        Queue.id == session["queue_id"],
+        Queue.branch_id == session["branch_id"],
+    ).first()
+    if queue and queue_value(queue, "status") == "Serving":
+        staff = db.query(BranchStaff).filter(
+            BranchStaff.username == session["created_by"],
+            BranchStaff.branch_id == session["branch_id"],
+        ).first()
+        if staff:
+            queue.status = "Completed"
+            queue.completed_at = datetime.utcnow()
+            apply_queue_security(queue)
+            archive_completed_queue(db, queue, staff.username)
+            db.delete(queue)
+            db.add(ActivityLog(
+                action="Queue Completed",
+                user=staff.username,
+                details=f"Completed queue via mobile receipt upload",
+                type="branch_queues",
+            ))
+            db.commit()
+
     session["status"] = "saved"
     session["record_id"] = record.id
     session["result"] = {

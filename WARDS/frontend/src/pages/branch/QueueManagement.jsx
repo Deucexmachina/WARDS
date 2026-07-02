@@ -1582,17 +1582,14 @@ const QueueManagement = () => {
   }, [queueTypeFilter, statusFilter, dateFilter, timeSlotFilter, serviceTypeFilter, windowFilter, queueNumberFilter, searchFilter]);
 
   useEffect(() => {
-    if (!mobileSession?.token) {
-      return;
-    }
-    if (completionMode !== 'mobile' && completionMode !== 'review') {
+    if (!mobileSession?.token || !completionQueue) {
       return;
     }
     const check = () => checkMobileReceiptUploadRef.current(true);
     check();
     const interval = setInterval(check, 5000);
     return () => clearInterval(interval);
-  }, [completionMode, mobileSession?.token]);
+  }, [mobileSession?.token, completionQueue?.id]);
 
   const windowOptions = useMemo(() => {
     const fromAccounts = managedWindowAccounts.map((account) => ({
@@ -1677,7 +1674,13 @@ const QueueManagement = () => {
       resetCompletionFlow();
       return true;
     } catch (err) {
-      setCompletionError(err.response?.data?.detail || 'Failed to complete queue.');
+      const status = err.response?.status;
+      const detail = err.response?.data?.detail;
+      if (status === 404 || detail === 'Queue record not found') {
+        resetCompletionFlow();
+        return true;
+      }
+      setCompletionError(detail || 'Failed to complete queue.');
       return false;
     } finally {
       setCompletingQueueId(null);
