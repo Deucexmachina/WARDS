@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import mimetypes
 import re
 from datetime import datetime
@@ -73,6 +74,52 @@ SUBMISSION_TYPES = {"RPT", "BT"}
 
 DEFAULT_ASSESSMENT_PAGE_SIZE = 5
 MAX_ASSESSMENT_PAGE_SIZE = 50
+
+PROFILE_MAX_FULL_NAME = 100
+PROFILE_MAX_EMAIL = 254
+PROFILE_MAX_MOBILE_NUMBER = 20
+PROFILE_MAX_ADDRESS = 255
+PROFILE_MAX_TAXPAYER_TYPE = 50
+PROFILE_MAX_TIN = 20
+PROFILE_MAX_PASSWORD = 128
+
+
+def validate_profile_field_lengths(payload: PublicProfileUpdateRequest):
+    if len(payload.full_name or "") > PROFILE_MAX_FULL_NAME:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Full name must not exceed {PROFILE_MAX_FULL_NAME} characters.",
+        )
+    if len(payload.email or "") > PROFILE_MAX_EMAIL:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Email must not exceed {PROFILE_MAX_EMAIL} characters.",
+        )
+    if len(payload.mobile_number or "") > PROFILE_MAX_MOBILE_NUMBER:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Mobile number must not exceed {PROFILE_MAX_MOBILE_NUMBER} characters.",
+        )
+    if len(payload.address or "") > PROFILE_MAX_ADDRESS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Address must not exceed {PROFILE_MAX_ADDRESS} characters.",
+        )
+    if len(payload.taxpayer_type or "") > PROFILE_MAX_TAXPAYER_TYPE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Taxpayer type must not exceed {PROFILE_MAX_TAXPAYER_TYPE} characters.",
+        )
+    if payload.tin and len(payload.tin) > PROFILE_MAX_TIN:
+        raise HTTPException(
+            status_code=400,
+            detail=f"TIN must not exceed {PROFILE_MAX_TIN} characters.",
+        )
+    if len(payload.current_password or "") > PROFILE_MAX_PASSWORD:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Password must not exceed {PROFILE_MAX_PASSWORD} characters.",
+        )
 
 
 def normalize_mime_type(mime_type: str) -> str:
@@ -684,66 +731,76 @@ async def update_public_account_profile(
     db: Session = Depends(get_db),
     current_user: CitizenUser = Depends(get_current_user),
 ):
-    verify_account_password(payload.current_password, current_user.hashed_password, detail="Incorrect account password.")
-    normalized_email = normalize_email(payload.email, check_deliverability=True)
-    ensure_email_is_unique(db, normalized_email, exclude_citizen_id=current_user.id)
-    taxpayer_type = normalize_taxpayer_type(payload.taxpayer_type)
-    mobile_number = normalize_mobile_number(payload.mobile_number)
-    ensure_contact_number_is_unique(db, mobile_number, exclude_citizen_id=current_user.id)
-    full_name = normalize_citizen_full_name(payload.full_name)
+    validate_profile_field_lengths(payload)
+    try:
+        verify_account_password(payload.current_password, current_user.hashed_password, detail="Incorrect account password.")
+        normalized_email = normalize_email(payload.email, check_deliverability=True)
+        ensure_email_is_unique(db, normalized_email, exclude_citizen_id=current_user.id)
+        taxpayer_type = normalize_taxpayer_type(payload.taxpayer_type)
+        mobile_number = normalize_mobile_number(payload.mobile_number)
+        ensure_contact_number_is_unique(db, mobile_number, exclude_citizen_id=current_user.id)
+        full_name = normalize_citizen_full_name(payload.full_name)
 
-    normalized_tin = None
-    if (payload.tin or "").strip():
-        normalized_tin = normalize_tin(payload.tin)
-        ensure_tin_is_unique(db, normalized_tin, exclude_citizen_id=current_user.id)
+        normalized_tin = None
+        if (payload.tin or "").strip():
+            normalized_tin = normalize_tin(payload.tin)
+            ensure_tin_is_unique(db, normalized_tin, exclude_citizen_id=current_user.id)
 
-    previous_email = citizen_email(current_user)
-    previous_name = citizen_name(current_user) or full_name
-    changes = changed_profile_fields(current_user, payload, normalized_email, mobile_number, taxpayer_type, normalized_tin)
+        previous_email = citizen_email(current_user)
+        previous_name = citizen_name(current_user) or full_name
+        changes = changed_profile_fields(current_user, payload, normalized_email, mobile_number, taxpayer_type, normalized_tin)
 
-    current_user.full_name = full_name
-    current_user.email = normalized_email
-    current_user.contact_number = mobile_number
-    current_user.address = (payload.address or "").strip() or None
-    current_user.taxpayer_type = taxpayer_type
-    current_user.tin = normalized_tin
-    apply_citizen_user_security(current_user)
-    sync_citizen_profile_to_related_records(
-        db,
-        citizen_user_id=current_user.id,
-        full_name=full_name,
-        email=normalized_email,
-        mobile_number=mobile_number,
-        address=current_user.address,
-        previous_email=previous_email,
-    )
-
-    db.add(ActivityLog(
-        action="Public Taxpayer Profile Updated",
-        user=normalized_email,
-        details=f"Taxpayer profile updated for citizen user {current_user.id}",
-        type="user",
-    ))
-    db.commit()
-    db.refresh(current_user)
-
-    recipients = [email for email in {previous_email, citizen_email(current_user)} if email]
-    for recipient_email in recipients:
-        send_account_change_notification_email(
-            recipient_email=recipient_email,
-            display_name=previous_name,
-            account_type="public",
-            change_summary="Your taxpayer profile information was updated.",
-            changed_fields=changes or ["Taxpayer Profile"],
+        current_user.full_name = full_name
+        current_user.email = normalized_email
+        current_user.contact_number = mobile_number
+        current_user.address = (payload.address or "").strip() or None
+        current_user.taxpayer_type = taxpayer_type
+        current_user.tin = normalized_tin
+        apply_citizen_user_security(current_user)
+        sync_citizen_profile_to_related_records(
+            db,
+            citizen_user_id=current_user.id,
+            full_name=full_name,
+            email=normalized_email,
+            mobile_number=mobile_number,
+            address=current_user.address,
+            previous_email=previous_email,
         )
 
-    return {
-        "message": "Account profile updated successfully.",
-        "profile": {
-            "id": current_user.id,
-            **get_citizen_profile_snapshot(current_user),
-        },
-    }
+        db.add(ActivityLog(
+            action="Public Taxpayer Profile Updated",
+            user=normalized_email,
+            details=f"Taxpayer profile updated for citizen user {current_user.id}",
+            type="user",
+        ))
+        db.commit()
+        db.refresh(current_user)
+
+        recipients = [email for email in {previous_email, citizen_email(current_user)} if email]
+        for recipient_email in recipients:
+            send_account_change_notification_email(
+                recipient_email=recipient_email,
+                display_name=previous_name,
+                account_type="public",
+                change_summary="Your taxpayer profile information was updated.",
+                changed_fields=changes or ["Taxpayer Profile"],
+            )
+
+        return {
+            "message": "Account profile updated successfully.",
+            "profile": {
+                "id": current_user.id,
+                **get_citizen_profile_snapshot(current_user),
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logging.error(f"Unexpected error updating public account profile for citizen {current_user.id}: {exc}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred while updating your profile. Please try again later.",
+        ) from exc
 
 
 @router.post("/user/account/submissions")
