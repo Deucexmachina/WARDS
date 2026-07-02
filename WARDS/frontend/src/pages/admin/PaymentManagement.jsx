@@ -412,6 +412,12 @@ const PaymentManagement = () => {
     monthlyRemittances.filter((remittance) => remittance.status === 'Submitted')
   ), [monthlyRemittances]);
 
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('pending-remittances-count', {
+      detail: { count: pendingReviewRemittances.length },
+    }));
+  }, [pendingReviewRemittances]);
+
   const filteredPayments = useMemo(() => (
     monthlyPayments.filter((payment) => {
       if (filter === 'all') return true;

@@ -17,6 +17,33 @@ import {
 
 const BRANCH_QUEUE_UPDATED_EVENT = 'branch-queue-updated';
 const BRANCH_RECEIPT_UPDATED_EVENT = 'branch-receipt-updated';
+const PENDING_REMITTANCES_COUNT_EVENT = 'pending-remittances-count';
+const PAYMENT_TIME_ZONE = 'Asia/Manila';
+
+const parsePaymentDate = (value) => {
+  if (!value) return null;
+  const normalizedValue =
+    typeof value === 'string' && !/[zZ]|[+-]\d{2}:\d{2}$/.test(value)
+      ? `${value}Z`
+      : value;
+  const parsedDate = new Date(normalizedValue);
+  return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
+};
+
+const getRemittanceMonthValue = (value) => {
+  const parsedDate = value ? parsePaymentDate(value) : new Date();
+  if (!parsedDate) return '';
+  const parts = new Intl.DateTimeFormat('en-PH', {
+    month: '2-digit',
+    timeZone: PAYMENT_TIME_ZONE,
+    year: 'numeric',
+  }).formatToParts(parsedDate);
+  const year = parts.find((part) => part.type === 'year')?.value;
+  const month = parts.find((part) => part.type === 'month')?.value;
+  return year && month ? `${year}-${month}` : '';
+};
+
+const isRemittanceInMonth = (value, monthValue) => getRemittanceMonthValue(value) === monthValue;
 
 const DynamicSidebar = ({ open = false, onClose }) => {
   const location = useLocation();
@@ -221,6 +248,13 @@ const DynamicSidebar = ({ open = false, onClose }) => {
     const handleRemittanceReviewed = () => {
       fetchSidebarModuleCounts();
     };
+    const handlePendingRemittancesCount = (event) => {
+      const count = Number(event?.detail?.count || 0);
+      setModuleCounts((current) => ({
+        ...current,
+        payments: Math.max(0, count),
+      }));
+    };
     const handleActivityLogsViewed = (event) => {
       const unreadCount = Number(event?.detail?.unreadCount || 0);
       setModuleCounts((current) => ({
@@ -246,6 +280,7 @@ const DynamicSidebar = ({ open = false, onClose }) => {
     window.addEventListener('admin-alert-read', handleAdminAlertRead);
     window.addEventListener('tax-assessment-updated', handleTaxAssessmentUpdated);
     window.addEventListener('remittance-reviewed', handleRemittanceReviewed);
+    window.addEventListener(PENDING_REMITTANCES_COUNT_EVENT, handlePendingRemittancesCount);
     window.addEventListener(ACTIVITY_LOGS_VIEWED_EVENT, handleActivityLogsViewed);
     window.addEventListener(ACTIVITY_LOGS_UPDATED_EVENT, handleActivityLogsUpdated);
     return () => {
@@ -267,6 +302,7 @@ const DynamicSidebar = ({ open = false, onClose }) => {
       window.removeEventListener('admin-alert-read', handleAdminAlertRead);
       window.removeEventListener('tax-assessment-updated', handleTaxAssessmentUpdated);
       window.removeEventListener('remittance-reviewed', handleRemittanceReviewed);
+      window.removeEventListener(PENDING_REMITTANCES_COUNT_EVENT, handlePendingRemittancesCount);
       window.removeEventListener(ACTIVITY_LOGS_VIEWED_EVENT, handleActivityLogsViewed);
       window.removeEventListener(ACTIVITY_LOGS_UPDATED_EVENT, handleActivityLogsUpdated);
     };
@@ -364,7 +400,10 @@ const DynamicSidebar = ({ open = false, onClose }) => {
         const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}');
         const securityCounts = backupResult.status === 'fulfilled' ? (backupResult.value.data || {}) : {};
         const remittances = remittancesResult.status === 'fulfilled' ? (remittancesResult.value.data?.remittances || []) : [];
-        const pendingRemittanceCount = remittances.filter((r) => r.status === 'Submitted').length;
+        const currentMonthValue = getRemittanceMonthValue();
+        const pendingRemittanceCount = remittances.filter(
+          (r) => r.status === 'Submitted' && isRemittanceInMonth(r.submitted_at, currentMonthValue)
+        ).length;
 
         setModuleCounts({
           announcements: announcementsResult.status === 'fulfilled' ? Number(announcementsResult.value.data?.unread_count || 0) : 0,
