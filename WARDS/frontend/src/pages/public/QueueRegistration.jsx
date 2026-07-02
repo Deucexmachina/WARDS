@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { formatUtc8DateTime } from '../../utils/dateTime';
@@ -35,6 +35,11 @@ const STATUS_LABELS = {
 
 const QueueRegistration = () => {
   const { branchId } = useParams();
+  const appointmentBounds = useMemo(() => {
+    const now = new Date();
+    const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    return { min: `${localDate}T00:00`, max: `${localDate}T23:59` };
+  }, []);
   const navigate = useNavigate();
   const [branch, setBranch] = useState(null);
   const [services, setServices] = useState([]);
@@ -497,6 +502,8 @@ const QueueRegistration = () => {
                   name="appointment_time"
                   value={formData.appointment_time}
                   onChange={handleInputChange}
+                  min={appointmentBounds.min}
+                  max={appointmentBounds.max}
                   disabled={queueUnavailable}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                   required

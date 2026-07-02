@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { branchSettingsAPI } from '../../services/api';
-import { formatUtc8DateTime } from '../../utils/dateTime';
+import { formatUtc8DateTime, getMinDateString } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 import ActionConfirmationModal from '../../components/ActionConfirmationModal';
 import { CustomSelect, CustomDatePicker } from '../../components/FormControls';
@@ -312,6 +312,7 @@ const BranchSettings = () => {
       return Array.isArray(parsed) ? parsed : [];
     } catch { return []; }
   });
+  const earliestSettingsDate = useMemo(() => getMinDateString(historyState.items.map((item) => item.changed_at)) || todayDate, [historyState.items, todayDate]);
 
   const fetchSettings = async () => {
     initialServicesSeeded.current = false;
@@ -1082,7 +1083,7 @@ const BranchSettings = () => {
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[170px_220px_1fr]">
                     <div>
                       <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">Date</label>
-                      <CustomDatePicker min={todayDate} value={override.date} disabled={!isBranchAdmin} onChange={(event) => { setOverrideErrors((current) => current.filter((i) => i !== index)); updateOverride(index, 'date', event.target.value); }} className={overrideErrors.includes(index) && !override.date ? 'border-red-500 ring-1 ring-red-500' : ''} />
+                      <CustomDatePicker min={earliestSettingsDate} max={todayDate} value={override.date} disabled={!isBranchAdmin} onChange={(event) => { setOverrideErrors((current) => current.filter((i) => i !== index)); updateOverride(index, 'date', event.target.value); }} className={overrideErrors.includes(index) && !override.date ? 'border-red-500 ring-1 ring-red-500' : ''} />
                     </div>
                     <div>
                       <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">Status</label>
@@ -1176,7 +1177,8 @@ const BranchSettings = () => {
                 <div>
                   <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">Draft Effective Date</label>
                   <CustomDatePicker
-                    min={todayDate}
+                    min={earliestSettingsDate}
+                    max={todayDate}
                     value={schedule.effective_date}
                     disabled={!isBranchAdmin}
                     onChange={(event) => setSchedule((current) => ({ ...current, effective_date: event.target.value }))}

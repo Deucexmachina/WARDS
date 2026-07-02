@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { receiptAPI } from '../../services/api';
-import { formatUtc8DateTime } from '../../utils/dateTime';
+import { formatUtc8DateTime, getMinDateString } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
 import { CustomSelect, CustomDatePicker } from '../../components/FormControls';
@@ -465,6 +465,7 @@ const ReceiptManagement = () => {
   const [requests, setRequests] = useState([]);
   const [requestHistory, setRequestHistory] = useState([]);
   const [loading, setLoading] = useState(true);
+  const earliestReceiptDate = useMemo(() => getMinDateString(records.map((record) => record.created_at || record.transaction_date)), [records]);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [deletingRecordId, setDeletingRecordId] = useState(null);
@@ -2152,7 +2153,7 @@ const handleCancelScan = () => {
                       <input
                         name="transaction_date"
                         type={activeReceiptCategory === 'MARKET' ? 'date' : 'text'}
-                        min={activeReceiptCategory === 'MARKET' ? getTodayDateInputValue() : undefined}
+                        min={activeReceiptCategory === 'MARKET' ? earliestReceiptDate || undefined : undefined}
                         max={activeReceiptCategory === 'MARKET' ? getTodayDateInputValue() : undefined}
                         value={activeReceiptCategory === 'MARKET' ? formatDateInputValue(ocrDraft.transaction_date) : (ocrDraft.transaction_date || '')}
                         onChange={activeReceiptCategory === 'MARKET'
@@ -2206,7 +2207,8 @@ const handleCancelScan = () => {
                           <label className="block text-sm font-semibold text-gray-700 mb-1">Valid Until</label>
                           <CustomDatePicker
                             name="market_valid_until"
-                            min={getTodayDateInputValue()}
+                            min={earliestReceiptDate || undefined}
+                            max={getTodayDateInputValue()}
                             value={formatDateInputValue(ocrDraft.market_valid_until)}
                             onChange={handleMarketDateChange}
                             hasError={missingRequiredFields.includes('market_valid_until')}

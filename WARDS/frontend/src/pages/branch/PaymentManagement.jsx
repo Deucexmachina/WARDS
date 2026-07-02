@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import api, { API_BASE_URL } from '../../services/api';
 import WardsPageHero from '../../components/WardsPageHero';
 import { CustomSelect, CustomDatePicker } from '../../components/FormControls';
+import { getMinDateString } from '../../utils/dateTime';
 
 const PAYMENT_TIME_ZONE = 'Asia/Manila';
 const TRANSACTIONS_PER_PAGE = 5;
@@ -544,6 +545,7 @@ const PaymentManagement = () => {
     remittance: 1,
   });
   const [feedback, setFeedback] = useState({ type: '', message: '' });
+  const earliestPaymentDate = useMemo(() => getMinDateString(payments.map((payment) => payment.created_at || payment.verified_at)), [payments]);
 
   useEffect(() => {
     fetchPayments();
@@ -1473,6 +1475,7 @@ const PaymentManagement = () => {
           <div>
             <label className="mb-2 block text-sm font-semibold text-slate-700">Date From</label>
             <CustomDatePicker
+              min={earliestPaymentDate || undefined}
               max={draftFilters.dateTo && draftFilters.dateTo <= todayStr ? draftFilters.dateTo : todayStr}
               value={draftFilters.dateFrom}
               onChange={(event) => updateDraftFilter('dateFrom', event.target.value)}
@@ -1481,7 +1484,7 @@ const PaymentManagement = () => {
           <div>
             <label className="mb-2 block text-sm font-semibold text-slate-700">Date To</label>
             <CustomDatePicker
-              min={draftFilters.dateFrom || undefined}
+              min={draftFilters.dateFrom || earliestPaymentDate || undefined}
               max={todayStr}
               value={draftFilters.dateTo}
               onChange={(event) => updateDraftFilter('dateTo', event.target.value)}

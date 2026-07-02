@@ -7,6 +7,7 @@ const SAVE_URL = "http://localhost:8000/api/receipts/save";
 function ReceiptEdit() {
   const { state } = useLocation();
   const navigate = useNavigate();
+  const todayStr = new Date().toISOString().split('T')[0];
 
   useEffect(() => {
     const storedUser = JSON.parse(localStorage.getItem('user') || 'null');
@@ -216,6 +217,8 @@ function ReceiptEdit() {
               </label>
               <input
                 type="date"
+                min={todayStr}
+                max={todayStr}
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
                 className="w-full border p-2 rounded"

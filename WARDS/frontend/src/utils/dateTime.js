@@ -110,3 +110,16 @@ export const isSameUtc8Day = (leftValue, rightValue = new Date()) => {
 
   return getUtc8DateKey(leftDate) === getUtc8DateKey(rightDate);
 };
+
+export const getMinDateString = (dates) => {
+  const normalized = (dates || [])
+    .filter(Boolean)
+    .map((d) => {
+      if (typeof d === 'string') return d;
+      if (d && typeof d.toISOString === 'function') return d.toISOString();
+      return String(d);
+    })
+    .filter((d) => /^\d{4}-\d{2}-\d{2}/.test(d));
+  if (!normalized.length) return null;
+  return normalized.sort()[0].slice(0, 10);
+};

@@ -1,7 +1,7 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useEffect, useMemo, useState, useRef } from 'react';
 import api, { receiptAPI } from '../../services/api';
-import { formatUtc8DateTime } from '../../utils/dateTime';
+import { formatUtc8DateTime, getMinDateString } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 import { CustomSelect, CustomDatePicker } from '../../components/FormControls';
 import { isAnnouncementActive } from '../../utils/queueAnnouncement';
@@ -1162,6 +1162,7 @@ const CompletedTransactionsSection = ({
   canDeleteHistory,
   windowOptions,
   maxCompletionDate,
+  earliestQueueDate,
 }) => {
   const [page, setPage] = useState(1);
 
@@ -1236,6 +1237,7 @@ const CompletedTransactionsSection = ({
             <CustomDatePicker
               value={filters.completionDate}
               onChange={(event) => handleFilterChange('completionDate', event.target.value)}
+              min={earliestQueueDate || undefined}
               max={maxCompletionDate}
             />
             <CustomSelect value={filters.status} onChange={(value) => handleFilterChange('status', value)} options={[{ value: 'all', label: 'All statuses' }, { value: 'completed', label: 'Completed' }, { value: 'skipped', label: 'Skipped' }]} placeholder="All statuses" />
@@ -1403,6 +1405,7 @@ const QueueManagement = () => {
   const managedWindowAccounts = Array.isArray(branchUser?.window_accounts) ? branchUser.window_accounts : [];
   const [queues, setQueues] = useState([]);
   const [queueHistory, setQueueHistory] = useState([]);
+  const earliestQueueDate = useMemo(() => getMinDateString([...queues, ...queueHistory].map((item) => item.created_at || item.appointment_date || item.completed_at || item.served_at)), [queues, queueHistory]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [systemStatus, setSystemStatus] = useState(null);
@@ -2558,7 +2561,7 @@ const QueueManagement = () => {
         <div className="mt-5 grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-4">
           <CustomSelect value={queueTypeFilter} onChange={(value) => setQueueTypeFilter(value)} options={[{ value: 'all', label: 'All queue types' }, { value: 'immediate', label: 'Immediate' }, { value: 'appointment', label: 'Appointment' }]} placeholder="All queue types" />
           <CustomSelect value={statusFilter} onChange={(value) => setStatusFilter(value)} options={[{ value: 'all', label: 'All statuses' }, { value: 'appointment', label: 'Appointment' }, { value: 'waiting', label: 'Waiting' }, { value: 'called', label: 'Called' }, { value: 'serving', label: 'Serving' }, { value: 'completed', label: 'Completed' }, { value: 'skipped', label: 'Skipped' }]} placeholder="All statuses" />
-          <CustomDatePicker value={dateFilter} onChange={(event) => setDateFilter(event.target.value)} max={currentDateInputValue} />
+          <CustomDatePicker value={dateFilter} onChange={(event) => setDateFilter(event.target.value)} min={earliestQueueDate || undefined} max={currentDateInputValue} />
           <input type="time" value={timeSlotFilter} onChange={(event) => setTimeSlotFilter(event.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none" />
           <CustomSelect value={serviceTypeFilter} onChange={(value) => setServiceTypeFilter(value)} options={[{ value: 'all', label: 'All services' }, ...serviceTypes.map((serviceType) => ({ value: serviceType, label: serviceType }))]} placeholder="All services" />
           {isMonitorOnlyRole ? (
@@ -2752,6 +2755,7 @@ const QueueManagement = () => {
         items={completedTransactions}
         filters={completedTransactionFilters}
         onFilterChange={(field, value) => setCompletedTransactionFilters((current) => ({ ...current, [field]: value }))}
+        earliestQueueDate={earliestQueueDate}
         onOpenView={setSelectedCompletedTransaction}
         onDeleteHistory={openDeleteHistoryModal}
         deletingHistoryId={deletingHistoryId}
@@ -3004,8 +3008,8 @@ const QueueManagement = () => {
                       <span className="mb-2 block text-sm font-semibold text-slate-700">Date</span>
                       <CustomDatePicker
                         name="transaction_date"
-                        min={getTodayDateInputValue()}
-                        max={getTodayDateInputValue()}
+                        min={earliestQueueDate || currentDateInputValue}
+                        max={currentDateInputValue}
                         value={formatDateInputValue(receiptDraft.transaction_date || getTodayDateInputValue())}
                         disabled
                       />
@@ -3096,7 +3100,8 @@ const QueueManagement = () => {
                             <span className="mb-2 block text-sm font-semibold text-slate-700">Valid Until</span>
                             <CustomDatePicker
                               name="market_valid_until"
-                              min={getTodayDateInputValue()}
+                              min={earliestQueueDate || currentDateInputValue}
+                              max={currentDateInputValue}
                               value={formatDateInputValue(receiptDraft.market_valid_until)}
                               onChange={handleMarketDateChange}
                               hasError={receiptDraftMissingFields.includes('market_valid_until')}
