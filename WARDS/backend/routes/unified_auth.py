@@ -166,6 +166,11 @@ def _add_permanent_ip_block(ip: str, reason: str) -> None:
             existing.abuse_count = (existing.abuse_count or 0) + 1
             existing.reason = reason
         db.commit()
+        try:
+            from middleware.dos_protection import invalidate_permanent_block_cache
+            invalidate_permanent_block_cache()
+        except Exception:
+            pass
     except Exception:
         logger.exception("Failed to add permanent IP block for %s", ip)
     finally:

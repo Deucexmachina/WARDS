@@ -507,7 +507,7 @@ def bulk_update_incidents(db, action, admin_id, confirm_missing_files=False):
         return _local(db, action, admin_id, confirm_missing_files=confirm_missing_files)
     return _sync_post("/v1/incidents/bulk-action", {
         "action": action, "admin_id": admin_id, "confirm_missing_files": confirm_missing_files,
-    })
+    }, timeout=600.0)
 
 
 # ---------------------------------------------------------------------------

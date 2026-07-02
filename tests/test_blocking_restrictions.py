@@ -9,8 +9,10 @@ from middleware.dos_protection import (
     AbuseDetectionMiddleware,
     account_rate_limit_state,
     blocked_ips,
+    request_history,
     _permanent_blocks_cache,
     _permanent_blocks_cache_time,
+    get_client_ip,
 )
 from services.ip_reputation import add_permanent_block, remove_permanent_block, get_permanent_blocks
 
@@ -74,12 +76,14 @@ def reset_dos_state():
     """Reset mutable middleware state before each test."""
     blocked_ips.clear()
     account_rate_limit_state.clear()
+    request_history.clear()
     _permanent_blocks_cache.clear()
     global _permanent_blocks_cache_time
     _permanent_blocks_cache_time = 0
     yield
     blocked_ips.clear()
     account_rate_limit_state.clear()
+    request_history.clear()
     _permanent_blocks_cache.clear()
     _permanent_blocks_cache_time = 0
 
@@ -157,12 +161,59 @@ def test_connection_limit_blocks_permanent_ip():
     # Seed the permanent block cache directly (simulating an admin block)
     _permanent_blocks_cache["1.2.3.4"] = True
     response = client.get("/health", headers={"X-Forwarded-For": "1.2.3.4"})
-    # TestClient uses request.client.host from the ASGI transport; we need to check
-    # if the middleware actually blocks. Since TestClient uses localhost by default,
-    # we can't easily change client_ip without a more complex setup. Instead, verify
-    # the middleware logic directly.
-    # We'll do a simpler unit test of the cache check logic.
-    assert response.status_code != 403 or response.json().get("block_type") == "permanent"
+    assert response.status_code == 403
+    assert response.json().get("block_type") == "permanent"
+    client.close()
+
+
+def test_connection_limit_blocks_forwarded_temporary_ip():
+    app = _make_app_with_middleware()
+    client = TestClient(app)
+    blocked_ips["5.6.7.8"] = time.time() + 300
+
+    response = client.get("/health", headers={"CF-Connecting-IP": "5.6.7.8"})
+
+    assert response.status_code == 429
+    assert response.json().get("block_type") == "temporary"
+    client.close()
+
+
+def test_get_client_ip_prefers_forwarding_headers():
+    app = FastAPI()
+
+    @app.get("/whoami")
+    def whoami(request: Request):
+        return {"ip": get_client_ip(request)}
+
+    client = TestClient(app)
+    response = client.get(
+        "/whoami",
+        headers={
+            "X-Forwarded-For": "9.9.9.9, 10.0.0.1",
+            "X-Real-IP": "8.8.8.8",
+            "CF-Connecting-IP": "7.7.7.7",
+        },
+    )
+
+    assert response.json()["ip"] == "7.7.7.7"
+    client.close()
+
+
+def test_exempt_loopback_requests_still_feed_traffic_telemetry(monkeypatch):
+    app = _make_app_with_middleware()
+    client = TestClient(app)
+    calls = []
+
+    monkeypatch.setattr(
+        "middleware.dos_protection._maybe_record_traffic_ai_detection",
+        lambda current_time: calls.append(current_time),
+    )
+
+    response = client.get("/health", headers={"X-Forwarded-For": "::1"})
+
+    assert response.status_code == 200
+    assert len(request_history["::1"]) == 1
+    assert calls
     client.close()
 
 

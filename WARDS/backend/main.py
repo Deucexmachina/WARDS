@@ -44,7 +44,7 @@ from utils.log_sanitization import install_uvicorn_reload_path_filter
 from utils.redis_client import require_redis
 from utils.system_settings import seed_system_settings
 from utils.branch_system_settings import cleanup_duplicate_branch_system_settings
-from middleware.dos_protection import RequestSizeMiddleware, RequestTimeoutMiddleware, ConnectionLimitMiddleware, AbuseDetectionMiddleware, account_from_request
+from middleware.dos_protection import RequestSizeMiddleware, RequestTimeoutMiddleware, ConnectionLimitMiddleware, AbuseDetectionMiddleware, account_from_request, get_client_ip
 from middleware.https import HttpsEnforcementMiddleware
 
 install_uvicorn_reload_path_filter()
@@ -256,7 +256,7 @@ async def production_exception_handler(request: Request, exc: Exception):
 
 def hybrid_rate_limit_key(request: Request) -> str:
     """Return account-based key for authenticated users, IP for anonymous."""
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = get_client_ip(request)
     account_key, _, _ = account_from_request(request, client_ip)
     return account_key
 
