@@ -1741,10 +1741,13 @@ const QueueManagement = () => {
       const response = await receiptAPI.getMobileUploadSession(mobileSession.token);
       setMobileSession((current) => ({ ...current, ...response.data }));
       if (response.data?.status === 'saved') {
-        setReceiptSavedForCompletion(true);
-        setCompletionNotice('Receipt already uploaded and saved to Receipt Management. You can now complete this queue.');
-        setReceiptDraft(null);
-        setCompletionMode('options');
+        const completed = await completeQueueDirectly(completionQueue);
+        if (!completed) {
+          setReceiptSavedForCompletion(true);
+          setCompletionNotice('Receipt uploaded and saved to Receipt Management. You can now complete this queue.');
+          setReceiptDraft(null);
+          setCompletionMode('options');
+        }
       } else if (response.data?.status === 'processed' && response.data?.result) {
         const resolvedCategory = normalizeReceiptCategory(response.data?.result?.selected_category || response.data?.result?.tax_type || response.data?.result?.category || resolveReceiptCategory(completionQueue));
         const todayDate = getTodayDateInputValue();
