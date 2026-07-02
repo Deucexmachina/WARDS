@@ -65,6 +65,8 @@ _traffic_ai_last_evaluated_at = 0.0
 _traffic_baseline_rps = 0.0
 TRAFFIC_AI_EVALUATION_INTERVAL = float(os.getenv("TRAFFIC_AI_EVALUATION_INTERVAL_SECONDS", "5"))
 TRAFFIC_AI_DETECTION_COOLDOWN = float(os.getenv("TRAFFIC_AI_DETECTION_COOLDOWN_SECONDS", "300"))
+TRAFFIC_AI_COUNT_EXEMPT_IPS = os.getenv("TRAFFIC_AI_COUNT_EXEMPT_IPS", "true").lower() == "true"
+TRAFFIC_AI_REMOTE_PREFILTER_REQUESTS = int(os.getenv("TRAFFIC_AI_REMOTE_PREFILTER_REQUESTS", "30"))
 
 _DOS_STATE_PATH = Path(os.getenv("DOS_STATE_PATH", "./dos_state.json"))
 _DOS_STATE_SAVE_INTERVAL = float(os.getenv("DOS_STATE_SAVE_INTERVAL", "5"))  # seconds
@@ -589,8 +591,7 @@ def _maybe_record_traffic_ai_detection(current_time: float) -> None:
         _traffic_baseline_rps = (_traffic_baseline_rps * 0.85) + (current_rps * 0.15)
 
     try:
-        from database.models import SessionLocal, authorize_database_session
-        from SECURITY.security_engine import record_traffic_detection
+        from SECURITY.security_engine import detect_ddos_attack, detect_single_ip_traffic_abuse, detect_traffic_spike, record_traffic_detection
 
         context = {
             "request_count": total_requests,
@@ -607,8 +608,38 @@ def _maybe_record_traffic_ai_detection(current_time: float) -> None:
             "target_type": "traffic",
             "actor": "dos_protection",
         }
+        local_signal = (
+            detect_ddos_attack(context)
+            or detect_single_ip_traffic_abuse(context)
+            or detect_traffic_spike(context)
+            or total_requests >= TRAFFIC_AI_REMOTE_PREFILTER_REQUESTS
+            or peak_source_count >= TRAFFIC_AI_REMOTE_PREFILTER_REQUESTS
+        )
+        if not local_signal:
+            return
         if current_time - max(_traffic_ai_last_recorded_at.values() or [0]) < TRAFFIC_AI_DETECTION_COOLDOWN:
             return
+
+        try:
+            from utils.security_client import SECURITY_API_URL, record_context_detection as proxy_context_detection
+        except Exception:
+            SECURITY_API_URL = None
+            proxy_context_detection = None
+
+        if SECURITY_API_URL and proxy_context_detection:
+            detection = proxy_context_detection(
+                None,
+                "site_traffic",
+                "dos_protection",
+                "traffic_telemetry",
+                context=context,
+            )
+            if detection:
+                change_type = detection.get("change_type") if isinstance(detection, dict) else getattr(detection, "change_type", "traffic")
+                _traffic_ai_last_recorded_at[str(change_type or "traffic")] = current_time
+            return
+
+        from database.models import SessionLocal, authorize_database_session
         db = SessionLocal()
         try:
             authorize_database_session(db, context="traffic_ai_detection", actor="dos_protection")
@@ -619,6 +650,15 @@ def _maybe_record_traffic_ai_detection(current_time: float) -> None:
             db.close()
     except Exception:
         pass
+
+
+def _record_traffic_sample(client_ip: str, current_time: float) -> None:
+    """Count every observed request for traffic AI telemetry."""
+    if not client_ip or client_ip == "unknown":
+        return
+    request_history[client_ip] = prune_timestamps(request_history[client_ip], current_time, ABUSE_WINDOW)
+    request_history[client_ip].append(current_time)
+    _maybe_record_traffic_ai_detection(current_time)
 
 
 def rate_limit_for_path(path: str) -> tuple[str, int, int]:
@@ -768,9 +808,11 @@ class AbuseDetectionMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         global _permanent_blocks_cache_time
         client_ip = get_client_ip(request)
+        current_time = time.time()
+        if TRAFFIC_AI_COUNT_EXEMPT_IPS or not is_exempt_ip(client_ip):
+            _record_traffic_sample(client_ip, current_time)
         if is_exempt_ip(client_ip):
             return await call_next(request)
-        current_time = time.time()
         path = request.url.path
         account_key, account_type, role = account_from_request(request, client_ip)
         _refresh_dos_state()
@@ -849,10 +891,6 @@ class AbuseDetectionMiddleware(BaseHTTPMiddleware):
                 },
             )
         endpoint_request_history[history_key].append(current_time)
-        request_history[client_ip] = prune_timestamps(request_history[client_ip], current_time, ABUSE_WINDOW)
-        request_history[client_ip].append(current_time)
-        _maybe_record_traffic_ai_detection(current_time)
-
         failed_auth_history[client_ip] = prune_timestamps(failed_auth_history[client_ip], current_time, AUTH_ABUSE_WINDOW)
         if is_login_path(path) and len(failed_auth_history[client_ip]) >= AUTH_ABUSE_THRESHOLD:
             violations, strikes = register_account_violation(account_key, current_time)

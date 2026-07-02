@@ -9,6 +9,7 @@ from middleware.dos_protection import (
     AbuseDetectionMiddleware,
     account_rate_limit_state,
     blocked_ips,
+    request_history,
     _permanent_blocks_cache,
     _permanent_blocks_cache_time,
     get_client_ip,
@@ -75,12 +76,14 @@ def reset_dos_state():
     """Reset mutable middleware state before each test."""
     blocked_ips.clear()
     account_rate_limit_state.clear()
+    request_history.clear()
     _permanent_blocks_cache.clear()
     global _permanent_blocks_cache_time
     _permanent_blocks_cache_time = 0
     yield
     blocked_ips.clear()
     account_rate_limit_state.clear()
+    request_history.clear()
     _permanent_blocks_cache.clear()
     _permanent_blocks_cache_time = 0
 
@@ -193,6 +196,24 @@ def test_get_client_ip_prefers_forwarding_headers():
     )
 
     assert response.json()["ip"] == "7.7.7.7"
+    client.close()
+
+
+def test_exempt_loopback_requests_still_feed_traffic_telemetry(monkeypatch):
+    app = _make_app_with_middleware()
+    client = TestClient(app)
+    calls = []
+
+    monkeypatch.setattr(
+        "middleware.dos_protection._maybe_record_traffic_ai_detection",
+        lambda current_time: calls.append(current_time),
+    )
+
+    response = client.get("/health", headers={"X-Forwarded-For": "::1"})
+
+    assert response.status_code == 200
+    assert len(request_history["::1"]) == 1
+    assert calls
     client.close()
 
 
