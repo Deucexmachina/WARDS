@@ -1460,12 +1460,6 @@ const QueueManagement = () => {
   const [skippedPage, setSkippedPage] = useState(1);
   const [lastCalledQueue, setLastCalledQueue] = useState(null);
   const lastCalledQueueRef = useRef(null);
-  const [showWalkInModal, setShowWalkInModal] = useState(false);
-  const [walkInServiceType, setWalkInServiceType] = useState('');
-  const [walkInTaxpayerName, setWalkInTaxpayerName] = useState('');
-  const [walkInContactNumber, setWalkInContactNumber] = useState('');
-  const [walkInError, setWalkInError] = useState('');
-  const [addingWalkIn, setAddingWalkIn] = useState(false);
   const receiptDraftCategory = (receiptDraft?.selected_category || receiptDraft?.tax_type || resolveReceiptCategory(completionQueue)).trim().toUpperCase();
   const completionReceiptCategory = resolveReceiptCategory(completionQueue);
   const isCtcFileOnlyCompletion = completionReceiptCategory === 'CTC';
@@ -1973,37 +1967,6 @@ const QueueManagement = () => {
       } else if (action === 'complete') {
         setCompletingQueueId(null);
       }
-    }
-  };
-
-  const handleAddWalkIn = async () => {
-    setWalkInError('');
-    const effectiveServiceType = isQueueWindowAccount ? assignedWindowKey : walkInServiceType.trim();
-    if (!effectiveServiceType) {
-      setWalkInError('Service type is required.');
-      return;
-    }
-    if (!walkInTaxpayerName.trim()) {
-      setWalkInError('Taxpayer name is required.');
-      return;
-    }
-    try {
-      setAddingWalkIn(true);
-      await api.post('/branch/queue/walk-in', {
-        service_type: effectiveServiceType,
-        taxpayer_name: walkInTaxpayerName.trim(),
-        contact_number: walkInContactNumber.trim() || undefined,
-      });
-      setShowWalkInModal(false);
-      setWalkInServiceType('');
-      setWalkInTaxpayerName('');
-      setWalkInContactNumber('');
-      setWalkInError('');
-      await fetchQueues();
-    } catch (err) {
-      setWalkInError(err.response?.data?.detail || 'Failed to register walk-in queue.');
-    } finally {
-      setAddingWalkIn(false);
     }
   };
 
@@ -2679,22 +2642,6 @@ const QueueManagement = () => {
             onDeleteRequest={openDeleteModal}
             now={now}
             canManageQueues={canManageQueueOperations}
-            headerAction={
-              canManageQueueOperations ? (
-                <button
-                  onClick={() => {
-                    setWalkInError('');
-                    setShowWalkInModal(true);
-                  }}
-                  className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700"
-                >
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
-                  </svg>
-                  Add Walk-in
-                </button>
-              ) : null
-            }
           />
           <QueueSection
             title="Appointment Queue"
@@ -3237,108 +3184,6 @@ const QueueManagement = () => {
         </div>
       ) : null}
 
-      {showWalkInModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4">
-          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl md:p-8">
-            <div className="flex items-start gap-4">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600">
-                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
-                </svg>
-              </div>
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-emerald-400">Walk-in</p>
-                <h3 className="mt-2 text-2xl font-bold text-primary">Register Walk-in</h3>
-                <p className="mt-3 text-sm leading-6 text-slate-600">
-                  Create a queue entry for a walk-in citizen. They will be placed in the queue based on arrival time (FIFO).
-                </p>
-              </div>
-            </div>
-
-            {walkInError ? (
-              <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                <p className="font-semibold">{walkInError}</p>
-              </div>
-            ) : null}
-
-            <div className="mt-6 space-y-4">
-              <div>
-                <label className="mb-1 block text-sm font-semibold text-slate-700">Service Type <span className="text-red-500">*</span></label>
-                {isQueueWindowAccount ? (
-                  <input
-                    type="text"
-                    value={assignedWindowLabel}
-                    disabled
-                    className="w-full rounded-xl border border-slate-200 bg-slate-100 px-4 py-3 text-sm text-slate-500 outline-none cursor-not-allowed"
-                  />
-                ) : (
-                  <input
-                    type="text"
-                    value={walkInServiceType}
-                    onChange={(e) => setWalkInServiceType(e.target.value)}
-                    placeholder="e.g. Real Property Tax"
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
-                  />
-                )}
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-semibold text-slate-700">Taxpayer Name <span className="text-red-500">*</span></label>
-                <input
-                  type="text"
-                  value={walkInTaxpayerName}
-                  onChange={(e) => setWalkInTaxpayerName(e.target.value)}
-                  placeholder="Enter taxpayer name"
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-semibold text-slate-700">Contact Number <span className="font-normal text-slate-500">(optional)</span></label>
-                <input
-                  type="text"
-                  value={walkInContactNumber}
-                  onChange={(e) => {
-                    const raw = e.target.value.replace(/\D/g, '');
-                    if (raw.startsWith('0')) {
-                      setWalkInContactNumber(raw.slice(0, 11));
-                    } else if (raw.startsWith('63')) {
-                      setWalkInContactNumber(raw.slice(0, 12));
-                    } else {
-                      setWalkInContactNumber(raw.slice(0, 11));
-                    }
-                  }}
-                  placeholder="09XXXXXXXXX"
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
-                />
-              </div>
-            </div>
-
-            <div className="mt-6 flex flex-col-reverse gap-3 md:flex-row md:justify-end">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowWalkInModal(false);
-                  setWalkInServiceType('');
-                  setWalkInTaxpayerName('');
-                  setWalkInContactNumber('');
-                  setWalkInError('');
-                }}
-                disabled={addingWalkIn}
-                className="rounded-2xl bg-slate-200 px-5 py-3 font-semibold text-slate-700 transition hover:bg-slate-300 disabled:opacity-70"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleAddWalkIn}
-                disabled={addingWalkIn || !(isQueueWindowAccount ? assignedWindowKey : walkInServiceType.trim()) || !walkInTaxpayerName.trim()}
-                className="rounded-2xl bg-emerald-600 px-5 py-3 font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-70"
-              >
-                {addingWalkIn ? 'Registering...' : 'Register Walk-in'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
