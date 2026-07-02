@@ -1582,7 +1582,10 @@ const QueueManagement = () => {
   }, [queueTypeFilter, statusFilter, dateFilter, timeSlotFilter, serviceTypeFilter, windowFilter, queueNumberFilter, searchFilter]);
 
   useEffect(() => {
-    if (completionMode !== 'mobile' || !mobileSession?.token) {
+    if (!mobileSession?.token) {
+      return;
+    }
+    if (completionMode !== 'mobile' && completionMode !== 'review') {
       return;
     }
     const check = () => checkMobileReceiptUploadRef.current(true);
