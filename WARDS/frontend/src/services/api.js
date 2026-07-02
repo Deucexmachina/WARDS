@@ -233,8 +233,8 @@ export const receiptAPI = {
     });
   },
   createMobileUploadSession: (data) => api.post('/receipts/records/mobile-upload-sessions', data),
-  getMobileUploadSession: (token) => api.get(`/receipts/records/mobile-upload-sessions/${token}`),
-  getMobileUploadPublicSession: (token) => api.get(`/receipts/records/mobile-upload-sessions/${token}/public`),
+  getMobileUploadSession: (token) => api.get(`/receipts/records/mobile-upload-sessions/${token}`, { suppressGlobalErrorModal: true }),
+  getMobileUploadPublicSession: (token) => api.get(`/receipts/records/mobile-upload-sessions/${token}/public`, { suppressGlobalErrorModal: true }),
     uploadMobileReceipt: (token, formData) => api.post(`/receipts/records/mobile-upload-sessions/${token}/upload`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     }),
