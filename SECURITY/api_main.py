@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import os
+import inspect as py_inspect
 import shutil
 import sys
 import threading
@@ -121,34 +122,45 @@ def _rate_limit_key(endpoint: str, request) -> str:
 
 def rate_limit(endpoint_name: str, max_requests: int = 5, window_seconds: float = 60.0):
     """Decorator to rate-limit an endpoint by client IP."""
+    def _check_limit(args, kwargs):
+        request = None
+        for arg in args:
+            if hasattr(arg, "client"):
+                request = arg
+                break
+        if request is None:
+            for v in kwargs.values():
+                if hasattr(v, "client"):
+                    request = v
+                    break
+        if not request:
+            return
+        eval_header = str(request.headers.get("X-Evaluation-Run", "")).strip().lower()
+        eval_secret = request.headers.get("X-Admin-Secret", "")
+        if eval_header in {"1", "true", "yes"} and ADMIN_SECRET and eval_secret == ADMIN_SECRET:
+            return
+        key = _rate_limit_key(endpoint_name, request)
+        now = time.time()
+        bucket = _rate_limit_store.setdefault(key, {"count": 0, "reset_at": now + window_seconds})
+        if now > bucket["reset_at"]:
+            bucket["count"] = 0
+            bucket["reset_at"] = now + window_seconds
+        bucket["count"] += 1
+        if bucket["count"] > max_requests:
+            raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again later.")
+
     def decorator(func):
         from functools import wraps
+        if py_inspect.iscoroutinefunction(func):
+            @wraps(func)
+            async def async_wrapper(*args, **kwargs):
+                _check_limit(args, kwargs)
+                return await func(*args, **kwargs)
+            return async_wrapper
+
         @wraps(func)
         def wrapper(*args, **kwargs):
-            request = None
-            for arg in args:
-                if hasattr(arg, "client"):
-                    request = arg
-                    break
-            if request is None:
-                for v in kwargs.values():
-                    if hasattr(v, "client"):
-                        request = v
-                        break
-            if request:
-                eval_header = str(request.headers.get("X-Evaluation-Run", "")).strip().lower()
-                eval_secret = request.headers.get("X-Admin-Secret", "")
-                if eval_header in {"1", "true", "yes"} and ADMIN_SECRET and eval_secret == ADMIN_SECRET:
-                    return func(*args, **kwargs)
-                key = _rate_limit_key(endpoint_name, request)
-                now = time.time()
-                bucket = _rate_limit_store.setdefault(key, {"count": 0, "reset_at": now + window_seconds})
-                if now > bucket["reset_at"]:
-                    bucket["count"] = 0
-                    bucket["reset_at"] = now + window_seconds
-                bucket["count"] += 1
-                if bucket["count"] > max_requests:
-                    raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again later.")
+            _check_limit(args, kwargs)
             return func(*args, **kwargs)
         return wrapper
     return decorator

@@ -71,6 +71,14 @@ def test_security_client_uses_long_timeout_for_background_operations(monkeypatch
     assert all(timeout >= 600.0 for _path, timeout in calls)
 
 
+def test_security_api_rate_limit_awaits_async_endpoints():
+    source = Path("SECURITY/api_main.py").read_text(encoding="utf-8")
+
+    assert "py_inspect.iscoroutinefunction(func)" in source
+    assert "async def async_wrapper" in source
+    assert "return await func(*args, **kwargs)" in source
+
+
 def test_background_job_manager_rejects_duplicate_active_job():
     manager = BackgroundJobManager()
     manager.set_rate_limit("security_full_backup", 0)
@@ -416,6 +424,9 @@ def test_vm1_frontend_rebuild_does_not_recreate_backend_dependency():
 
     assert '["docker", "compose", "up", "-d", "--no-deps", "--build", "frontend"]' in reporter
     assert '["docker-compose", "up", "-d", "--no-deps", "--build", "frontend"]' in reporter
+    assert "_queue_frontend_rebuild(rel_path)" in reporter
+    assert "_flush_frontend_rebuild()" in reporter
+    assert "Frontend rebuilt and restarted after restoring {restored_count} frontend file(s)" in reporter
 
 
 def test_frontend_dockerfile_uses_static_nginx_server():

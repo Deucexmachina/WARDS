@@ -51,6 +51,7 @@ MAX_MANIFEST_CONTENT_BYTES = int(os.getenv("VM1_MAX_MANIFEST_CONTENT_BYTES", "52
 
 CUSTOM_FOLDERS: list[Path] = []
 DYNAMIC_SCAN_INTERVAL = SCAN_INTERVAL
+FRONTEND_REBUILD_REASONS: set[str] = set()
 
 LOG_PREFIX = "[VM1-REPORTER]"
 
@@ -343,6 +344,7 @@ def send_manifest(files: list[dict]) -> bool:
                     )
                 except Exception:
                     pass
+            _flush_frontend_rebuild()
             return True
         log(f"Manifest upload failed: HTTP {resp.status_code} {resp.text[:200]}")
         return False
@@ -411,11 +413,23 @@ def scan_and_send_manifest(reason: str) -> bool:
         return False
 
 
-def _trigger_docker_rebuild(rel_path: str):
-    """Rebuild and restart frontend container if a restored file affects the built output."""
+def _restore_affects_frontend(rel_path: str) -> bool:
     lower = rel_path.lower()
-    if not any(p in lower for p in ("/frontend/", "/public/", "index.html")):
+    return any(p in lower for p in ("/frontend/", "/public/", "index.html"))
+
+
+def _queue_frontend_rebuild(rel_path: str):
+    if _restore_affects_frontend(rel_path):
+        FRONTEND_REBUILD_REASONS.add(rel_path)
+
+
+def _flush_frontend_rebuild():
+    """Rebuild and restart frontend container once after a batch of restored frontend files."""
+    if not FRONTEND_REBUILD_REASONS:
         return
+    restored_count = len(FRONTEND_REBUILD_REASONS)
+    sample_path = sorted(FRONTEND_REBUILD_REASONS)[0]
+    FRONTEND_REBUILD_REASONS.clear()
 
     # Find a directory that contains docker-compose.yml so the build
     # uses the correct compose definition and build context.
@@ -445,7 +459,7 @@ def _trigger_docker_rebuild(rel_path: str):
             try:
                 result = subprocess.run(cmd, **kwargs)
                 if result.returncode == 0:
-                    log(f"Frontend rebuilt and restarted after restoring {rel_path}")
+                    log(f"Frontend rebuilt and restarted after restoring {restored_count} frontend file(s); sample={sample_path}")
                     return
                 break  # command exists but failed; don't try the other variant
             except FileNotFoundError:
@@ -527,7 +541,7 @@ def apply_restore_command(cmd: dict) -> bool:
             return False
 
         log(f"Restored {rel_path} (hash: {actual_hash})")
-        _trigger_docker_rebuild(rel_path)
+        _queue_frontend_rebuild(rel_path)
         return True
     except Exception as exc:
         log(f"Restore failed for {rel_path}: {exc}")
@@ -559,6 +573,7 @@ def poll_restore_commands():
                 },
                 timeout=10,
             )
+        _flush_frontend_rebuild()
     except Exception as exc:
         log(f"Restore poll exception: {exc}")
 
