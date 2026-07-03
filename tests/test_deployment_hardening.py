@@ -411,6 +411,13 @@ def test_vm1_config_exposes_force_scan_token_for_reporter():
     assert 'scan_and_send_manifest("forced" if force_scan_due else "interval")' in reporter
 
 
+def test_vm1_frontend_rebuild_does_not_recreate_backend_dependency():
+    reporter = (Path(__file__).resolve().parents[1] / "scripts" / "vm1_security_reporter.py").read_text()
+
+    assert '["docker", "compose", "up", "-d", "--no-deps", "--build", "frontend"]' in reporter
+    assert '["docker-compose", "up", "-d", "--no-deps", "--build", "frontend"]' in reporter
+
+
 def test_frontend_dockerfile_uses_static_nginx_server():
     dockerfile = (Path(__file__).resolve().parents[1] / "WARDS" / "frontend" / "Dockerfile").read_text()
 

@@ -16,16 +16,18 @@ from datetime import datetime, timedelta
 
 def start_scheduled_backup_runner():
     """Start the background thread that runs scheduled backups."""
+    check_interval = max(10, int(os.getenv("SCHEDULED_BACKUP_CHECK_INTERVAL_SECONDS", "60")))
     thread = threading.Thread(
         target=_scheduled_backup_loop,
+        args=(check_interval,),
         daemon=True,
         name="wards-scheduled-backup",
     )
     thread.start()
-    print("[SCHEDULED BACKUP] runner started; checking every 60 seconds")
+    print(f"[SCHEDULED BACKUP] runner started; checking backup schedule every {check_interval} seconds")
 
 
-def _scheduled_backup_loop():
+def _scheduled_backup_loop(check_interval: int):
     from database.models import SessionLocal, Backup, ActivityLog
     from utils.backup_engine import create_database_backup as create_vm1_database_backup, prune_database_backup_records
     from utils.security_client import get_setting, set_setting, create_full_system_backup, upload_vm1_database_backup
@@ -33,7 +35,7 @@ def _scheduled_backup_loop():
     _running = False
 
     while True:
-        time.sleep(60)
+        time.sleep(check_interval)
 
         try:
             db = SessionLocal()

@@ -437,8 +437,8 @@ def _trigger_docker_rebuild(rel_path: str):
 
         # docker compose (new plugin) vs docker-compose (legacy standalone)
         rebuild_cmds = [
-            ["docker", "compose", "up", "-d", "--build", "frontend"],
-            ["docker-compose", "up", "-d", "--build", "frontend"],
+            ["docker", "compose", "up", "-d", "--no-deps", "--build", "frontend"],
+            ["docker-compose", "up", "-d", "--no-deps", "--build", "frontend"],
         ]
         result = None
         for cmd in rebuild_cmds:
