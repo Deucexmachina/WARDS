@@ -236,7 +236,10 @@ def api_scan_file(payload: ScanFileRequest, db=Depends(get_db)):
 @app.post("/v1/scan/all", dependencies=[Depends(require_api_key)])
 @rate_limit("scan_all", max_requests=3, window_seconds=60)
 def api_scan_all(payload: dict = {}, request: Request = None, db=Depends(get_db)):
-    detections = scan_all_files(db, context=payload.get("context", {}))
+    context = payload.get("context", {}) or {}
+    if context.get("manual_scan"):
+        set_setting(db, "vm1_scan_requested_at", now_utc().isoformat(), "manual_scan")
+    detections = scan_all_files(db, context=context)
     return {"detections": [serialize_detection(d) for d in detections]}
 
 
@@ -422,6 +425,7 @@ def start_security_monitor_if_enabled():
                 monitoring_enabled = (get_setting(db, "monitoring_enabled", "true") or "true").lower() == "true"
                 configured_interval = max(5, int(get_setting(db, "scan_interval_seconds", str(default_interval))))
                 if monitoring_enabled:
+                    set_setting(db, "vm1_scan_requested_at", now_utc().isoformat(), "interval_scanner")
                     detections = scan_all_files(db, context={"background_monitor": True})
                     set_setting(db, "last_scan_at", now_utc().isoformat(), "interval_scanner")
                     set_setting(db, "last_interval_scan_status", "success", "interval_scanner")
@@ -540,6 +544,8 @@ def api_vm1_config(db=Depends(get_db)):
         "vm1_custom_folders": custom_folders,
         "monitoring_enabled": (get_setting(db, "monitoring_enabled", "true") or "true").lower() == "true",
         "deployment_paused": is_deployment_in_progress(db),
+        "force_scan_token": get_setting(db, "vm1_scan_requested_at", ""),
+        "last_manifest_at": get_setting(db, "vm1_last_manifest_at", ""),
     }
 
 

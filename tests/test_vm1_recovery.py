@@ -2,6 +2,7 @@
 
 import json
 import hashlib
+import importlib.util
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +13,7 @@ import pytest
 from SECURITY.security_engine import (
     _create_vm1_restore_command,
     _has_pending_vm1_restore_for_file,
+    IMPORTANT_SYSTEM_ALERT_KEYS,
     classify,
     get_pending_vm1_restore_commands,
     vm1_bulk_changes_match_git_head,
@@ -119,3 +121,26 @@ def test_bulk_vm1_changes_require_git_head_confirmation():
     ]) is False
 
     assert vm1_bulk_changes_match_git_head([]) is False
+
+
+def test_vm1_reporter_config_sync_returns_force_scan_token(monkeypatch):
+    reporter_path = Path(__file__).resolve().parents[1] / "scripts" / "vm1_security_reporter.py"
+    spec = importlib.util.spec_from_file_location("vm1_security_reporter_test", reporter_path)
+    reporter = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(reporter)
+
+    monkeypatch.setattr(reporter, "MAX_DYNAMIC_SCAN_INTERVAL", 60)
+    token = reporter.apply_vm2_config({
+        "scan_interval_seconds": 300,
+        "vm1_custom_folders": ["/opt/wards/custom"],
+        "force_scan_token": "2026-07-03T13:42:07",
+    })
+
+    assert token == "2026-07-03T13:42:07"
+    assert reporter.DYNAMIC_SCAN_INTERVAL == 60
+    assert reporter.CUSTOM_FOLDERS[0].parts[-3:] == ("opt", "wards", "custom")
+
+
+def test_auto_recovery_alerts_are_email_eligible():
+    assert "incident_auto_recovery" in IMPORTANT_SYSTEM_ALERT_KEYS

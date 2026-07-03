@@ -634,6 +634,7 @@ IMPORTANT_SYSTEM_ALERT_KEYS = {
     "recovery_completed",
     "recovery_failed",
     "incident_created",
+    "incident_auto_recovery",
     "incident_resolved",
     "incident_false_positive",
     "vpn_risk",
@@ -768,6 +769,29 @@ def create_incident_system_alert(db: Session, incident: SecurityIncident, detect
         f"{dedupe_key}: {incident.description or 'Security incident recorded.'} "
         f"Detection: {detection_summary} Recovery: {recovery_summary}"
     )
+    incident_payload = {
+        "id": incident.id,
+        "severity_level": incident.severity_level,
+        "status": incident.status,
+        "incident_type": incident.incident_type,
+        "description": incident.description,
+    }
+    detection_payload = None
+    if detection:
+        detection_payload = {
+            "id": detection.id,
+            "target_name": detection.target_name,
+            "target_type": detection.target_type,
+            "change_type": detection.change_type,
+            "trigger_summary": detection.trigger_summary,
+            "ai_score": detection.ai_score,
+            "ai_prediction": detection.ai_prediction,
+            "confidence": detection.confidence,
+            "severity_level": detection.severity_level,
+            "nist_category": detection.nist_category,
+            "enisa_threat_type": detection.enisa_threat_type,
+        }
+    recoveries_payload = [serialize_recovery(recovery)] if recovery else None
     return create_system_alert(
         db,
         "incident_created",
@@ -775,6 +799,9 @@ def create_incident_system_alert(db: Session, incident: SecurityIncident, detect
         incident.severity_level or "high",
         title=f"Security Incident {dedupe_key}",
         dedupe_key=dedupe_key,
+        incident=incident_payload,
+        detection=detection_payload,
+        recoveries=recoveries_payload,
     )
 
 
@@ -6966,6 +6993,18 @@ def dashboard_payload(db: Session) -> dict:
     monitoring_enabled = (get_setting(db, "monitoring_enabled", "false") or "false").lower() == "true"
     ml_model_trained = IFOREST_MODEL_PATH.exists()
     iforest_metadata = load_isolation_forest_metadata()
+    vm1_last_manifest_at = get_setting(db, "vm1_last_manifest_at", "")
+    vm1_scan_requested_at = get_setting(db, "vm1_scan_requested_at", "")
+    vm1_manifest_age_seconds = None
+    vm1_manifest_status = "not received"
+    if vm1_last_manifest_at:
+        try:
+            last_manifest_dt = datetime.fromisoformat(vm1_last_manifest_at.replace("Z", "+00:00")).replace(tzinfo=None)
+            vm1_manifest_age_seconds = max(0, int((datetime.utcnow() - last_manifest_dt).total_seconds()))
+            configured_scan_seconds = max(5, int(get_setting(db, "scan_interval_seconds", "30")))
+            vm1_manifest_status = "fresh" if vm1_manifest_age_seconds <= max(120, configured_scan_seconds * 3) else "stale"
+        except Exception:
+            vm1_manifest_status = "invalid timestamp"
 
     # Today's counts
     today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -7018,7 +7057,10 @@ def dashboard_payload(db: Session) -> dict:
             "deployment_in_progress": "true" if is_deployment_in_progress(db) else "false",
             "deployment_target_commit": get_setting(db, "deployment_target_commit", "") or "not set",
             "deployment_vm1_baseline_ready": get_setting(db, "deployment_vm1_baseline_ready", "false"),
-            "vm1_last_manifest_at": get_setting(db, "vm1_last_manifest_at", "") or "not received",
+            "vm1_last_manifest_at": vm1_last_manifest_at or "not received",
+            "vm1_manifest_status": vm1_manifest_status,
+            "vm1_manifest_age_seconds": vm1_manifest_age_seconds,
+            "vm1_scan_requested_at": vm1_scan_requested_at or "not requested",
             "vm1_last_manifest_commit": get_setting(db, "vm1_last_manifest_commit", "") or "not received",
             "vm1_last_heartbeat_at": get_setting(db, "vm1_last_heartbeat_at", "") or "not received",
             "vm1_last_heartbeat_status": get_setting(db, "vm1_last_heartbeat_status", "unknown"),
@@ -8056,12 +8098,22 @@ def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type
             )
             db.add(recovery)
             db.commit()
+            db.refresh(recovery)
             create_system_alert(
                 db,
                 "incident_auto_recovery",
                 f"SEC-{incident.id}: Auto-recovery applied for {entry.relative_path} (high-risk / high-severity). Admin review required.",
                 incident.severity_level or "low",
                 dedupe_key=f"SEC-{incident.id}",
+                incident={
+                    "id": incident.id,
+                    "severity_level": incident.severity_level,
+                    "status": incident.status,
+                    "incident_type": incident.incident_type,
+                    "description": incident.description,
+                },
+                detection=serialize_detection(detection),
+                recoveries=[serialize_recovery(recovery)],
             )
         else:
             incident.response_action = "vm1_restore_pending"

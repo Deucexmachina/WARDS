@@ -401,6 +401,16 @@ def test_file_status_scan_and_recover_routes_still_proxy_to_vm2():
     assert 'return _sync_post("/v1/files/recover"' in client
 
 
+def test_vm1_config_exposes_force_scan_token_for_reporter():
+    security_api = (Path(__file__).resolve().parents[1] / "SECURITY" / "api_main.py").read_text()
+    reporter = (Path(__file__).resolve().parents[1] / "scripts" / "vm1_security_reporter.py").read_text()
+
+    assert '"force_scan_token": get_setting(db, "vm1_scan_requested_at", "")' in security_api
+    assert 'set_setting(db, "vm1_scan_requested_at", now_utc().isoformat(), "manual_scan")' in security_api
+    assert 'VM2 requested immediate manifest scan' in reporter
+    assert 'scan_and_send_manifest("forced" if force_scan_due else "interval")' in reporter
+
+
 def test_frontend_dockerfile_uses_static_nginx_server():
     dockerfile = (Path(__file__).resolve().parents[1] / "WARDS" / "frontend" / "Dockerfile").read_text()
 

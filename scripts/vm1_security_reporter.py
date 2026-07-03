@@ -42,6 +42,8 @@ DEPLOY_DIR = Path(os.getenv("DEPLOY_DIR", "/opt/wards/app"))
 SCAN_INTERVAL = max(5, int(os.getenv("VM1_REPORT_INTERVAL", "10")))
 HEARTBEAT_INTERVAL = max(5, int(os.getenv("VM1_HEARTBEAT_INTERVAL", "10")))
 RESTORE_POLL_INTERVAL = max(3, int(os.getenv("VM1_RESTORE_POLL_INTERVAL", "5")))
+CONFIG_FETCH_INTERVAL = max(5, int(os.getenv("VM1_CONFIG_FETCH_INTERVAL", "10")))
+MAX_DYNAMIC_SCAN_INTERVAL = max(5, int(os.getenv("VM1_MAX_REPORT_INTERVAL", "60")))
 SNAPSHOT_DIR = Path(os.getenv("VM1_SNAPSHOT_DIR", "/app/.vm1_snapshots"))
 MAX_FILE_SNAPSHOT_BYTES = int(os.getenv("VM1_MAX_SNAPSHOT_BYTES", "2097152"))  # 2 MB
 
@@ -165,12 +167,18 @@ def _iter_root_files(root_name: str, root_path: Path):
                     git_head_match = True
             except ValueError:
                 pass  # path is outside git_root
+        try:
+            stat = path.stat()
+            current_hash = sha256_file(path)
+        except Exception as exc:
+            log(f"Skipping unreadable file {path}: {exc}")
+            continue
         yield {
             "relative_path": f"{root_name}/{rel}",
             "folder_root": f"VM1_{root_name}",
             "file_path": str(path),
-            "size_bytes": path.stat().st_size,
-            "current_hash": sha256_file(path),
+            "size_bytes": stat.st_size,
+            "current_hash": current_hash,
             "content_b64": file_content_b64(path),
             "git_head_match": git_head_match,
         }
@@ -190,6 +198,7 @@ def send_manifest(files: list[dict]) -> bool:
         log("SECURITY_API_URL or SECURITY_API_KEY not set; skipping manifest upload")
         return False
     try:
+        log(f"Uploading manifest with {len(files)} file(s)")
         resp = requests.post(
             f"{SECURITY_API_URL}/v1/vm1/files/register",
             headers={"X-API-Key": API_KEY, "Content-Type": "application/json"},
@@ -255,9 +264,37 @@ def fetch_vm2_config() -> dict:
         )
         if resp.status_code == 200:
             return resp.json()
+        log(f"Config fetch failed: HTTP {resp.status_code} {resp.text[:200]}")
     except Exception as exc:
         log(f"Config fetch exception: {exc}")
     return {}
+
+
+def apply_vm2_config(cfg: dict) -> str:
+    global DYNAMIC_SCAN_INTERVAL, CUSTOM_FOLDERS
+    if not cfg:
+        return ""
+    new_interval = cfg.get("scan_interval_seconds")
+    if new_interval and isinstance(new_interval, int):
+        DYNAMIC_SCAN_INTERVAL = min(MAX_DYNAMIC_SCAN_INTERVAL, max(5, new_interval))
+    custom = cfg.get("vm1_custom_folders", [])
+    CUSTOM_FOLDERS = [Path(p) for p in custom if p]
+    if new_interval:
+        log(f"Config synced from VM2: interval={DYNAMIC_SCAN_INTERVAL}s custom_folders={len(CUSTOM_FOLDERS)}")
+    return str(cfg.get("force_scan_token") or "")
+
+
+def scan_and_send_manifest(reason: str) -> bool:
+    try:
+        log(f"Preparing VM1 file manifest ({reason})")
+        files = list(iter_monitored_files())
+        snapshot_files(files)
+        sent = send_manifest(files)
+        poll_restore_commands()
+        return sent
+    except Exception as exc:
+        log(f"Manifest scan/upload failed ({reason}): {exc}")
+        return False
 
 
 def _trigger_docker_rebuild(rel_path: str):
@@ -436,40 +473,38 @@ def main_loop():
     last_heartbeat = 0
     last_restore_poll = 0
     last_config_fetch = 0
+    last_force_scan_token = ""
+    force_scan_due = False
 
     while True:
         now = time.time()
 
-        # Fetch unified config from VM2 every 60s
-        if now - last_config_fetch >= 60:
+        # Fetch unified config from VM2 frequently so manual scans can force
+        # a fresh manifest without waiting for a long report interval.
+        if now - last_config_fetch >= CONFIG_FETCH_INTERVAL:
             cfg = fetch_vm2_config()
-            if cfg:
-                new_interval = cfg.get("scan_interval_seconds")
-                if new_interval and isinstance(new_interval, int):
-                    # Allow VM2 to control scan rate for demo/deployment flexibility.
-                    # Floor at 5s to prevent hammering; no ceiling so longer intervals
-                    # (e.g. 300s) can be used to delay detection during demonstrations.
-                    DYNAMIC_SCAN_INTERVAL = max(5, new_interval)
-                custom = cfg.get("vm1_custom_folders", [])
-                CUSTOM_FOLDERS = [Path(p) for p in custom if p]
-                if new_interval:
-                    log(f"Config synced from VM2: interval={DYNAMIC_SCAN_INTERVAL}s custom_folders={len(CUSTOM_FOLDERS)}")
+            force_scan_token = apply_vm2_config(cfg)
+            if force_scan_token and force_scan_token != last_force_scan_token:
+                last_force_scan_token = force_scan_token
+                force_scan_due = True
+                log(f"VM2 requested immediate manifest scan: {force_scan_token}")
             last_config_fetch = now
 
         if now - last_heartbeat >= HEARTBEAT_INTERVAL:
             if send_heartbeat():
                 last_heartbeat = now
 
-        if now - last_scan >= DYNAMIC_SCAN_INTERVAL:
+        if force_scan_due or now - last_scan >= DYNAMIC_SCAN_INTERVAL:
             cfg = fetch_vm2_config()
+            force_scan_token = apply_vm2_config(cfg)
+            if force_scan_token and force_scan_token != last_force_scan_token:
+                last_force_scan_token = force_scan_token
+                force_scan_due = True
+                log(f"VM2 requested immediate manifest scan: {force_scan_token}")
             if cfg.get("deployment_paused"):
                 log("VM2 deployment is paused — change detections suppressed, but manifest will still be uploaded")
-            files = list(iter_monitored_files())
-            snapshot_files(files)
-            send_manifest(files)
-            # Immediately poll for any restore commands created from this manifest
-            # instead of waiting for the next restore-poll interval.
-            poll_restore_commands()
+            scan_and_send_manifest("forced" if force_scan_due else "interval")
+            force_scan_due = False
             last_scan = now
 
         if now - last_restore_poll >= RESTORE_POLL_INTERVAL:
