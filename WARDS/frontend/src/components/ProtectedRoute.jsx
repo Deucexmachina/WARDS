@@ -20,6 +20,7 @@ const ProtectedRoute = ({ children }) => {
   }, []);
 
   const clearAdminSession = () => {
+    localStorage.removeItem('wardsPortal');
     localStorage.removeItem('adminToken');
     localStorage.removeItem('adminUser');
     localStorage.removeItem('adminAuthenticatedAt');
