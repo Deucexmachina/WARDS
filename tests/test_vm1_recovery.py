@@ -144,3 +144,79 @@ def test_vm1_reporter_config_sync_returns_force_scan_token(monkeypatch):
 
 def test_auto_recovery_alerts_are_email_eligible():
     assert "incident_auto_recovery" in IMPORTANT_SYSTEM_ALERT_KEYS
+
+
+def test_vm1_reporter_excludes_vendor_dirs_and_budgets_inline_content(monkeypatch, tmp_path):
+    reporter_path = Path(__file__).resolve().parents[1] / "scripts" / "vm1_security_reporter.py"
+    spec = importlib.util.spec_from_file_location("vm1_security_reporter_budget_test", reporter_path)
+    reporter = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(reporter)
+
+    root = tmp_path / "WARDS"
+    (root / "frontend").mkdir(parents=True)
+    (root / "frontend" / "index.html").write_text("<html>clean</html>")
+    (root / "node_modules" / "pkg").mkdir(parents=True)
+    (root / "node_modules" / "pkg" / "ignored.js").write_text("ignored")
+    (root / "backend").mkdir()
+    (root / "backend" / "large.py").write_text("x" * 200)
+
+    monkeypatch.setattr(reporter, "MONITORED_ROOTS", {"WARDS": root})
+    monkeypatch.setattr(reporter, "CUSTOM_FOLDERS", [])
+    monkeypatch.setattr(reporter, "MAX_INLINE_CONTENT_BYTES", 64)
+    monkeypatch.setattr(reporter, "MAX_MANIFEST_CONTENT_BYTES", 64)
+
+    files = list(reporter.iter_monitored_files())
+    by_path = {item["relative_path"]: item for item in files}
+
+    assert "WARDS/frontend/index.html" in by_path
+    assert "WARDS/node_modules/pkg/ignored.js" not in by_path
+    assert by_path["WARDS/frontend/index.html"]["content_b64"]
+    assert by_path["WARDS/backend/large.py"]["content_b64"] is None
+
+
+def test_vm1_reporter_retries_413_with_hash_only_manifest(monkeypatch):
+    reporter_path = Path(__file__).resolve().parents[1] / "scripts" / "vm1_security_reporter.py"
+    spec = importlib.util.spec_from_file_location("vm1_security_reporter_retry_test", reporter_path)
+    reporter = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(reporter)
+
+    posted_payloads = []
+
+    class Response:
+        def __init__(self, status_code, payload=None, text=""):
+            self.status_code = status_code
+            self._payload = payload or {}
+            self.text = text
+
+        def json(self):
+            return self._payload
+
+    def fake_post(_url, headers=None, json=None, timeout=None):
+        posted_payloads.append(json)
+        if len(posted_payloads) == 1:
+            return Response(413, text="too large")
+        return Response(200, {"registered": 1, "changed": 0, "detections": 0, "restore_commands": []})
+
+    monkeypatch.setattr(reporter, "SECURITY_API_URL", "https://vm2.local")
+    monkeypatch.setattr(reporter, "API_KEY", "secret")
+    monkeypatch.setattr(reporter, "current_git_commit", lambda: "abc123")
+    monkeypatch.setattr(reporter.requests, "post", fake_post)
+
+    sent = reporter.send_manifest([
+        {
+            "relative_path": "WARDS/frontend/index.html",
+            "folder_root": "VM1_WARDS",
+            "file_path": "/opt/wards/app/WARDS/frontend/index.html",
+            "size_bytes": 18,
+            "current_hash": "a" * 64,
+            "content_b64": "PGh0bWw+PC9odG1sPg==",
+            "git_head_match": False,
+        }
+    ])
+
+    assert sent is True
+    assert len(posted_payloads) == 2
+    assert posted_payloads[0]["files"][0]["content_b64"]
+    assert posted_payloads[1]["files"][0]["content_b64"] is None

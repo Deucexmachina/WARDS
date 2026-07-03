@@ -46,11 +46,70 @@ CONFIG_FETCH_INTERVAL = max(5, int(os.getenv("VM1_CONFIG_FETCH_INTERVAL", "10"))
 MAX_DYNAMIC_SCAN_INTERVAL = max(5, int(os.getenv("VM1_MAX_REPORT_INTERVAL", "60")))
 SNAPSHOT_DIR = Path(os.getenv("VM1_SNAPSHOT_DIR", "/app/.vm1_snapshots"))
 MAX_FILE_SNAPSHOT_BYTES = int(os.getenv("VM1_MAX_SNAPSHOT_BYTES", "2097152"))  # 2 MB
+MAX_INLINE_CONTENT_BYTES = int(os.getenv("VM1_MAX_INLINE_CONTENT_BYTES", "131072"))  # 128 KB per file
+MAX_MANIFEST_CONTENT_BYTES = int(os.getenv("VM1_MAX_MANIFEST_CONTENT_BYTES", "524288"))  # 512 KB total
 
 CUSTOM_FOLDERS: list[Path] = []
 DYNAMIC_SCAN_INTERVAL = SCAN_INTERVAL
 
 LOG_PREFIX = "[VM1-REPORTER]"
+
+EXCLUDED_DIRS = {
+    ".git",
+    "__pycache__",
+    ".pytest_cache",
+    "node_modules",
+    "venv",
+    ".venv",
+    "dist",
+    "build",
+    "output",
+    "SECURITY",
+    "local_backups",
+    "QUARANTINE",
+    "DEFACEMENT",
+    "OCR",
+}
+
+MONITORED_SUFFIXES = {
+    ".py",
+    ".js",
+    ".jsx",
+    ".ts",
+    ".tsx",
+    ".html",
+    ".css",
+    ".json",
+    ".md",
+    ".txt",
+    ".xml",
+    ".yml",
+    ".yaml",
+    ".sql",
+    ".db",
+    ".sqlite",
+    ".sqlite3",
+    ".php",
+    ".phtml",
+    ".pkl",
+    ".csv",
+}
+
+INLINE_CONTENT_SUFFIXES = {
+    ".py",
+    ".js",
+    ".jsx",
+    ".ts",
+    ".tsx",
+    ".html",
+    ".css",
+    ".json",
+    ".php",
+    ".phtml",
+}
+
+MONITORED_SPECIAL_FILENAMES = {"dockerfile", ".env", ".gitignore", ".gitkeep"}
+MONITORED_SPECIAL_NAME_SUFFIXES = (".env", ".env.example", "env.example")
 
 
 def log(msg: str):
@@ -94,6 +153,31 @@ def file_content_b64(path: Path) -> str | None:
             return base64.b64encode(f.read()).decode()
     except Exception:
         return None
+
+
+def _path_has_excluded_part(path: Path) -> bool:
+    return any(part in EXCLUDED_DIRS or part.lower() in {item.lower() for item in EXCLUDED_DIRS} for part in path.parts)
+
+
+def _file_monitorable(path: Path) -> bool:
+    lower_name = path.name.lower()
+    suffix = path.suffix.lower()
+    if suffix in MONITORED_SUFFIXES:
+        return True
+    if lower_name in MONITORED_SPECIAL_FILENAMES:
+        return True
+    if any(lower_name.endswith(item) for item in MONITORED_SPECIAL_NAME_SUFFIXES):
+        return True
+    return False
+
+
+def _should_inline_content(path: Path, size_bytes: int) -> bool:
+    if size_bytes > MAX_INLINE_CONTENT_BYTES:
+        return False
+    lower_name = path.name.lower()
+    if path.suffix.lower() in INLINE_CONTENT_SUFFIXES:
+        return True
+    return lower_name in MONITORED_SPECIAL_FILENAMES or any(lower_name.endswith(item) for item in MONITORED_SPECIAL_NAME_SUFFIXES)
 
 
 def _git_info_for_root(root_path: Path) -> tuple[Path | None, set[str], set[str]]:
@@ -155,6 +239,10 @@ def _iter_root_files(root_name: str, root_path: Path):
     for path in root_path.rglob("*"):
         if not path.is_file():
             continue
+        if _path_has_excluded_part(path.relative_to(root_path)):
+            continue
+        if not _file_monitorable(path):
+            continue
         # Skip environment files — they change as part of normal operations
         if path.name.lower() == ".env":
             continue
@@ -179,32 +267,58 @@ def _iter_root_files(root_name: str, root_path: Path):
             "file_path": str(path),
             "size_bytes": stat.st_size,
             "current_hash": current_hash,
-            "content_b64": file_content_b64(path),
+            "content_b64": None,
+            "inline_candidate": _should_inline_content(path, stat.st_size),
             "git_head_match": git_head_match,
         }
 
 
 def iter_monitored_files():
+    inline_budget = MAX_MANIFEST_CONTENT_BYTES
     for root_name, root_path in MONITORED_ROOTS.items():
-        yield from _iter_root_files(root_name, root_path)
+        for item in _iter_root_files(root_name, root_path):
+            if item.pop("inline_candidate", False) and item["size_bytes"] <= inline_budget:
+                item["content_b64"] = file_content_b64(Path(item["file_path"]))
+                if item["content_b64"]:
+                    inline_budget -= item["size_bytes"]
+            yield item
     for custom_path in CUSTOM_FOLDERS:
         if custom_path.exists() and custom_path.is_dir():
             root_name = custom_path.name
-            yield from _iter_root_files(root_name, custom_path)
+            for item in _iter_root_files(root_name, custom_path):
+                if item.pop("inline_candidate", False) and item["size_bytes"] <= inline_budget:
+                    item["content_b64"] = file_content_b64(Path(item["file_path"]))
+                    if item["content_b64"]:
+                        inline_budget -= item["size_bytes"]
+                yield item
 
 
 def send_manifest(files: list[dict]) -> bool:
     if not SECURITY_API_URL or not API_KEY:
         log("SECURITY_API_URL or SECURITY_API_KEY not set; skipping manifest upload")
         return False
-    try:
-        log(f"Uploading manifest with {len(files)} file(s)")
-        resp = requests.post(
+    payload = {"files": files, "commit": current_git_commit()}
+
+    def _post_manifest(manifest_payload: dict):
+        return requests.post(
             f"{SECURITY_API_URL}/v1/vm1/files/register",
             headers={"X-API-Key": API_KEY, "Content-Type": "application/json"},
-            json={"files": files, "commit": current_git_commit()},
+            json=manifest_payload,
             timeout=30,
         )
+
+    try:
+        inline_count = sum(1 for item in files if item.get("content_b64"))
+        log(f"Uploading manifest with {len(files)} file(s), inline_content={inline_count}")
+        resp = _post_manifest(payload)
+        if resp.status_code == 413:
+            log("Manifest upload hit HTTP 413; retrying with hash-only manifest")
+            hash_only_files = []
+            for item in files:
+                compact = dict(item)
+                compact["content_b64"] = None
+                hash_only_files.append(compact)
+            resp = _post_manifest({"files": hash_only_files, "commit": payload["commit"]})
         if resp.status_code == 200:
             data = resp.json()
             log(

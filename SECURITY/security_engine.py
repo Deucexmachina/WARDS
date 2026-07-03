@@ -2115,9 +2115,9 @@ def is_deployment_in_progress(db: Session) -> bool:
     setting = db.query(SecuritySetting).filter(SecuritySetting.key == "deployment_in_progress").first()
     if not setting or not setting.value or setting.value.lower() != "true":
         return False
-    # Auto-clear stale deployment pause (> 30 minutes) so a failed webhook unpause
+    # Auto-clear stale deployment pause so a failed webhook unpause
     # doesn't leave monitoring disabled forever.
-    stale_threshold = 1800  # seconds
+    stale_threshold = max(300, int(os.getenv("SECURITY_DEPLOYMENT_PAUSE_STALE_SECONDS", "600")))
     if setting.updated_at and (now_utc() - setting.updated_at).total_seconds() > stale_threshold:
         logger.warning(
             "Deployment pause is stale (updated_at=%s, threshold=%ds). Auto-clearing.",
