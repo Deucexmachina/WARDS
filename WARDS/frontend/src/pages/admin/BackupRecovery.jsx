@@ -140,13 +140,16 @@ const Section = ({ title, children, actions, className = '' }) => (
 );
 
 const MiniChart = ({ data, empty = 'No data yet.' }) => {
+  const [expanded, setExpanded] = useState(false);
   const entries = Object.entries(data || {}).filter(([, value]) => Number(value) > 0);
   const max = Math.max(1, ...entries.map(([, value]) => Number(value)));
   if (!entries.length) return <p className="text-sm text-slate-500">{empty}</p>;
+  const visibleEntries = expanded ? entries : entries.slice(0, 5);
+  const hasOverflow = entries.length > 5;
 
   return (
     <div className="space-y-3">
-      {entries.map(([label, value], index) => (
+      {visibleEntries.map(([label, value], index) => (
         <div key={label} className="grid grid-cols-[5rem_1fr_2rem] items-center gap-3 text-sm sm:grid-cols-[8rem_1fr_2rem]">
           <span className="truncate font-semibold capitalize text-slate-700">{label.replaceAll('_', ' ')}</span>
           <div className="h-3 overflow-hidden rounded-full bg-slate-100">
@@ -155,8 +158,25 @@ const MiniChart = ({ data, empty = 'No data yet.' }) => {
           <span className="text-right font-bold text-slate-700">{value}</span>
         </div>
       ))}
+      {hasOverflow ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+          className="mx-auto mt-2 flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-lg font-bold text-slate-700 transition hover:bg-slate-100"
+          aria-label={expanded ? 'Show fewer chart items' : 'Show all chart items'}
+          title={expanded ? 'Show fewer' : 'Show all'}
+        >
+          {expanded ? '^' : 'v'}
+        </button>
+      ) : null}
     </div>
   );
+};
+
+const healthValueText = (value) => {
+  if (value === null || value === undefined || value === '') return 'Not available';
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  return String(value);
 };
 
 const Filters = ({ filters, setFilters, showType, showStatus, showClassification = false, minDate }) => {
@@ -1416,7 +1436,7 @@ const BackupRecovery = () => {
                   {Object.entries(dashboard?.health || {}).filter(([key]) => key !== 'backup_location').map(([key, value]) => (
                     <div key={key} className="min-w-0 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
                       <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">{key.replaceAll('_', ' ')}</p>
-                      <p className="mt-2 overflow-hidden break-words text-sm font-bold text-slate-900">{value}</p>
+                      <p className="mt-2 overflow-hidden break-words text-sm font-bold text-slate-900">{healthValueText(value)}</p>
                     </div>
                   ))}
                 </div>

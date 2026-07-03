@@ -410,6 +410,15 @@ def get_dashboard(db: Session = Depends(get_db), _=Depends(current_admin)):
             "latest_backup": None,
             "ai_model_status": {"trained": False, "last_trained": None},
             "monitoring_enabled": False,
+            "health": {
+                "security_api": "unavailable",
+                "dashboard_error": str(exc),
+                "monitoring_enabled": "unknown",
+                "deployment_in_progress": "unknown",
+                "last_interval_scan_status": "unknown",
+                "vm1_last_manifest_at": "unknown",
+                "vm1_last_heartbeat_at": "unknown",
+            },
             "_service_warning": str(exc),
         }
 

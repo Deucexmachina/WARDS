@@ -14,6 +14,7 @@ from SECURITY.security_engine import (
     _has_pending_vm1_restore_for_file,
     classify,
     get_pending_vm1_restore_commands,
+    vm1_bulk_changes_match_git_head,
 )
 
 
@@ -102,3 +103,19 @@ def test_create_vm1_restore_command_does_not_truncate_pending_commands(monkeypat
     assert "c0" not in command_ids
     assert "c1" not in command_ids
     assert any(item.get("detection_id") == 99 for item in commands)
+
+
+def test_bulk_vm1_changes_require_git_head_confirmation():
+    clean = SimpleNamespace(relative_path="WARDS/frontend/index.html")
+
+    assert vm1_bulk_changes_match_git_head([
+        (clean, {"git_head_match": True}, "a" * 64),
+        (clean, {"git_head_match": True}, "b" * 64),
+    ]) is True
+
+    assert vm1_bulk_changes_match_git_head([
+        (clean, {"git_head_match": True}, "a" * 64),
+        (clean, {"git_head_match": False}, "b" * 64),
+    ]) is False
+
+    assert vm1_bulk_changes_match_git_head([]) is False

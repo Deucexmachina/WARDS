@@ -7015,6 +7015,14 @@ def dashboard_payload(db: Session) -> dict:
             "ml_model_path": str(IFOREST_MODEL_PATH) if ml_model_trained else None,
             "ai_rules_enabled": sum(1 for item in get_ai_rules(db).values() if item.get("enabled", True)),
             "deployment_mode": get_setting(db, "deployment_mode", "development"),
+            "deployment_in_progress": "true" if is_deployment_in_progress(db) else "false",
+            "deployment_target_commit": get_setting(db, "deployment_target_commit", "") or "not set",
+            "deployment_vm1_baseline_ready": get_setting(db, "deployment_vm1_baseline_ready", "false"),
+            "vm1_last_manifest_at": get_setting(db, "vm1_last_manifest_at", "") or "not received",
+            "vm1_last_manifest_commit": get_setting(db, "vm1_last_manifest_commit", "") or "not received",
+            "vm1_last_heartbeat_at": get_setting(db, "vm1_last_heartbeat_at", "") or "not received",
+            "vm1_last_heartbeat_status": get_setting(db, "vm1_last_heartbeat_status", "unknown"),
+            "startup_baseline_status": get_setting(db, "startup_baseline_status", "unknown"),
             "monitoring_enabled": "true" if monitoring_enabled else "false",
             "scan_interval_seconds": get_setting(db, "scan_interval_seconds", "30"),
             "last_interval_scan_status": get_setting(db, "last_interval_scan_status", "unknown"),
@@ -7878,6 +7886,10 @@ def get_pending_vm1_restore_commands(db: Session) -> list[dict]:
     return pending
 
 
+def vm1_bulk_changes_match_git_head(changed_entries: list[tuple[SecurityMonitoredFile, dict, str]]) -> bool:
+    return bool(changed_entries) and all(bool(item.get("git_head_match")) for _, item, _ in changed_entries)
+
+
 def acknowledge_vm1_restore_command(db: Session, command_id: str, success: bool) -> bool:
     acks = json_loads(get_setting(db, "vm1_restore_acks", "[]"), [])
     acks.append({
@@ -8213,7 +8225,8 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
             is not None
             for entry, _, _ in changed_entries
         )
-        if not has_open_incidents:
+        all_git_head_matches = vm1_bulk_changes_match_git_head(changed_entries)
+        if not has_open_incidents and all_git_head_matches:
             logger.info(
                 "Bulk VM1 file change detected (%d files) — treating as deployment, updating baselines.",
                 len(changed_entries),
@@ -8232,6 +8245,12 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
                 "detections": 0,
                 "deployment_detected": True,
             }
+        if not all_git_head_matches:
+            logger.warning(
+                "Bulk VM1 file change detected (%d files) without deployment/git confirmation; "
+                "continuing with normal detection instead of accepting a new baseline.",
+                len(changed_entries),
+            )
 
     detections = []
     changed = 0

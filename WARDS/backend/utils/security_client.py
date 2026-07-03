@@ -119,7 +119,28 @@ def dashboard_payload(db) -> dict:
     if not SECURITY_API_URL:
         from SECURITY.security_engine import dashboard_payload as _local
         return _local(db)
-    return _cached_fetch("dashboard_payload", _CACHE_TTL["dashboard_payload"], lambda: _sync_get("/v1/dashboard"), default={})
+    default_dashboard = {
+        "system_status": "Unknown",
+        "monitored_files": 0,
+        "active_incidents": 0,
+        "last_scan": None,
+        "next_scheduled_backup": "Not scheduled",
+        "severity_distribution": {},
+        "attack_types": {},
+        "behaviors": {},
+        "today_summary": {"incidents": 0, "detections": 0, "high_severity": 0, "recommendation": "Security API data is unavailable."},
+        "traffic_summaries": {"severity": "No data available.", "attacks": "No data available.", "behaviors": "No data available."},
+        "notification_counts": {"dashboard": 0, "files": 0, "detections": 0, "recoveries": 0, "incidents": 0},
+        "health": {
+            "security_api": "unavailable",
+            "monitoring_enabled": "unknown",
+            "deployment_in_progress": "unknown",
+            "last_interval_scan_status": "unknown",
+            "vm1_last_manifest_at": "unknown",
+            "vm1_last_heartbeat_at": "unknown",
+        },
+    }
+    return _cached_fetch("dashboard_payload", _CACHE_TTL["dashboard_payload"], lambda: _sync_get("/v1/dashboard"), default=default_dashboard)
 
 
 def active_monitored_files_query(db):
@@ -232,6 +253,7 @@ def scan_single_file(db, file_entry, context=None, commit_clean=True):
         "commit_clean": commit_clean,
     }
     resp = _sync_post("/v1/scan/file", payload, timeout=600.0)
+    _invalidate_security_state_cache()
     # VM2 wraps the detection in {"detection": ...}; unwrap it so callers
     # get the same shape as the local function (detection object/dict or None).
     return resp.get("detection") if isinstance(resp, dict) else resp
@@ -241,7 +263,11 @@ def scan_all_files(db, context=None):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import scan_all_files as _local
         return _local(db, context=context)
-    return _sync_post("/v1/scan/all", {"context": context or {}})
+    resp = _sync_post("/v1/scan/all", {"context": context or {}}, timeout=600.0)
+    _invalidate_security_state_cache()
+    if isinstance(resp, dict) and isinstance(resp.get("detections"), list):
+        return resp["detections"]
+    return resp
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +290,18 @@ def get_ai_sensitivity(db) -> str:
 def _invalidate_cache(cache_key: str):
     with _cache_lock:
         _cache.pop(cache_key, None)
+
+
+def _invalidate_security_state_cache():
+    with _cache_lock:
+        for key in list(_cache.keys()):
+            if (
+                key in {"dashboard_payload", "list_monitored_files", "current_hash_index"}
+                or key.startswith("query_")
+                or key.startswith("source_ids:")
+                or key.startswith("get_setting:")
+            ):
+                _cache.pop(key, None)
 
 
 def update_ai_rules(db, rules, actor):
@@ -326,7 +364,9 @@ def create_manual_backup(db, admin_id, label: str = "manual"):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import create_manual_backup as _local
         return _local(db, admin_id, label=label)
-    return _sync_post("/v1/backup/manual", {"admin_id": admin_id, "label": label}, timeout=600.0)
+    result = _sync_post("/v1/backup/manual", {"admin_id": admin_id, "label": label}, timeout=600.0)
+    _invalidate_security_state_cache()
+    return result
 
 
 def upload_vm1_database_backup(path, checksum: str | None = None, db_type: str | None = None):
@@ -373,7 +413,9 @@ def set_backup_location(db, path, delete_previous=False, actor=None):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import set_backup_location as _local
         return _local(db, path, delete_previous, actor)
-    return _sync_post("/v1/backup/location", {"path": path, "delete_previous": delete_previous, "actor": actor})
+    result = _sync_post("/v1/backup/location", {"path": path, "delete_previous": delete_previous, "actor": actor})
+    _invalidate_security_state_cache()
+    return result
 
 
 def list_backup_inventory(db):
@@ -390,70 +432,90 @@ def full_system_recovery(db, admin_id):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import full_system_recovery as _local
         return _local(db, admin_id)
-    return _sync_post("/v1/recover/full", {"admin_id": admin_id}, timeout=600.0)
+    result = _sync_post("/v1/recover/full", {"admin_id": admin_id}, timeout=600.0)
+    _invalidate_security_state_cache()
+    return result
 
 
 def create_database_backup(db, admin_id):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import create_database_backup as _local
         return _local(db, admin_id)
-    return _sync_post("/v1/backup/database", {"admin_id": admin_id}, timeout=600.0)
+    result = _sync_post("/v1/backup/database", {"admin_id": admin_id}, timeout=600.0)
+    _invalidate_security_state_cache()
+    return result
 
 
 def create_files_backup(db, admin_id):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import create_files_backup as _local
         return _local(db, admin_id)
-    return _sync_post("/v1/backup/files", {"admin_id": admin_id}, timeout=600.0)
+    result = _sync_post("/v1/backup/files", {"admin_id": admin_id}, timeout=600.0)
+    _invalidate_security_state_cache()
+    return result
 
 
 def create_ml_backup(db, admin_id):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import create_ml_backup as _local
         return _local(db, admin_id)
-    return _sync_post("/v1/backup/ml", {"admin_id": admin_id}, timeout=600.0)
+    result = _sync_post("/v1/backup/ml", {"admin_id": admin_id}, timeout=600.0)
+    _invalidate_security_state_cache()
+    return result
 
 
 def create_full_system_backup(db, admin_id):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import create_full_system_backup as _local
         return _local(db, admin_id)
-    return _sync_post("/v1/backup/full", {"admin_id": admin_id}, timeout=600.0)
+    result = _sync_post("/v1/backup/full", {"admin_id": admin_id}, timeout=600.0)
+    _invalidate_security_state_cache()
+    return result
 
 
 def recover_database(db, admin_id):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import recover_database as _local
         return _local(db, admin_id)
-    return _sync_post("/v1/recover/database", {"admin_id": admin_id}, timeout=600.0)
+    result = _sync_post("/v1/recover/database", {"admin_id": admin_id}, timeout=600.0)
+    _invalidate_security_state_cache()
+    return result
 
 
 def recover_files(db, admin_id):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import recover_files as _local
         return _local(db, admin_id)
-    return _sync_post("/v1/recover/files", {"admin_id": admin_id}, timeout=600.0)
+    result = _sync_post("/v1/recover/files", {"admin_id": admin_id}, timeout=600.0)
+    _invalidate_security_state_cache()
+    return result
 
 
 def recover_ml_artifacts(db, admin_id):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import recover_ml_artifacts as _local
         return _local(db, admin_id)
-    return _sync_post("/v1/recover/ml", {"admin_id": admin_id}, timeout=600.0)
+    result = _sync_post("/v1/recover/ml", {"admin_id": admin_id}, timeout=600.0)
+    _invalidate_security_state_cache()
+    return result
 
 
 def recover_full_system(db, admin_id):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import recover_full_system as _local
         return _local(db, admin_id)
-    return _sync_post("/v1/recover/full", {"admin_id": admin_id}, timeout=600.0)
+    result = _sync_post("/v1/recover/full", {"admin_id": admin_id}, timeout=600.0)
+    _invalidate_security_state_cache()
+    return result
 
 
 def manual_recover_file(db, file_id, admin_id):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import manual_recover_file as _local
         return _local(db, file_id, admin_id)
-    return _sync_post("/v1/files/recover", {"file_id": file_id, "admin_id": admin_id}, timeout=600.0)
+    result = _sync_post("/v1/files/recover", {"file_id": file_id, "admin_id": admin_id}, timeout=600.0)
+    _invalidate_security_state_cache()
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -463,7 +525,9 @@ def add_monitored_folder(db, path, initiated_by=None, vm_target=None):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import add_monitored_folder as _local
         return _local(db, path, initiated_by=initiated_by, vm_target=vm_target)
-    return _sync_post("/v1/folders", {"path": path, "initiated_by": initiated_by, "vm_target": vm_target}, timeout=30.0)
+    result = _sync_post("/v1/folders", {"path": path, "initiated_by": initiated_by, "vm_target": vm_target}, timeout=30.0)
+    _invalidate_security_state_cache()
+    return result
 
 
 def remove_monitored_folder(db, path, initiated_by=None, vm_target=None):
@@ -471,7 +535,9 @@ def remove_monitored_folder(db, path, initiated_by=None, vm_target=None):
         from SECURITY.security_engine import remove_monitored_folder as _local
         return _local(db, path, initiated_by=initiated_by, vm_target=vm_target)
     try:
-        return _sync_post("/v1/folders/remove", {"path": path, "initiated_by": initiated_by, "vm_target": vm_target}, timeout=30.0)
+        result = _sync_post("/v1/folders/remove", {"path": path, "initiated_by": initiated_by, "vm_target": vm_target}, timeout=30.0)
+        _invalidate_security_state_cache()
+        return result
     except requests.HTTPError as exc:
         if exc.response is not None and exc.response.status_code == 404:
             # Security API endpoint may be missing on older deployments; fall back to local
@@ -487,27 +553,33 @@ def resolve_incident(db, incident_id, admin_id, confirm_missing_files=False):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import resolve_incident as _local
         return _local(db, incident_id, admin_id, confirm_missing_files=confirm_missing_files)
-    return _sync_post("/v1/incidents/resolve", {
+    result = _sync_post("/v1/incidents/resolve", {
         "incident_id": incident_id, "admin_id": admin_id, "confirm_missing_files": confirm_missing_files,
     })
+    _invalidate_security_state_cache()
+    return result
 
 
 def mark_false_positive(db, incident_id, admin_id, confirm_missing_files=False):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import mark_false_positive as _local
         return _local(db, incident_id, admin_id, confirm_missing_files=confirm_missing_files)
-    return _sync_post("/v1/incidents/false-positive", {
+    result = _sync_post("/v1/incidents/false-positive", {
         "incident_id": incident_id, "admin_id": admin_id, "confirm_missing_files": confirm_missing_files,
     })
+    _invalidate_security_state_cache()
+    return result
 
 
 def bulk_update_incidents(db, action, admin_id, confirm_missing_files=False):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import bulk_update_incidents as _local
         return _local(db, action, admin_id, confirm_missing_files=confirm_missing_files)
-    return _sync_post("/v1/incidents/bulk-action", {
+    result = _sync_post("/v1/incidents/bulk-action", {
         "action": action, "admin_id": admin_id, "confirm_missing_files": confirm_missing_files,
     }, timeout=600.0)
+    _invalidate_security_state_cache()
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -526,7 +598,9 @@ def set_setting(db, key, value, actor=None):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import set_setting as _local
         return _local(db, key, value, actor)
-    return _sync_post("/v1/settings/set", {"key": key, "value": value, "actor": actor})
+    result = _sync_post("/v1/settings/set", {"key": key, "value": value, "actor": actor})
+    _invalidate_security_state_cache()
+    return result
 
 
 # ---------------------------------------------------------------------------
