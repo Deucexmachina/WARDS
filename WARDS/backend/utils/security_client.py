@@ -509,11 +509,15 @@ def recover_full_system(db, admin_id):
     return result
 
 
+def _remote_manual_recover_file(file_id, admin_id):
+    return _sync_post("/v1/files/recover", {"file_id": file_id, "admin_id": admin_id}, timeout=600.0)
+
+
 def manual_recover_file(db, file_id, admin_id):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import manual_recover_file as _local
         return _local(db, file_id, admin_id)
-    result = _sync_post("/v1/files/recover", {"file_id": file_id, "admin_id": admin_id}, timeout=600.0)
+    result = _remote_manual_recover_file(file_id, admin_id)
     _invalidate_security_state_cache()
     return result
 
