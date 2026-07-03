@@ -4404,11 +4404,44 @@ def classify(change_type: str, prediction: AIPrediction, flags: list[str], conte
 
 
 def diff_lines(old_content: str, new_content: str) -> dict:
-    changes = {"added": [], "removed": [], "changed": []}
-    diff = difflib.ndiff(old_content.splitlines(), new_content.splitlines())
+    old_lines = old_content.splitlines()
+    new_lines = new_content.splitlines()
+    changes = {
+        "added": [],
+        "removed": [],
+        "changed": [],
+        "truncated": False,
+        "total_added": 0,
+        "total_removed": 0,
+    }
+    max_lines_per_side = int(os.getenv("SECURITY_MAX_STORED_DIFF_LINES", "80"))
+    max_chars_per_line = int(os.getenv("SECURITY_MAX_STORED_DIFF_LINE_CHARS", "180"))
+    if len(old_lines) + len(new_lines) > int(os.getenv("SECURITY_FAST_DIFF_LINE_THRESHOLD", "1000")):
+        for idx in range(max(len(old_lines), len(new_lines))):
+            old_text = old_lines[idx] if idx < len(old_lines) else None
+            new_text = new_lines[idx] if idx < len(new_lines) else None
+            if old_text == new_text:
+                continue
+            if old_text is not None:
+                changes["total_removed"] += 1
+                if len(changes["removed"]) < max_lines_per_side:
+                    changes["removed"].append({"line": idx + 1, "text": old_text[:max_chars_per_line]})
+                else:
+                    changes["truncated"] = True
+            if new_text is not None:
+                changes["total_added"] += 1
+                if len(changes["added"]) < max_lines_per_side:
+                    changes["added"].append({"line": idx + 1, "text": new_text[:max_chars_per_line]})
+                else:
+                    changes["truncated"] = True
+            if changes["total_added"] >= max_lines_per_side * 4 and changes["total_removed"] >= max_lines_per_side * 4:
+                changes["truncated"] = True
+                break
+        return changes
+
+    diff = difflib.ndiff(old_lines, new_lines)
     old_line = 0
     new_line = 0
-    _MAX_DIFF_LINES = 500
     for entry in diff:
         code = entry[:2]
         text = entry[2:]
@@ -4417,12 +4450,22 @@ def diff_lines(old_content: str, new_content: str) -> dict:
             new_line += 1
         elif code == "- ":
             old_line += 1
-            changes["removed"].append({"line": old_line, "text": text[:500]})
+            changes["total_removed"] += 1
+            if len(changes["removed"]) < max_lines_per_side:
+                changes["removed"].append({"line": old_line, "text": text[:max_chars_per_line]})
+            else:
+                changes["truncated"] = True
         elif code == "+ ":
             new_line += 1
-            changes["added"].append({"line": new_line, "text": text[:500]})
-        # Cap each list independently to keep total JSON well under MySQL TEXT limit
-        if len(changes["added"]) >= _MAX_DIFF_LINES and len(changes["removed"]) >= _MAX_DIFF_LINES:
+            changes["total_added"] += 1
+            if len(changes["added"]) < max_lines_per_side:
+                changes["added"].append({"line": new_line, "text": text[:max_chars_per_line]})
+            else:
+                changes["truncated"] = True
+        # Keep walking briefly enough to count useful totals, but stop once both
+        # sides are clearly beyond the stored summary budget.
+        if changes["total_added"] >= max_lines_per_side * 4 and changes["total_removed"] >= max_lines_per_side * 4:
+            changes["truncated"] = True
             break
     return changes
 

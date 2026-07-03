@@ -16,8 +16,10 @@ from SECURITY.security_engine import (
     add_monitored_folder,
     remove_monitored_folder,
     create_manual_backup,
+    diff_lines,
     scan_single_file,
     record_detection,
+    json_dumps,
     get_pending_vm1_restore_commands,
     _create_vm1_restore_command,
     _has_pending_vm1_restore_for_file,
@@ -292,6 +294,21 @@ def test_record_detection_creates_event():
     )
     assert isinstance(detection, SecurityDetectionEvent)
     assert detection.change_type == "content_modified"
+
+
+def test_diff_lines_is_bounded_for_mysql_text_columns():
+    old_content = "\n".join(f"old line {idx} {'x' * 500}" for idx in range(1200))
+    new_content = "\n".join(f"new line {idx} {'y' * 500}" for idx in range(1200))
+
+    changed = diff_lines(old_content, new_content)
+    payload = json_dumps(changed)
+
+    assert changed["truncated"] is True
+    assert changed["total_added"] >= 80
+    assert changed["total_removed"] >= 80
+    assert len(changed["added"]) <= 80
+    assert len(changed["removed"]) <= 80
+    assert len(payload.encode("utf-8")) < 60000
 
 
 # ---------------------------------------------------------------------------
