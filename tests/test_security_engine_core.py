@@ -21,6 +21,8 @@ from SECURITY.security_engine import (
     get_pending_vm1_restore_commands,
     _create_vm1_restore_command,
     _has_pending_vm1_restore_for_file,
+    active_monitored_file_ids_for_backup,
+    load_monitored_file_for_backup,
 )
 from SECURITY.security_models import (
     SecurityMonitoredFile,
@@ -191,6 +193,46 @@ def test_create_manual_backup_runs_without_crash():
                 with patch("SECURITY.security_engine.reconcile_trusted_file_removals", return_value={}):
                     event = create_manual_backup(db, initiated_by=None, label="test")
                     assert isinstance(event, SecurityRecoveryEvent)
+
+
+def test_backup_file_loader_skips_rows_removed_after_id_snapshot():
+    class DeletedRowQuery:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def filter(self, *args, **kwargs):
+            return self
+
+        def order_by(self, *args, **kwargs):
+            return self
+
+        def all(self):
+            return self.rows
+
+        def first(self):
+            return None
+
+    class ReloadingDB:
+        def __init__(self):
+            self.rows = [SimpleNamespace(id=10)]
+            self.rolled_back = False
+
+        def query(self, model):
+            return DeletedRowQuery(self.rows if model is SecurityMonitoredFile else [])
+
+        def get(self, model, row_id):
+            return None
+
+        def rollback(self):
+            self.rolled_back = True
+
+    db = ReloadingDB()
+
+    ids = active_monitored_file_ids_for_backup(db)
+    db.rows = []
+
+    assert ids == [10]
+    assert load_monitored_file_for_backup(db, 10) is None
 
 
 # ---------------------------------------------------------------------------

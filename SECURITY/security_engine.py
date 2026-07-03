@@ -29,7 +29,7 @@ import requests
 from sqlalchemy import MetaData, Table, inspect, or_, text
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
-from sqlalchemy.orm.exc import StaleDataError
+from sqlalchemy.orm.exc import ObjectDeletedError, StaleDataError
 from database.models import Admin, Alert, SessionLocal
 from utils.log_integrity import verify_record_integrity
 
@@ -5456,6 +5456,44 @@ def commit_backup_file_progress(db: Session) -> bool:
         return False
 
 
+def active_monitored_file_ids_for_backup(db: Session) -> list[int]:
+    """Return active monitored-file IDs before a backup loop starts.
+
+    Backup loops commit periodically. With SQLAlchemy's default
+    expire-on-commit behavior, holding ORM instances across those commits can
+    later raise ObjectDeletedError if another process removes or merges a row.
+    Keeping only primary keys lets each iteration reload the current row.
+    """
+    ids: list[int] = []
+    for row in active_monitored_files_query(db).order_by(SecurityMonitoredFile.relative_path.asc()).all():
+        try:
+            row_id = int(row.id)
+        except (AttributeError, TypeError, ValueError, ObjectDeletedError):
+            continue
+        ids.append(row_id)
+    return ids
+
+
+def load_monitored_file_for_backup(db: Session, file_id: int) -> SecurityMonitoredFile | None:
+    try:
+        getter = getattr(db, "get", None)
+        if getter:
+            return getter(SecurityMonitoredFile, file_id)
+    except (ObjectDeletedError, Exception):
+        try:
+            db.rollback()
+        except Exception:
+            pass
+    try:
+        return db.query(SecurityMonitoredFile).filter(SecurityMonitoredFile.id == file_id).first()
+    except (ObjectDeletedError, Exception):
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return None
+
+
 def create_manual_backup(db: Session, initiated_by: int | None, label: str = "manual", skip_database_snapshot: bool = False, skip_file_registration: bool = False) -> SecurityRecoveryEvent:
     # FK safety: initiated_by may reference a VM1 admin ID that doesn't exist
     # in the security DB. Fall back to None to avoid IntegrityError.
@@ -5500,15 +5538,18 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
     try:
         backup_root.mkdir(parents=True, exist_ok=True)
         database_entry = normalize_database_monitor_entry(db, reset_baseline=False, ensure_snapshot=not skip_database_snapshot)
+        database_entry_id = database_entry.id if database_entry else None
         manifest_files: list[dict[str, object]] = []
         backed_up_roots: set[str] = set()
         # Clear any pending state from the setup functions to avoid
         # accumulating row locks before the main loop.
         db.commit()
         processed = 0
-        entries = active_monitored_files_query(db).order_by(SecurityMonitoredFile.relative_path.asc()).all()
-        for entry in entries:
-            if is_database_entry(entry) and database_entry and entry.id != database_entry.id:
+        for entry_id in active_monitored_file_ids_for_backup(db):
+            entry = load_monitored_file_for_backup(db, entry_id)
+            if not entry:
+                continue
+            if is_database_entry(entry) and database_entry_id and entry.id != database_entry_id:
                 entry.status = "clean"
                 entry.last_checked = now_utc()
                 db.add(entry)
@@ -5798,8 +5839,12 @@ def create_database_backup(
     try:
         backup_root.mkdir(parents=True, exist_ok=True)
         database_entry = normalize_database_monitor_entry(db, reset_baseline=False, ensure_snapshot=True)
-        for entry in active_monitored_files_query(db).order_by(SecurityMonitoredFile.relative_path.asc()).all():
-            if is_database_entry(entry) and database_entry and entry.id != database_entry.id:
+        database_entry_id = database_entry.id if database_entry else None
+        for entry_id in active_monitored_file_ids_for_backup(db):
+            entry = load_monitored_file_for_backup(db, entry_id)
+            if not entry:
+                continue
+            if is_database_entry(entry) and database_entry_id and entry.id != database_entry_id:
                 entry.status = "clean"
                 entry.last_checked = now_utc()
                 db.add(entry)
@@ -5862,7 +5907,10 @@ def create_files_backup(
     manifest_files: list[dict[str, object]] = []
     try:
         backup_root.mkdir(parents=True, exist_ok=True)
-        for entry in active_monitored_files_query(db).order_by(SecurityMonitoredFile.relative_path.asc()).all():
+        for entry_id in active_monitored_file_ids_for_backup(db):
+            entry = load_monitored_file_for_backup(db, entry_id)
+            if not entry:
+                continue
             if is_database_entry(entry):
                 continue
             path = portable_monitored_path(entry)
