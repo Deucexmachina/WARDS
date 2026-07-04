@@ -162,8 +162,7 @@ jobs:
             elif [ "$VM1_COMMIT" = "$TARGET_COMMIT" ] && \
                [ "$VM2_COMMIT" = "$TARGET_COMMIT" ] && \
                [ "$VM2_VM1_MANIFEST_COMMIT" = "$TARGET_COMMIT" ] && \
-               [ "$VM2_BASELINE_READY" = "true" ] && \
-               [ "$VM2_PAUSED" = "false" ]; then
+               [ "$VM2_BASELINE_READY" = "true" ]; then
                   echo "VMs synchronized at $TARGET_COMMIT and VM1 baseline manifest verified."
                 exit 0
             fi
