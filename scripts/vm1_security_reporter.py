@@ -455,19 +455,24 @@ def _compose_base_command() -> tuple[list[str], str | None]:
 def vm1_critical_database_checksum() -> dict | None:
     """Hash critical VM1 DB settings that should rarely change outside admin workflows."""
     command, cwd = _compose_base_command()
-    mysql_script = (
-        'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE" -N -B -e '
-        '"SELECT `key`, COALESCE(`value`, \'\'), COALESCE(`description`, \'\'), '
-        'COALESCE(`updated_by`, \'\'), COALESCE(CAST(`updated_at` AS CHAR), \'\') '
-        'FROM system_settings WHERE `key` IN (\'sessionTimeout\') ORDER BY `key`;"'
+    # Pass SQL via stdin so backtick-quoted identifiers are NOT interpreted
+    # as shell command substitution by sh -lc.
+    mysql_cmd = (
+        'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE" -N -B'
+    )
+    sql = (
+        "SELECT `key`, COALESCE(`value`, ''), COALESCE(`description`, ''), "
+        "COALESCE(`updated_by`, ''), COALESCE(CAST(`updated_at` AS CHAR), '') "
+        "FROM system_settings WHERE `key` IN ('sessionTimeout') ORDER BY `key`;"
     )
     try:
         result = subprocess.run(
-            [*command, "exec", "-T", "mysql", "sh", "-lc", mysql_script],
+            [*command, "exec", "-T", "mysql", "sh", "-lc", mysql_cmd],
             cwd=cwd,
             capture_output=True,
             text=True,
             timeout=30,
+            input=sql + "\n",
         )
         if result.returncode != 0:
             log(f"VM1 database checksum query failed: {result.stderr.strip()[:200]}")

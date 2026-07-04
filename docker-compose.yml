@@ -86,6 +86,8 @@ services:
       VM1_REPORT_INTERVAL: "5"
       VM1_HEARTBEAT_INTERVAL: "5"
       VM1_RESTORE_POLL_INTERVAL: "3"
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-wards_root_password}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-wards_db}
     volumes:
       - ./WARDS:/WARDS
       - ./OCR:/OCR
