@@ -354,7 +354,63 @@ def normalize_identifier(identifier: str) -> str:
 
 
 def _is_suspicious_input(value: str) -> bool:
-    return bool(re.search(r"[<>]", str(value or "")))
+    if not value:
+        return False
+    text = str(value).lower()
+
+    # Raw HTML/script tags
+    if re.search(r"[<>]", text):
+        return True
+
+    # HTML-encoded entities (&lt; &gt; &#39; &#x3C; etc.)
+    if re.search(r"&lt;|&gt;|&amp;|&#\d+;|&#x[0-9a-f]+;", text):
+        return True
+
+    # XSS / JavaScript patterns (event handlers, protocols, DOM access)
+    if re.search(
+        r"(?:javascript|data|vbscript):|"
+        r"<\s*\w+.*?\bon\w+\s*=|"
+        r"alert\s*\(|prompt\s*\(|confirm\s*\(|"
+        r"eval\s*\(|expression\s*\(|"
+        r"document\.(?:cookie|location|write)|"
+        r"window\.(?:location|open)",
+        text,
+    ):
+        return True
+
+    # Script tag fragments even when brackets are stripped/encoded
+    if re.search(
+        r"script.*(?:alert|prompt|confirm|eval|document\.|window\.)|"
+        r"(?:alert|prompt|confirm|eval).*script",
+        text,
+    ):
+        return True
+
+    # SQL injection patterns
+    sql_rx = (
+        r"(?:--|/\*|;)\s*(?:drop|delete|update|insert|union|select|exec|execute)|"
+        r"(?:union|select|insert|update|delete|drop|create|alter)\s+.*?\s+(?:from|into|table|database)|"
+        r"or\s+1\s*=\s*1|and\s+1\s*=\s*1|"
+        r"'\s*or\s*'|\"\s*or\s*\"|"
+        r"waitfor\s+delay|benchmark\s*\(|sleep\s*\(|"
+        r";%20|char\s*\(|concat\s*\(|group_concat"
+    )
+    if re.search(sql_rx, text):
+        return True
+
+    # Path traversal
+    if re.search(r"\.\./|\.\.\\", text):
+        return True
+
+    # Shell / command injection
+    if re.search(r"[|&;`$]|\$\(.*?(?:\)|$)|`.*?(?:`|$)", text):
+        return True
+
+    # Null byte injection
+    if "\x00" in text:
+        return True
+
+    return False
 
 
 def tracking_key(portal: str, identifier: str) -> str:
