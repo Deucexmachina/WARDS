@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import api from '../../services/api';
-import { getEmailValidationMessage, validateStrongPassword } from '../../utils/validation';
+import { getEmailValidationMessage, validateStrongPassword, validatePhilippineContactDigits } from '../../utils/validation';
 import WardsPageHero from '../../components/WardsPageHero';
 import PasswordField from '../../components/PasswordField';
 import { safeNavigate } from '../../utils/urlValidator';
 import { persistSession } from '../../utils/auth';
 import { CustomSelect } from '../../components/FormControls';
+import SystemMessageModal from '../../components/SystemMessageModal';
 
 const slugifyBranchName = (name) => {
   const slug = name
@@ -199,6 +200,9 @@ const Branches = () => {
   const [mapSearchQuery, setMapSearchQuery] = useState('');
   const [mapSearchResults, setMapSearchResults] = useState([]);
   const [selectedMapLocation, setSelectedMapLocation] = useState(null);
+  const [branchNameError, setBranchNameError] = useState('');
+  const [contactError, setContactError] = useState('');
+  const [successModal, setSuccessModal] = useState({ open: false, title: '', message: '' });
 
   const [showReassignModal, setShowReassignModal] = useState(false);
   const [reassignBranch, setReassignBranch] = useState(null);
@@ -351,6 +355,12 @@ const Branches = () => {
     if (name === 'admin_email') {
       setAdminEmailError(getEmailValidationMessage(nextValue));
     }
+    if (name === 'name') {
+      setBranchNameError(isValidBranchName(nextValue));
+    }
+    if (name === 'contact') {
+      setContactError(isValidContact(nextValue));
+    }
     if (name === 'admin_username' && nextValue && !isValidUsername(nextValue)) {
       setModalError('Username must be 3-32 characters and may only contain letters, numbers, dots, underscores, hyphens, or @.');
     } else if (modalError) {
@@ -375,6 +385,21 @@ const Branches = () => {
   const isValidUsername = (username) => {
     return /^[A-Za-z0-9_.@-]{3,32}$/.test(username);
   };
+
+  const isValidBranchName = (name) => {
+    if (!name || !name.trim()) {
+      return 'Branch name is required.';
+    }
+    if (name.trim().length > 30) {
+      return 'Branch name must be 30 characters or fewer.';
+    }
+    if (!/^[A-Za-z\- ]+$/.test(name.trim())) {
+      return 'Branch name must contain letters only.';
+    }
+    return '';
+  };
+
+  const isValidContact = (contact) => validatePhilippineContactDigits(contact);
 
   const handlePresetChange = (e) => {
     const presetId = e.target.value;
@@ -418,6 +443,8 @@ const Branches = () => {
     setFormData(EMPTY_BRANCH_FORM);
     setModalError('');
     setAdminEmailError('');
+    setBranchNameError('');
+    setContactError('');
     setWindowAccounts(EMPTY_WINDOW_ACCOUNTS);
     setSuccessMessage('');
     setPendingNotice('');
@@ -441,6 +468,8 @@ const Branches = () => {
     });
     setModalError('');
     setAdminEmailError('');
+    setBranchNameError('');
+    setContactError('');
     setWindowAccounts(buildWindowAccountsState(branch.window_accounts || []));
     setSuccessMessage('');
     setPendingNotice('');
@@ -546,8 +575,13 @@ const Branches = () => {
   };
 
   const handleSaveBranch = async () => {
-    if (!formData.name || !formData.location || !formData.contact) {
-      setModalError('Please fill in all required fields.');
+    const nameError = isValidBranchName(formData.name);
+    const contactErr = isValidContact(formData.contact);
+    setBranchNameError(nameError);
+    setContactError(contactErr);
+
+    if (nameError || contactErr || !formData.location) {
+      setModalError('Please fill in all required fields correctly.');
       return;
     }
 
@@ -654,11 +688,17 @@ const Branches = () => {
         const windowMessage = windowAccountCount > 0
           ? ` ${windowAccountCount} queue window account${windowAccountCount > 1 ? 's were' : ' was'} also generated automatically, included in the branch admin verification email with login email addresses and temporary passwords, and set with Microsoft Authenticator MFA required on first login.`
           : '';
-        setPendingNotice(`${deliveryMessage} Branch admin access will remain pending until the recipient verifies the email.${windowMessage}`);
+        const notice = `${deliveryMessage} Branch admin access will remain pending until the recipient verifies the email.${windowMessage}`;
+        setPendingNotice(notice);
+        setSuccessModal({ open: true, title: 'Branch Created', message: notice });
       } else if (!editingBranch && response?.data?.email_delivery?.message) {
-        setSuccessMessage(response.data.email_delivery.message);
+        const msg = response.data.email_delivery.message;
+        setSuccessMessage(msg);
+        setSuccessModal({ open: true, title: 'Branch Created', message: msg });
       } else {
-        setSuccessMessage(editingBranch ? 'Branch updated successfully.' : 'Branch created successfully.');
+        const msg = editingBranch ? 'Branch updated successfully.' : 'Branch created successfully.';
+        setSuccessMessage(msg);
+        setSuccessModal({ open: true, title: editingBranch ? 'Branch Updated' : 'Branch Created', message: msg });
       }
     } catch (error) {
       console.error('Failed to save branch:', error);
@@ -863,7 +903,9 @@ const Branches = () => {
         if (emailMsg && newAdded === 0) {
           successParts.push(emailMsg);
         }
-        setSuccessMessage(successParts.join(' '));
+        const editMsg = successParts.join(' ');
+        setSuccessMessage(editMsg);
+        setSuccessModal({ open: true, title: 'Branch Updated', message: editMsg });
       }
 
       if (authModal.mode === 'reassign' && reassignBranch) {
@@ -878,7 +920,9 @@ const Branches = () => {
         await fetchBranches();
         window.dispatchEvent(new Event('wards-accounts-refresh'));
         closeReassignModal();
-        setSuccessMessage('Window services reassigned successfully. Existing staff accounts kept the same login credentials.');
+        const reassignMsg = 'Window services reassigned successfully. Existing staff accounts kept the same login credentials.';
+        setSuccessMessage(reassignMsg);
+        setSuccessModal({ open: true, title: 'Services Reassigned', message: reassignMsg });
       }
 
       if (authModal.mode === 'delete' && authModal.branchId) {
@@ -889,7 +933,9 @@ const Branches = () => {
         });
         await fetchBranches();
         window.dispatchEvent(new Event('wards-accounts-refresh'));
-        setSuccessMessage('Branch deleted successfully.');
+        const deleteMsg = 'Branch deleted successfully.';
+        setSuccessMessage(deleteMsg);
+        setSuccessModal({ open: true, title: 'Branch Deleted', message: deleteMsg });
       }
 
       closeAuthModal();
@@ -914,7 +960,9 @@ const Branches = () => {
       setSuccessMessage('');
       setPendingNotice('');
       const response = await api.post(`/branches/${branch.id}/resend-verification`);
-      setPendingNotice(response.data.message);
+      const msg = response.data.message;
+      setPendingNotice(msg);
+      setSuccessModal({ open: true, title: 'Verification Resent', message: msg });
       await fetchBranches();
     } catch (error) {
       console.error('Failed to resend branch verification:', error);
@@ -1091,9 +1139,14 @@ const Branches = () => {
                   name="name"
                   value={formData.name}
                   onChange={handleInputChange}
-                  maxLength={255}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
+                  maxLength={30}
+                  className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent ${
+                    branchNameError ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                  }`}
                 />
+                {branchNameError && (
+                  <p className="mt-2 text-sm font-semibold text-red-600">{branchNameError}</p>
+                )}
               </div>
               <div>
                 <div className="mb-2 flex min-h-10 items-center justify-between gap-3">
@@ -1133,8 +1186,13 @@ const Branches = () => {
                   name="contact"
                   value={formData.contact}
                   onChange={handleInputChange}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent"
+                  className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent ${
+                    contactError ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                  }`}
                 />
+                {contactError && (
+                  <p className="mt-2 text-sm font-semibold text-red-600">{contactError}</p>
+                )}
               </div>
               <div className="md:col-span-2">
                 <label className="block text-gray-700 font-semibold mb-2">Branch Dashboard Localhost URL</label>
@@ -1542,6 +1600,14 @@ const Branches = () => {
           </div>
         </div>
       )}
+
+      <SystemMessageModal
+        open={successModal.open}
+        tone="success"
+        title={successModal.title}
+        message={successModal.message}
+        onClose={() => setSuccessModal((previous) => ({ ...previous, open: false }))}
+      />
     </div>
   );
 };

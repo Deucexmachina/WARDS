@@ -419,6 +419,38 @@ async def create_superadmin_branch_session(
     set_auth_cookie(response, "branch", access_token)
     return response
 
+def validate_branch_name(name: str) -> str:
+    cleaned = re.sub(r"\s+", " ", (name or "").strip())
+    if not cleaned:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch name is required.")
+    if len(cleaned) > 30:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch name must be 30 characters or fewer.")
+    if not re.fullmatch(r"[A-Za-z\- ]+", cleaned):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Branch name must contain letters only.")
+    return cleaned
+
+
+PH_CONTACT_DIGITS_PATTERN = re.compile(r"^9\d{9}$")
+
+
+def validate_branch_contact(contact: str) -> str:
+    raw = (contact or "").strip()
+    if not raw:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Contact number is required.")
+    normalized = re.sub(r"\D", "", raw)
+    subscriber_number = normalized
+    if subscriber_number.startswith("63"):
+        subscriber_number = subscriber_number[2:]
+    elif subscriber_number.startswith("0"):
+        subscriber_number = subscriber_number[1:]
+    if not PH_CONTACT_DIGITS_PATTERN.fullmatch(subscriber_number):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Contact number must begin with 9 and contain exactly 10 digits.",
+        )
+    return f"+63{subscriber_number}"
+
+
 @router.post("/")
 async def create_branch(
     branch: BranchCreate,
@@ -426,15 +458,16 @@ async def create_branch(
     db: Session = Depends(get_db)
 ):
     """Create new branch with optional admin account (main admin only)"""
-    branch_name = normalize_branch_name(branch.name)
+    branch_name = validate_branch_name(branch.name)
     ensure_branch_name_is_unique(db, branch_name)
+    branch_contact = validate_branch_contact(branch.contact)
     normalized_counter_count = normalize_counter_count(branch.counters)
 
     # Create the branch
     branch_data = {
         "name": branch_name,
         "location": branch.location,
-        "contact": branch.contact,
+        "contact": branch_contact,
         "dashboard_url": build_branch_dashboard_url(branch_name),
         "counters": normalized_counter_count,
         "status": branch.status
@@ -607,8 +640,9 @@ async def update_branch(
 
     verify_account_password(branch.current_admin_password, current_user.hashed_password, detail="Incorrect password. Please try again.")
 
-    normalized_name = normalize_branch_name(branch.name)
+    normalized_name = validate_branch_name(branch.name)
     ensure_branch_name_is_unique(db, normalized_name, exclude_branch_id=db_branch.id)
+    branch_contact = validate_branch_contact(branch.contact)
     normalized_counter_count = normalize_counter_count(branch.counters)
     normalized_window_accounts = normalize_window_accounts_payload(branch.window_accounts or [], normalized_counter_count)
 
@@ -616,6 +650,7 @@ async def update_branch(
     update_data = branch.dict(exclude_unset=True)
     update_data.pop("current_admin_password", None)
     update_data.pop("window_accounts", None)
+    update_data["contact"] = branch_contact
     update_data["name"] = normalized_name
     update_data["counters"] = normalized_counter_count
     for key, value in update_data.items():
