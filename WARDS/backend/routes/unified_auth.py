@@ -108,7 +108,43 @@ else:
 
 PASSWORD_RESET_EXPIRES_MINUTES = 30
 
-SERVER_STARTED_AT = datetime.utcnow().isoformat()
+
+def _get_server_started_at() -> str:
+    """Return a consistent server start time across all worker processes.
+
+    Uses Redis if available so all workers share the same timestamp.
+    Falls back to a file on disk. This prevents users from being logged
+    out when an individual worker restarts in multi-worker deployments.
+    """
+    redis_key = "wards:server_started_at"
+    r = get_redis_client()
+    if r:
+        try:
+            stored = r.get(redis_key)
+            if stored:
+                return stored
+            now = datetime.utcnow().isoformat()
+            r.set(redis_key, now)
+            return now
+        except Exception:
+            pass
+
+    start_file = Path(__file__).resolve().parent / ".server_start_time"
+    try:
+        if start_file.exists():
+            return start_file.read_text().strip()
+    except Exception:
+        pass
+
+    now = datetime.utcnow().isoformat()
+    try:
+        start_file.write_text(now)
+    except Exception:
+        pass
+    return now
+
+
+SERVER_STARTED_AT = _get_server_started_at()
 
 MAX_LOGIN_ATTEMPTS = int(os.getenv("MAX_LOGIN_ATTEMPTS", "5"))
 RATE_LIMIT_WINDOW = 60
