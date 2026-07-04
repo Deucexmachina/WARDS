@@ -811,14 +811,14 @@ const Accounts = () => {
       }),
     ]);
 
-  const renderAccountRows = (rows, primaryLabel = 'Username', pageKey = null) => {
+  const renderAccountRows = (rows, primaryLabel = 'Username', pageKey = null, scrollable = false) => {
     const currentPage = pageKey ? (accountPages[pageKey] || 1) : 1;
     const totalPages = pageKey ? Math.ceil(rows.length / ACCOUNTS_PER_PAGE) : 1;
     const startIndex = (currentPage - 1) * ACCOUNTS_PER_PAGE;
     const endIndex = startIndex + ACCOUNTS_PER_PAGE;
     const pagedRows = pageKey ? rows.slice(startIndex, endIndex) : rows;
     return (
-      <div className="overflow-hidden rounded-2xl border border-gray-200">
+      <div className={`${scrollable ? 'overflow-x-auto' : 'overflow-hidden'} rounded-2xl border border-gray-200`}>
         <table className="w-full table-auto text-xs">
           <thead className="bg-gray-50">
             <tr>
@@ -958,12 +958,12 @@ const Accounts = () => {
     );
   };
 
-  const renderAccountTable = (title, rows, primaryLabel = 'Username', pageKey = null) => (
+  const renderAccountTable = (title, rows, primaryLabel = 'Username', pageKey = null, scrollable = false) => (
     <div className="mb-6 overflow-hidden rounded-xl bg-white shadow-lg">
       <div className="bg-primary px-6 py-4">
         <h3 className="text-xl font-bold text-white">{title}</h3>
       </div>
-      {renderAccountRows(rows, primaryLabel, pageKey)}
+      {renderAccountRows(rows, primaryLabel, pageKey, scrollable)}
     </div>
   );
 
@@ -1063,7 +1063,7 @@ const Accounts = () => {
 
       {!isBranchPortal && renderAccountTable('Main Admin Accounts', adminAccounts, 'Username', 'main_admin')}
       {renderBranchAccountTable()}
-      {renderAccountTable('Citizen Accounts', citizenAccounts, 'Full Name', 'citizen')}
+      {renderAccountTable('Citizen Accounts', citizenAccounts, 'Full Name', 'citizen', true)}
       </div>
 
       <div className="flex flex-col gap-3 border-t border-gray-100 px-2 py-4 sm:flex-row sm:items-center sm:justify-between">
