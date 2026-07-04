@@ -5270,6 +5270,31 @@ def _has_open_incident(db: Session, file_entry: SecurityMonitoredFile, change_ty
     ).first() is not None
 
 
+def _local_file_hash_matches_git_head(relative_path: str | None, current_hash: str | None) -> bool:
+    if not relative_path or not current_hash:
+        return False
+    normalized_rel = str(relative_path).replace("\\", "/").lstrip("/")
+    if ".." in Path(normalized_rel).parts:
+        return False
+    try:
+        candidate = (MASTER_ROOT / normalized_rel).resolve()
+        root = MASTER_ROOT.resolve()
+        if not candidate.is_relative_to(root) or not candidate.exists() or not candidate.is_file():
+            return False
+        result = subprocess.run(
+            ["git", "-C", str(root), "show", f"HEAD:{normalized_rel}"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return False
+        return hashlib.sha256(result.stdout).hexdigest().lower() == str(current_hash).lower()
+    except Exception:
+        return False
+
+
 def scan_single_file(db: Session, file_entry: SecurityMonitoredFile, context: dict | None = None, commit_clean: bool = True, precomputed_hash: str | None = None) -> SecurityDetectionEvent | None:
     context = context or {}
     if is_vm1_evidence_entry(file_entry):
@@ -5337,6 +5362,17 @@ def scan_single_file(db: Session, file_entry: SecurityMonitoredFile, context: di
     file_entry.last_checked = now_utc()
 
     if current_hash != file_entry.baseline_hash:
+        if _local_file_hash_matches_git_head(file_entry.relative_path, current_hash):
+            file_entry.baseline_hash = current_hash
+            file_entry.status = "clean"
+            db.add(file_entry)
+            if commit_clean:
+                db.commit()
+            logger.info(
+                "Local git workflow: accepted %s as clean because it matches Git HEAD.",
+                file_entry.relative_path,
+            )
+            return None
         if _has_open_incident(db, file_entry, "content_modified"):
             file_entry.status = "modified"
             db.add(file_entry)

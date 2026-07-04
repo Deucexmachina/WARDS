@@ -299,6 +299,33 @@ def test_scan_single_file_detects_change():
         assert detection is not None
 
 
+def test_scan_single_file_accepts_git_head_change(monkeypatch):
+    with tempfile.TemporaryDirectory() as tmp:
+        test_file = Path(tmp) / "security_engine.py"
+        test_file.write_text("SUSPICIOUS_PATTERNS = {'defacement_keywords': ('hacked',)}")
+        entry = SecurityMonitoredFile(
+            file_path=str(test_file),
+            relative_path="SECURITY/security_engine.py",
+            folder_root="SECURITY",
+            baseline_hash="0" * 64,
+            current_hash="0" * 64,
+            status="clean",
+            file_type="py",
+            size_bytes=test_file.stat().st_size,
+        )
+        entry.id = 1
+
+        db = MonitoredFolderDB()
+        monkeypatch.setattr("SECURITY.security_engine._local_file_hash_matches_git_head", lambda *_args: True)
+
+        detection = scan_single_file(db, entry, context={"manual_scan": True}, commit_clean=False)
+
+        assert detection is None
+        assert entry.baseline_hash == entry.current_hash
+        assert entry.baseline_hash != "0" * 64
+        assert entry.status == "clean"
+
+
 # ---------------------------------------------------------------------------
 # Detection / Incident
 # ---------------------------------------------------------------------------
