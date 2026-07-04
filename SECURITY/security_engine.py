@@ -8062,6 +8062,59 @@ def _store_vm1_snapshot_from_local_repo(rel_path: str) -> bool:
         return False
 
 
+def _vm1_local_repo_content(rel_path: str) -> tuple[bytes | None, str | None, str]:
+    candidate = _local_repo_path_for_vm1_file(rel_path)
+    if not candidate:
+        return None, None, ""
+    try:
+        content = candidate.read_bytes()
+        return content, hashlib.sha256(content).hexdigest(), content.decode("utf-8", errors="replace")
+    except Exception:
+        return None, None, ""
+
+
+def _decode_vm1_manifest_content(file_payload: dict) -> tuple[bool, str, bytes | None]:
+    content_b64 = file_payload.get("content_b64")
+    if not isinstance(content_b64, str) or not content_b64.strip():
+        return False, "", None
+    try:
+        raw = base64.b64decode(content_b64)
+        return True, raw.decode("utf-8", errors="replace"), raw
+    except Exception:
+        return False, "", None
+
+
+def _vm1_manifest_content_is_malicious(db: Session, rel_path: str, content: str) -> tuple[bool, list[str]]:
+    if not content.strip():
+        return False, []
+    rules = get_ai_rules(db)
+    path = Path(rel_path)
+    flags = content_flags(
+        content,
+        {
+            "host_vm": "vm1",
+            "background_monitor": True,
+            "source_ip": "vm1_internal",
+            "admin_session_valid": False,
+            "method_legitimate": False,
+            "ai_rules": rules,
+        },
+        path=path,
+    )
+    concrete_tamper_flags = {
+        "defacement_keywords",
+        "script_injection",
+        "iframe_injection",
+        "webshell_indicator",
+        "destructive_command_pattern",
+    }
+    return (
+        is_high_risk_file_path(rel_path, rules)
+        and bool(concrete_tamper_flags.intersection(flags)),
+        flags,
+    )
+
+
 def _quarantine_vm1_snapshot(entry: SecurityMonitoredFile, detection_id: int) -> str | None:
     snapshot = VM1_SNAPSHOT_ROOT / entry.relative_path
     if not snapshot.exists():
@@ -9072,17 +9125,31 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
                         SecurityDetectionEvent.id == recent_incident.detection_event_id
                     ).first()
                     if recent_detection and recent_detection.new_hash == current_hash:
-                        entry.baseline_hash = current_hash
-                        entry.status = "clean"
-                        db.add(entry)
-                        db.commit()
-                        logger.info(
-                            "VM1 safety-net: suppressed re-detection for %s (hash %s...%s) "
-                            "because incident SEC-%s was already %s.",
-                            entry.relative_path, current_hash[:8], current_hash[-8:],
-                            recent_incident.id, recent_incident.status,
+                        content_supplied, candidate_content, _candidate_bytes = _decode_vm1_manifest_content(f)
+                        malicious_content, malicious_flags = _vm1_manifest_content_is_malicious(
+                            db,
+                            entry.relative_path,
+                            candidate_content if content_supplied else "",
                         )
-                        continue
+                        if malicious_content:
+                            logger.warning(
+                                "VM1 safety-net bypassed for %s because manifest content still carries "
+                                "malicious markers: %s",
+                                entry.relative_path,
+                                ", ".join(malicious_flags),
+                            )
+                        else:
+                            entry.baseline_hash = current_hash
+                            entry.status = "clean"
+                            db.add(entry)
+                            db.commit()
+                            logger.info(
+                                "VM1 safety-net: suppressed re-detection for %s (hash %s...%s) "
+                                "because incident SEC-%s was already %s.",
+                                entry.relative_path, current_hash[:8], current_hash[-8:],
+                                recent_incident.id, recent_incident.status,
+                            )
+                            continue
                 # Fallback: if baseline is missing, set it and skip instead of flooding
                 if not entry.baseline_hash:
                     entry.baseline_hash = current_hash
@@ -9170,6 +9237,58 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
                 entry.status = "modified"
                 db.add(entry)
         else:
+            content_supplied, new_content, new_content_bytes = _decode_vm1_manifest_content(f)
+            malicious_content, malicious_flags = _vm1_manifest_content_is_malicious(
+                db,
+                entry.relative_path,
+                new_content if content_supplied else "",
+            )
+            has_open_incident = _has_open_incident(db, entry, "vm1_content_modified")
+            if malicious_content and not has_open_incident:
+                clean_bytes, clean_hash, clean_content = _vm1_local_repo_content(entry.relative_path)
+                snapshot_path = VM1_SNAPSHOT_ROOT / entry.relative_path
+                snapshot_content = read_text(snapshot_path) if snapshot_path.exists() else ""
+                snapshot_bytes = None
+                if snapshot_path.exists():
+                    try:
+                        snapshot_bytes = snapshot_path.read_bytes()
+                    except Exception:
+                        snapshot_bytes = None
+                original_bytes = clean_bytes if clean_hash and clean_hash != current_hash else snapshot_bytes
+                old_content = clean_content if clean_hash and clean_hash != current_hash else snapshot_content
+                if clean_hash and clean_hash != current_hash:
+                    entry.baseline_hash = clean_hash
+                entry.status = "modified"
+                changed += 1
+                db.add(entry)
+                db.commit()
+                logger.warning(
+                    "VM1 poisoned-baseline guard: %s hash matched baseline but content looked malicious (%s); "
+                    "recording detection instead of marking clean.",
+                    entry.relative_path,
+                    ", ".join(malicious_flags),
+                )
+                detection = _record_vm1_detection(
+                    db,
+                    entry,
+                    "vm1_content_modified",
+                    current_hash,
+                    old_content=old_content,
+                    new_content=new_content,
+                    original_content_bytes=original_bytes,
+                )
+                _store_vm1_snapshot(rel_path, f.get("content_b64"))
+                snapshot = VM1_SNAPSHOT_ROOT / rel_path
+                if snapshot.exists():
+                    defaced_path = VM1_DEFACED_SNAPSHOT_ROOT / rel_path
+                    defaced_path.parent.mkdir(parents=True, exist_ok=True)
+                    try:
+                        shutil.copy2(snapshot, defaced_path)
+                    except Exception:
+                        pass
+                if detection:
+                    detections.append(detection)
+                continue
             entry.status = "clean"
             # Keep baseline in sync so future changes don't re-trigger old deltas
             entry.baseline_hash = current_hash

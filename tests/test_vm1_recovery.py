@@ -13,7 +13,9 @@ import pytest
 from SECURITY.security_engine import (
     _create_vm1_restore_command,
     _has_pending_vm1_restore_for_file,
+    _vm1_manifest_content_is_malicious,
     IMPORTANT_SYSTEM_ALERT_KEYS,
+    DEFAULT_AI_RULES,
     classify,
     get_pending_vm1_restore_commands,
     vm1_bulk_changes_match_git_head,
@@ -144,6 +146,19 @@ def test_vm1_reporter_config_sync_returns_force_scan_token(monkeypatch):
 
 def test_auto_recovery_alerts_are_email_eligible():
     assert "incident_auto_recovery" in IMPORTANT_SYSTEM_ALERT_KEYS
+
+
+def test_vm1_index_defacement_content_is_malicious(monkeypatch):
+    monkeypatch.setattr("SECURITY.security_engine.get_ai_rules", lambda _db: DEFAULT_AI_RULES)
+
+    malicious, flags = _vm1_manifest_content_is_malicious(
+        MagicMock(),
+        "WARDS/frontend/index.html",
+        '<html><body style="background:#000">HACKED BY NANO</body></html>',
+    )
+
+    assert malicious is True
+    assert "defacement_keywords" in flags
 
 
 def test_vm1_reporter_excludes_vendor_dirs_and_budgets_inline_content(monkeypatch, tmp_path):

@@ -269,6 +269,16 @@ def test_vm1_repeat_hash_with_content_uses_normal_detection_flow():
     assert "if not _has_pending_vm1_restore_for_file(db, entry.relative_path):" in engine_source
 
 
+def test_vm1_poisoned_baseline_content_still_creates_detection():
+    engine_source = Path("SECURITY/security_engine.py").read_text(encoding="utf-8")
+
+    assert "def _vm1_manifest_content_is_malicious" in engine_source
+    assert "VM1 poisoned-baseline guard" in engine_source
+    assert "hash matched baseline but content looked malicious" in engine_source
+    assert "VM1 safety-net bypassed" in engine_source
+    assert '"defacement_keywords"' in engine_source
+
+
 def test_security_unread_counts_use_batch_source_ids():
     vm2_source = Path("SECURITY/api_main.py").read_text(encoding="utf-8")
     client_source = Path("WARDS/backend/utils/security_client.py").read_text(encoding="utf-8")
