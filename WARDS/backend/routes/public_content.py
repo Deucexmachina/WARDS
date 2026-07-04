@@ -18,6 +18,24 @@ PAGE_CONTACT = "contact"
 PAGE_ABOUT_US = "about_us"
 PAGE_FAQS = "faqs"
 
+# ── Public Content Validation Limits ──
+_MAX_HERO_TITLE = 50
+_MAX_HERO_SUBTITLE = 100
+_MAX_BUTTON_LABEL = 20
+_MAX_ANNOUNCEMENTS_TITLE = 30
+_MAX_ANNOUNCEMENTS_SUBTITLE = 100
+_MAX_GUIDES = 10
+_MAX_GUIDE_TITLE = 50
+_MAX_GUIDE_CATEGORY = 30
+_MAX_GUIDE_CONTENT = 1000
+_MAX_HELP_TITLE = 50
+_MAX_HELP_DESCRIPTION = 500
+_MAX_HELP_CONTACTS = 10
+_MAX_HELP_CONTACT_LABEL = 20
+_MAX_HELP_CONTACT_VALUE = 20
+_MAX_PAGE_TITLE = 50
+_MAX_PAGE_SUBTITLE = 100
+
 
 class PublicContentPayload(BaseModel):
     content: dict[str, Any]
@@ -188,10 +206,47 @@ def _normalize_taxpayer_guide_content(content: dict[str, Any]) -> dict[str, Any]
         "guides_tl": _sanitize_line_items(content.get("guides_tl"), ["title", "content", "category"]),
     }
 
+    # Required fields
     if not normalized["page_title_en"] or not normalized["page_title_tl"]:
         raise HTTPException(status_code=400, detail="Taxpayer Guide page titles are required.")
     if not normalized["guides_en"] or not normalized["guides_tl"]:
         raise HTTPException(status_code=400, detail="At least one guide is required for both English and Tagalog.")
+
+    # Length validations
+    for suffix in ("_en", "_tl"):
+        if len(normalized[f"page_title{suffix}"]) > _MAX_PAGE_TITLE:
+            raise HTTPException(status_code=400, detail=f"Page title must be {_MAX_PAGE_TITLE} characters or fewer.")
+        if len(normalized[f"page_subtitle{suffix}"]) > _MAX_PAGE_SUBTITLE:
+            raise HTTPException(status_code=400, detail=f"Page subtitle must be {_MAX_PAGE_SUBTITLE} characters or fewer.")
+        if len(normalized[f"help_title{suffix}"]) > _MAX_HELP_TITLE:
+            raise HTTPException(status_code=400, detail=f"Help title must be {_MAX_HELP_TITLE} characters or fewer.")
+        if len(normalized[f"help_description{suffix}"]) > _MAX_HELP_DESCRIPTION:
+            raise HTTPException(status_code=400, detail=f"Help description must be {_MAX_HELP_DESCRIPTION} characters or fewer.")
+
+    # Guide limits
+    for lang_key in ("guides_en", "guides_tl"):
+        guides = normalized[lang_key]
+        if len(guides) > _MAX_GUIDES:
+            raise HTTPException(status_code=400, detail=f"Maximum {_MAX_GUIDES} guides allowed.")
+        for guide in guides:
+            if len(guide.get("title", "")) > _MAX_GUIDE_TITLE:
+                raise HTTPException(status_code=400, detail=f"Guide title must be {_MAX_GUIDE_TITLE} characters or fewer.")
+            if len(guide.get("category", "")) > _MAX_GUIDE_CATEGORY:
+                raise HTTPException(status_code=400, detail=f"Guide category must be {_MAX_GUIDE_CATEGORY} characters or fewer.")
+            if len(guide.get("content", "")) > _MAX_GUIDE_CONTENT:
+                raise HTTPException(status_code=400, detail=f"Guide content must be {_MAX_GUIDE_CONTENT} characters or fewer.")
+
+    # Help contact limits
+    contacts = normalized["help_contacts"]
+    if len(contacts) > _MAX_HELP_CONTACTS:
+        raise HTTPException(status_code=400, detail=f"Maximum {_MAX_HELP_CONTACTS} help contacts allowed.")
+    for contact in contacts:
+        if len(contact.get("label_en", "")) > _MAX_HELP_CONTACT_LABEL:
+            raise HTTPException(status_code=400, detail=f"Help contact label must be {_MAX_HELP_CONTACT_LABEL} characters or fewer.")
+        if len(contact.get("label_tl", "")) > _MAX_HELP_CONTACT_LABEL:
+            raise HTTPException(status_code=400, detail=f"Help contact label must be {_MAX_HELP_CONTACT_LABEL} characters or fewer.")
+        if len(contact.get("value", "")) > _MAX_HELP_CONTACT_VALUE:
+            raise HTTPException(status_code=400, detail=f"Help contact value must be {_MAX_HELP_CONTACT_VALUE} characters or fewer.")
 
     return normalized
 
@@ -694,13 +749,36 @@ def _default_home_content() -> dict[str, Any]:
     }
 
 
+def _validate_image_base64(value: str) -> None:
+    if not value:
+        return
+    if not value.startswith(("data:image/png;base64,", "data:image/jpeg;base64,")):
+        raise HTTPException(status_code=400, detail="Hero background image must be a PNG or JPG file.")
+
+
 def _normalize_home_content(content: dict[str, Any]) -> dict[str, Any]:
     defaults = _default_home_content()
-    normalized: dict[str, Any] = {"hero_bg_image": str(content.get("hero_bg_image", "")).strip()}
+    raw_image = str(content.get("hero_bg_image", "")).strip()
+    _validate_image_base64(raw_image)
+    normalized: dict[str, Any] = {"hero_bg_image": raw_image}
     text_keys = [k for k in defaults if k != "hero_bg_image"]
     for key in text_keys:
         value = str(content.get(key, "")).strip()
         normalized[key] = value if value else defaults[key]
+
+    # Validate lengths
+    for suffix in ("_en", "_tl"):
+        if len(normalized.get(f"hero_title{suffix}", "")) > _MAX_HERO_TITLE:
+            raise HTTPException(status_code=400, detail=f"Hero title must be {_MAX_HERO_TITLE} characters or fewer.")
+        if len(normalized.get(f"hero_subtitle{suffix}", "")) > _MAX_HERO_SUBTITLE:
+            raise HTTPException(status_code=400, detail=f"Hero subtitle must be {_MAX_HERO_SUBTITLE} characters or fewer.")
+        if len(normalized.get(f"announcements_title{suffix}", "")) > _MAX_ANNOUNCEMENTS_TITLE:
+            raise HTTPException(status_code=400, detail=f"Announcements title must be {_MAX_ANNOUNCEMENTS_TITLE} characters or fewer.")
+        if len(normalized.get(f"announcements_subtitle{suffix}", "")) > _MAX_ANNOUNCEMENTS_SUBTITLE:
+            raise HTTPException(status_code=400, detail=f"Announcements subtitle must be {_MAX_ANNOUNCEMENTS_SUBTITLE} characters or fewer.")
+        for btn in ("btn_get_queue", "btn_view_ticket", "btn_pay_taxes", "btn_request_receipt"):
+            if len(normalized.get(f"{btn}{suffix}", "")) > _MAX_BUTTON_LABEL:
+                raise HTTPException(status_code=400, detail=f"Button label must be {_MAX_BUTTON_LABEL} characters or fewer.")
     return normalized
 
 
