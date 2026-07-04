@@ -170,17 +170,28 @@ const ImageUploadField = ({ label, value, onChange, hint }) => {
   );
 };
 
-const ArrayTextField = ({ label, values, onChange, addLabel }) => (
+const ArrayTextField = ({ label, values, onChange, addLabel, maxItems, maxLength, validate }) => (
   <SectionCard title={label}>
     <div className="space-y-3">
       {values.map((value, index) => (
-        <div key={`${label}-${index}`} className="flex gap-3">
-          <input
-            type="text"
-            value={value}
-            onChange={(event) => onChange(index, event.target.value)}
-            className={textInputClass}
-          />
+        <div key={`${label}-${index}`} className="flex items-start gap-3">
+          <div className="flex-1">
+            <input
+              type="text"
+              value={value}
+              maxLength={maxLength}
+              onChange={(event) => onChange(index, event.target.value)}
+              className={textInputClass}
+            />
+            <div className="mt-1 flex items-center gap-2">
+              {maxLength ? (
+                <span className="text-xs text-slate-500">{value.length}/{maxLength}</span>
+              ) : null}
+              {validate && value && !validate(value) ? (
+                <span className="text-xs font-medium text-rose-600">Invalid format.</span>
+              ) : null}
+            </div>
+          </div>
           <button
             type="button"
             onClick={() => onChange(index, null)}
@@ -190,13 +201,17 @@ const ArrayTextField = ({ label, values, onChange, addLabel }) => (
           </button>
         </div>
       ))}
-      <button
-        type="button"
-        onClick={() => onChange(values.length, '')}
-        className="rounded-xl border border-dashed border-slate-300 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-primary hover:text-primary"
-      >
-        {addLabel}
-      </button>
+      {maxItems && values.length >= maxItems ? (
+        <p className="text-xs font-medium text-amber-600">Maximum {maxItems} items reached.</p>
+      ) : (
+        <button
+          type="button"
+          onClick={() => onChange(values.length, '')}
+          className="rounded-xl border border-dashed border-slate-300 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-primary hover:text-primary"
+        >
+          {addLabel}
+        </button>
+      )}
     </div>
   </SectionCard>
 );
@@ -1438,27 +1453,27 @@ const PublicContentManagement = ({ portal = 'admin' }) => {
 
             <SectionCard title="Page Header" description="Update the main hero copy used on the public Contact page.">
               <div className="space-y-4">
-                <Field label="Title"><input value={contactContent[`page_title_${editorLanguage}`]} onChange={(e) => updateContactValue(`page_title_${editorLanguage}`, e.target.value)} className={textInputClass} /></Field>
-                <Field label="Subtitle"><textarea value={contactContent[`page_subtitle_${editorLanguage}`]} onChange={(e) => updateContactValue(`page_subtitle_${editorLanguage}`, e.target.value)} className={textAreaClass} /></Field>
+                <Field label="Title" hint={`${contactContent[`page_title_${editorLanguage}`].length}/50`}><input value={contactContent[`page_title_${editorLanguage}`]} onChange={(e) => updateContactValue(`page_title_${editorLanguage}`, e.target.value)} className={textInputClass} maxLength={50} /></Field>
+                <Field label="Subtitle" hint={`${contactContent[`page_subtitle_${editorLanguage}`].length}/100`}><textarea value={contactContent[`page_subtitle_${editorLanguage}`]} onChange={(e) => updateContactValue(`page_subtitle_${editorLanguage}`, e.target.value)} className={textAreaClass} maxLength={100} /></Field>
               </div>
             </SectionCard>
 
             <SectionCard title="Main Office Details" description="Manage the office information presented in the featured contact card.">
               <div className="space-y-4">
-                <Field label="Section Title"><input value={contactContent[`main_office_title_${editorLanguage}`]} onChange={(e) => updateContactValue(`main_office_title_${editorLanguage}`, e.target.value)} className={textInputClass} /></Field>
-                <Field label="Office Name"><input value={contactContent.office_name} onChange={(e) => updateContactValue('office_name', e.target.value)} className={textInputClass} /></Field>
+                <Field label="Section Title" hint={`${contactContent[`main_office_title_${editorLanguage}`].length}/50`}><input value={contactContent[`main_office_title_${editorLanguage}`]} onChange={(e) => updateContactValue(`main_office_title_${editorLanguage}`, e.target.value)} className={textInputClass} maxLength={50} /></Field>
+                <Field label="Office Name" hint={`${contactContent.office_name.length}/100`}><input value={contactContent.office_name} onChange={(e) => updateContactValue('office_name', e.target.value)} className={textInputClass} maxLength={100} /></Field>
               </div>
             </SectionCard>
 
-            <ArrayTextField label="Address Lines" values={contactContent.address_lines} onChange={(index, value) => updateContactArray('address_lines', index, value)} addLabel="Add Address Line" />
-            <ArrayTextField label="Contact Numbers" values={contactContent.contact_numbers} onChange={(index, value) => updateContactArray('contact_numbers', index, value)} addLabel="Add Contact Number" />
-            <ArrayTextField label="Email Addresses" values={contactContent.email_addresses} onChange={(index, value) => updateContactArray('email_addresses', index, value)} addLabel="Add Email Address" />
-            <ArrayTextField label="Operating Hours" values={contactContent.office_hours} onChange={(index, value) => updateContactArray('office_hours', index, value)} addLabel="Add Operating Hours Entry" />
+            <ArrayTextField label="Address Lines" values={contactContent.address_lines} onChange={(index, value) => updateContactArray('address_lines', index, value)} addLabel="Add Address Line" maxItems={10} maxLength={50} />
+            <ArrayTextField label="Contact Numbers" values={contactContent.contact_numbers} onChange={(index, value) => updateContactArray('contact_numbers', index, value)} addLabel="Add Contact Number" maxItems={10} maxLength={50} />
+            <ArrayTextField label="Email Addresses" values={contactContent.email_addresses} onChange={(index, value) => updateContactArray('email_addresses', index, value)} addLabel="Add Email Address" maxItems={10} validate={(val) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)} />
+            <ArrayTextField label="Operating Hours" values={contactContent.office_hours} onChange={(index, value) => updateContactArray('office_hours', index, value)} addLabel="Add Operating Hours Entry" maxItems={10} maxLength={50} />
 
             <SectionCard title="Supporting Section Labels" description="Keep the branch directory and message form headings aligned with the public page.">
               <div className="space-y-4">
-                <Field label="Branch Section Title"><input value={contactContent[`branch_section_title_${editorLanguage}`]} onChange={(e) => updateContactValue(`branch_section_title_${editorLanguage}`, e.target.value)} className={textInputClass} /></Field>
-                <Field label="Form Title"><input value={contactContent[`form_title_${editorLanguage}`]} onChange={(e) => updateContactValue(`form_title_${editorLanguage}`, e.target.value)} className={textInputClass} /></Field>
+                <Field label="Branch Section Title" hint={`${contactContent[`branch_section_title_${editorLanguage}`].length}/50`}><input value={contactContent[`branch_section_title_${editorLanguage}`]} onChange={(e) => updateContactValue(`branch_section_title_${editorLanguage}`, e.target.value)} className={textInputClass} maxLength={50} /></Field>
+                <Field label="Form Title" hint={`${contactContent[`form_title_${editorLanguage}`].length}/2000`}><input value={contactContent[`form_title_${editorLanguage}`]} onChange={(e) => updateContactValue(`form_title_${editorLanguage}`, e.target.value)} className={textInputClass} maxLength={2000} /></Field>
               </div>
             </SectionCard>
           </div>

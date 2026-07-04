@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime
 from typing import Any
 
@@ -35,6 +36,14 @@ _MAX_HELP_CONTACT_LABEL = 20
 _MAX_HELP_CONTACT_VALUE = 20
 _MAX_PAGE_TITLE = 50
 _MAX_PAGE_SUBTITLE = 100
+_MAX_OFFICE_NAME = 100
+_MAX_CONTACT_ARRAY_ITEMS = 10
+_MAX_CONTACT_ARRAY_LINE = 50
+_MAX_FORM_TITLE = 2000
+
+
+def _is_valid_email(value: str) -> bool:
+    return bool(re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", value))
 
 
 class PublicContentPayload(BaseModel):
@@ -281,6 +290,37 @@ def _normalize_contact_content(content: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="Contact page titles and office name are required.")
     if not normalized["contact_numbers"] and not normalized["email_addresses"]:
         raise HTTPException(status_code=400, detail="Provide at least one contact number or email address.")
+
+    # Length validations
+    for suffix in ("_en", "_tl"):
+        if len(normalized[f"page_title{suffix}"]) > _MAX_PAGE_TITLE:
+            raise HTTPException(status_code=400, detail=f"Page title must be {_MAX_PAGE_TITLE} characters or fewer.")
+        if len(normalized[f"page_subtitle{suffix}"]) > _MAX_PAGE_SUBTITLE:
+            raise HTTPException(status_code=400, detail=f"Page subtitle must be {_MAX_PAGE_SUBTITLE} characters or fewer.")
+        if len(normalized[f"main_office_title{suffix}"]) > _MAX_PAGE_TITLE:
+            raise HTTPException(status_code=400, detail=f"Section title must be {_MAX_PAGE_TITLE} characters or fewer.")
+        if len(normalized[f"branch_section_title{suffix}"]) > _MAX_PAGE_TITLE:
+            raise HTTPException(status_code=400, detail=f"Branch section title must be {_MAX_PAGE_TITLE} characters or fewer.")
+        if len(normalized[f"form_title{suffix}"]) > _MAX_FORM_TITLE:
+            raise HTTPException(status_code=400, detail=f"Form title must be {_MAX_FORM_TITLE} characters or fewer.")
+    if len(normalized["office_name"]) > _MAX_OFFICE_NAME:
+        raise HTTPException(status_code=400, detail=f"Office name must be {_MAX_OFFICE_NAME} characters or fewer.")
+
+    # Array field limits
+    for key in ("address_lines", "contact_numbers", "office_hours"):
+        items = normalized[key]
+        if len(items) > _MAX_CONTACT_ARRAY_ITEMS:
+            raise HTTPException(status_code=400, detail=f"Maximum {_MAX_CONTACT_ARRAY_ITEMS} {key.replace('_', ' ')} allowed.")
+        for item in items:
+            if len(item) > _MAX_CONTACT_ARRAY_LINE:
+                raise HTTPException(status_code=400, detail=f"Each {key.replace('_', ' ')} entry must be {_MAX_CONTACT_ARRAY_LINE} characters or fewer.")
+
+    emails = normalized["email_addresses"]
+    if len(emails) > _MAX_CONTACT_ARRAY_ITEMS:
+        raise HTTPException(status_code=400, detail=f"Maximum {_MAX_CONTACT_ARRAY_ITEMS} email addresses allowed.")
+    for email in emails:
+        if not _is_valid_email(email):
+            raise HTTPException(status_code=400, detail=f"Invalid email address: {email}")
 
     return normalized
 
