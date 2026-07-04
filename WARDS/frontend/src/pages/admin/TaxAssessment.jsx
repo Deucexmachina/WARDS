@@ -145,6 +145,10 @@ const getAssessmentValidationErrors = (form) => {
     errors.taxpayer_name = 'Taxpayer Name is required.';
   }
 
+  if (!String(form.branch_id || '').trim()) {
+    errors.branch_id = 'Branch is required. Please select a branch.';
+  }
+
   if (form.taxpayer_email && !emailPattern.test(String(form.taxpayer_email).trim())) {
     errors.taxpayer_email = 'Enter a valid email address.';
   }
@@ -788,7 +792,8 @@ const TaxAssessment = () => {
             </label>
             <label className="block">
               <span className="mb-2 block text-sm font-semibold text-slate-700">Branch</span>
-              <CustomSelect value={assessmentForm.branch_id} onChange={handleSelectChange('branch_id')} options={[{ value: '', label: 'Unassigned' }, ...branches.map((branch) => ({ value: String(branch.id), label: branch.name }))]} placeholder="Select branch" />
+              <CustomSelect value={assessmentForm.branch_id} onChange={handleSelectChange('branch_id')} options={branches.map((branch) => ({ value: String(branch.id), label: branch.name }))} placeholder="Select branch" hasError={!!assessmentValidationErrors.branch_id} />
+              {assessmentValidationErrors.branch_id ? <span className="mt-2 block text-xs font-medium text-rose-600">{assessmentValidationErrors.branch_id}</span> : null}
             </label>
             <label className="block">
               <span className="mb-2 block text-sm font-semibold text-slate-700">Verification Status</span>
