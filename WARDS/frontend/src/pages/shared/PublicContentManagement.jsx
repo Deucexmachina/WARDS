@@ -225,6 +225,7 @@ const RepeaterCard = ({ title, description, items, onChange, onAdd, onRemove, fi
                       value={item[field.key] || ''}
                       onChange={(event) => onChange(index, field.key, event.target.value)}
                       className={textAreaClass}
+                      maxLength={field.maxLength}
                     />
                   ) : (
                     <input
@@ -232,6 +233,7 @@ const RepeaterCard = ({ title, description, items, onChange, onAdd, onRemove, fi
                       value={item[field.key] || ''}
                       onChange={(event) => onChange(index, field.key, event.target.value)}
                       className={textInputClass}
+                      maxLength={field.maxLength}
                     />
                   )}
                 </Field>
@@ -1352,8 +1354,8 @@ const PublicContentManagement = ({ portal = 'admin' }) => {
 
             <SectionCard title="Page Header" description="Control the hero title and supporting introduction shown on the public page.">
               <div className="space-y-4">
-                <Field label="Title"><input value={guideContent[`page_title_${editorLanguage}`]} onChange={(e) => updateGuideValue(`page_title_${editorLanguage}`, e.target.value)} className={textInputClass} /></Field>
-                <Field label="Subtitle"><textarea value={guideContent[`page_subtitle_${editorLanguage}`]} onChange={(e) => updateGuideValue(`page_subtitle_${editorLanguage}`, e.target.value)} className={textAreaClass} /></Field>
+                <Field label="Title" hint={`${guideContent[`page_title_${editorLanguage}`].length}/50`}><input value={guideContent[`page_title_${editorLanguage}`]} onChange={(e) => updateGuideValue(`page_title_${editorLanguage}`, e.target.value)} className={textInputClass} maxLength={50} /></Field>
+                <Field label="Subtitle" hint={`${guideContent[`page_subtitle_${editorLanguage}`].length}/100`}><textarea value={guideContent[`page_subtitle_${editorLanguage}`]} onChange={(e) => updateGuideValue(`page_subtitle_${editorLanguage}`, e.target.value)} className={textAreaClass} maxLength={100} /></Field>
               </div>
             </SectionCard>
 
@@ -1363,19 +1365,26 @@ const PublicContentManagement = ({ portal = 'admin' }) => {
               description={`Maintain ${editorLanguage === 'en' ? 'English' : 'Tagalog'} guide cards in their public display order.`}
               items={guideContent[`guides_${editorLanguage}`]}
               onChange={(index, field, value) => updateGuideListItem(`guides_${editorLanguage}`, index, field, value)}
-              onAdd={() => addGuideListItem(`guides_${editorLanguage}`, makeGuideItem)}
+              onAdd={() => {
+                const list = guideContent[`guides_${editorLanguage}`];
+                if (list.length >= 10) {
+                  alert('Maximum 10 guides allowed.');
+                  return;
+                }
+                addGuideListItem(`guides_${editorLanguage}`, makeGuideItem);
+              }}
               onRemove={(index) => removeGuideListItem(`guides_${editorLanguage}`, index)}
               fields={[
-                { key: 'title', label: 'Guide Title' },
-                { key: 'category', label: 'Category' },
-                { key: 'content', label: 'Content', multiline: true },
+                { key: 'title', label: 'Guide Title', maxLength: 50 },
+                { key: 'category', label: 'Category', maxLength: 30 },
+                { key: 'content', label: 'Content', multiline: true, maxLength: 1000 },
               ]}
             />
 
             <SectionCard title="Help Box" description="Configure the contact callout shown at the bottom of the guide page.">
               <div className="space-y-4">
-                <Field label="Help Title"><input value={guideContent[`help_title_${editorLanguage}`]} onChange={(e) => updateGuideValue(`help_title_${editorLanguage}`, e.target.value)} className={textInputClass} /></Field>
-                <Field label="Help Description"><textarea value={guideContent[`help_description_${editorLanguage}`]} onChange={(e) => updateGuideValue(`help_description_${editorLanguage}`, e.target.value)} className={textAreaClass} /></Field>
+                <Field label="Help Title" hint={`${guideContent[`help_title_${editorLanguage}`].length}/50`}><input value={guideContent[`help_title_${editorLanguage}`]} onChange={(e) => updateGuideValue(`help_title_${editorLanguage}`, e.target.value)} className={textInputClass} maxLength={50} /></Field>
+                <Field label="Help Description" hint={`${guideContent[`help_description_${editorLanguage}`].length}/500`}><textarea value={guideContent[`help_description_${editorLanguage}`]} onChange={(e) => updateGuideValue(`help_description_${editorLanguage}`, e.target.value)} className={textAreaClass} maxLength={500} /></Field>
               </div>
             </SectionCard>
 
@@ -1384,11 +1393,17 @@ const PublicContentManagement = ({ portal = 'admin' }) => {
               description="Add the phone, email, or other public support items shown in the guide help box."
               items={guideContent.help_contacts}
               onChange={(index, field, value) => updateGuideListItem('help_contacts', index, field, value)}
-              onAdd={() => addGuideListItem('help_contacts', makeHelpContact)}
+              onAdd={() => {
+                if (guideContent.help_contacts.length >= 10) {
+                  alert('Maximum 10 help contacts allowed.');
+                  return;
+                }
+                addGuideListItem('help_contacts', makeHelpContact);
+              }}
               onRemove={(index) => removeGuideListItem('help_contacts', index)}
               fields={[
-                { key: `label_${editorLanguage}`, label: `${editorLanguage === 'en' ? 'English' : 'Tagalog'} Label` },
-                { key: 'value', label: 'Displayed Value' },
+                { key: `label_${editorLanguage}`, label: `${editorLanguage === 'en' ? 'English' : 'Tagalog'} Label`, maxLength: 20 },
+                { key: 'value', label: 'Displayed Value', maxLength: 20 },
               ]}
             />
           </div>
