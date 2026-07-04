@@ -1155,7 +1155,6 @@ const GetQueue = () => {
                         value={formData.appointment_date}
                         onChange={handleInputChange}
                         min={todayDate}
-                        max={todayDate}
                         disabled={queueUnavailable}
                         placeholder="Select date"
                       />
