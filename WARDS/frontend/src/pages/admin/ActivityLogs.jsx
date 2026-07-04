@@ -70,6 +70,13 @@ const ActivityLogs = () => {
     fetchLogs();
   }, []);
 
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      fetchLogs();
+    }, 10000);
+    return () => clearInterval(intervalId);
+  }, [filters, pageState.page]);
+
   const handleFilterChange = (event) => {
     const { name, value } = event.target;
     setFilters((current) => ({ ...current, [name]: value }));

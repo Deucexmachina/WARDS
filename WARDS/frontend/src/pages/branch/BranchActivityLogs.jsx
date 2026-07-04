@@ -67,6 +67,13 @@ const BranchActivityLogs = () => {
     fetchLogs(1);
   }, []);
 
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      fetchLogs(pageState.page);
+    }, 10000);
+    return () => clearInterval(intervalId);
+  }, [filters, pageState.page]);
+
   const handleFilterChange = (event) => {
     const { name, value } = event.target;
     setFilters((current) => ({ ...current, [name]: value }));
