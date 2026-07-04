@@ -352,6 +352,10 @@ def normalize_identifier(identifier: str) -> str:
     return identifier.strip().lower()
 
 
+def _is_suspicious_input(value: str) -> bool:
+    return bool(re.search(r"[<>]", str(value or "")))
+
+
 def tracking_key(portal: str, identifier: str) -> str:
     return f"{portal}:{normalize_identifier(identifier)}"
 
@@ -1167,14 +1171,24 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
             )
 
         record_failed_attempt("unknown", credentials.identifier, client_ip)
-        log_activity(
-            db,
-            "Failed Unified Login",
-            credentials.identifier,
-            f"Portal: unknown; Reason: Account not found",
-            "security",
-            request=request,
-        )
+        if _is_suspicious_input(credentials.identifier):
+            log_activity(
+                db,
+                "Injection Attempt",
+                credentials.identifier,
+                f"Portal: unknown; Reason: Suspicious characters detected in identifier",
+                "security",
+                request=request,
+            )
+        else:
+            log_activity(
+                db,
+                "Failed Unified Login",
+                credentials.identifier,
+                f"Portal: unknown; Reason: Account not found",
+                "security",
+                request=request,
+            )
         info = _lockout_info("unknown", credentials.identifier)
         return JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -1202,15 +1216,26 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
     logger.warning("[LOGIN] password_valid=%s for %s (portal=%s)", password_valid, credentials.identifier, portal)
     if not password_valid:
         record_failed_attempt(portal, credentials.identifier, client_ip)
-        log_activity(
-            db,
-            "Failed Unified Login",
-            credentials.identifier,
-            f"Portal: {portal}",
-            "security",
-            request=request,
-            account=account,
-        )
+        if _is_suspicious_input(credentials.identifier):
+            log_activity(
+                db,
+                "Injection Attempt",
+                credentials.identifier,
+                f"Portal: {portal}; Reason: Suspicious characters detected in identifier",
+                "security",
+                request=request,
+                account=account,
+            )
+        else:
+            log_activity(
+                db,
+                "Failed Unified Login",
+                credentials.identifier,
+                f"Portal: {portal}",
+                "security",
+                request=request,
+                account=account,
+            )
         info = _lockout_info(portal, credentials.identifier)
         return JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,

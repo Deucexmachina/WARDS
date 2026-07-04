@@ -10,6 +10,8 @@ const FAQs = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState('all');
 
+  const sanitizeSearch = (value) => String(value || '').replace(/[<>]/g, '').trim();
+
   useEffect(() => {
     const fetchContent = async () => {
       try {
@@ -110,7 +112,7 @@ const FAQs = () => {
               type="text"
               value={searchQuery}
               onChange={(e) => {
-                setSearchQuery(e.target.value);
+                setSearchQuery(sanitizeSearch(e.target.value));
                 setOpenFaq(null);
               }}
               placeholder={language === 'en' ? 'Search questions...' : 'Maghanap ng mga tanong...'}
