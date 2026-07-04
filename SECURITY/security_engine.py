@@ -8159,6 +8159,16 @@ def _queue_vm1_restore_if_needed(
             detection_id,
             original_content_bytes=original_content_bytes,
         )
+        recovery = SecurityRecoveryEvent(
+            detection_event_id=detection_id,
+            file_id=entry.id,
+            recovery_type="vm1_restore_queued",
+            initiated_by=None,
+            status="in_progress",
+            summary=f"VM1 restore command queued for {entry.relative_path} after {reason}.",
+        )
+        db.add(recovery)
+        db.commit()
         logger.warning(
             "Queued VM1 restore command for %s after %s; file remains modified.",
             entry.relative_path,
@@ -8419,6 +8429,19 @@ def acknowledge_vm1_restore_command(db: Session, command_id: str, success: bool)
                 .first()
             )
             if not file_entry:
+                recovery = SecurityRecoveryEvent(
+                    detection_event_id=cmd.get("detection_id"),
+                    file_id=None,
+                    recovery_type="vm1_file_auto_restore",
+                    initiated_by=None,
+                    status="failed",
+                    backup_path=rel_path,
+                    completed_at=now_utc(),
+                    error_message="VM1 reporter acknowledged restore, but VM2 no longer has the monitored file row.",
+                    summary=f"VM1 restore acknowledgement could not be matched to monitored file {rel_path}.",
+                )
+                db.add(recovery)
+                db.commit()
                 continue
             try:
                 clean_hash = None
@@ -8441,9 +8464,69 @@ def acknowledge_vm1_restore_command(db: Session, command_id: str, success: bool)
                     file_entry.status = "clean"
                     file_entry.last_checked = now_utc()
                     db.add(file_entry)
+                    recovery = SecurityRecoveryEvent(
+                        detection_event_id=cmd.get("detection_id"),
+                        file_id=file_entry.id,
+                        recovery_type="vm1_file_auto_restore",
+                        initiated_by=None,
+                        status="success",
+                        backup_path=cmd.get("relative_path"),
+                        completed_at=now_utc(),
+                        summary=f"VM1 reporter acknowledged automatic restore for {rel_path}.",
+                    )
+                    db.add(recovery)
                     db.commit()
             except Exception:
-                pass
+                recovery = SecurityRecoveryEvent(
+                    detection_event_id=cmd.get("detection_id"),
+                    file_id=getattr(file_entry, "id", None),
+                    recovery_type="vm1_file_auto_restore",
+                    initiated_by=None,
+                    status="failed",
+                    backup_path=cmd.get("relative_path"),
+                    completed_at=now_utc(),
+                    error_message="VM2 failed to update baseline after VM1 restore acknowledgement.",
+                    summary=f"VM1 reporter acknowledged restore for {rel_path}, but VM2 could not update the recovery record.",
+                )
+                db.add(recovery)
+                db.commit()
+    else:
+        for cmd in removed:
+            if cmd.get("command_type") == "vm1_database_restore":
+                recovery = SecurityRecoveryEvent(
+                    detection_event_id=cmd.get("detection_id"),
+                    file_id=None,
+                    recovery_type="vm1_database_auto_restore",
+                    initiated_by=None,
+                    status="failed",
+                    backup_path="latest_vm1_database_archive",
+                    completed_at=now_utc(),
+                    error_message="VM1 reporter failed to apply database restore command.",
+                    summary="VM1 database automatic restore failed on VM1 reporter.",
+                )
+                db.add(recovery)
+                db.commit()
+                set_setting(db, "vm1_database_integrity_status", "restore_failed", "vm1_reporter")
+                continue
+            rel_path = cmd.get("relative_path") or "unknown"
+            file_entry = (
+                db.query(SecurityMonitoredFile)
+                .filter(SecurityMonitoredFile.relative_path == rel_path)
+                .first()
+            )
+            recovery = SecurityRecoveryEvent(
+                detection_event_id=cmd.get("detection_id"),
+                file_id=file_entry.id if file_entry else None,
+                recovery_type="vm1_file_auto_restore",
+                initiated_by=None,
+                status="failed",
+                backup_path=rel_path,
+                completed_at=now_utc(),
+                error_message="VM1 reporter failed to apply file restore command.",
+                summary=f"VM1 automatic restore failed for {rel_path}.",
+            )
+            db.add(recovery)
+            db.commit()
 
     # Clean up external content files to prevent disk bloat
     for c in removed:

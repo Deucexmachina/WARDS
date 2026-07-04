@@ -238,12 +238,22 @@ def test_manual_scan_marks_pending_risk_and_waits_for_vm1_db_integrity():
     vm1_source = Path("WARDS/backend/routes/security_dashboard.py").read_text(encoding="utf-8")
     dashboard_source = Path("SECURITY/security_engine.py").read_text(encoding="utf-8")
 
+    assert 'recovery_type="security_scan_requested"' in vm2_source
     assert 'set_setting(db, "security_scan_pending_since", force_token, "manual_scan")' in vm2_source
     assert 'set_setting(db, "vm1_database_integrity_status", "pending_scan", "manual_scan")' in vm2_source
     assert 'last_db_check = str(get_setting(db, "vm1_database_last_integrity_at", "") or "")' in vm2_source
     assert "last_manifest >= force_token and last_db_check >= force_token" in vm2_source
     assert 'set_setting(db, "security_scan_pending_since", scan_token, "manual_scan")' in vm1_source
     assert 'vm1_database_integrity_status in {"pending_scan", "restore_queued"}' in dashboard_source
+
+
+def test_vm1_restore_ack_creates_recovery_history_rows():
+    engine_source = Path("SECURITY/security_engine.py").read_text(encoding="utf-8")
+
+    assert 'recovery_type="vm1_file_auto_restore"' in engine_source
+    assert "VM1 reporter acknowledged automatic restore" in engine_source
+    assert "VM1 reporter failed to apply file restore command" in engine_source
+    assert 'recovery_type="vm1_restore_queued"' in engine_source
 
 
 def test_security_unread_counts_use_batch_source_ids():

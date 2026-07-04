@@ -252,12 +252,22 @@ def api_scan_file(payload: ScanFileRequest, db=Depends(get_db)):
 def api_scan_all(payload: dict = {}, request: Request = None, db=Depends(get_db)):
     context = payload.get("context", {}) or {}
     force_token = ""
+    scan_event = None
     if context.get("manual_scan"):
         force_token = now_utc().isoformat()
         set_setting(db, "vm1_scan_requested_at", force_token, "manual_scan")
         set_setting(db, "security_scan_pending_since", force_token, "manual_scan")
         set_setting(db, "last_interval_scan_status", "manual_scan_requested", "manual_scan")
         set_setting(db, "vm1_database_integrity_status", "pending_scan", "manual_scan")
+        scan_event = SecurityRecoveryEvent(
+            recovery_type="security_scan_requested",
+            initiated_by=None,
+            status="in_progress",
+            summary="Manual security scan requested; waiting for VM1 file manifest and database integrity report.",
+        )
+        db.add(scan_event)
+        db.commit()
+        db.refresh(scan_event)
     detections = scan_all_files(db, context=context)
     if context.get("manual_scan") and force_token:
         wait_seconds = max(0, min(30, int(os.getenv("VM1_MANUAL_SCAN_WAIT_SECONDS", "18"))))
@@ -273,6 +283,16 @@ def api_scan_all(payload: dict = {}, request: Request = None, db=Depends(get_db)
             time.sleep(1)
         if last_manifest >= force_token or last_db_check >= force_token:
             set_setting(db, "security_scan_pending_since", "", "manual_scan")
+        if scan_event:
+            scan_event.status = "success" if (last_manifest >= force_token or last_db_check >= force_token) else "in_progress"
+            scan_event.completed_at = now_utc() if scan_event.status == "success" else None
+            scan_event.summary = (
+                f"Manual security scan accepted; detections returned immediately={len(detections)}, "
+                f"vm1_manifest_received={bool(last_manifest >= force_token)}, "
+                f"vm1_database_integrity_received={bool(last_db_check >= force_token)}."
+            )
+            db.add(scan_event)
+            db.commit()
     return {"detections": [serialize_detection(d) for d in detections]}
 
 
