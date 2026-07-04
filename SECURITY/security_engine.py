@@ -7189,7 +7189,7 @@ def dashboard_payload(db: Session) -> dict:
     status = "Protected"
     if any(item.severity_level in {"high", "critical"} for item in incidents):
         status = "Compromised"
-    elif incidents or security_scan_pending_since or vm1_database_integrity_status in {"pending_scan", "restore_queued"}:
+    elif incidents:
         status = "At Risk"
     vm1_manifest_age_seconds = None
     vm1_manifest_status = "not received"
@@ -7330,7 +7330,24 @@ def query_recoveries(db: Session, keyword: str | None = None, date_from: str | N
         like = f"%{keyword}%"
         query = query.filter(or_(SecurityRecoveryEvent.summary.like(like), SecurityRecoveryEvent.backup_path.like(like), SecurityRecoveryEvent.error_message.like(like)))
     if recovery_type:
-        if recovery_type == "reverted":
+        if recovery_type == "automatic":
+            query = query.filter(
+                or_(
+                    SecurityRecoveryEvent.recovery_type == "automatic",
+                    SecurityRecoveryEvent.recovery_type.like("vm1_%auto%"),
+                    SecurityRecoveryEvent.recovery_type.like("auto_%"),
+                )
+            )
+        elif recovery_type == "manual":
+            query = query.filter(
+                or_(
+                    SecurityRecoveryEvent.recovery_type == "manual",
+                    SecurityRecoveryEvent.recovery_type.in_(["resolve", "bulk_incident_update", "reverted", "false_positive_restore"]),
+                )
+            )
+        elif recovery_type == "manual_full":
+            query = query.filter(or_(SecurityRecoveryEvent.recovery_type == "manual_full", SecurityRecoveryEvent.recovery_type == "full_system_recovery"))
+        elif recovery_type == "reverted":
             query = query.filter(or_(SecurityRecoveryEvent.recovery_type.in_(["reverted", "false_positive_restore"]), SecurityRecoveryEvent.status == "reverted"))
         else:
             query = query.filter(SecurityRecoveryEvent.recovery_type == recovery_type)
@@ -8159,16 +8176,6 @@ def _queue_vm1_restore_if_needed(
             detection_id,
             original_content_bytes=original_content_bytes,
         )
-        recovery = SecurityRecoveryEvent(
-            detection_event_id=detection_id,
-            file_id=entry.id,
-            recovery_type="vm1_restore_queued",
-            initiated_by=None,
-            status="in_progress",
-            summary=f"VM1 restore command queued for {entry.relative_path} after {reason}.",
-        )
-        db.add(recovery)
-        db.commit()
         logger.warning(
             "Queued VM1 restore command for %s after %s; file remains modified.",
             entry.relative_path,
@@ -8429,19 +8436,6 @@ def acknowledge_vm1_restore_command(db: Session, command_id: str, success: bool)
                 .first()
             )
             if not file_entry:
-                recovery = SecurityRecoveryEvent(
-                    detection_event_id=cmd.get("detection_id"),
-                    file_id=None,
-                    recovery_type="vm1_file_auto_restore",
-                    initiated_by=None,
-                    status="failed",
-                    backup_path=rel_path,
-                    completed_at=now_utc(),
-                    error_message="VM1 reporter acknowledged restore, but VM2 no longer has the monitored file row.",
-                    summary=f"VM1 restore acknowledgement could not be matched to monitored file {rel_path}.",
-                )
-                db.add(recovery)
-                db.commit()
                 continue
             try:
                 clean_hash = None
@@ -8464,32 +8458,9 @@ def acknowledge_vm1_restore_command(db: Session, command_id: str, success: bool)
                     file_entry.status = "clean"
                     file_entry.last_checked = now_utc()
                     db.add(file_entry)
-                    recovery = SecurityRecoveryEvent(
-                        detection_event_id=cmd.get("detection_id"),
-                        file_id=file_entry.id,
-                        recovery_type="vm1_file_auto_restore",
-                        initiated_by=None,
-                        status="success",
-                        backup_path=cmd.get("relative_path"),
-                        completed_at=now_utc(),
-                        summary=f"VM1 reporter acknowledged automatic restore for {rel_path}.",
-                    )
-                    db.add(recovery)
                     db.commit()
             except Exception:
-                recovery = SecurityRecoveryEvent(
-                    detection_event_id=cmd.get("detection_id"),
-                    file_id=getattr(file_entry, "id", None),
-                    recovery_type="vm1_file_auto_restore",
-                    initiated_by=None,
-                    status="failed",
-                    backup_path=cmd.get("relative_path"),
-                    completed_at=now_utc(),
-                    error_message="VM2 failed to update baseline after VM1 restore acknowledgement.",
-                    summary=f"VM1 reporter acknowledged restore for {rel_path}, but VM2 could not update the recovery record.",
-                )
-                db.add(recovery)
-                db.commit()
+                logger.exception("VM2 failed to update baseline after VM1 restore acknowledgement for %s", rel_path)
     else:
         for cmd in removed:
             if cmd.get("command_type") == "vm1_database_restore":
@@ -8508,25 +8479,7 @@ def acknowledge_vm1_restore_command(db: Session, command_id: str, success: bool)
                 db.commit()
                 set_setting(db, "vm1_database_integrity_status", "restore_failed", "vm1_reporter")
                 continue
-            rel_path = cmd.get("relative_path") or "unknown"
-            file_entry = (
-                db.query(SecurityMonitoredFile)
-                .filter(SecurityMonitoredFile.relative_path == rel_path)
-                .first()
-            )
-            recovery = SecurityRecoveryEvent(
-                detection_event_id=cmd.get("detection_id"),
-                file_id=file_entry.id if file_entry else None,
-                recovery_type="vm1_file_auto_restore",
-                initiated_by=None,
-                status="failed",
-                backup_path=rel_path,
-                completed_at=now_utc(),
-                error_message="VM1 reporter failed to apply file restore command.",
-                summary=f"VM1 automatic restore failed for {rel_path}.",
-            )
-            db.add(recovery)
-            db.commit()
+            logger.error("VM1 reporter failed to apply file restore command for %s", cmd.get("relative_path") or "unknown")
 
     # Clean up external content files to prevent disk bloat
     for c in removed:
@@ -8620,7 +8573,8 @@ def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type
     if is_auto_recover:
         # Queue restore command independently — failure here must NOT prevent incident creation
         try:
-            _create_vm1_restore_command(db, entry, detection.id, original_content_bytes=original_content_bytes)
+            if not _has_pending_vm1_restore_for_file(db, entry.relative_path):
+                _create_vm1_restore_command(db, entry, detection.id, original_content_bytes=original_content_bytes)
         except Exception as exc:
             logger.exception("VM1 restore-command creation failed for %s: %s", entry.relative_path, exc)
 
@@ -9013,10 +8967,51 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
                 if not f.get("content_b64"):
                     _store_vm1_snapshot_from_local_repo(rel_path)
                 continue
-            # If the file hash hasn't changed since the last scan, don't log another detection.
-            # This must run after the git-head check so deferred deployment changes can
-            # become clean on the next reporter pass.
+            # A hash-only deferral stores the modified hash as current. If a later
+            # forced reporter pass includes content for that same hash, create the
+            # normal detection/incident instead of silently queuing recovery forever.
             if previous_hash == current_hash:
+                open_incident_exists = _has_open_incident(db, entry, "vm1_content_modified")
+                snapshot_path = VM1_SNAPSHOT_ROOT / entry.relative_path
+                old_content = read_text(snapshot_path) if snapshot_path.exists() else ""
+                old_snapshot_bytes = None
+                if snapshot_path.exists():
+                    try:
+                        old_snapshot_bytes = snapshot_path.read_bytes()
+                    except Exception:
+                        pass
+                new_content = ""
+                content_b64 = f.get("content_b64")
+                content_supplied = isinstance(content_b64, str) and bool(content_b64.strip())
+                if content_supplied:
+                    try:
+                        new_content = base64.b64decode(content_b64).decode("utf-8", errors="replace")
+                    except Exception:
+                        content_supplied = False
+
+                if not open_incident_exists and content_supplied and new_content.strip():
+                    entry.status = "modified"
+                    changed += 1
+                    db.add(entry)
+                    db.commit()
+                    detection = _record_vm1_detection(
+                        db, entry, "vm1_content_modified", current_hash,
+                        old_content=old_content, new_content=new_content,
+                        original_content_bytes=old_snapshot_bytes,
+                    )
+                    _store_vm1_snapshot(rel_path, content_b64)
+                    snapshot = VM1_SNAPSHOT_ROOT / rel_path
+                    if snapshot.exists():
+                        defaced_path = VM1_DEFACED_SNAPSHOT_ROOT / rel_path
+                        defaced_path.parent.mkdir(parents=True, exist_ok=True)
+                        try:
+                            shutil.copy2(snapshot, defaced_path)
+                        except Exception:
+                            pass
+                    if detection:
+                        detections.append(detection)
+                    continue
+
                 entry.status = "modified"
                 db.add(entry)
                 _queue_vm1_restore_if_needed(

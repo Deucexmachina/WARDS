@@ -76,6 +76,20 @@ const badgeClass = (value) => {
 const humanize = (value) => String(value || 'n/a').replaceAll('_', ' ');
 const titleize = (value) => humanize(value).replace(/\b\w/g, (letter) => letter.toUpperCase());
 const badgeText = (value) => String(value || '').toLowerCase() === 'false_positive' ? 'False' : titleize(value);
+const recoveryTypeLabel = (value) => {
+  const normalized = String(value || '').toLowerCase();
+  if (normalized === 'manual_full' || normalized.includes('full_system') || normalized.includes('manual full')) return 'manual_full';
+  if (normalized.includes('manual') || normalized.includes('resolve') || normalized.includes('reverted') || normalized.includes('false_positive') || normalized.includes('bulk')) return 'manual';
+  return 'automatic';
+};
+const recoveryStatusLabel = (value) => {
+  const normalized = String(value || '').toLowerCase();
+  if (normalized === 'verified_removal') return 'success';
+  if (normalized.includes('revert')) return 'reverted';
+  if (normalized.includes('progress') || normalized.includes('pending') || normalized.includes('queued')) return 'in_progress';
+  if (normalized.includes('fail')) return 'failed';
+  return 'success';
+};
 const detectionClassification = (item) => {
   if (item?.is_legitimate) return 'legitimate';
   return String(item?.ai_prediction || '').toLowerCase() === 'malicious' ? 'malicious' : 'suspicious';
@@ -1593,8 +1607,8 @@ const BackupRecovery = () => {
                         </div>
                         <div className="flex flex-wrap items-center gap-2 md:justify-end md:text-right">
                           <span className="text-xs font-semibold text-slate-500">{item.recovery_duration_ms || 0} ms</span>
-                          <Badge>{item.recovery_type}</Badge>
-                          <Badge>{item.status}</Badge>
+                          <Badge>{recoveryTypeLabel(item.recovery_type)}</Badge>
+                          <Badge>{recoveryStatusLabel(item.status)}</Badge>
                         </div>
                       </button>
                       {openRows[key] && (
