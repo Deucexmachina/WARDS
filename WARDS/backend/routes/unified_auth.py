@@ -31,7 +31,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
-from database.models import ActivityLog, Admin, AdminLoginSecurityProfile, BranchStaff, CitizenUser, EmailOTP, Invite, MFASecret, get_db
+from database.models import ActivityLog, Alert, Admin, AdminLoginSecurityProfile, BranchStaff, CitizenUser, EmailOTP, Invite, MFASecret, get_db
 from utils.redis_client import get_redis_client
 from services.email_service import (
     _safe_html,
@@ -703,6 +703,21 @@ def log_activity(db: Session, action: str, user: str, details: str, log_type: st
     except (AttributeError, TypeError):
         pass
 
+    if log_type == "malicious":
+        try:
+            db.add(
+                Alert(
+                    type="malicious",
+                    title=action,
+                    message=full_details,
+                    severity="high",
+                    read=False,
+                )
+            )
+            db.commit()
+        except (AttributeError, TypeError):
+            pass
+
 
 def _sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8", errors="ignore")).hexdigest()
@@ -1236,8 +1251,8 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
                 db,
                 "Injection Attempt",
                 credentials.identifier,
-                f"Portal: unknown; Reason: Suspicious characters detected in identifier",
-                "security",
+                f"Portal: unknown; Reason: Suspicious characters detected in identifier; Input: {credentials.identifier}",
+                "malicious",
                 request=request,
             )
         else:
@@ -1281,7 +1296,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
                 db,
                 "Injection Attempt",
                 credentials.identifier,
-                f"Portal: {portal}; Reason: Suspicious characters detected in identifier",
+                f"Portal: {portal}; Reason: Suspicious characters detected in identifier; Input: {credentials.identifier}",
                 "malicious",
                 request=request,
                 account=account,
