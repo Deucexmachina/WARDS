@@ -3,17 +3,16 @@ export const CITIZEN_NAME_PATTERN = /^[A-Za-z ]+$/;
 export const PH_CONTACT_DIGITS_PATTERN = /^9\d{9}$/;
 export const REAL_EMAIL_RULE_MESSAGE = 'Please enter a valid email address.';
 
-const FAKE_EMAIL_DOMAINS = new Set([
-  'test.com', 'example.com', 'fake.com', 'mock.com',
-  'sample.com', 'temp.com', 'mailinator.com', 'yopmail.com',
-  'guerrillamail.com', 'sharklasers.com',
+const DISPOSABLE_EMAIL_DOMAINS = new Set([
+  'test.com', 'fake.com', 'mock.com', 'sample.com', 'temp.com',
+  'mailinator.com', 'yopmail.com', 'guerrillamail.com', 'sharklasers.com',
 ]);
 
 export const isFakeEmail = (value) => {
   const trimmed = String(value || '').trim().toLowerCase();
   if (!trimmed.includes('@')) return false;
   const domain = trimmed.split('@')[1];
-  return FAKE_EMAIL_DOMAINS.has(domain);
+  return DISPOSABLE_EMAIL_DOMAINS.has(domain);
 };
 export const CITIZEN_NAME_RULE_MESSAGE = 'Full name must contain letters and spaces only.';
 export const PH_CONTACT_RULE_MESSAGE = 'Contact number must begin with 9 and contain exactly 10 digits.';

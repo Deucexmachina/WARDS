@@ -2100,13 +2100,12 @@ async def unified_register(
 
     email = normalize_email(payload.email)
 
-    _FAKE_EMAIL_DOMAINS = {
-        "test.com", "example.com", "fake.com", "mock.com",
-        "sample.com", "temp.com", "mailinator.com", "yopmail.com",
-        "guerrillamail.com", "sharklasers.com",
+    _DISPOSABLE_EMAIL_DOMAINS = {
+        "test.com", "fake.com", "mock.com", "sample.com", "temp.com",
+        "mailinator.com", "yopmail.com", "guerrillamail.com", "sharklasers.com",
     }
     domain = email.split("@")[1] if "@" in email else ""
-    if domain in _FAKE_EMAIL_DOMAINS:
+    if domain in _DISPOSABLE_EMAIL_DOMAINS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Please use a real email address, not a temporary or test email.",
@@ -2299,13 +2298,12 @@ async def unified_invite_register(
 ):
     email = normalize_email(payload.email)
 
-    _FAKE_EMAIL_DOMAINS = {
-        "test.com", "example.com", "fake.com", "mock.com",
-        "sample.com", "temp.com", "mailinator.com", "yopmail.com",
-        "guerrillamail.com", "sharklasers.com",
+    _DISPOSABLE_EMAIL_DOMAINS = {
+        "test.com", "fake.com", "mock.com", "sample.com", "temp.com",
+        "mailinator.com", "yopmail.com", "guerrillamail.com", "sharklasers.com",
     }
     domain = email.split("@")[1] if "@" in email else ""
-    if domain in _FAKE_EMAIL_DOMAINS:
+    if domain in _DISPOSABLE_EMAIL_DOMAINS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Please use a real email address, not a temporary or test email.",
