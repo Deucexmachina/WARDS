@@ -671,8 +671,15 @@ def apply_restore_command(cmd: dict) -> bool:
 
 
 def apply_database_restore_command(cmd: dict) -> bool:
-    if not SECURITY_API_URL or not API_KEY or not ADMIN_SECRET:
-        log("VM1 database restore command skipped; missing SECURITY API credentials")
+    missing = []
+    if not SECURITY_API_URL:
+        missing.append("SECURITY_API_URL")
+    if not API_KEY:
+        missing.append("SECURITY_API_KEY")
+    if not ADMIN_SECRET:
+        missing.append("SECURITY_ADMIN_SECRET")
+    if missing:
+        log(f"VM1 database restore command skipped; missing env: {', '.join(missing)}")
         return False
     command_id = str(cmd.get("command_id") or f"dbrestore_{int(time.time())}")
     download_path = Path(f"/tmp/{command_id}.sql.gz")
