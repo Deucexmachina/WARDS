@@ -497,9 +497,13 @@ class TestProcessVm1ManifestNormalizesCustomPrefix:
             "SECURITY.security_engine.now_utc",
             lambda: __import__("datetime").datetime(2026, 6, 30),
         )
+        monkeypatch.setattr(
+            "SECURITY.security_engine.get_setting",
+            lambda _db, key, default="": {"deployment_target_commit": "abc123", "deployment_vm1_baseline_ready": "false"}.get(key, default),
+        )
 
-        result = process_vm1_file_manifest(db, files)
-        call_args = db.add.call_args[0][0]
+        result = process_vm1_file_manifest(db, files, deployment_commit="abc123")
+        call_args = next(call.args[0] for call in db.add.call_args_list if hasattr(call.args[0], "folder_root"))
         assert call_args.folder_root == "SIGMA"
         assert call_args.relative_path == "SIGMA/config.txt"
         assert call_args.file_path == "vm1://SIGMA/config.txt"

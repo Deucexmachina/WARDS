@@ -58,6 +58,10 @@ LAST_DATABASE_CHECKSUM = ""
 
 LOG_PREFIX = "[VM1-REPORTER]"
 
+CRITICAL_INLINE_RELATIVE_PATHS = {
+    "WARDS/frontend/index.html",
+}
+
 EXCLUDED_DIRS = {
     ".git",
     "__pycache__",
@@ -184,6 +188,16 @@ def _should_inline_content(path: Path, size_bytes: int) -> bool:
     return lower_name in MONITORED_SPECIAL_FILENAMES or any(lower_name.endswith(item) for item in MONITORED_SPECIAL_NAME_SUFFIXES)
 
 
+def _inline_priority_rank(relative_path: str, path: Path, git_head_match: bool) -> int:
+    if relative_path in CRITICAL_INLINE_RELATIVE_PATHS:
+        return 0
+    if not git_head_match and path.suffix.lower() in INLINE_CONTENT_SUFFIXES:
+        return 1
+    if not git_head_match:
+        return 2
+    return 3
+
+
 def _git_info_for_root(root_path: Path) -> tuple[Path | None, set[str], set[str]]:
     """Return (git_root, tracked_files, modified_files) for a monitored root.
 
@@ -265,15 +279,18 @@ def _iter_root_files(root_name: str, root_path: Path):
         except Exception as exc:
             log(f"Skipping unreadable file {path}: {exc}")
             continue
+        relative_path = f"{root_name}/{rel}"
         yield {
-            "relative_path": f"{root_name}/{rel}",
+            "relative_path": relative_path,
             "folder_root": f"VM1_{root_name}",
             "file_path": str(path),
             "size_bytes": stat.st_size,
             "current_hash": current_hash,
             "content_b64": None,
             "inline_candidate": _should_inline_content(path, stat.st_size),
-            "inline_priority": not git_head_match,
+            "inline_priority": not git_head_match or relative_path in CRITICAL_INLINE_RELATIVE_PATHS,
+            "inline_priority_rank": _inline_priority_rank(relative_path, path, git_head_match),
+            "inline_always": relative_path in CRITICAL_INLINE_RELATIVE_PATHS,
             "git_head_match": git_head_match,
         }
 
@@ -290,13 +307,16 @@ def iter_monitored_files():
 
     # Changed files need content most urgently; without it VM2 can only see
     # a hash delta and cannot produce a trustworthy diff or recovery command.
-    items.sort(key=lambda item: (not item.get("inline_priority", False), item["relative_path"]))
+    items.sort(key=lambda item: (item.get("inline_priority_rank", 3), item["relative_path"]))
     for item in items:
-        if item.pop("inline_candidate", False) and item["size_bytes"] <= inline_budget:
+        inline_candidate = item.pop("inline_candidate", False)
+        inline_always = item.pop("inline_always", False)
+        if inline_candidate and (item["size_bytes"] <= inline_budget or inline_always):
             item["content_b64"] = file_content_b64(Path(item["file_path"]))
             if item["content_b64"] is not None:
-                inline_budget -= item["size_bytes"]
+                inline_budget = max(0, inline_budget - item["size_bytes"])
         item.pop("inline_priority", None)
+        item.pop("inline_priority_rank", None)
         yield item
 
 

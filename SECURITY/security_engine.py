@@ -8669,12 +8669,30 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
 
     deployment_commit = str(deployment_commit or "").strip()
     deployment_paused = is_deployment_in_progress(db)
+    target_commit = (get_setting(db, "deployment_target_commit", "") or "").strip()
+    baseline_already_ready = (get_setting(db, "deployment_vm1_baseline_ready", "false") or "false").lower() == "true"
+    deployment_baseline_allowed = bool(
+        deployment_paused
+        and deployment_commit
+        and target_commit
+        and deployment_commit == target_commit
+        and not baseline_already_ready
+    )
     if deployment_commit:
         set_setting(db, "vm1_last_manifest_commit", deployment_commit, "vm1_reporter")
     set_setting(db, "vm1_last_manifest_at", now_utc().isoformat(), "vm1_reporter")
     set_setting(db, "vm1_last_manifest_deployment_paused", "true" if deployment_paused else "false", "vm1_reporter")
 
-    if deployment_paused:
+    if deployment_paused and not deployment_baseline_allowed:
+        logger.warning(
+            "Deployment mode is active, but VM1 manifest will be scanned normally "
+            "(commit=%s target=%s baseline_ready=%s).",
+            deployment_commit or "unknown",
+            target_commit or "not set",
+            baseline_already_ready,
+        )
+
+    if deployment_baseline_allowed:
         logger.info("Deployment in progress — skipping VM1 file change detections.")
         # Still register or update files so the baseline is correct post-deploy
         for f in files:
@@ -8727,7 +8745,6 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
             # Store the snapshot during deployment so future diffs have a proper baseline
             _store_vm1_snapshot(rel_path, f.get("content_b64"))
         db.commit()
-        target_commit = (get_setting(db, "deployment_target_commit", "") or "").strip()
         baseline_ready = bool(deployment_commit and target_commit and deployment_commit == target_commit)
         if baseline_ready:
             set_setting(db, "deployment_vm1_baseline_ready", "true", "vm1_reporter")
