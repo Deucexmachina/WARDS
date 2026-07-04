@@ -2067,7 +2067,12 @@ def register_monitored_folder_entries(
     backed_up = 0
     processed = 0
     roots = {root.name.upper(): root}
+    seen_path_keys: set[str] = set()
     for root_name, path in iter_monitorable_files(roots):
+        path_key = normalized_path_key(path)
+        if path_key in seen_path_keys:
+            continue
+        seen_path_keys.add(path_key)
         processed += 1
         current_hash = sha256_file(path)
         relative = monitored_relative_path(path, root)
@@ -9021,7 +9026,8 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
                     reason="repeat modified hash scan",
                 )
                 continue
-            if not has_pending_restore:
+            has_open_incident = _has_open_incident(db, entry, "vm1_content_modified")
+            if not has_pending_restore or not has_open_incident:
                 # Resolve any existing open incidents for this file before creating a new one
                 for old_incident in db.query(SecurityIncident).join(SecurityDetectionEvent).filter(
                     SecurityDetectionEvent.file_id == entry.id,

@@ -555,6 +555,10 @@ def api_vm1_files_register(payload: dict = {}, db=Depends(get_db)):
     try:
         return process_vm1_file_manifest(db, payload.get("files", []), deployment_commit=payload.get("commit"))
     except Exception as exc:
+        try:
+            db.rollback()
+        except Exception:
+            pass
         logger.exception("VM1 file manifest registration failed.")
         raise HTTPException(status_code=500, detail=f"VM1 file manifest registration failed: {exc}") from exc
 

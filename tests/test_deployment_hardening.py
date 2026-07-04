@@ -265,6 +265,8 @@ def test_vm1_repeat_hash_with_content_uses_normal_detection_flow():
     assert "not open_incident_exists and content_supplied and new_content.strip()" in engine_source
     assert '_record_vm1_detection(\n                        db, entry, "vm1_content_modified", current_hash' in engine_source
     assert "repeat modified hash scan" in engine_source
+    assert "if not has_pending_restore or not has_open_incident:" in engine_source
+    assert "if not _has_pending_vm1_restore_for_file(db, entry.relative_path):" in engine_source
 
 
 def test_security_unread_counts_use_batch_source_ids():
