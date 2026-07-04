@@ -1131,6 +1131,14 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
             )
 
         record_failed_attempt("unknown", credentials.identifier, client_ip)
+        log_activity(
+            db,
+            "Failed Unified Login",
+            credentials.identifier,
+            f"Portal: unknown; Reason: Account not found",
+            "security",
+            request=request,
+        )
         info = _lockout_info("unknown", credentials.identifier)
         return JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,
