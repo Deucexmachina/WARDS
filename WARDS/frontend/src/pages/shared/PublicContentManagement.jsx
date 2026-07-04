@@ -125,6 +125,12 @@ const ImageUploadField = ({ label, value, onChange, hint }) => {
   const handleFile = (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
+    const validTypes = ['image/png', 'image/jpeg', 'image/jpg'];
+    if (!validTypes.includes(file.type)) {
+      alert('Only PNG and JPG images are allowed.');
+      event.target.value = '';
+      return;
+    }
     if (file.size > MAX_IMAGE_BYTES) {
       alert(`Image must be under 2 MB. "${file.name}" is ${(file.size / 1024 / 1024).toFixed(1)} MB.`);
       event.target.value = '';
@@ -1253,19 +1259,21 @@ const PublicContentManagement = ({ portal = 'admin' }) => {
 
             <SectionCard title="Hero Text" description="The main headline and supporting subtitle shown over the hero background.">
               <div className="space-y-4">
-                <Field label="Title">
+                <Field label="Title" hint={`${homeContent[`hero_title_${editorLanguage}`].length}/50`}>
                   <input
                     value={homeContent[`hero_title_${editorLanguage}`]}
                     onChange={(e) => setHomeContent((c) => ({ ...c, [`hero_title_${editorLanguage}`]: e.target.value }))}
                     className={textInputClass}
+                    maxLength={50}
                   />
                 </Field>
-                <Field label="Subtitle">
+                <Field label="Subtitle" hint={`${homeContent[`hero_subtitle_${editorLanguage}`].length}/100`}>
                   <textarea
                     value={homeContent[`hero_subtitle_${editorLanguage}`]}
                     onChange={(e) => setHomeContent((c) => ({ ...c, [`hero_subtitle_${editorLanguage}`]: e.target.value }))}
                     className={textAreaClass}
                     style={{ minHeight: 80 }}
+                    maxLength={100}
                   />
                 </Field>
               </div>
@@ -1279,11 +1287,12 @@ const PublicContentManagement = ({ portal = 'admin' }) => {
                   { key: `btn_pay_taxes_${editorLanguage}`, label: 'Pay Taxes Online' },
                   { key: `btn_request_receipt_${editorLanguage}`, label: 'Request Receipt' },
                 ].map(({ key, label }) => (
-                  <Field key={key} label={label}>
+                  <Field key={key} label={label} hint={`${homeContent[key].length}/20`}>
                     <input
                       value={homeContent[key]}
                       onChange={(e) => setHomeContent((c) => ({ ...c, [key]: e.target.value }))}
                       className={textInputClass}
+                      maxLength={20}
                     />
                   </Field>
                 ))}
@@ -1292,19 +1301,21 @@ const PublicContentManagement = ({ portal = 'admin' }) => {
 
             <SectionCard title="Announcements Section" description="The heading and subtitle shown above the Latest Announcements cards.">
               <div className="space-y-4">
-                <Field label="Section Title">
+                <Field label="Section Title" hint={`${homeContent[`announcements_title_${editorLanguage}`].length}/30`}>
                   <input
                     value={homeContent[`announcements_title_${editorLanguage}`]}
                     onChange={(e) => setHomeContent((c) => ({ ...c, [`announcements_title_${editorLanguage}`]: e.target.value }))}
                     className={textInputClass}
+                    maxLength={30}
                   />
                 </Field>
-                <Field label="Section Subtitle">
+                <Field label="Section Subtitle" hint={`${homeContent[`announcements_subtitle_${editorLanguage}`].length}/100`}>
                   <textarea
                     value={homeContent[`announcements_subtitle_${editorLanguage}`]}
                     onChange={(e) => setHomeContent((c) => ({ ...c, [`announcements_subtitle_${editorLanguage}`]: e.target.value }))}
                     className={textAreaClass}
                     style={{ minHeight: 72 }}
+                    maxLength={100}
                   />
                 </Field>
               </div>
