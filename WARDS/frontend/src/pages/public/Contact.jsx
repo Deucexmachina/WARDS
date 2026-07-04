@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import api, { publicContentAPI } from '../../services/api';
+import api, { publicContentAPI, contactAPI } from '../../services/api';
 import { getEmailValidationMessage } from '../../utils/validation';
 import { usePublicLanguage } from '../../utils/publicLanguage';
 
@@ -15,7 +15,51 @@ const Contact = () => {
     message: '',
   });
   const [emailError, setEmailError] = useState('');
+  const [fullNameError, setFullNameError] = useState('');
+  const [subjectError, setSubjectError] = useState('');
+  const [messageError, setMessageError] = useState('');
   const [formNotice, setFormNotice] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const sanitizeInput = (value) => String(value || '').replace(/[<>]/g, '').trim();
+
+  const validateFullName = (value) => {
+    const cleaned = sanitizeInput(value);
+    if (!cleaned) {
+      return language === 'en' ? 'Full name is required.' : 'Kailangan ang buong pangalan.';
+    }
+    if (cleaned.length > 50) {
+      return language === 'en' ? 'Full name must be 50 characters or fewer.' : 'Ang buong pangalan ay dapat 50 character o mas mababa.';
+    }
+    if (!/^[A-Za-z.\-' ]+$/.test(cleaned)) {
+      return language === 'en'
+        ? 'Full name must contain letters, spaces, periods, hyphens, and apostrophes only.'
+        : 'Ang buong pangalan ay dapat mga letra, espasyo, tuldok, gitling, at apostrophe lamang.';
+    }
+    return '';
+  };
+
+  const validateSubject = (value) => {
+    const cleaned = sanitizeInput(value);
+    if (!cleaned) {
+      return language === 'en' ? 'Subject is required.' : 'Kailangan ang paksa.';
+    }
+    if (cleaned.length > 200) {
+      return language === 'en' ? 'Subject must be 200 characters or fewer.' : 'Ang paksa ay dapat 200 character o mas mababa.';
+    }
+    return '';
+  };
+
+  const validateMessage = (value) => {
+    const cleaned = sanitizeInput(value);
+    if (!cleaned) {
+      return language === 'en' ? 'Message is required.' : 'Kailangan ang mensahe.';
+    }
+    if (cleaned.length > 5000) {
+      return language === 'en' ? 'Message must be 5000 characters or fewer.' : 'Ang mensahe ay dapat 5000 character o mas mababa.';
+    }
+    return '';
+  };
 
   useEffect(() => {
     const fetchContent = async () => {
@@ -42,20 +86,68 @@ const Contact = () => {
     if (name === 'email') {
       setEmailError(getEmailValidationMessage(value));
     }
+    if (name === 'fullName') {
+      setFullNameError(validateFullName(value));
+    }
+    if (name === 'subject') {
+      setSubjectError(validateSubject(value));
+    }
+    if (name === 'message') {
+      setMessageError(validateMessage(value));
+    }
     if (formNotice) {
       setFormNotice('');
     }
   };
 
-  const handleContactSubmit = (event) => {
+  const handleContactSubmit = async (event) => {
     event.preventDefault();
+
+    const nextFullNameError = validateFullName(contactForm.fullName);
     const nextEmailError = getEmailValidationMessage(contactForm.email);
-    if (nextEmailError) {
-      setEmailError(nextEmailError);
-      setFormNotice('Please correct the highlighted email field before sending your message.');
+    const nextSubjectError = validateSubject(contactForm.subject);
+    const nextMessageError = validateMessage(contactForm.message);
+
+    setFullNameError(nextFullNameError);
+    setEmailError(nextEmailError);
+    setSubjectError(nextSubjectError);
+    setMessageError(nextMessageError);
+
+    if (nextFullNameError || nextEmailError || nextSubjectError || nextMessageError) {
+      setFormNotice(
+        language === 'en'
+          ? 'Please correct the highlighted fields before sending your message.'
+          : 'Mangyaring ayusin ang mga naka-highlight na field bago ipadala ang iyong mensahe.'
+      );
       return;
     }
-    setFormNotice('Message sending is not connected yet, but your email field is now being validated properly.');
+
+    setSubmitting(true);
+    setFormNotice('');
+
+    try {
+      const response = await contactAPI.submitInquiry({
+        full_name: sanitizeInput(contactForm.fullName),
+        email: sanitizeInput(contactForm.email),
+        subject: sanitizeInput(contactForm.subject),
+        message: sanitizeInput(contactForm.message),
+      });
+      setFormNotice(response.data.message || '');
+      setContactForm({ fullName: '', email: '', subject: '', message: '' });
+      setFullNameError('');
+      setEmailError('');
+      setSubjectError('');
+      setMessageError('');
+    } catch (err) {
+      const detail = err.response?.data?.detail || '';
+      setFormNotice(
+        detail || (language === 'en'
+          ? 'Failed to send your message. Please try again later.'
+          : 'Hindi naipadala ang iyong mensahe. Pakisubukang muli mamaya.')
+      );
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (loading) {
@@ -286,13 +378,13 @@ const Contact = () => {
             {formNotice ? (
               <div
                 className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-sm font-medium ${
-                  emailError
+                  (emailError || fullNameError || subjectError || messageError)
                     ? 'border-red-200 bg-red-50 text-red-700'
                     : 'border-blue-200 bg-blue-50 text-blue-700'
                 }`}
               >
                 <svg className="mt-0.5 h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={emailError ? 'M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' : 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'}></path>
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={(emailError || fullNameError || subjectError || messageError) ? 'M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' : 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'}></path>
                 </svg>
                 {formNotice}
               </div>
@@ -308,9 +400,20 @@ const Contact = () => {
                   name="fullName"
                   value={contactForm.fullName}
                   onChange={handleContactInputChange}
-                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm transition focus:border-transparent focus:bg-white focus:ring-2 focus:ring-accent"
+                  maxLength={50}
+                  className={`w-full rounded-xl border px-4 py-3 text-sm transition focus:border-transparent focus:ring-2 focus:ring-accent ${
+                    fullNameError ? 'border-red-400 bg-red-50' : 'border-gray-200 bg-gray-50 focus:bg-white'
+                  }`}
                   placeholder={language === 'en' ? 'Juan Dela Cruz' : 'Juan Dela Cruz'}
                 />
+                {fullNameError ? (
+                  <p className="mt-1.5 flex items-center gap-1 text-xs font-semibold text-red-600">
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    {fullNameError}
+                  </p>
+                ) : null}
               </div>
               <div>
                 <label className="mb-1.5 block text-sm font-semibold text-gray-700">
@@ -346,9 +449,20 @@ const Contact = () => {
                 name="subject"
                 value={contactForm.subject}
                 onChange={handleContactInputChange}
-                className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm transition focus:border-transparent focus:bg-white focus:ring-2 focus:ring-accent"
+                maxLength={200}
+                className={`w-full rounded-xl border px-4 py-3 text-sm transition focus:border-transparent focus:ring-2 focus:ring-accent ${
+                  subjectError ? 'border-red-400 bg-red-50' : 'border-gray-200 bg-gray-50 focus:bg-white'
+                }`}
                 placeholder={language === 'en' ? 'How can we help you?' : 'Paano namin kayo matutulungan?'}
               />
+              {subjectError ? (
+                <p className="mt-1.5 flex items-center gap-1 text-xs font-semibold text-red-600">
+                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                  </svg>
+                  {subjectError}
+                </p>
+              ) : null}
             </div>
 
             <div>
@@ -360,19 +474,33 @@ const Contact = () => {
                 name="message"
                 value={contactForm.message}
                 onChange={handleContactInputChange}
-                className="w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm transition focus:border-transparent focus:bg-white focus:ring-2 focus:ring-accent"
+                maxLength={5000}
+                className={`w-full resize-none rounded-xl border px-4 py-3 text-sm transition focus:border-transparent focus:ring-2 focus:ring-accent ${
+                  messageError ? 'border-red-400 bg-red-50' : 'border-gray-200 bg-gray-50 focus:bg-white'
+                }`}
                 placeholder={language === 'en' ? 'Type your message here...' : 'Ilagay ang inyong mensahe dito...'}
               ></textarea>
+              {messageError ? (
+                <p className="mt-1.5 flex items-center gap-1 text-xs font-semibold text-red-600">
+                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                  </svg>
+                  {messageError}
+                </p>
+              ) : null}
             </div>
 
             <button
               type="submit"
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-8 py-3 font-semibold text-white transition hover:bg-primary sm:w-auto"
+              disabled={submitting}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-8 py-3 font-semibold text-white transition hover:bg-primary disabled:opacity-50 sm:w-auto"
             >
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path>
               </svg>
-              {language === 'en' ? 'Send Message' : 'Ipadala ang Mensahe'}
+              {submitting
+                ? (language === 'en' ? 'Sending...' : 'Nagpapadala...')
+                : (language === 'en' ? 'Send Message' : 'Ipadala ang Mensahe')}
             </button>
           </form>
         </div>

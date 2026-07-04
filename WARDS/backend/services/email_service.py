@@ -1955,6 +1955,71 @@ def send_taxpayer_verification_status_email(
         return {**result, "message": f"Verification status email sent to {recipient_email}."}
     except Exception as exc:
         return {"sent": False, "status": "failed", "message": f"Verification status email could not be sent: {exc}"}
+def send_contact_inquiry_email(
+    admin_email: str,
+    sender_name: str,
+    sender_email: str,
+    subject_line: str,
+    body_text: str,
+    ip_address: str | None = None,
+) -> dict:
+    if not smtp_is_configured():
+        logger.warning("SMTP not configured — contact inquiry email to %s was skipped.", admin_email)
+        return {"sent": False, "status": "skipped", "message": "SMTP not configured."}
+
+    smtp_from_email = os.getenv("SMTP_FROM_EMAIL")
+    smtp_from_name = os.getenv("SMTP_FROM_NAME", "WARDS Admin")
+
+    ip_info = f"\nSender IP: {ip_address}" if ip_address else ""
+    message = EmailMessage()
+    message["Subject"] = f"New Contact Inquiry | WARDS"
+    message["From"] = f"{smtp_from_name} <{smtp_from_email}>"
+    message["To"] = admin_email
+    message.set_content(
+        f"""
+You have received a new message through the WARDS Contact Us form.
+
+From: {sender_name} <{sender_email}>
+Subject: {subject_line}
+Message:
+{body_text}
+{ip_info}
+
+---
+This is an automated notification from the WARDS system.
+""".strip()
+    )
+    message.add_alternative(
+        f"""<!DOCTYPE html>
+<html lang="en">
+<body style="margin:0;padding:0;background:#f3f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;">
+  <div style="max-width:640px;margin:0 auto;padding:32px 20px;">
+    <div style="background:#ffffff;border-radius:24px;padding:30px 30px 32px;box-shadow:0 18px 40px rgba(15,39,68,.10);border:1px solid #dbe3ef;">
+      <h2 style="margin:0 0 12px;font-size:22px;color:#0f2744;">New Contact Inquiry</h2>
+      <p style="margin:0 0 18px;font-size:14px;color:#546273;">A new message was submitted through the WARDS Contact Us form.</p>
+      <div style="background:#f8fbff;border:1px solid #dbe7f3;border-radius:18px;padding:20px 22px;">
+        <p style="margin:0 0 8px;font-size:14px;line-height:1.7;color:#546273;"><strong>From:</strong> {_safe_html(sender_name)} &lt;{_safe_html(sender_email)}&gt;</p>
+        <p style="margin:0 0 8px;font-size:14px;line-height:1.7;color:#546273;"><strong>Subject:</strong> {_safe_html(subject_line)}</p>
+        <p style="margin:0 0 8px;font-size:14px;line-height:1.7;color:#546273;"><strong>Message:</strong></p>
+        <p style="margin:0;font-size:14px;line-height:1.7;color:#546273;white-space:pre-wrap;">{_safe_html(body_text)}</p>
+        {f'<p style="margin:16px 0 0;font-size:12px;line-height:1.5;color:#8898aa;"><strong>Sender IP:</strong> {_safe_html(ip_address)}</p>' if ip_address else ''}
+      </div>
+      <p style="margin:24px 0 0;font-size:12px;color:#8898aa;">This is an automated notification from the WARDS system.</p>
+    </div>
+  </div>
+</body>
+</html>""",
+        subtype="html",
+    )
+
+    try:
+        result = _send_email_message(message)
+        return {**result, "message": f"Contact inquiry notification sent to {admin_email}."}
+    except Exception as exc:
+        logger.error("Contact inquiry email failed: %s", exc)
+        return {"sent": False, "status": "failed", "message": f"Contact inquiry email could not be sent: {exc}"}
+
+
 try:
     MANILA_TIMEZONE = ZoneInfo("Asia/Manila") if ZoneInfo else timezone(timedelta(hours=8))
 except ZoneInfoNotFoundError:

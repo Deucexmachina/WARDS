@@ -1202,6 +1202,23 @@ def ensure_auth_extensions():
                 )
             """))
 
+        if "contact_inquiries" not in table_names:
+            id_column = "INTEGER PRIMARY KEY AUTO_INCREMENT" if is_mysql else "INTEGER PRIMARY KEY AUTOINCREMENT"
+            conn.execute(text(f"""
+                CREATE TABLE contact_inquiries (
+                    id {id_column},
+                    full_name VARCHAR(255) NOT NULL,
+                    email VARCHAR(255) NOT NULL,
+                    subject VARCHAR(255) NOT NULL,
+                    message TEXT NOT NULL,
+                    ip_address VARCHAR(45) NULL,
+                    status VARCHAR(50) DEFAULT 'New',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    INDEX ix_contact_inquiries_email (email),
+                    INDEX ix_contact_inquiries_created_at (created_at)
+                )
+            """))
+
     db = SessionLocal()
     try:
         cleanup_duplicate_branch_system_settings(db)

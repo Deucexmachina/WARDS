@@ -7,6 +7,9 @@ from typing import List, Optional
 from datetime import datetime, timedelta, timezone
 import random
 import re
+from html import escape as html_escape
+
+from database.models import ContactInquiry
 
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -36,6 +39,7 @@ from utils.field_crypto import decrypt_optional_value
 from utils.announcement_attachments import serialize_attachments
 from auth import get_optional_current_user
 from utils.distributed_ledger import append_ledger_entry
+from services.email_service import send_contact_inquiry_email
 
 router = APIRouter()
 ACTIVE_PUBLIC_QUEUE_STATUSES = ("Pending", "Waiting", "Called", "Serving")
@@ -1408,4 +1412,93 @@ async def verify_payment(request: Request, ref_number: str, db: Session = Depend
         "ref_number": get_decrypted_or_raw(payment, "ref_number"),
         "status": payment.status,
         "message": "Payment submitted successfully" if payment.source_module == "receipt_request" else "Payment verified successfully"
+    }
+
+
+class ContactSubmit(BaseModel):
+    full_name: str = Field(..., min_length=1, max_length=50)
+    email: str = Field(..., min_length=1, max_length=255)
+    subject: str = Field(..., min_length=1, max_length=200)
+    message: str = Field(..., min_length=1, max_length=5000)
+
+
+_FULL_NAME_PATTERN = re.compile(r"^[A-Za-z.\-' ]+$")
+_EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
+def _sanitize_contact_input(raw: str, max_length: int) -> str:
+    cleaned = str(raw or "").strip()
+    # Strip common HTML/script injection vectors before length check
+    cleaned = re.sub(r"[<>]", "", cleaned)
+    cleaned = cleaned[:max_length]
+    return cleaned
+
+
+@router.post("/contact/submit")
+@limiter.limit("3/minute;20/day")
+async def submit_contact_inquiry(
+    request: Request,
+    payload: ContactSubmit,
+    db: Session = Depends(get_db),
+):
+    # Sanitize inputs
+    full_name = _sanitize_contact_input(payload.full_name, 50)
+    email = _sanitize_contact_input(payload.email, 255).lower()
+    subject = _sanitize_contact_input(payload.subject, 200)
+    message = _sanitize_contact_input(payload.message, 5000)
+
+    # Validate required fields
+    if not full_name:
+        raise HTTPException(status_code=400, detail="Full name is required.")
+    if not email:
+        raise HTTPException(status_code=400, detail="Email address is required.")
+    if not subject:
+        raise HTTPException(status_code=400, detail="Subject is required.")
+    if not message:
+        raise HTTPException(status_code=400, detail="Message is required.")
+
+    # Pattern validation
+    if not _FULL_NAME_PATTERN.fullmatch(full_name):
+        raise HTTPException(status_code=400, detail="Full name must contain letters, spaces, periods, hyphens, and apostrophes only.")
+    if not _EMAIL_PATTERN.fullmatch(email):
+        raise HTTPException(status_code=400, detail="Please enter a valid email address.")
+
+    # Block disposable / fake domains
+    disposable_domains = {
+        "test.com", "fake.com", "mock.com", "sample.com", "temp.com",
+        "mailinator.com", "yopmail.com", "guerrillamail.com", "sharklasers.com",
+    }
+    domain = email.split("@")[1].lower()
+    if domain in disposable_domains:
+        raise HTTPException(status_code=400, detail="Please use a real email address, not a temporary or test email.")
+
+    # Store sanitized, HTML-escaped version in DB
+    inquiry = ContactInquiry(
+        full_name=html_escape(full_name, quote=True),
+        email=html_escape(email, quote=True),
+        subject=html_escape(subject, quote=True),
+        message=html_escape(message, quote=True),
+        ip_address=getattr(request.client, "host", None),
+        status="New",
+    )
+    db.add(inquiry)
+    db.commit()
+
+    # Notify admin inbox
+    client_ip = getattr(request.client, "host", None)
+    try:
+        send_contact_inquiry_email(
+            admin_email="treasurermain@gmail.com",
+            sender_name=full_name,
+            sender_email=email,
+            subject_line=subject,
+            body_text=message,
+            ip_address=client_ip,
+        )
+    except Exception:
+        pass  # Do not fail the request if the notification email fails
+
+    return {
+        "success": True,
+        "message": "Your message has been sent. We'll get back to you as soon as possible.",
     }

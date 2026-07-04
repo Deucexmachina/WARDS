@@ -493,4 +493,8 @@ export const queueAPI = {
   checkStatus: (queueNumber) => api.get(`/public/queue/${queueNumber}`),
 };
 
+export const contactAPI = {
+  submitInquiry: (data) => api.post('/public/contact/submit', data),
+};
+
 export default api;

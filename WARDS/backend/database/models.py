@@ -1525,3 +1525,16 @@ class IpReputationCache(Base):
     last_checked = Column(DateTime, default=datetime.utcnow)
     report_count = Column(Integer, default=0)  # Number of abuse reports
     threat_types = Column(String(500), nullable=True)  # JSON array of threat types
+
+
+class ContactInquiry(Base):
+    __tablename__ = "contact_inquiries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    full_name = Column(String(255), nullable=False)
+    email = Column(String(255), nullable=False, index=True)
+    subject = Column(String(255), nullable=False)
+    message = Column(Text, nullable=False)
+    ip_address = Column(String(45), nullable=True)
+    status = Column(String(50), default="New")  # New, Read, Replied, Archived
+    created_at = Column(DateTime, default=datetime.utcnow)
