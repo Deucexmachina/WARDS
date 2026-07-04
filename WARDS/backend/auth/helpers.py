@@ -8,7 +8,10 @@ from utils.field_crypto import get_decrypted_or_raw
 
 
 def get_session_timeout_minutes(db: Session) -> int:
-    configured_timeout = int(get_setting_value(db, "sessionTimeout") or 30)
+    try:
+        configured_timeout = int(get_setting_value(db, "sessionTimeout") or 30)
+    except Exception:
+        configured_timeout = 30
     return max(configured_timeout, 30)
 
 

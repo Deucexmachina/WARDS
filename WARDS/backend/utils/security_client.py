@@ -401,6 +401,12 @@ def list_vm1_database_backup_archives():
     return _sync_get("/v1/vm1/database-backups", timeout=60.0)
 
 
+def log_vm1_database_recovery(payload: dict):
+    if not SECURITY_API_URL:
+        return None
+    return _sync_post("/v1/vm1/database-recoveries/log", payload, timeout=60.0)
+
+
 def download_vm1_database_backup_archive(archive_name: str, destination_dir):
     if not SECURITY_API_URL:
         return None

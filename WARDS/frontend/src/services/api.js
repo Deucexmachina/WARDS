@@ -75,11 +75,21 @@ api.interceptors.response.use(
     const status = error?.response?.status;
     const responseDetail = error?.response?.data?.detail;
     const isConfirmationResponse = status === 409 && responseDetail?.requires_confirmation;
+    const errorDetail = typeof responseDetail === 'string' ? responseDetail : (responseDetail?.message || '');
+    const isSessionExpirationError = status === 401 && (
+      !errorDetail ||
+      errorDetail.toLowerCase().includes('credentials') ||
+      errorDetail.toLowerCase().includes('session') ||
+      errorDetail.toLowerCase().includes('expired') ||
+      errorDetail.toLowerCase().includes('logged out') ||
+      errorDetail.toLowerCase().includes('token') ||
+      errorDetail.toLowerCase().includes('unauthorized')
+    );
     if (status && !isConfirmationResponse && !error?.config?.suppressGlobalErrorModal && !shouldSuppressGlobalErrorModal(error)) {
       window.dispatchEvent(new CustomEvent('wards:system-message', {
         detail: {
           tone: getModalToneForError(error),
-          title: status === 429 ? 'Too Many Requests' : 'Request Failed',
+          title: isSessionExpirationError ? 'Session Expired' : status === 429 ? 'Too Many Requests' : 'Request Failed',
           message: getFriendlyErrorMessage(error),
         },
       }));
@@ -93,22 +103,11 @@ api.interceptors.response.use(
       url.includes('/accounts');
 
     // Check if this is a password confirmation error (incorrect password, not session expiration)
-    const errorDetail = typeof responseDetail === 'string' ? responseDetail : (responseDetail?.message || '');
     const requestPayload = error?.config?.data;
     const isProtectedPasswordRequest = typeof requestPayload === 'string' && requestPayload.toLowerCase().includes('current_admin_password');
     const isPasswordConfirmationError = 
       errorDetail.toLowerCase().includes('incorrect') && 
       (errorDetail.toLowerCase().includes('password') || errorDetail.toLowerCase().includes('super admin') || errorDetail.toLowerCase().includes('main admin') || errorDetail.toLowerCase().includes('branch admin'));
-
-    const isSessionExpirationError = status === 401 && (
-      !errorDetail ||
-      errorDetail.toLowerCase().includes('credentials') ||
-      errorDetail.toLowerCase().includes('session') ||
-      errorDetail.toLowerCase().includes('expired') ||
-      errorDetail.toLowerCase().includes('logged out') ||
-      errorDetail.toLowerCase().includes('token') ||
-      errorDetail.toLowerCase().includes('unauthorized')
-    );
 
     const isBranchPortalRequest = isBranchPortalContext() || url.startsWith('/branch/');
     const isSuperadminAccessRequest = /\/branches\/\d+\/superadmin-access/.test(url);

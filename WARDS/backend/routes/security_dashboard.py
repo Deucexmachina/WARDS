@@ -47,6 +47,7 @@ from utils.security_client import (
     download_latest_vm1_database_backup,
     full_system_recovery,
     list_backup_inventory,
+    log_vm1_database_recovery,
     recover_database,
     recover_files,
     recover_ml_artifacts,
@@ -357,6 +358,13 @@ def _archive_vm1_database_backup_to_vm2(result) -> dict | None:
 
 def _is_vm1_database_backup_row(row) -> bool:
     return is_database_backup_record(row)
+
+
+def _safe_log_vm1_database_recovery(payload: dict) -> None:
+    try:
+        log_vm1_database_recovery(payload)
+    except Exception as exc:
+        print(f"[SECURITY] VM1 database recovery audit log upload failed: {exc}")
 
 
 def _prune_vm1_database_backup_rows(db: Session) -> int:
@@ -947,6 +955,12 @@ def recover_vm1_database(request: Request, db: Session = Depends(get_db), admin=
         try:
             job_manager.update_progress(job_id, 15, "selecting_vm1_database_backup")
             restore_result = _restore_latest_vm1_database_backup(db2)
+            _safe_log_vm1_database_recovery({
+                "status": "success",
+                "filename": restore_result.get("filename"),
+                "source": restore_result.get("source"),
+                "actor": username,
+            })
             job_manager.update_progress(job_id, 35, f"restored {restore_result.get('filename')}")
             db2.add(ActivityLog(
                 action="Security VM1 Database Recovery Completed",
@@ -956,6 +970,15 @@ def recover_vm1_database(request: Request, db: Session = Depends(get_db), admin=
             ))
             db2.commit()
             return restore_result
+        except Exception as exc:
+            _safe_log_vm1_database_recovery({
+                "status": "failed",
+                "filename": "unknown",
+                "source": "vm1",
+                "actor": username,
+                "error": str(exc),
+            })
+            raise
         finally:
             db2.close()
 

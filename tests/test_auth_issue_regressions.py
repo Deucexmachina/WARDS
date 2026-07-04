@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from routes import branches, memos, unified_auth
+from auth.helpers import get_session_timeout_minutes
 from utils.log_sanitization import SanitizeUvicornReloadPathFilter
 
 
@@ -48,6 +49,10 @@ def test_auth_datetime_helpers_compare_aware_utc_values_correctly():
     assert unified_auth.is_expired_at(future) is False
     assert unified_auth.is_expired_at(past) is True
     assert unified_auth.seconds_since(past) >= 0
+
+
+def test_session_timeout_helper_falls_back_without_settings_session():
+    assert get_session_timeout_minutes(object()) == 30
 
 
 def test_memo_branch_lookup_returns_decrypted_branch_names():

@@ -183,6 +183,34 @@ def test_backup_engine_creates_compressed_dump_with_checksum(monkeypatch, tmp_pa
         assert handle.read() == b"-- sql dump\n"
 
 
+def test_unified_auth_uses_configured_session_timeout_for_cookie_jwt_and_redis():
+    source = Path("WARDS/backend/routes/unified_auth.py").read_text(encoding="utf-8")
+
+    assert "session_timeout_minutes = get_session_timeout_minutes(db)" in source
+    assert "create_access_token(portal, token_payload, expires_minutes=session_timeout_minutes)" in source
+    assert "set_auth_cookie(response, portal, access_token, max_age=session_timeout_minutes * 60)" in source
+    assert "ttl = session_timeout_minutes * 60" in source
+
+
+def test_frontend_global_error_modal_labels_session_expiration():
+    source = Path("WARDS/frontend/src/services/api.js").read_text(encoding="utf-8")
+
+    assert "const isSessionExpirationError = status === 401" in source
+    assert "title: isSessionExpirationError ? 'Session Expired'" in source
+
+
+def test_vm1_database_recovery_is_audited_to_vm2():
+    vm1_source = Path("WARDS/backend/routes/security_dashboard.py").read_text(encoding="utf-8")
+    client_source = Path("WARDS/backend/utils/security_client.py").read_text(encoding="utf-8")
+    vm2_source = Path("SECURITY/api_main.py").read_text(encoding="utf-8")
+
+    assert "def log_vm1_database_recovery" in client_source
+    assert "/v1/vm1/database-recoveries/log" in client_source
+    assert "_safe_log_vm1_database_recovery" in vm1_source
+    assert "vm1_database_recovery" in vm2_source
+    assert "api_log_vm1_database_recovery" in vm2_source
+
+
 def test_backup_engine_prunes_vm1_database_dumps_to_ten(monkeypatch, tmp_path):
     monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/wards")
     monkeypatch.setenv("BACKUP_DIR", str(tmp_path))

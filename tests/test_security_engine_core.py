@@ -25,6 +25,7 @@ from SECURITY.security_engine import (
     _has_pending_vm1_restore_for_file,
     active_monitored_file_ids_for_backup,
     load_monitored_file_for_backup,
+    is_monitorable,
 )
 from SECURITY.security_models import (
     SecurityMonitoredFile,
@@ -47,6 +48,24 @@ class FakeSettingQuery:
 
     def first(self):
         return self.rows[0] if self.rows else None
+
+
+def test_vm1_snapshot_paths_are_not_monitorable(tmp_path):
+    root = tmp_path / "SECURITY"
+    snapshot_file = root / "vm1_snapshots" / "WARDS" / "frontend" / "src" / "App.jsx"
+    snapshot_file.parent.mkdir(parents=True)
+    snapshot_file.write_text("console.log('snapshot');", encoding="utf-8")
+
+    assert is_monitorable(snapshot_file, root_path=root) is False
+
+
+def test_uppercase_excluded_directory_is_not_monitorable(tmp_path):
+    root = tmp_path / "app"
+    nested = root / "SECURITY" / "vm1_snapshots" / "index.html"
+    nested.parent.mkdir(parents=True)
+    nested.write_text("<html></html>", encoding="utf-8")
+
+    assert is_monitorable(nested, root_path=root) is False
 
 
 class MonitoredFolderDB:

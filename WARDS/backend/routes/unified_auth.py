@@ -1275,13 +1275,14 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
     token_payload = build_token_payload(portal, account, ip=client_ip, ua=user_agent)
     session_id = str(uuid.uuid4())
     token_payload["sid"] = session_id
-    access_token = create_access_token(portal, token_payload)
+    session_timeout_minutes = get_session_timeout_minutes(db)
+    access_token = create_access_token(portal, token_payload, expires_minutes=session_timeout_minutes)
     refresh_token = create_refresh_token(portal, token_payload)
 
     r = get_redis_client()
     previous_session_id = None
     if r:
-        ttl = PORTAL_CONFIG[portal]["expires_minutes"] * 60
+        ttl = session_timeout_minutes * 60
         session_key = f"wards:session:{portal}:{account.id}"
         previous_session_id = r.get(session_key)
         if isinstance(previous_session_id, bytes):
@@ -1347,7 +1348,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
             "mfa_setup_required": mfa_setup_required,
         }
     )
-    set_auth_cookie(response, portal, access_token)
+    set_auth_cookie(response, portal, access_token, max_age=session_timeout_minutes * 60)
     set_refresh_cookie(response, portal, refresh_token)
     return response
 
@@ -1487,12 +1488,13 @@ async def unified_refresh_token(request: Request, payload: RefreshTokenRequest, 
         token_payload["sid"] = sid
 
     r = get_redis_client()
+    session_timeout_minutes = get_session_timeout_minutes(db)
     if r and sid and user_id:
-        ttl = PORTAL_CONFIG[portal]["expires_minutes"] * 60
+        ttl = session_timeout_minutes * 60
         r.setex(f"wards:session:{portal}:{user_id}", ttl, sid)
 
     mfa_setup_required = get_mfa_secret(db, portal, get_mfa_username(portal, account)) is None
-    access_token = create_access_token(portal, token_payload)
+    access_token = create_access_token(portal, token_payload, expires_minutes=session_timeout_minutes)
     new_refresh_token = create_refresh_token(portal, token_payload)
 
     response = JSONResponse(
@@ -1503,7 +1505,7 @@ async def unified_refresh_token(request: Request, payload: RefreshTokenRequest, 
             "user": build_user_response(portal, account, mfa_setup_required),
         }
     )
-    set_auth_cookie(response, portal, access_token)
+    set_auth_cookie(response, portal, access_token, max_age=session_timeout_minutes * 60)
     set_refresh_cookie(response, portal, new_refresh_token)
     return response
 
@@ -2359,7 +2361,8 @@ async def unified_invite_register(
         else ("admin" if portal in ("admin", "main_admin", "superadmin") else "branch")
     )
     token_payload = build_token_payload(token_portal, account)
-    access_token = create_access_token(token_portal, token_payload)
+    session_timeout_minutes = get_session_timeout_minutes(db)
+    access_token = create_access_token(token_portal, token_payload, expires_minutes=session_timeout_minutes)
 
     log_activity(
         db,
@@ -2383,7 +2386,7 @@ async def unified_invite_register(
             "user": user_response,
         }
     )
-    set_auth_cookie(response, token_portal, access_token)
+    set_auth_cookie(response, token_portal, access_token, max_age=session_timeout_minutes * 60)
     return response
 
 

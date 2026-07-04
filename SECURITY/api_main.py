@@ -682,6 +682,27 @@ def api_latest_vm1_database_backup():
     )
 
 
+@app.post("/v1/vm1/database-recoveries/log", dependencies=[Depends(require_api_key), Depends(require_admin_secret)])
+@rate_limit("vm1_database_recovery_log", max_requests=20, window_seconds=300)
+def api_log_vm1_database_recovery(payload: dict = {}, db=Depends(get_db)):
+    status_value = str(payload.get("status") or "success")
+    filename = str(payload.get("filename") or "unknown")
+    source = str(payload.get("source") or "unknown")
+    event = SecurityRecoveryEvent(
+        recovery_type="vm1_database_recovery",
+        initiated_by=None,
+        status=status_value,
+        backup_path=filename,
+        summary=f"VM1 database recovery {status_value}: restored from {filename} ({source}).",
+        completed_at=now_utc() if status_value == "success" else None,
+        error_message=str(payload.get("error") or "") or None,
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    return serialize_recovery(event)
+
+
 @app.get("/v1/vm1/database-backups", dependencies=[Depends(require_api_key), Depends(require_admin_secret)])
 @rate_limit("vm1_database_backup_list", max_requests=20, window_seconds=300)
 def api_list_vm1_database_backups():
