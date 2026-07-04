@@ -2109,6 +2109,12 @@ async def unified_register(
 
     validate_password_strength(payload.password)
 
+    if payload.address and len(payload.address.strip()) > 50:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Address must be 50 characters or fewer.",
+        )
+
     citizen = CitizenUser(
         email=email,
         full_name=payload.full_name.strip(),
