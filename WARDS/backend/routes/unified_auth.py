@@ -1370,7 +1370,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
                     "MFA Required",
                     credentials.identifier,
                     f"Portal: {portal}; Step: TOTP code requested",
-                    "security",
+                    "auth",
                     request=request,
                     account=account,
                 )
@@ -1403,7 +1403,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
                     "MFA Verification Failed",
                     credentials.identifier,
                     f"Portal: {portal}; Reason: Invalid TOTP code",
-                    "security",
+                    "auth",
                     request=request,
                     account=account,
                 )
@@ -1419,7 +1419,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
                 "MFA Verification Succeeded",
                 credentials.identifier,
                 f"Portal: {portal}",
-                "security",
+                "auth",
                 request=request,
                 account=account,
             )
@@ -1474,7 +1474,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
         "Successful Unified Login",
         credentials.identifier,
         f"Portal: {portal}",
-        "security",
+        "auth",
         request=request,
         account=account,
     )
@@ -1684,7 +1684,7 @@ async def unified_setup_mfa(request: Request, credentials: UnifiedSetupMFAReques
             "Failed Unified MFA Setup",
             credentials.identifier,
             f"Portal: {portal}",
-            "security",
+            "auth",
             request=request,
             account=account,
         )
@@ -1714,7 +1714,7 @@ async def unified_setup_mfa(request: Request, credentials: UnifiedSetupMFAReques
         "Unified MFA Setup Initiated",
         credentials.identifier,
         f"Portal: {portal}",
-        "security",
+        "auth",
         request=request,
         account=account,
     )
@@ -1778,7 +1778,7 @@ async def unified_verify_mfa_setup(
         "Unified MFA Setup Verified",
         credentials.identifier,
         f"Portal: {portal}",
-        "security",
+        "auth",
         request=request,
         account=account,
     )
@@ -2122,7 +2122,7 @@ async def unified_setup_mfa_authenticated(request: Request, db: Session = Depend
         "Authenticated MFA Setup Initiated",
         get_account_identifier(portal, account),
         f"Portal: {portal}",
-        "security",
+        "auth",
         request=request,
         account=account,
     )
