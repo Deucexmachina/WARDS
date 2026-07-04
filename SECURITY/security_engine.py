@@ -166,6 +166,9 @@ DEFAULT_EXCLUDED_DIRS = {
     "output",
     "SECURITY",
     "local_backups",
+    "vm1_snapshots",
+    ".restore_content",
+    ".defaced_snapshots",
     "QUARANTINE",
     "DEFACEMENT",
     "OCR",
@@ -8292,7 +8295,7 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
             continue
         if folder_root not in allowed_vm1_roots:
             continue
-        rel_path_parts = set(Path(rel_path).parts)
+        rel_path_parts = {part.lower() for part in Path(rel_path).parts}
         if rel_path_parts.intersection({item.lower() for item in DEFAULT_EXCLUDED_DIRS}):
             continue
         if not _vm1_file_monitorable(rel_path):
@@ -8367,7 +8370,7 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
             continue
 
         # Skip files in excluded directories (e.g. OCR, build outputs)
-        rel_path_parts = set(Path(rel_path).parts)
+        rel_path_parts = {part.lower() for part in Path(rel_path).parts}
         if rel_path_parts.intersection({item.lower() for item in DEFAULT_EXCLUDED_DIRS}):
             continue
 
