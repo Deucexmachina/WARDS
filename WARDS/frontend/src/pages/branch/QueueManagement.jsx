@@ -1422,6 +1422,7 @@ const QueueManagement = () => {
   const [serviceTypeFilter, setServiceTypeFilter] = useState('all');
   const [windowFilter, setWindowFilter] = useState('all');
   const [queueNumberFilter, setQueueNumberFilter] = useState('');
+  const [queueNumberFilterError, setQueueNumberFilterError] = useState('');
   const [isAnnouncementPlaying, setIsAnnouncementPlaying] = useState(false);
   const [callingNext, setCallingNext] = useState(false);
   const [searchFilter, setSearchFilter] = useState('');
@@ -1533,6 +1534,17 @@ const QueueManagement = () => {
       return [];
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleQueueNumberFilterChange = (event) => {
+    const rawValue = event.target.value;
+    const sanitized = rawValue.replace(/[^a-zA-Z0-9-]/g, '');
+    setQueueNumberFilter(sanitized);
+    if (rawValue !== sanitized) {
+      setQueueNumberFilterError('Only letters, numbers, and hyphens are allowed.');
+    } else {
+      setQueueNumberFilterError('');
     }
   };
 
@@ -2562,13 +2574,21 @@ const QueueManagement = () => {
           {isMonitorOnlyRole ? (
             <CustomSelect value={windowFilter} onChange={(value) => setWindowFilter(value)} options={[{ value: 'all', label: 'All branch windows' }, ...windowOptions.map((account) => ({ value: account.key, label: `${account.label}${account.username ? ` - ${account.username}` : ''}` }))]} placeholder="All branch windows" />
           ) : null}
-          <input
-            type="text"
-            value={queueNumberFilter}
-            onChange={(event) => setQueueNumberFilter(event.target.value)}
-            placeholder="Filter by queue number"
-            className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none"
-          />
+          <div className="flex flex-col">
+            <input
+              type="text"
+              value={queueNumberFilter}
+              onChange={handleQueueNumberFilterChange}
+              placeholder="Filter by queue number"
+              aria-invalid={queueNumberFilterError ? 'true' : 'false'}
+              className={`rounded-xl border px-4 py-3 text-sm text-slate-700 outline-none ${
+                queueNumberFilterError ? 'border-rose-400 bg-rose-50' : 'border-slate-200 bg-slate-50'
+              }`}
+            />
+            {queueNumberFilterError ? (
+              <p className="mt-1 text-xs font-medium text-rose-600">{queueNumberFilterError}</p>
+            ) : null}
+          </div>
           <input
             type="text"
             value={searchFilter}
@@ -2585,6 +2605,7 @@ const QueueManagement = () => {
               setServiceTypeFilter('all');
               setWindowFilter('all');
               setQueueNumberFilter('');
+              setQueueNumberFilterError('');
               setSearchFilter('');
             }}
             className="rounded-xl bg-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-300"
