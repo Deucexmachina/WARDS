@@ -8092,24 +8092,33 @@ def _local_repo_path_for_vm1_file(rel_path: str) -> Path | None:
     does not exist.  We must also check /opt/wards/app and the direct WARDS/OCR
     mounts so that _vm1_hash_matches_local_repo works for frontend files.
     """
-    candidates = [MASTER_ROOT, Path("/opt/wards/app")]
+    candidates = [MASTER_ROOT / rel_path, Path("/opt/wards/app") / rel_path]
     if rel_path.startswith("WARDS/"):
-        candidates.append(Path("/WARDS"))
         try:
             suffix = Path(rel_path).relative_to("WARDS")
             candidates.append(Path("/WARDS") / suffix)
         except ValueError:
             pass
     if rel_path.startswith("OCR/"):
-        candidates.append(Path("/OCR"))
-    for root in candidates:
         try:
-            candidate = (root / rel_path).resolve()
-            root_resolved = root.resolve()
-            if not candidate.is_relative_to(root_resolved):
+            suffix = Path(rel_path).relative_to("OCR")
+            candidates.append(Path("/OCR") / suffix)
+        except ValueError:
+            pass
+    safe_roots = {
+        MASTER_ROOT.resolve(),
+        Path("/opt/wards/app").resolve(),
+        Path("/WARDS").resolve(),
+        Path("/OCR").resolve(),
+        Path("/").resolve(),
+    }
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+            if not any(resolved.is_relative_to(r) for r in safe_roots):
                 continue
-            if candidate.exists() and candidate.is_file():
-                return candidate
+            if resolved.exists() and resolved.is_file():
+                return resolved
         except Exception:
             pass
     return None

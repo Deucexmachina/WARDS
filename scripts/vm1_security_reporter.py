@@ -482,6 +482,10 @@ def vm1_critical_database_checksum() -> dict | None:
             token in payload.lower()
             for token in ("hacked", "defacement", "unauthorized", "unauthorized_sql_test")
         )
+        log(
+            f"VM1 DB checksum payload (len={len(payload)}): {payload[:200]!r}; "
+            f"suspicious={suspicious}"
+        )
         return {
             "checksum": digest,
             "scope": "critical_system_settings",
