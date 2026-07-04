@@ -461,6 +461,30 @@ def test_get_cached_model_returns_none_when_model_disappears(monkeypatch):
     assert _get_cached_model() is None
 
 
+def test_ml_feature_mismatch_invalidates_stale_model(monkeypatch, tmp_path):
+    from SECURITY import security_engine
+
+    class StaleModel:
+        n_features_in_ = len(security_engine.FEATURE_NAMES) - 1
+
+    model_path = tmp_path / "isolation_forest.pkl"
+    meta_path = tmp_path / "model_metadata.json"
+    model_path.write_text("stale", encoding="utf-8")
+    meta_path.write_text("stale", encoding="utf-8")
+
+    monkeypatch.setattr(security_engine, "IFOREST_MODEL_PATH", model_path)
+    monkeypatch.setattr(security_engine, "IFOREST_META_PATH", meta_path)
+    monkeypatch.setattr(security_engine, "_JOBLIB_AVAILABLE", True)
+    monkeypatch.setattr(security_engine, "_NUMPY_AVAILABLE", True)
+    monkeypatch.setattr(security_engine, "_SKLEARN_AVAILABLE", True)
+    monkeypatch.setattr(security_engine, "_get_cached_model", lambda: StaleModel())
+    monkeypatch.setattr(security_engine, "_ml_model_cache", {"model": StaleModel(), "mtime": 123.0})
+
+    assert security_engine.ml_anomaly_score({"hour_of_day": 10}) == 0.0
+    assert not model_path.exists()
+    assert not meta_path.exists()
+
+
 def test_compute_profile_confidence_ignores_disappearing_model(monkeypatch):
     class DisappearingModelPath:
         def exists(self):
