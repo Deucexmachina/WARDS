@@ -598,11 +598,13 @@ def api_vm1_config(db=Depends(get_db)):
     from SECURITY.security_engine import get_setting, load_vm1_monitored_folders, is_deployment_in_progress
     interval = max(5, int(get_setting(db, "scan_interval_seconds", "30")))
     custom_folders = [str(p) for p in load_vm1_monitored_folders(db)]
+    deployment_paused = is_deployment_in_progress(db)
+    baseline_ready = (get_setting(db, "deployment_vm1_baseline_ready", "false") or "false").lower() == "true"
     return {
         "scan_interval_seconds": interval,
         "vm1_custom_folders": custom_folders,
         "monitoring_enabled": (get_setting(db, "monitoring_enabled", "true") or "true").lower() == "true",
-        "deployment_paused": is_deployment_in_progress(db),
+        "deployment_paused": deployment_paused and not baseline_ready,
         "force_scan_token": get_setting(db, "vm1_scan_requested_at", ""),
         "last_manifest_at": get_setting(db, "vm1_last_manifest_at", ""),
     }

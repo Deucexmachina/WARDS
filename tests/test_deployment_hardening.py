@@ -536,6 +536,7 @@ def test_vm1_config_exposes_force_scan_token_for_reporter():
     reporter = (Path(__file__).resolve().parents[1] / "scripts" / "vm1_security_reporter.py").read_text()
 
     assert '"force_scan_token": get_setting(db, "vm1_scan_requested_at", "")' in security_api
+    assert '"deployment_paused": deployment_paused and not baseline_ready' in security_api
     assert 'set_setting(db, "vm1_scan_requested_at", force_token, "manual_scan")' in security_api
     assert "VM1_MANUAL_SCAN_WAIT_SECONDS" in security_api
     assert 'VM2 requested immediate manifest scan' in reporter
@@ -550,7 +551,19 @@ def test_vm1_hash_only_manifest_changes_are_deferred_not_detected():
     assert "content_missing_for_nonempty_file" in engine
     assert "size_bytes > 0" in engine
     assert 'set_setting(db, "vm1_scan_requested_at", now_utc().isoformat(), "vm2_hash_only_defer")' in engine
-    assert '"inline_priority": not git_head_match' in reporter
+    assert '"inline_priority": not git_head_match or relative_path in CRITICAL_INLINE_RELATIVE_PATHS' in reporter
+    assert "CRITICAL_INLINE_RELATIVE_PATHS" in reporter
+    assert '"WARDS/frontend/index.html"' in reporter
+    assert "inline_always" in reporter
+
+
+def test_stale_deployment_pause_does_not_accept_vm1_manifest_as_baseline():
+    engine = (Path(__file__).resolve().parents[1] / "SECURITY" / "security_engine.py").read_text()
+
+    assert "deployment_baseline_allowed" in engine
+    assert "and not baseline_already_ready" in engine
+    assert "if deployment_paused and not deployment_baseline_allowed:" in engine
+    assert "if deployment_baseline_allowed:" in engine
 
 
 def test_vm1_deferred_git_clean_files_can_be_marked_clean():
