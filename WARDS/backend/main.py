@@ -44,7 +44,21 @@ from utils.log_sanitization import install_uvicorn_reload_path_filter
 from utils.redis_client import require_redis
 from utils.system_settings import seed_system_settings
 from utils.branch_system_settings import cleanup_duplicate_branch_system_settings
-from middleware.dos_protection import RequestSizeMiddleware, RequestTimeoutMiddleware, ConnectionLimitMiddleware, AbuseDetectionMiddleware, account_from_request, get_client_ip
+from middleware.dos_protection import RequestSizeMiddleware, RequestTimeoutMiddleware, ConnectionLimitMiddleware, AbuseDetectionMiddleware, account_from_request
+try:
+    from middleware.dos_protection import get_client_ip
+except ImportError:
+    def get_client_ip(request):
+        if request is None:
+            return "unknown"
+        for header in ("cf-connecting-ip", "true-client-ip", "x-real-ip"):
+            value = request.headers.get(header)
+            if value:
+                return value.split(",", 1)[0].strip() or "unknown"
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            return forwarded.split(",", 1)[0].strip() or "unknown"
+        return request.client.host if request.client and request.client.host else "unknown"
 from middleware.https import HttpsEnforcementMiddleware
 
 install_uvicorn_reload_path_filter()

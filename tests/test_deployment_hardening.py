@@ -199,6 +199,16 @@ def test_frontend_global_error_modal_labels_session_expiration():
     assert "title: isSessionExpirationError ? 'Session Expired'" in source
 
 
+def test_backend_main_has_get_client_ip_import_fallback():
+    source = Path("WARDS/backend/main.py").read_text(encoding="utf-8")
+
+    assert "from middleware.dos_protection import RequestSizeMiddleware" in source
+    assert "try:\n    from middleware.dos_protection import get_client_ip" in source
+    assert "except ImportError:" in source
+    assert "cf-connecting-ip" in source
+    assert "x-forwarded-for" in source
+
+
 def test_vm1_database_recovery_is_audited_to_vm2():
     vm1_source = Path("WARDS/backend/routes/security_dashboard.py").read_text(encoding="utf-8")
     client_source = Path("WARDS/backend/utils/security_client.py").read_text(encoding="utf-8")
