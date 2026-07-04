@@ -239,6 +239,8 @@ def api_scan_file(payload: ScanFileRequest, db=Depends(get_db)):
     if not file_entry:
         raise HTTPException(status_code=404, detail="Monitored file not found")
     if is_vm1_file(file_entry):
+        force_token = now_utc().isoformat()
+        set_setting(db, "vm1_scan_requested_at", force_token, "manual_file_scan")
         detection = _scan_vm1_snapshot(db, file_entry, context=payload.context)
     else:
         detection = scan_single_file(db, file_entry, context=payload.context, commit_clean=payload.commit_clean)
@@ -249,9 +251,20 @@ def api_scan_file(payload: ScanFileRequest, db=Depends(get_db)):
 @rate_limit("scan_all", max_requests=3, window_seconds=60)
 def api_scan_all(payload: dict = {}, request: Request = None, db=Depends(get_db)):
     context = payload.get("context", {}) or {}
+    force_token = ""
     if context.get("manual_scan"):
-        set_setting(db, "vm1_scan_requested_at", now_utc().isoformat(), "manual_scan")
+        force_token = now_utc().isoformat()
+        set_setting(db, "vm1_scan_requested_at", force_token, "manual_scan")
     detections = scan_all_files(db, context=context)
+    if context.get("manual_scan") and force_token:
+        wait_seconds = max(0, min(30, int(os.getenv("VM1_MANUAL_SCAN_WAIT_SECONDS", "18"))))
+        deadline = time.time() + wait_seconds
+        while time.time() < deadline:
+            db.expire_all()
+            last_manifest = str(get_setting(db, "vm1_last_manifest_at", "") or "")
+            if last_manifest >= force_token:
+                break
+            time.sleep(1)
     return {"detections": [serialize_detection(d) for d in detections]}
 
 
@@ -557,6 +570,15 @@ def api_vm1_restore_ack(payload: dict = {}, db=Depends(get_db)):
     from SECURITY.security_engine import acknowledge_vm1_restore_command
     success = acknowledge_vm1_restore_command(db, payload.get("command_id"), payload.get("success", False))
     return {"status": "ok" if success else "error"}
+
+
+@app.post("/v1/vm1/database/integrity", dependencies=[Depends(require_api_key)])
+def api_vm1_database_integrity(payload: dict = {}, db=Depends(get_db)):
+    from SECURITY.security_engine import process_vm1_database_integrity_report
+    try:
+        return process_vm1_database_integrity_report(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/v1/vm1/config", dependencies=[Depends(require_api_key)])

@@ -216,12 +216,18 @@ def test_vm1_database_recovery_is_audited_to_vm2():
     vm1_source = Path("WARDS/backend/routes/security_dashboard.py").read_text(encoding="utf-8")
     client_source = Path("WARDS/backend/utils/security_client.py").read_text(encoding="utf-8")
     vm2_source = Path("SECURITY/api_main.py").read_text(encoding="utf-8")
+    engine_source = Path("SECURITY/security_engine.py").read_text(encoding="utf-8")
+    reporter_source = Path("scripts/vm1_security_reporter.py").read_text(encoding="utf-8")
 
     assert "def log_vm1_database_recovery" in client_source
     assert "/v1/vm1/database-recoveries/log" in client_source
     assert "_safe_log_vm1_database_recovery" in vm1_source
     assert "vm1_database_recovery" in vm2_source
     assert "api_log_vm1_database_recovery" in vm2_source
+    assert "/v1/vm1/database/integrity" in vm2_source
+    assert "process_vm1_database_integrity_report" in engine_source
+    assert 'cmd.get("command_type") == "vm1_database_restore"' in reporter_source
+    assert "send_database_integrity_report(reason)" in reporter_source
 
 
 def test_vm1_recovery_retries_same_hash_and_existing_open_incidents():
@@ -231,6 +237,7 @@ def test_vm1_recovery_retries_same_hash_and_existing_open_incidents():
     assert "reason=\"repeat modified hash scan\"" in engine
     assert "reason=f\"existing open incident SEC-{existing_incident.id}\"" in engine
     assert "reason=\"snapshot scan found existing open incident\"" in engine
+    assert "is_vm1_evidence_entry(file_entry)" in engine
 
 
 def test_database_checksum_drift_without_audit_creates_detection():
@@ -472,7 +479,8 @@ def test_vm1_config_exposes_force_scan_token_for_reporter():
     reporter = (Path(__file__).resolve().parents[1] / "scripts" / "vm1_security_reporter.py").read_text()
 
     assert '"force_scan_token": get_setting(db, "vm1_scan_requested_at", "")' in security_api
-    assert 'set_setting(db, "vm1_scan_requested_at", now_utc().isoformat(), "manual_scan")' in security_api
+    assert 'set_setting(db, "vm1_scan_requested_at", force_token, "manual_scan")' in security_api
+    assert "VM1_MANUAL_SCAN_WAIT_SECONDS" in security_api
     assert 'VM2 requested immediate manifest scan' in reporter
     assert 'scan_and_send_manifest("forced" if force_scan_due else "interval")' in reporter
 

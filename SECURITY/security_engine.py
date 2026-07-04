@@ -2026,6 +2026,15 @@ def is_vm1_evidence_path(path: Path | str) -> bool:
     return bool(parts.intersection(VM1_EVIDENCE_DIR_PARTS))
 
 
+def is_vm1_evidence_entry(file_entry: SecurityMonitoredFile | None) -> bool:
+    if not file_entry:
+        return False
+    return (
+        is_vm1_evidence_path(file_entry.relative_path or "")
+        or is_vm1_evidence_path(file_entry.file_path or "")
+    )
+
+
 def iter_monitorable_files(roots: dict[str, Path] | None = None) -> Iterable[tuple[str, Path]]:
     roots = roots or MONITORED_ROOTS
     excluded = {item.lower() for item in DEFAULT_EXCLUDED_DIRS}
@@ -5258,6 +5267,13 @@ def _has_open_incident(db: Session, file_entry: SecurityMonitoredFile, change_ty
 
 def scan_single_file(db: Session, file_entry: SecurityMonitoredFile, context: dict | None = None, commit_clean: bool = True, precomputed_hash: str | None = None) -> SecurityDetectionEvent | None:
     context = context or {}
+    if is_vm1_evidence_entry(file_entry):
+        file_entry.status = MONITORING_REMOVED_STATUS
+        file_entry.last_checked = now_utc()
+        db.add(file_entry)
+        if commit_clean:
+            db.commit()
+        return None
     if is_database_entry(file_entry):
         return scan_database_entry(db, file_entry, context=context, commit_clean=commit_clean)
     if is_vm1_file(file_entry) and not context.get("scan_vm1_local"):
@@ -5600,6 +5616,11 @@ def scan_all_files(db: Session, context: dict | None = None) -> list[SecurityDet
                 precomputed_hashes[entry_id] = file_hash
 
     for file_entry in file_entries:
+        if is_vm1_evidence_entry(file_entry):
+            file_entry.status = MONITORING_REMOVED_STATUS
+            file_entry.last_checked = now_utc()
+            db.add(file_entry)
+            continue
         if is_vm1_file(file_entry):
             if context and context.get("manual_scan"):
                 detection = _scan_vm1_snapshot(db, file_entry, context=context)
@@ -8143,6 +8164,149 @@ def _queue_vm1_restore_if_needed(
         return False
 
 
+def _has_pending_vm1_database_restore(db: Session) -> bool:
+    return any(
+        c.get("command_type") == "vm1_database_restore"
+        for c in get_pending_vm1_restore_commands(db)
+    )
+
+
+def _queue_vm1_database_restore_command(db: Session, detection_id: int | None = None, *, reason: str = "vm1_database_integrity") -> dict | None:
+    if _has_pending_vm1_database_restore(db):
+        return None
+    command_id = f"dbrest_{detection_id or int(time.time())}_{int(time.time())}"
+    cmd = {
+        "command_id": command_id,
+        "command_type": "vm1_database_restore",
+        "detection_id": detection_id,
+        "relative_path": "VM1_DATABASE/wards_db",
+        "created_at": now_utc().isoformat(),
+        "reason": reason,
+    }
+    existing = json_loads(get_setting(db, "vm1_restore_commands", "[]"), [])
+    if not isinstance(existing, list):
+        existing = []
+    existing.append(cmd)
+    set_setting(db, "vm1_restore_commands", json_dumps(existing), "vm2_database_monitor")
+    return cmd
+
+
+def process_vm1_database_integrity_report(db: Session, payload: dict) -> dict:
+    checksum = str(payload.get("checksum") or "").strip().lower()
+    if not checksum or len(checksum) != 64 or not all(c in "0123456789abcdef" for c in checksum):
+        raise ValueError("Invalid VM1 database checksum")
+
+    baseline_key = "vm1_database_critical_settings_baseline_checksum"
+    baseline = str(get_setting(db, baseline_key, "") or "").strip().lower()
+    suspicious = bool(payload.get("suspicious"))
+    set_setting(db, "vm1_database_last_integrity_at", now_utc().isoformat(), "vm1_reporter")
+    set_setting(db, "vm1_database_last_integrity_checksum", checksum, "vm1_reporter")
+
+    if not baseline and not suspicious:
+        set_setting(db, baseline_key, checksum, "vm1_reporter")
+        set_setting(db, "vm1_database_integrity_status", "baseline_initialized", "vm1_reporter")
+        return {"status": "baseline_initialized", "restore_queued": False}
+
+    if checksum == baseline and not suspicious:
+        set_setting(db, "vm1_database_integrity_status", "clean", "vm1_reporter")
+        return {"status": "clean", "restore_queued": False}
+
+    existing_incident = (
+        db.query(SecurityIncident)
+        .join(SecurityDetectionEvent)
+        .filter(SecurityDetectionEvent.target_type == "vm1_database")
+        .filter(SecurityIncident.status.in_(["open", "investigating"]))
+        .order_by(SecurityIncident.created_at.desc())
+        .first()
+    )
+    if existing_incident:
+        restore_cmd = _queue_vm1_database_restore_command(db, existing_incident.detection_event_id, reason="existing_vm1_database_incident")
+        set_setting(db, "vm1_database_integrity_status", "restore_queued", "vm2_database_monitor")
+        return {
+            "status": "existing_incident",
+            "restore_queued": bool(restore_cmd),
+            "command_id": restore_cmd.get("command_id") if restore_cmd else None,
+            "incident_id": existing_incident.id,
+        }
+
+    context = {
+        "target_type": "vm1_database",
+        "source_ip": "vm1_internal",
+        "host_vm": "vm1",
+        "database_integrity_deviation": True,
+        "vm1_database_scope": str(payload.get("scope") or "critical_system_settings"),
+        "vm1_database_row_count": payload.get("row_count"),
+        "vm1_database_sample": str(payload.get("sample") or "")[:500],
+        "vm1_database_suspicious_content": suspicious,
+    }
+    prediction = AIPrediction("malicious", 0.95, 0.95, "VM1 critical database integrity checksum deviated from trusted baseline.")
+    flags = ["database_integrity_deviation"]
+    classification = classify("content_modified", prediction, flags, context)
+    changed = {
+        "added": [{"line": 1, "text": f"VM1 DB checksum: {checksum}"}],
+        "removed": [{"line": 1, "text": f"Trusted checksum: {baseline or 'uninitialized'}"}],
+        "changed": [],
+        "truncated": False,
+        "total_added": 1,
+        "total_removed": 1,
+    }
+
+    detection = SecurityDetectionEvent(
+        file_id=None,
+        target_type="vm1_database",
+        target_name="VM1_DATABASE/critical_system_settings",
+        actor="vm1_reporter",
+        change_type="content_modified",
+        old_hash=baseline or None,
+        new_hash=checksum,
+        is_legitimate=False,
+        admin_id=None,
+        ai_score=prediction.score,
+        ai_prediction=prediction.prediction,
+        confidence=prediction.confidence,
+        severity_level=classification["severity_level"],
+        cvss_score=classification["cvss_score"],
+        nist_category=classification["nist_category"],
+        enisa_threat_type=classification["enisa_threat_type"],
+        trigger_summary="VM1 critical database settings checksum deviated from trusted baseline. Source IP: vm1_internal.",
+        accuracy_basis=prediction.basis,
+        behavior_flags_json=json_dumps([BEHAVIOR_LABELS.get(flag, flag) for flag in flags]),
+        changed_lines_json=json_dumps(changed),
+        context_json=json_dumps(context),
+    )
+    db.add(detection)
+    db.commit()
+    db.refresh(detection)
+    create_detection_system_alert(db, detection)
+
+    incident = create_incident(db, detection, classification, flags, changed, None)
+    restore_cmd = _queue_vm1_database_restore_command(db, detection.id)
+    recovery = SecurityRecoveryEvent(
+        detection_event_id=detection.id,
+        file_id=None,
+        recovery_type="vm1_database_auto_restore_queued",
+        initiated_by=None,
+        status="in_progress" if restore_cmd else "success",
+        backup_path="latest_vm1_database_archive",
+        summary="VM1 database auto-recovery command queued." if restore_cmd else "VM1 database auto-recovery command was already pending.",
+        completed_at=None if restore_cmd else now_utc(),
+    )
+    db.add(recovery)
+    incident.response_action = "auto_recovered_pending_review"
+    db.add(incident)
+    db.commit()
+    db.refresh(recovery)
+    create_incident_system_alert(db, incident, detection, recovery)
+    set_setting(db, "vm1_database_integrity_status", "restore_queued", "vm2_database_monitor")
+    return {
+        "status": "restore_queued",
+        "restore_queued": bool(restore_cmd),
+        "command_id": restore_cmd.get("command_id") if restore_cmd else None,
+        "detection_id": detection.id,
+        "incident_id": incident.id,
+    }
+
+
 def _has_pending_vm1_restore_for_file(db: Session, relative_path: str) -> bool:
     commands = get_pending_vm1_restore_commands(db)
     return any(c.get("relative_path") == relative_path for c in commands)
@@ -8205,6 +8369,24 @@ def acknowledge_vm1_restore_command(db: Session, command_id: str, success: bool)
     # state is trusted immediately and doesn't trigger a re-detection.
     if success:
         for cmd in removed:
+            if cmd.get("command_type") == "vm1_database_restore":
+                set_setting(db, "vm1_database_integrity_status", "restore_acknowledged", "vm1_reporter")
+                expected = get_setting(db, "vm1_database_critical_settings_baseline_checksum", "")
+                if expected:
+                    set_setting(db, "vm1_database_last_integrity_checksum", expected, "vm1_reporter")
+                recovery = SecurityRecoveryEvent(
+                    detection_event_id=cmd.get("detection_id"),
+                    file_id=None,
+                    recovery_type="vm1_database_auto_restore",
+                    initiated_by=None,
+                    status="success",
+                    backup_path="latest_vm1_database_archive",
+                    completed_at=now_utc(),
+                    summary="VM1 database automatic restore acknowledged by VM1 reporter.",
+                )
+                db.add(recovery)
+                db.commit()
+                continue
             rel_path = cmd.get("relative_path")
             if not rel_path:
                 continue

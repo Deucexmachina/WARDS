@@ -17,6 +17,7 @@ Environment variables:
 """
 
 import base64
+import gzip
 import hashlib
 import os
 import subprocess
@@ -32,6 +33,7 @@ import requests
 # ---------------------------------------------------------------------------
 SECURITY_API_URL = (os.getenv("SECURITY_API_URL") or "").rstrip("/")
 API_KEY = os.getenv("SECURITY_API_KEY", "")
+ADMIN_SECRET = os.getenv("SECURITY_ADMIN_SECRET", "")
 
 MONITORED_ROOTS = {
     "WARDS": Path(os.getenv("VM1_WARDS_DIR", "/WARDS")),
@@ -42,7 +44,7 @@ DEPLOY_DIR = Path(os.getenv("DEPLOY_DIR", "/opt/wards/app"))
 SCAN_INTERVAL = max(5, int(os.getenv("VM1_REPORT_INTERVAL", "10")))
 HEARTBEAT_INTERVAL = max(5, int(os.getenv("VM1_HEARTBEAT_INTERVAL", "10")))
 RESTORE_POLL_INTERVAL = max(3, int(os.getenv("VM1_RESTORE_POLL_INTERVAL", "5")))
-CONFIG_FETCH_INTERVAL = max(5, int(os.getenv("VM1_CONFIG_FETCH_INTERVAL", "10")))
+CONFIG_FETCH_INTERVAL = max(3, int(os.getenv("VM1_CONFIG_FETCH_INTERVAL", "5")))
 MAX_DYNAMIC_SCAN_INTERVAL = max(5, int(os.getenv("VM1_MAX_REPORT_INTERVAL", "60")))
 SNAPSHOT_DIR = Path(os.getenv("VM1_SNAPSHOT_DIR", "/app/.vm1_snapshots"))
 MAX_FILE_SNAPSHOT_BYTES = int(os.getenv("VM1_MAX_SNAPSHOT_BYTES", "2097152"))  # 2 MB
@@ -52,6 +54,7 @@ MAX_MANIFEST_CONTENT_BYTES = int(os.getenv("VM1_MAX_MANIFEST_CONTENT_BYTES", "52
 CUSTOM_FOLDERS: list[Path] = []
 DYNAMIC_SCAN_INTERVAL = SCAN_INTERVAL
 FRONTEND_REBUILD_REASONS: set[str] = set()
+LAST_DATABASE_CHECKSUM = ""
 
 LOG_PREFIX = "[VM1-REPORTER]"
 
@@ -409,11 +412,88 @@ def scan_and_send_manifest(reason: str) -> bool:
         files = list(iter_monitored_files())
         snapshot_files(files)
         sent = send_manifest(files)
+        send_database_integrity_report(reason)
         poll_restore_commands()
         return sent
     except Exception as exc:
         log(f"Manifest scan/upload failed ({reason}): {exc}")
         return False
+
+
+def _compose_base_command() -> tuple[list[str], str | None]:
+    compose_dirs = ["/opt/wards/app", "/wards", "/app", "/"]
+    cwd = None
+    for d in compose_dirs:
+        if Path(d).joinpath("docker-compose.yml").exists():
+            cwd = d
+            break
+    return ["docker", "compose"], cwd
+
+
+def vm1_critical_database_checksum() -> dict | None:
+    """Hash critical VM1 DB settings that should rarely change outside admin workflows."""
+    command, cwd = _compose_base_command()
+    mysql_script = (
+        'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE" -N -B -e '
+        '"SELECT `key`, COALESCE(`value`, \'\'), COALESCE(`description`, \'\'), '
+        'COALESCE(`updated_by`, \'\'), COALESCE(CAST(`updated_at` AS CHAR), \'\') '
+        'FROM system_settings WHERE `key` IN (\'sessionTimeout\') ORDER BY `key`;"'
+    )
+    try:
+        result = subprocess.run(
+            [*command, "exec", "-T", "mysql", "sh", "-lc", mysql_script],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            log(f"VM1 database checksum query failed: {result.stderr.strip()[:200]}")
+            return None
+        payload = result.stdout.strip()
+        digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        suspicious = any(token in payload.lower() for token in ("hacked", "defacement", "unauthorized_sql_test"))
+        return {
+            "checksum": digest,
+            "scope": "critical_system_settings",
+            "row_count": len([line for line in payload.splitlines() if line.strip()]),
+            "sample": payload[:500],
+            "suspicious": suspicious,
+        }
+    except FileNotFoundError:
+        log("Docker compose is unavailable; VM1 database integrity report skipped")
+    except Exception as exc:
+        log(f"VM1 database checksum exception: {exc}")
+    return None
+
+
+def send_database_integrity_report(reason: str) -> bool:
+    global LAST_DATABASE_CHECKSUM
+    if not SECURITY_API_URL or not API_KEY:
+        return False
+    report = vm1_critical_database_checksum()
+    if not report:
+        return False
+    checksum = str(report.get("checksum") or "")
+    if checksum == LAST_DATABASE_CHECKSUM and not report.get("suspicious"):
+        return True
+    try:
+        resp = requests.post(
+            f"{SECURITY_API_URL}/v1/vm1/database/integrity",
+            headers={"X-API-Key": API_KEY, "Content-Type": "application/json"},
+            json={**report, "reason": reason, "timestamp": datetime.now(timezone.utc).isoformat()},
+            timeout=20,
+        )
+        if resp.status_code == 200:
+            LAST_DATABASE_CHECKSUM = checksum
+            data = resp.json()
+            if data.get("restore_queued"):
+                log(f"VM1 database integrity drift reported; restore queued by VM2 ({data.get('command_id')})")
+            return True
+        log(f"VM1 database integrity upload failed: HTTP {resp.status_code} {resp.text[:200]}")
+    except Exception as exc:
+        log(f"VM1 database integrity upload exception: {exc}")
+    return False
 
 
 def _restore_affects_frontend(rel_path: str) -> bool:
@@ -497,6 +577,9 @@ def _flush_frontend_rebuild():
 
 
 def apply_restore_command(cmd: dict) -> bool:
+    if cmd.get("command_type") == "vm1_database_restore":
+        return apply_database_restore_command(cmd)
+
     rel_path = cmd.get("relative_path", "")
     expected_hash = cmd.get("expected_hash")
     content_b64 = cmd.get("restore_content_b64")
@@ -549,6 +632,63 @@ def apply_restore_command(cmd: dict) -> bool:
     except Exception as exc:
         log(f"Restore failed for {rel_path}: {exc}")
         return False
+
+
+def apply_database_restore_command(cmd: dict) -> bool:
+    if not SECURITY_API_URL or not API_KEY or not ADMIN_SECRET:
+        log("VM1 database restore command skipped; missing SECURITY API credentials")
+        return False
+    command_id = str(cmd.get("command_id") or f"dbrestore_{int(time.time())}")
+    download_path = Path(f"/tmp/{command_id}.sql.gz")
+    try:
+        with requests.get(
+            f"{SECURITY_API_URL}/v1/vm1/database-backups/latest",
+            headers={"X-API-Key": API_KEY, "X-Admin-Secret": ADMIN_SECRET},
+            timeout=120,
+            stream=True,
+        ) as resp:
+            if resp.status_code != 200:
+                log(f"VM1 database backup download failed: HTTP {resp.status_code} {resp.text[:200]}")
+                return False
+            with open(download_path, "wb") as handle:
+                for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        handle.write(chunk)
+
+        with gzip.open(download_path, "rb") as source:
+            sql_payload = source.read()
+
+        compose_cmd, cwd = _compose_base_command()
+        restore = subprocess.run(
+            [
+                *compose_cmd,
+                "exec",
+                "-T",
+                "mysql",
+                "sh",
+                "-lc",
+                'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"',
+            ],
+            input=sql_payload,
+            cwd=cwd,
+            capture_output=True,
+            timeout=180,
+        )
+        if restore.returncode != 0:
+            stderr = restore.stderr.decode("utf-8", errors="replace") if restore.stderr else ""
+            log(f"VM1 database restore failed: {stderr[:300]}")
+            return False
+        log(f"VM1 database restored from latest VM2 archive for command {command_id}")
+        send_database_integrity_report("database_restore")
+        return True
+    except Exception as exc:
+        log(f"VM1 database restore exception: {exc}")
+        return False
+    finally:
+        try:
+            download_path.unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
 def poll_restore_commands():
