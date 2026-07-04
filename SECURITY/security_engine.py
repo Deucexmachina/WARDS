@@ -189,6 +189,13 @@ DEFAULT_EXCLUDED_DIRS = {
     "OCR",
 }
 
+VM1_EVIDENCE_DIR_PARTS = {
+    "vm1_snapshots",
+    ".restore_content",
+    ".defaced",
+    ".defaced_snapshots",
+}
+
 MONITORED_SUFFIXES = {
     ".py",
     ".js",
@@ -2001,6 +2008,8 @@ def is_database_entry(file_entry: SecurityMonitoredFile) -> bool:
 def is_monitorable(path: Path, root_path: Path | None = None) -> bool:
     if not path.is_file():
         return False
+    if is_vm1_evidence_path(path):
+        return False
     lower_name = path.name.lower()
     if path.suffix.lower() not in MONITORED_SUFFIXES and lower_name not in MONITORED_SPECIAL_FILENAMES and not any(lower_name.endswith(item) for item in MONITORED_SPECIAL_NAME_SUFFIXES):
         return False
@@ -2009,6 +2018,12 @@ def is_monitorable(path: Path, root_path: Path | None = None) -> bool:
     if (parts - allowed_root_parts).intersection({item.lower() for item in DEFAULT_EXCLUDED_DIRS}):
         return False
     return True
+
+
+def is_vm1_evidence_path(path: Path | str) -> bool:
+    """Return true for VM1 snapshot/restore evidence copies that must never be scanned."""
+    parts = {part.lower() for part in Path(path).parts}
+    return bool(parts.intersection(VM1_EVIDENCE_DIR_PARTS))
 
 
 def iter_monitorable_files(roots: dict[str, Path] | None = None) -> Iterable[tuple[str, Path]]:
@@ -5163,18 +5178,24 @@ def scan_database_entry(db: Session, file_entry: SecurityMonitoredFile, context:
 
     if not audit_changes and not unauthorized_audit_changes and checksum_existed:
         current_hash = sha256_file(existing_path)
-        file_entry.current_hash = current_hash
-        file_entry.size_bytes = existing_path.stat().st_size
-        file_entry.last_checked = now_utc()
-        if current_hash != file_entry.baseline_hash:
-            file_entry.baseline_hash = current_hash
-        file_entry.status = "clean"
-        db.add(file_entry)
-        set_setting(db, "database_audit_last_id", str(latest_database_audit_id(db)), "database_monitor")
-        prune_database_authorized_operations(db)
-        if commit_clean:
-            db.commit()
-        return None
+        if current_hash == file_entry.baseline_hash:
+            file_entry.current_hash = current_hash
+            file_entry.size_bytes = existing_path.stat().st_size
+            file_entry.last_checked = now_utc()
+            file_entry.status = "clean"
+            db.add(file_entry)
+            set_setting(db, "database_audit_last_id", str(latest_database_audit_id(db)), "database_monitor")
+            prune_database_authorized_operations(db)
+            if commit_clean:
+                db.commit()
+            return None
+        context["database_integrity_deviation"] = True
+        context["database_checksum_drift_without_audit"] = True
+        context.setdefault("source_ip", "database_monitor")
+        context.setdefault("db_user", "unknown")
+        logger.warning(
+            "Database checksum drift detected without matching audit rows; creating integrity detection."
+        )
 
     path = create_database_checksum_manifest(db, existing_path)
     old_hash = file_entry.current_hash
@@ -5188,6 +5209,15 @@ def scan_database_entry(db: Session, file_entry: SecurityMonitoredFile, context:
     file_entry.last_checked = now_utc()
 
     if unauthorized_audit_changes:
+        file_entry.status = "modified"
+        db.add(file_entry)
+        db.commit()
+        new_content = read_text(path)
+        detection = record_detection(db, file_entry, "content_modified", old_hash, current_hash, old_content, new_content, context)
+        set_setting(db, "database_audit_last_id", str(latest_database_audit_id(db)), "database_monitor")
+        return detection
+
+    if context.get("database_checksum_drift_without_audit") and current_hash != file_entry.baseline_hash:
         file_entry.status = "modified"
         db.add(file_entry)
         db.commit()
@@ -5328,6 +5358,12 @@ def _scan_vm1_snapshot(db: Session, file_entry: SecurityMonitoredFile, context: 
     if _has_open_incident(db, file_entry, "vm1_content_modified"):
         file_entry.status = "modified"
         db.add(file_entry)
+        _queue_vm1_restore_if_needed(
+            db,
+            file_entry,
+            detection_id=None,
+            reason="snapshot scan found existing open incident",
+        )
         return None
 
     if _has_pending_vm1_restore_for_file(db, file_entry.relative_path):
@@ -7991,7 +8027,7 @@ def _quarantine_vm1_snapshot(entry: SecurityMonitoredFile, detection_id: int) ->
         return None
 
 
-def _create_vm1_restore_command(db: Session, entry: SecurityMonitoredFile, detection_id: int, *, original_content_bytes: bytes | None = None):
+def _create_vm1_restore_command(db: Session, entry: SecurityMonitoredFile, detection_id: int | None, *, original_content_bytes: bytes | None = None):
     content_bytes = None
     if original_content_bytes is not None:
         # Verify the provided bytes actually match the expected baseline hash
@@ -8071,6 +8107,40 @@ def _create_vm1_restore_command(db: Session, entry: SecurityMonitoredFile, detec
         logger.warning("VM1 restore command queue has %s pending command(s); not truncating pending restores.", len(existing))
     set_setting(db, "vm1_restore_commands", json_dumps(existing), "vm2_monitor")
     return cmd
+
+
+def _queue_vm1_restore_if_needed(
+    db: Session,
+    entry: SecurityMonitoredFile,
+    *,
+    detection_id: int | None = None,
+    original_content_bytes: bytes | None = None,
+    reason: str = "retry",
+) -> bool:
+    """Queue a VM1 restore once for a modified high-risk file if no command is pending."""
+    if not entry or not entry.relative_path or not entry.baseline_hash:
+        return False
+    if _has_pending_vm1_restore_for_file(db, entry.relative_path):
+        return False
+    try:
+        rules = get_ai_rules(db)
+        if not is_high_risk_file_path(entry.relative_path or "", rules):
+            return False
+        _create_vm1_restore_command(
+            db,
+            entry,
+            detection_id,
+            original_content_bytes=original_content_bytes,
+        )
+        logger.warning(
+            "Queued VM1 restore command for %s after %s; file remains modified.",
+            entry.relative_path,
+            reason,
+        )
+        return True
+    except Exception as exc:
+        logger.exception("Unable to queue VM1 restore retry for %s: %s", entry.relative_path, exc)
+        return False
 
 
 def _has_pending_vm1_restore_for_file(db: Session, relative_path: str) -> bool:
@@ -8234,6 +8304,13 @@ def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type
         SecurityIncident.status.in_(["open", "investigating"]),
     ).first()
     if existing_incident:
+        _queue_vm1_restore_if_needed(
+            db,
+            entry,
+            detection_id=detection.id,
+            original_content_bytes=original_content_bytes,
+            reason=f"existing open incident SEC-{existing_incident.id}",
+        )
         logger.info(
             "VM1 dedup: skipping incident for %s (existing open incident SEC-%s)",
             entry.relative_path, existing_incident.id,
@@ -8363,6 +8440,8 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
             rel_path = _clean_folder_root(rel_path)
             if not rel_path or ".." in rel_path.replace("\\", "/"):
                 continue
+            if is_vm1_evidence_path(rel_path):
+                continue
             current_hash = _valid_hash(f.get("current_hash"))
             size_bytes = _valid_size(f.get("size_bytes"))
             if Path(rel_path).name.lower() == ".env":
@@ -8427,6 +8506,8 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
         folder_root = _clean_folder_root(folder_root)
         rel_path = _clean_folder_root(rel_path)
         if not rel_path or ".." in rel_path.replace("\\", "/"):
+            continue
+        if is_vm1_evidence_path(rel_path):
             continue
         if folder_root not in allowed_vm1_roots:
             continue
@@ -8502,6 +8583,8 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
         folder_root = _clean_folder_root(folder_root)
         rel_path = _clean_folder_root(rel_path)
         if not rel_path or ".." in rel_path.replace("\\", "/"):
+            continue
+        if is_vm1_evidence_path(rel_path):
             continue
 
         # Skip files from folders that are no longer in the VM1 monitored list
@@ -8648,6 +8731,12 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
             if previous_hash == current_hash:
                 entry.status = "modified"
                 db.add(entry)
+                _queue_vm1_restore_if_needed(
+                    db,
+                    entry,
+                    detection_id=None,
+                    reason="repeat modified hash scan",
+                )
                 continue
             if not has_pending_restore:
                 # Resolve any existing open incidents for this file before creating a new one

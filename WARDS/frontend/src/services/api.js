@@ -53,6 +53,19 @@ const isBranchPortalContext = () => {
   return pathname.startsWith('/branch-dashboard/') || pathname.startsWith('/live-monitor/');
 };
 
+const hasStoredPortalSession = () => {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  return Boolean(
+    localStorage.getItem('wardsPortal')
+    || localStorage.getItem('adminUser')
+    || localStorage.getItem('branchUser')
+    || localStorage.getItem('user')
+    || localStorage.getItem('publicUser')
+  );
+};
+
 api.interceptors.request.use((config) => {
   // Auth is handled by HttpOnly cookies. Explicit Authorization headers are
   // still respected when a caller deliberately supplies one for a non-browser
@@ -76,14 +89,24 @@ api.interceptors.response.use(
     const responseDetail = error?.response?.data?.detail;
     const isConfirmationResponse = status === 409 && responseDetail?.requires_confirmation;
     const errorDetail = typeof responseDetail === 'string' ? responseDetail : (responseDetail?.message || '');
-    const isSessionExpirationError = status === 401 && (
+    const loweredErrorDetail = errorDetail.toLowerCase();
+    const looksLikeAuthFailure = (
       !errorDetail ||
-      errorDetail.toLowerCase().includes('credentials') ||
-      errorDetail.toLowerCase().includes('session') ||
-      errorDetail.toLowerCase().includes('expired') ||
-      errorDetail.toLowerCase().includes('logged out') ||
-      errorDetail.toLowerCase().includes('token') ||
-      errorDetail.toLowerCase().includes('unauthorized')
+      loweredErrorDetail.includes('credentials') ||
+      loweredErrorDetail.includes('session') ||
+      loweredErrorDetail.includes('expired') ||
+      loweredErrorDetail.includes('logged out') ||
+      loweredErrorDetail.includes('token') ||
+      loweredErrorDetail.includes('unauthorized')
+    );
+    const protectedSessionRequest = isAdminApiRequest(url) || isBranchApiRequest(url) || url.includes('/user/');
+    const isSessionExpirationError = (
+      status === 401 && looksLikeAuthFailure
+    ) || (
+      status === 403 &&
+      hasStoredPortalSession() &&
+      protectedSessionRequest &&
+      (looksLikeAuthFailure || loweredErrorDetail.includes('permission'))
     );
     if (status && !isConfirmationResponse && !error?.config?.suppressGlobalErrorModal && !shouldSuppressGlobalErrorModal(error)) {
       window.dispatchEvent(new CustomEvent('wards:system-message', {

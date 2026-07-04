@@ -26,6 +26,7 @@ from SECURITY.security_engine import (
     active_monitored_file_ids_for_backup,
     load_monitored_file_for_backup,
     is_monitorable,
+    is_vm1_evidence_path,
 )
 from SECURITY.security_models import (
     SecurityMonitoredFile,
@@ -57,6 +58,7 @@ def test_vm1_snapshot_paths_are_not_monitorable(tmp_path):
     snapshot_file.write_text("console.log('snapshot');", encoding="utf-8")
 
     assert is_monitorable(snapshot_file, root_path=root) is False
+    assert is_vm1_evidence_path(snapshot_file) is True
 
 
 def test_uppercase_excluded_directory_is_not_monitorable(tmp_path):
@@ -66,6 +68,16 @@ def test_uppercase_excluded_directory_is_not_monitorable(tmp_path):
     nested.write_text("<html></html>", encoding="utf-8")
 
     assert is_monitorable(nested, root_path=root) is False
+
+
+def test_vm1_restore_content_paths_are_not_monitorable(tmp_path):
+    root = tmp_path / "SECURITY"
+    restore_content = root / "vm1_snapshots" / ".restore_content" / "rest_1.b64"
+    restore_content.parent.mkdir(parents=True)
+    restore_content.write_text("Y2xlYW4=", encoding="utf-8")
+
+    assert is_monitorable(restore_content, root_path=root) is False
+    assert is_vm1_evidence_path(restore_content) is True
 
 
 class MonitoredFolderDB:

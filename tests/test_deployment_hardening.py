@@ -195,7 +195,10 @@ def test_unified_auth_uses_configured_session_timeout_for_cookie_jwt_and_redis()
 def test_frontend_global_error_modal_labels_session_expiration():
     source = Path("WARDS/frontend/src/services/api.js").read_text(encoding="utf-8")
 
-    assert "const isSessionExpirationError = status === 401" in source
+    assert "const hasStoredPortalSession" in source
+    assert "status === 401 && looksLikeAuthFailure" in source
+    assert "status === 403" in source
+    assert "loweredErrorDetail.includes('permission')" in source
     assert "title: isSessionExpirationError ? 'Session Expired'" in source
 
 
@@ -219,6 +222,23 @@ def test_vm1_database_recovery_is_audited_to_vm2():
     assert "_safe_log_vm1_database_recovery" in vm1_source
     assert "vm1_database_recovery" in vm2_source
     assert "api_log_vm1_database_recovery" in vm2_source
+
+
+def test_vm1_recovery_retries_same_hash_and_existing_open_incidents():
+    engine = Path("SECURITY/security_engine.py").read_text(encoding="utf-8")
+
+    assert "def _queue_vm1_restore_if_needed" in engine
+    assert "reason=\"repeat modified hash scan\"" in engine
+    assert "reason=f\"existing open incident SEC-{existing_incident.id}\"" in engine
+    assert "reason=\"snapshot scan found existing open incident\"" in engine
+
+
+def test_database_checksum_drift_without_audit_creates_detection():
+    engine = Path("SECURITY/security_engine.py").read_text(encoding="utf-8")
+
+    assert "database_checksum_drift_without_audit" in engine
+    assert "Database checksum drift detected without matching audit rows" in engine
+    assert "record_detection(db, file_entry, \"content_modified\", old_hash, current_hash, old_content, new_content, context)" in engine
 
 
 def test_backup_engine_prunes_vm1_database_dumps_to_ten(monkeypatch, tmp_path):
