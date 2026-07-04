@@ -513,6 +513,16 @@ def test_startup_registration_handles_duplicate_monitored_file_rows():
     assert "except IntegrityError as exc:" in engine
 
 
+def test_startup_baseline_failure_rolls_back_before_status_update():
+    security_api = (Path(__file__).resolve().parents[1] / "SECURITY" / "api_main.py").read_text()
+    vm1_main = (Path(__file__).resolve().parents[1] / "WARDS" / "backend" / "main.py").read_text()
+
+    assert "startup_db.rollback()" in security_api
+    assert "startup_db.rollback()" in vm1_main
+    assert 'set_setting(startup_db, "startup_baseline_status", "failed", "system")' in security_api
+    assert 'set_setting(startup_db, "startup_baseline_status", "failed", "system")' in vm1_main
+
+
 def test_vm1_frontend_rebuild_does_not_recreate_backend_dependency():
     reporter = (Path(__file__).resolve().parents[1] / "scripts" / "vm1_security_reporter.py").read_text()
 

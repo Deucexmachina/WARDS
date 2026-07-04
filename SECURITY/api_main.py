@@ -417,8 +417,17 @@ def start_security_monitor_if_enabled():
                 break
             except Exception as exc:
                 try:
-                    set_setting(startup_db, "startup_baseline_status", "failed", "system")
+                    startup_db.rollback()
                 except Exception:
+                    pass
+                try:
+                    set_setting(startup_db, "startup_baseline_status", "failed", "system")
+                    startup_db.commit()
+                except Exception:
+                    try:
+                        startup_db.rollback()
+                    except Exception:
+                        pass
                     pass
                 print(f"[SECURITY MONITOR] startup baseline refresh failed: {exc}")
                 retry_delay = True

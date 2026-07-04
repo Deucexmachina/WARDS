@@ -736,6 +736,17 @@ def test_security_ai_artifacts_are_monitorable_without_local_backups(tmp_path):
     )
 
 
+def test_database_monitor_runtime_artifacts_are_not_normal_file_monitored(tmp_path):
+    from SECURITY import security_engine
+
+    security_root = tmp_path / "SECURITY"
+    db_snapshot = security_root / "database_monitor" / "wards_db_snapshot.json"
+    db_snapshot.parent.mkdir(parents=True)
+    db_snapshot.write_text("{}", encoding="utf-8")
+
+    assert not security_engine.is_monitorable(db_snapshot, root_path=security_root)
+
+
 def test_default_ai_rule_configs_are_not_empty():
     from SECURITY import security_engine
 

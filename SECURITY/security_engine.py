@@ -177,6 +177,7 @@ DEFAULT_EXCLUDED_DIRS = {
     "dist",
     "build",
     "output",
+    "database_monitor",
     "SECURITY",
     "local_backups",
     "vm1_snapshots",
