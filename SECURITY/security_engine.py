@@ -9196,17 +9196,36 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
                                 ", ".join(malicious_flags),
                             )
                         else:
-                            entry.baseline_hash = current_hash
-                            entry.status = "clean"
-                            db.add(entry)
-                            db.commit()
-                            logger.info(
-                                "VM1 safety-net: suppressed re-detection for %s (hash %s...%s) "
-                                "because incident SEC-%s was already %s.",
-                                entry.relative_path, current_hash[:8], current_hash[-8:],
-                                recent_incident.id, recent_incident.status,
+                            # Do not suppress high-risk files that were previously auto-recovered,
+                            # or any high-risk file where inline content is missing. Allowing the
+                            # normal detection flow ensures auto-recovery is re-triggered instead of
+                            # silently poisoning the baseline with the defaced hash.
+                            rules = get_ai_rules(db)
+                            is_high_risk = is_high_risk_file_path(entry.relative_path or "", rules)
+                            was_auto_recovered = recent_incident.response_action in (
+                                "auto_recovered",
+                                "auto_recovered_pending_review",
                             )
-                            continue
+                            if is_high_risk or was_auto_recovered:
+                                logger.warning(
+                                    "VM1 safety-net skipped for %s; allowing normal detection flow "
+                                    "(high_risk=%s, auto_recovered=%s).",
+                                    entry.relative_path,
+                                    is_high_risk,
+                                    was_auto_recovered,
+                                )
+                            else:
+                                entry.baseline_hash = current_hash
+                                entry.status = "clean"
+                                db.add(entry)
+                                db.commit()
+                                logger.info(
+                                    "VM1 safety-net: suppressed re-detection for %s (hash %s...%s) "
+                                    "because incident SEC-%s was already %s.",
+                                    entry.relative_path, current_hash[:8], current_hash[-8:],
+                                    recent_incident.id, recent_incident.status,
+                                )
+                                continue
                 # Fallback: if baseline is missing, set it and skip instead of flooding
                 if not entry.baseline_hash:
                     entry.baseline_hash = current_hash
