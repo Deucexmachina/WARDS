@@ -816,6 +816,13 @@ async def submit_full_scan(request: Request, db: Session = Depends(get_db), admi
         job = job_manager.submit("security_full_scan")
     except Exception as exc:
         raise HTTPException(status_code=429, detail=str(exc))
+    scan_token = now_utc().isoformat()
+    try:
+        set_setting(db, "security_scan_pending_since", scan_token, "manual_scan")
+        set_setting(db, "vm1_scan_requested_at", scan_token, "manual_scan")
+        set_setting(db, "vm1_database_integrity_status", "pending_scan", "manual_scan")
+    except Exception:
+        pass
     db.add(ActivityLog(
         action="Security Full Scan Submitted",
         user=admin.username,
@@ -835,6 +842,13 @@ def run_full_scan(request: Request, db: Session = Depends(get_db), admin=Depends
         job = job_manager.submit("security_full_scan")
     except Exception as exc:
         raise HTTPException(status_code=429, detail=str(exc))
+    scan_token = now_utc().isoformat()
+    try:
+        set_setting(db, "security_scan_pending_since", scan_token, "manual_scan")
+        set_setting(db, "vm1_scan_requested_at", scan_token, "manual_scan")
+        set_setting(db, "vm1_database_integrity_status", "pending_scan", "manual_scan")
+    except Exception:
+        pass
     db.add(ActivityLog(
         action="Security Full Scan",
         user=admin.username,

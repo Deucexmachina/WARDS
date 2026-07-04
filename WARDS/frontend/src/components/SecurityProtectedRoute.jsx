@@ -1,5 +1,5 @@
 import { Navigate } from 'react-router-dom';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import api from '../services/api';
 import { getStoredPortal } from '../utils/auth';
 
@@ -24,9 +24,14 @@ const clearAdminSession = () => {
 
 const SecurityProtectedRoute = ({ children }) => {
   const [allowed, setAllowed] = useState(null);
+  const verifyingRef = useRef(false);
 
   useEffect(() => {
     const verify = async () => {
+      if (verifyingRef.current) {
+        return;
+      }
+      verifyingRef.current = true;
       const portal = getStoredPortal();
       const securityReady = sessionStorage.getItem('securityAuthenticated') === 'true';
       const adminAuthenticatedAt = Date.parse(localStorage.getItem('adminAuthenticatedAt') || '');
@@ -34,18 +39,22 @@ const SecurityProtectedRoute = ({ children }) => {
 
       if (portal !== 'admin') {
         setAllowed(false);
+        verifyingRef.current = false;
         return;
       }
 
       if (!securityReady || !adminAuthenticatedAt || !securityAuthenticatedAt || securityAuthenticatedAt <= adminAuthenticatedAt) {
         clearSecuritySession();
         setAllowed(false);
+        verifyingRef.current = false;
         return;
       }
 
       try {
         const response = await api.get('/auth/unified/verify', {
           params: { portal: 'admin' },
+          timeout: 8000,
+          suppressGlobalErrorModal: true,
         });
         const serverStartedAt = Date.parse(response.data.server_started_at || '');
         if (!response.data.valid || response.data.user?.role !== 'admin' || (serverStartedAt && adminAuthenticatedAt <= serverStartedAt)) {
@@ -57,6 +66,8 @@ const SecurityProtectedRoute = ({ children }) => {
       } catch {
         clearAdminSession();
         setAllowed(false);
+      } finally {
+        verifyingRef.current = false;
       }
     };
 

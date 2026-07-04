@@ -408,11 +408,13 @@ def apply_vm2_config(cfg: dict) -> str:
 
 def scan_and_send_manifest(reason: str) -> bool:
     try:
+        # DB integrity is tiny compared with the file manifest. Send it first so
+        # VM2 can mark the dashboard at-risk and queue DB recovery quickly.
+        send_database_integrity_report(reason, force=reason == "forced")
         log(f"Preparing VM1 file manifest ({reason})")
         files = list(iter_monitored_files())
         snapshot_files(files)
         sent = send_manifest(files)
-        send_database_integrity_report(reason)
         poll_restore_commands()
         return sent
     except Exception as exc:
@@ -452,7 +454,10 @@ def vm1_critical_database_checksum() -> dict | None:
             return None
         payload = result.stdout.strip()
         digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
-        suspicious = any(token in payload.lower() for token in ("hacked", "defacement", "unauthorized_sql_test"))
+        suspicious = any(
+            token in payload.lower()
+            for token in ("hacked", "defacement", "unauthorized", "unauthorized_sql_test")
+        )
         return {
             "checksum": digest,
             "scope": "critical_system_settings",
@@ -467,17 +472,22 @@ def vm1_critical_database_checksum() -> dict | None:
     return None
 
 
-def send_database_integrity_report(reason: str) -> bool:
+def send_database_integrity_report(reason: str, *, force: bool = False) -> bool:
     global LAST_DATABASE_CHECKSUM
     if not SECURITY_API_URL or not API_KEY:
         return False
     report = vm1_critical_database_checksum()
     if not report:
+        log(f"VM1 database integrity report skipped ({reason}); checksum unavailable")
         return False
     checksum = str(report.get("checksum") or "")
-    if checksum == LAST_DATABASE_CHECKSUM and not report.get("suspicious"):
+    if checksum == LAST_DATABASE_CHECKSUM and not report.get("suspicious") and not force:
         return True
     try:
+        log(
+            f"Uploading VM1 database integrity report ({reason}); "
+            f"suspicious={bool(report.get('suspicious'))} row_count={report.get('row_count')}"
+        )
         resp = requests.post(
             f"{SECURITY_API_URL}/v1/vm1/database/integrity",
             headers={"X-API-Key": API_KEY, "Content-Type": "application/json"},
@@ -489,6 +499,8 @@ def send_database_integrity_report(reason: str) -> bool:
             data = resp.json()
             if data.get("restore_queued"):
                 log(f"VM1 database integrity drift reported; restore queued by VM2 ({data.get('command_id')})")
+            else:
+                log(f"VM1 database integrity accepted by VM2: {data.get('status', 'ok')}")
             return True
         log(f"VM1 database integrity upload failed: HTTP {resp.status_code} {resp.text[:200]}")
     except Exception as exc:

@@ -7178,16 +7178,19 @@ def dashboard_payload(db: Session) -> dict:
             behaviors[behavior] = behaviors.get(behavior, 0) + 1
     schedule = json_loads(get_setting(db, "backup_schedule", "{}"), {})
     next_backup = schedule.get("next_run") or "Not scheduled"
-    status = "Protected"
-    if any(item.severity_level in {"high", "critical"} for item in incidents):
-        status = "Compromised"
-    elif incidents:
-        status = "At Risk"
     monitoring_enabled = (get_setting(db, "monitoring_enabled", "false") or "false").lower() == "true"
     ml_model_trained = IFOREST_MODEL_PATH.exists()
     iforest_metadata = load_isolation_forest_metadata()
     vm1_last_manifest_at = get_setting(db, "vm1_last_manifest_at", "")
     vm1_scan_requested_at = get_setting(db, "vm1_scan_requested_at", "")
+    security_scan_pending_since = get_setting(db, "security_scan_pending_since", "")
+    vm1_database_integrity_status = get_setting(db, "vm1_database_integrity_status", "unknown")
+    vm1_database_last_integrity_at = get_setting(db, "vm1_database_last_integrity_at", "")
+    status = "Protected"
+    if any(item.severity_level in {"high", "critical"} for item in incidents):
+        status = "Compromised"
+    elif incidents or security_scan_pending_since or vm1_database_integrity_status in {"pending_scan", "restore_queued"}:
+        status = "At Risk"
     vm1_manifest_age_seconds = None
     vm1_manifest_status = "not received"
     if vm1_last_manifest_at:
@@ -7254,9 +7257,12 @@ def dashboard_payload(db: Session) -> dict:
             "vm1_manifest_status": vm1_manifest_status,
             "vm1_manifest_age_seconds": vm1_manifest_age_seconds,
             "vm1_scan_requested_at": vm1_scan_requested_at or "not requested",
+            "security_scan_pending_since": security_scan_pending_since or "not pending",
             "vm1_last_manifest_commit": get_setting(db, "vm1_last_manifest_commit", "") or "not received",
             "vm1_last_heartbeat_at": get_setting(db, "vm1_last_heartbeat_at", "") or "not received",
             "vm1_last_heartbeat_status": get_setting(db, "vm1_last_heartbeat_status", "unknown"),
+            "vm1_database_integrity_status": vm1_database_integrity_status,
+            "vm1_database_last_integrity_at": vm1_database_last_integrity_at or "not received",
             "startup_baseline_status": get_setting(db, "startup_baseline_status", "unknown"),
             "monitoring_enabled": "true" if monitoring_enabled else "false",
             "scan_interval_seconds": get_setting(db, "scan_interval_seconds", "30"),
@@ -8198,18 +8204,33 @@ def process_vm1_database_integrity_report(db: Session, payload: dict) -> dict:
 
     baseline_key = "vm1_database_critical_settings_baseline_checksum"
     baseline = str(get_setting(db, baseline_key, "") or "").strip().lower()
-    suspicious = bool(payload.get("suspicious"))
+    sample = str(payload.get("sample") or "")
+    reason = str(payload.get("reason") or "")
+    suspicious_tokens = ("hacked", "defacement", "unauthorized", "unauthorized_sql_test")
+    suspicious = bool(payload.get("suspicious")) or any(token in sample.lower() for token in suspicious_tokens)
+    baseline_tainted = (get_setting(db, "vm1_database_baseline_tainted", "false") or "false").lower() == "true"
     set_setting(db, "vm1_database_last_integrity_at", now_utc().isoformat(), "vm1_reporter")
     set_setting(db, "vm1_database_last_integrity_checksum", checksum, "vm1_reporter")
+    set_setting(db, "security_scan_pending_since", "", "vm1_reporter")
+
+    if reason == "database_restore" and not suspicious and (baseline_tainted or not baseline or checksum != baseline):
+        set_setting(db, baseline_key, checksum, "vm1_reporter")
+        set_setting(db, "vm1_database_integrity_status", "clean_after_restore", "vm1_reporter")
+        set_setting(db, "vm1_database_baseline_tainted", "false", "vm1_reporter")
+        return {"status": "clean_after_restore", "restore_queued": False}
 
     if not baseline and not suspicious:
         set_setting(db, baseline_key, checksum, "vm1_reporter")
         set_setting(db, "vm1_database_integrity_status", "baseline_initialized", "vm1_reporter")
+        set_setting(db, "vm1_database_baseline_tainted", "false", "vm1_reporter")
         return {"status": "baseline_initialized", "restore_queued": False}
 
     if checksum == baseline and not suspicious:
         set_setting(db, "vm1_database_integrity_status", "clean", "vm1_reporter")
+        set_setting(db, "vm1_database_baseline_tainted", "false", "vm1_reporter")
         return {"status": "clean", "restore_queued": False}
+    if suspicious:
+        set_setting(db, "vm1_database_baseline_tainted", "true" if checksum == baseline else "false", "vm2_database_monitor")
 
     existing_incident = (
         db.query(SecurityIncident)
@@ -8236,8 +8257,9 @@ def process_vm1_database_integrity_report(db: Session, payload: dict) -> dict:
         "database_integrity_deviation": True,
         "vm1_database_scope": str(payload.get("scope") or "critical_system_settings"),
         "vm1_database_row_count": payload.get("row_count"),
-        "vm1_database_sample": str(payload.get("sample") or "")[:500],
+        "vm1_database_sample": sample[:500],
         "vm1_database_suspicious_content": suspicious,
+        "vm1_database_baseline_tainted": baseline_tainted,
     }
     prediction = AIPrediction("malicious", 0.95, 0.95, "VM1 critical database integrity checksum deviated from trusted baseline.")
     flags = ["database_integrity_deviation"]
@@ -8372,7 +8394,8 @@ def acknowledge_vm1_restore_command(db: Session, command_id: str, success: bool)
             if cmd.get("command_type") == "vm1_database_restore":
                 set_setting(db, "vm1_database_integrity_status", "restore_acknowledged", "vm1_reporter")
                 expected = get_setting(db, "vm1_database_critical_settings_baseline_checksum", "")
-                if expected:
+                baseline_tainted = (get_setting(db, "vm1_database_baseline_tainted", "false") or "false").lower() == "true"
+                if expected and not baseline_tainted:
                     set_setting(db, "vm1_database_last_integrity_checksum", expected, "vm1_reporter")
                 recovery = SecurityRecoveryEvent(
                     detection_event_id=cmd.get("detection_id"),

@@ -210,7 +210,15 @@ def source_ids_for_log_type(db, log_type: str) -> list[int]:
 
 def source_ids_batch(db, log_types: list[str]) -> dict[str, list[int]]:
     """Fetch source IDs for multiple log types from VM2 (uses per-type cache)."""
-    return {lt: source_ids_for_log_type(db, lt) for lt in log_types}
+    if not SECURITY_API_URL:
+        return {lt: source_ids_for_log_type(db, lt) for lt in log_types}
+    cache_key = f"source_ids_batch:{','.join(sorted(log_types))}"
+
+    def _fetch():
+        data = _sync_post("/v1/source-ids/batch", {"log_types": log_types})
+        return {str(key): list(value or []) for key, value in (data or {}).items()}
+
+    return _cached_fetch(cache_key, _CACHE_TTL["source_ids"], _fetch, default={})
 
 
 def query_detections(db, keyword=None, date_from=None, date_to=None, target=None, severity=None, limit=200, sort="newest", classification=None):
@@ -299,6 +307,7 @@ def _invalidate_security_state_cache():
                 key in {"dashboard_payload", "list_monitored_files", "current_hash_index"}
                 or key.startswith("query_")
                 or key.startswith("source_ids:")
+                or key.startswith("source_ids_batch:")
                 or key.startswith("get_setting:")
             ):
                 _cache.pop(key, None)

@@ -255,16 +255,24 @@ def api_scan_all(payload: dict = {}, request: Request = None, db=Depends(get_db)
     if context.get("manual_scan"):
         force_token = now_utc().isoformat()
         set_setting(db, "vm1_scan_requested_at", force_token, "manual_scan")
+        set_setting(db, "security_scan_pending_since", force_token, "manual_scan")
+        set_setting(db, "last_interval_scan_status", "manual_scan_requested", "manual_scan")
+        set_setting(db, "vm1_database_integrity_status", "pending_scan", "manual_scan")
     detections = scan_all_files(db, context=context)
     if context.get("manual_scan") and force_token:
         wait_seconds = max(0, min(30, int(os.getenv("VM1_MANUAL_SCAN_WAIT_SECONDS", "18"))))
         deadline = time.time() + wait_seconds
+        last_manifest = ""
+        last_db_check = ""
         while time.time() < deadline:
             db.expire_all()
             last_manifest = str(get_setting(db, "vm1_last_manifest_at", "") or "")
-            if last_manifest >= force_token:
+            last_db_check = str(get_setting(db, "vm1_database_last_integrity_at", "") or "")
+            if last_manifest >= force_token and last_db_check >= force_token:
                 break
             time.sleep(1)
+        if last_manifest >= force_token or last_db_check >= force_token:
+            set_setting(db, "security_scan_pending_since", "", "manual_scan")
     return {"detections": [serialize_detection(d) for d in detections]}
 
 
@@ -984,6 +992,27 @@ def api_settings_get(payload: dict = {}, db=Depends(get_db)):
 @app.post("/v1/settings/set", dependencies=[Depends(require_api_key)])
 def api_settings_set(payload: dict = {}, db=Depends(get_db)):
     return set_setting(db, payload["key"], payload["value"], updated_by=payload.get("actor"))
+
+
+@app.post("/v1/source-ids/batch", dependencies=[Depends(require_api_key)])
+def api_source_ids_batch(payload: dict = {}, db=Depends(get_db)):
+    log_types = payload.get("log_types") or ["detections", "recoveries", "incidents", "backups"]
+    if not isinstance(log_types, list):
+        raise HTTPException(status_code=400, detail="log_types must be a list")
+    result = {}
+    for log_type in log_types:
+        if log_type == "detections":
+            rows = db.query(SecurityDetectionEvent.id).filter(SecurityDetectionEvent.is_legitimate == False).all()
+        elif log_type == "recoveries":
+            rows = db.query(SecurityRecoveryEvent.id).filter(SecurityRecoveryEvent.recovery_type.notlike("%backup%")).all()
+        elif log_type == "incidents":
+            rows = db.query(SecurityIncident.id).filter(SecurityIncident.status.in_(["open", "investigating"])).all()
+        elif log_type == "backups":
+            rows = db.query(SecurityRecoveryEvent.id).filter(SecurityRecoveryEvent.recovery_type.like("%backup%")).all()
+        else:
+            raise HTTPException(status_code=400, detail=f"Invalid security log type: {log_type}")
+        result[str(log_type)] = [row[0] for row in rows]
+    return result
 
 
 @app.get("/v1/source-ids/{log_type}", dependencies=[Depends(require_api_key)])

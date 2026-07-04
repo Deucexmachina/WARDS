@@ -227,7 +227,41 @@ def test_vm1_database_recovery_is_audited_to_vm2():
     assert "/v1/vm1/database/integrity" in vm2_source
     assert "process_vm1_database_integrity_report" in engine_source
     assert 'cmd.get("command_type") == "vm1_database_restore"' in reporter_source
-    assert "send_database_integrity_report(reason)" in reporter_source
+    assert 'send_database_integrity_report(reason, force=reason == "forced")' in reporter_source
+    assert '"unauthorized"' in reporter_source
+    assert 'reason == "database_restore" and not suspicious' in engine_source
+    assert "vm1_database_baseline_tainted" in engine_source
+
+
+def test_manual_scan_marks_pending_risk_and_waits_for_vm1_db_integrity():
+    vm2_source = Path("SECURITY/api_main.py").read_text(encoding="utf-8")
+    vm1_source = Path("WARDS/backend/routes/security_dashboard.py").read_text(encoding="utf-8")
+    dashboard_source = Path("SECURITY/security_engine.py").read_text(encoding="utf-8")
+
+    assert 'set_setting(db, "security_scan_pending_since", force_token, "manual_scan")' in vm2_source
+    assert 'set_setting(db, "vm1_database_integrity_status", "pending_scan", "manual_scan")' in vm2_source
+    assert 'last_db_check = str(get_setting(db, "vm1_database_last_integrity_at", "") or "")' in vm2_source
+    assert "last_manifest >= force_token and last_db_check >= force_token" in vm2_source
+    assert 'set_setting(db, "security_scan_pending_since", scan_token, "manual_scan")' in vm1_source
+    assert 'vm1_database_integrity_status in {"pending_scan", "restore_queued"}' in dashboard_source
+
+
+def test_security_unread_counts_use_batch_source_ids():
+    vm2_source = Path("SECURITY/api_main.py").read_text(encoding="utf-8")
+    client_source = Path("WARDS/backend/utils/security_client.py").read_text(encoding="utf-8")
+
+    assert '@app.post("/v1/source-ids/batch"' in vm2_source
+    assert '@app.post("/v1/source-ids/batch"' in vm2_source.split('@app.get("/v1/source-ids/{log_type}"')[0]
+    assert '_sync_post("/v1/source-ids/batch"' in client_source
+    assert 'key.startswith("source_ids_batch:")' in client_source
+
+
+def test_security_route_guard_has_bounded_verify_request():
+    source = Path("WARDS/frontend/src/components/SecurityProtectedRoute.jsx").read_text(encoding="utf-8")
+
+    assert "verifyingRef" in source
+    assert "timeout: 8000" in source
+    assert "suppressGlobalErrorModal: true" in source
 
 
 def test_vm1_recovery_retries_same_hash_and_existing_open_incidents():
