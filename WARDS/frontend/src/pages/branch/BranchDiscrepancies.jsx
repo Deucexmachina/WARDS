@@ -19,6 +19,7 @@ import {
   getDiscrepancyValidationErrors,
   getDiscrepancyValidationSummary,
   getInitialDiscrepancyForm,
+  validateDiscrepancyAttachment,
 } from '../../utils/discrepancyValidation';
 
 const EMPTY_FORM = getInitialDiscrepancyForm();
@@ -120,6 +121,25 @@ const BranchDiscrepancies = () => {
     setError('');
   };
 
+  const handleAttachmentChange = (event) => {
+    const file = event.target.files?.[0] || null;
+    const error = validateDiscrepancyAttachment(file);
+    if (error) {
+      setAttachmentFile(null);
+      setValidationErrors((current) => ({ ...current, attachment: error }));
+      setError(error);
+    } else {
+      setAttachmentFile(file);
+      setValidationErrors((current) => {
+        if (!current.attachment) return current;
+        const next = { ...current };
+        delete next.attachment;
+        return next;
+      });
+      setError('');
+    }
+  };
+
   const handleSelectChange = (fieldName) => (value) => {
     handleInputChange({ target: { name: fieldName, value, type: 'select-one', checked: false } });
   };
@@ -132,7 +152,7 @@ const BranchDiscrepancies = () => {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    const nextValidationErrors = getDiscrepancyValidationErrors(formData);
+    const nextValidationErrors = getDiscrepancyValidationErrors(formData, attachmentFile);
     if (Object.keys(nextValidationErrors).length) {
       setValidationErrors(nextValidationErrors);
       setError(getDiscrepancyValidationSummary(nextValidationErrors));
@@ -415,10 +435,17 @@ const BranchDiscrepancies = () => {
             <input
               type="file"
               accept=".pdf,.png,.jpg,.jpeg"
-              onChange={(event) => setAttachmentFile(event.target.files?.[0] || null)}
-              className="w-full rounded-2xl border border-gray-300 px-4 py-3 file:mr-4 file:rounded-xl file:border-0 file:bg-blue-100 file:px-4 file:py-2 file:font-semibold file:text-blue-900"
+              onChange={handleAttachmentChange}
+              aria-invalid={validationErrors.attachment ? 'true' : 'false'}
+              className={`w-full rounded-2xl border px-4 py-3 file:mr-4 file:rounded-xl file:border-0 file:bg-blue-100 file:px-4 file:py-2 file:font-semibold file:text-blue-900 ${
+                validationErrors.attachment ? 'border-rose-400 bg-rose-50' : 'border-gray-300'
+              }`}
             />
-            <p className="mt-2 text-xs text-gray-500">Accepted files: PDF, PNG, or JPEG only.</p>
+            {validationErrors.attachment ? (
+              <p className="mt-2 text-xs font-medium text-rose-600">{validationErrors.attachment}</p>
+            ) : (
+              <p className="mt-2 text-xs text-gray-500">Accepted files: PDF, PNG, or JPEG only.</p>
+            )}
           </div>
 
           <label className="mt-4 flex items-center gap-3 text-sm text-gray-700">

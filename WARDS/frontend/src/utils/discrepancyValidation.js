@@ -2,6 +2,13 @@ import { getFriendlyErrorMessage } from './errorMessages';
 
 export const DISCREPANCY_TITLE_MAX_LENGTH = 255;
 
+export const DISCREPANCY_ALLOWED_ATTACHMENT_EXTENSIONS = new Set(['.pdf', '.png', '.jpg', '.jpeg']);
+export const DISCREPANCY_ALLOWED_ATTACHMENT_TYPES = new Set([
+  'application/pdf',
+  'image/png',
+  'image/jpeg',
+]);
+
 export const getCurrentSystemDateInputValue = () => {
   const now = new Date();
   const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
@@ -18,7 +25,26 @@ export const getInitialDiscrepancyForm = () => ({
   submitted_offline: false,
 });
 
-export const getDiscrepancyValidationErrors = (formData) => {
+export const validateDiscrepancyAttachment = (file) => {
+  if (!file) {
+    return '';
+  }
+
+  const name = String(file.name || '');
+  const extension = name.slice(name.lastIndexOf('.')).toLowerCase();
+  if (!DISCREPANCY_ALLOWED_ATTACHMENT_EXTENSIONS.has(extension)) {
+    return 'Unsupported file type. Only PDF, PNG, or JPEG files are allowed.';
+  }
+
+  const mimeType = String(file.type || '');
+  if (mimeType && !DISCREPANCY_ALLOWED_ATTACHMENT_TYPES.has(mimeType)) {
+    return 'Unsupported file type. Only PDF, PNG, or JPEG files are allowed.';
+  }
+
+  return '';
+};
+
+export const getDiscrepancyValidationErrors = (formData, attachmentFile = null) => {
   const errors = {};
   const title = String(formData?.title || '').trim();
   const reportDate = String(formData?.report_date || '').trim();
@@ -46,6 +72,11 @@ export const getDiscrepancyValidationErrors = (formData) => {
 
   if (!description) {
     errors.description = 'Please enter the Discrepancy Details.';
+  }
+
+  const attachmentError = validateDiscrepancyAttachment(attachmentFile);
+  if (attachmentError) {
+    errors.attachment = attachmentError;
   }
 
   return errors;
