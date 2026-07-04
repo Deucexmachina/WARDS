@@ -523,6 +523,14 @@ def test_startup_baseline_failure_rolls_back_before_status_update():
     assert 'set_setting(startup_db, "startup_baseline_status", "failed", "system")' in vm1_main
 
 
+def test_backup_file_registration_is_serialized():
+    engine = (Path(__file__).resolve().parents[1] / "SECURITY" / "security_engine.py").read_text()
+
+    assert "_backup_registration_lock = threading.Lock()" in engine
+    assert engine.count("with _backup_registration_lock:") >= 2
+    assert "register_count = register_initial_files(db, ensure_backup=False, refresh_existing=False)" in engine
+
+
 def test_vm1_frontend_rebuild_does_not_recreate_backend_dependency():
     reporter = (Path(__file__).resolve().parents[1] / "scripts" / "vm1_security_reporter.py").read_text()
 

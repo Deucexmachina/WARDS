@@ -71,6 +71,7 @@ logger = logging.getLogger(__name__)
 _last_migrate_at: float = 0.0
 _last_dedupe_at: float = 0.0
 HOUSEKEEPING_THROTTLE_SECONDS = 300
+_backup_registration_lock = threading.Lock()
 
 
 def _run_async_backup(fn):
@@ -5671,12 +5672,13 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
     seed_settings(db)
     run_monitored_file_housekeeping(db)
     mark_stale_backup_events_failed(db)
-    if not skip_file_registration:
-        register_count = register_initial_files(db, ensure_backup=False, refresh_existing=False)
-        dedupe_monitored_files_by_relative_path(db)
-    else:
-        register_count = 0
-    removal_summary = reconcile_trusted_file_removals(db, actor=f"{label}_backup")
+    with _backup_registration_lock:
+        if not skip_file_registration:
+            register_count = register_initial_files(db, ensure_backup=False, refresh_existing=False)
+            dedupe_monitored_files_by_relative_path(db)
+        else:
+            register_count = 0
+        removal_summary = reconcile_trusted_file_removals(db, actor=f"{label}_backup")
     backup_location = writable_backup_location(db)
     previous_backup_root = latest_backup_root(db)
     previous_manifest = backup_manifest_index(previous_backup_root)
@@ -5894,9 +5896,10 @@ def _prepare_backup_event(
     migrate_portable_monitored_files(db)
     dedupe_monitored_files_by_relative_path(db)
     mark_stale_backup_events_failed(db)
-    register_count = register_initial_files(db, ensure_backup=False, refresh_existing=False)
-    dedupe_monitored_files_by_relative_path(db)
-    removal_summary = reconcile_trusted_file_removals(db, actor=f"{label}_backup")
+    with _backup_registration_lock:
+        register_count = register_initial_files(db, ensure_backup=False, refresh_existing=False)
+        dedupe_monitored_files_by_relative_path(db)
+        removal_summary = reconcile_trusted_file_removals(db, actor=f"{label}_backup")
     backup_location = writable_backup_location(db)
     previous_backup_root = latest_backup_root(db)
     previous_manifest = backup_manifest_index(previous_backup_root)
