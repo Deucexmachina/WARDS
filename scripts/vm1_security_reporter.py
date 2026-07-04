@@ -461,8 +461,7 @@ def vm1_critical_database_checksum() -> dict | None:
         'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE" -N -B'
     )
     sql = (
-        "SELECT `key`, COALESCE(`value`, ''), COALESCE(`description`, ''), "
-        "COALESCE(`updated_by`, ''), COALESCE(CAST(`updated_at` AS CHAR), '') "
+        "SELECT `key`, COALESCE(`value`, '') "
         "FROM system_settings WHERE `key` IN ('sessionTimeout') ORDER BY `key`;"
     )
     try:

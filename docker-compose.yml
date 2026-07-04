@@ -88,6 +88,7 @@ services:
       VM1_RESTORE_POLL_INTERVAL: "3"
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-wards_root_password}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-wards_db}
+      SECURITY_ADMIN_SECRET: ${SECURITY_ADMIN_SECRET:-}
     volumes:
       - ./WARDS:/WARDS
       - ./OCR:/OCR

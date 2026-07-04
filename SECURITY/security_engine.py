@@ -5493,6 +5493,17 @@ def _scan_vm1_snapshot(db: Session, file_entry: SecurityMonitoredFile, context: 
 
 
 def record_detection(db: Session, file_entry: SecurityMonitoredFile, change_type: str, old_hash: str | None, new_hash: str | None, old_content: str, new_content: str, context: dict | None = None) -> SecurityDetectionEvent:
+    if change_type == "content_modified" and old_content == new_content and new_hash:
+        file_entry.baseline_hash = new_hash
+        file_entry.current_hash = new_hash
+        file_entry.status = "clean"
+        db.add(file_entry)
+        db.commit()
+        logger.info(
+            "Detection suppressed for %s: content unchanged from backup; updated baseline to %s.",
+            file_entry.relative_path, new_hash,
+        )
+        return None
     # Safety-net: skip if an open incident already exists for this file and change type
     existing_incident = db.query(SecurityIncident).join(SecurityDetectionEvent).filter(
         SecurityDetectionEvent.file_id == file_entry.id,
@@ -6889,6 +6900,13 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
                         file_entry.status = "missing"
                 file_entry.last_checked = now_utc()
                 db.add(file_entry)
+    # VM1 database incidents have no file_entry; update the baseline checksum on resolve
+    # so the next integrity report doesn't re-trigger.
+    if detection and detection.target_type == "vm1_database":
+        new_checksum = str(detection.new_hash or "").strip().lower()
+        if new_checksum:
+            set_setting(db, "vm1_database_critical_settings_baseline_checksum", new_checksum, "vm1_reporter")
+            set_setting(db, "vm1_database_baseline_tainted", "false", "vm1_reporter")
     incident.status = "resolved"
     incident.resolved_at = now_utc()
     incident.resolved_by = _valid_admin_id(db, admin_id)
@@ -6941,6 +6959,13 @@ def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_ba
             detection.severity_level = "info"
             detection.trigger_summary = f"False positive accepted by admin for {detection.target_name}."
             db.add(detection)
+            # VM1 database incidents have no file_entry; update the baseline checksum on false-positive
+            # so the next integrity report doesn't re-trigger.
+            if detection.target_type == "vm1_database":
+                new_checksum = str(detection.new_hash or "").strip().lower()
+                if new_checksum:
+                    set_setting(db, "vm1_database_critical_settings_baseline_checksum", new_checksum, "vm1_reporter")
+                    set_setting(db, "vm1_database_baseline_tainted", "false", "vm1_reporter")
         incident.status = "false_positive"
         incident.response_action = "authorized_non_file_acknowledged"
         incident.resolved_at = now_utc()
@@ -8291,6 +8316,20 @@ def _has_pending_vm1_database_restore(db: Session) -> bool:
 def _queue_vm1_database_restore_command(db: Session, detection_id: int | None = None, *, reason: str = "vm1_database_integrity") -> dict | None:
     if _has_pending_vm1_database_restore(db):
         return None
+    # Only one recovery attempt per detection/incident
+    if detection_id is not None:
+        existing_recovery = db.query(SecurityRecoveryEvent).filter(
+            SecurityRecoveryEvent.detection_event_id == detection_id,
+            SecurityRecoveryEvent.recovery_type.in_(
+                ["vm1_database_auto_restore", "vm1_database_auto_restore_queued"]
+            ),
+        ).first()
+        if existing_recovery:
+            logger.info(
+                "VM1 database restore command skipped for detection %s; recovery already recorded (status=%s).",
+                detection_id, existing_recovery.status,
+            )
+            return None
     command_id = f"dbrest_{detection_id or int(time.time())}_{int(time.time())}"
     cmd = {
         "command_id": command_id,
@@ -8372,7 +8411,10 @@ def process_vm1_database_integrity_report(db: Session, payload: dict) -> dict:
         "vm1_database_suspicious_content": suspicious,
         "vm1_database_baseline_tainted": baseline_tainted,
     }
-    prediction = AIPrediction("malicious", 0.95, 0.95, "VM1 critical database integrity checksum deviated from trusted baseline.")
+    if suspicious:
+        prediction = AIPrediction("malicious", 0.95, 0.95, "VM1 critical database integrity checksum deviated from trusted baseline and suspicious content detected.")
+    else:
+        prediction = AIPrediction("suspicious", 0.55, 0.65, "VM1 critical database integrity checksum deviated from trusted baseline without suspicious content markers.")
     flags = ["database_integrity_deviation"]
     classification = classify("content_modified", prediction, flags, context)
     changed = {
@@ -8413,26 +8455,32 @@ def process_vm1_database_integrity_report(db: Session, payload: dict) -> dict:
     create_detection_system_alert(db, detection)
 
     incident = create_incident(db, detection, classification, flags, changed, None)
-    restore_cmd = _queue_vm1_database_restore_command(db, detection.id)
-    recovery = SecurityRecoveryEvent(
-        detection_event_id=detection.id,
-        file_id=None,
-        recovery_type="vm1_database_auto_restore_queued",
-        initiated_by=None,
-        status="in_progress" if restore_cmd else "success",
-        backup_path="latest_vm1_database_archive",
-        summary="VM1 database auto-recovery command queued." if restore_cmd else "VM1 database auto-recovery command was already pending.",
-        completed_at=None if restore_cmd else now_utc(),
-    )
-    db.add(recovery)
-    incident.response_action = "auto_recovered_pending_review"
+    if suspicious:
+        restore_cmd = _queue_vm1_database_restore_command(db, detection.id)
+        recovery = SecurityRecoveryEvent(
+            detection_event_id=detection.id,
+            file_id=None,
+            recovery_type="vm1_database_auto_restore_queued",
+            initiated_by=None,
+            status="in_progress" if restore_cmd else "success",
+            backup_path="latest_vm1_database_archive",
+            summary="VM1 database auto-recovery command queued." if restore_cmd else "VM1 database auto-recovery command was already pending.",
+            completed_at=None if restore_cmd else now_utc(),
+        )
+        db.add(recovery)
+        incident.response_action = "auto_recovered_pending_review"
+    else:
+        restore_cmd = None
+        recovery = None
+        incident.response_action = "manual_review_required"
     db.add(incident)
     db.commit()
-    db.refresh(recovery)
+    if recovery:
+        db.refresh(recovery)
     create_incident_system_alert(db, incident, detection, recovery)
-    set_setting(db, "vm1_database_integrity_status", "restore_queued", "vm2_database_monitor")
+    set_setting(db, "vm1_database_integrity_status", "restore_queued" if suspicious else "manual_review", "vm2_database_monitor")
     return {
-        "status": "restore_queued",
+        "status": "restore_queued" if suspicious else "manual_review",
         "restore_queued": bool(restore_cmd),
         "command_id": restore_cmd.get("command_id") if restore_cmd else None,
         "detection_id": detection.id,
@@ -8503,13 +8551,21 @@ def acknowledge_vm1_restore_command(db: Session, command_id: str, success: bool)
     if success:
         for cmd in removed:
             if cmd.get("command_type") == "vm1_database_restore":
+                detection_id = cmd.get("detection_id")
+                existing_recovery = db.query(SecurityRecoveryEvent).filter(
+                    SecurityRecoveryEvent.detection_event_id == detection_id,
+                    SecurityRecoveryEvent.recovery_type == "vm1_database_auto_restore",
+                ).first()
+                if existing_recovery:
+                    logger.info("VM1 database restore ack (success) for detection %s ignored; recovery already recorded.", detection_id)
+                    continue
                 set_setting(db, "vm1_database_integrity_status", "restore_acknowledged", "vm1_reporter")
                 expected = get_setting(db, "vm1_database_critical_settings_baseline_checksum", "")
                 baseline_tainted = (get_setting(db, "vm1_database_baseline_tainted", "false") or "false").lower() == "true"
                 if expected and not baseline_tainted:
                     set_setting(db, "vm1_database_last_integrity_checksum", expected, "vm1_reporter")
                 recovery = SecurityRecoveryEvent(
-                    detection_event_id=cmd.get("detection_id"),
+                    detection_event_id=detection_id,
                     file_id=None,
                     recovery_type="vm1_database_auto_restore",
                     initiated_by=None,
@@ -8558,8 +8614,16 @@ def acknowledge_vm1_restore_command(db: Session, command_id: str, success: bool)
     else:
         for cmd in removed:
             if cmd.get("command_type") == "vm1_database_restore":
+                detection_id = cmd.get("detection_id")
+                existing_recovery = db.query(SecurityRecoveryEvent).filter(
+                    SecurityRecoveryEvent.detection_event_id == detection_id,
+                    SecurityRecoveryEvent.recovery_type == "vm1_database_auto_restore",
+                ).first()
+                if existing_recovery:
+                    logger.info("VM1 database restore ack (failure) for detection %s ignored; recovery already recorded.", detection_id)
+                    continue
                 recovery = SecurityRecoveryEvent(
-                    detection_event_id=cmd.get("detection_id"),
+                    detection_event_id=detection_id,
                     file_id=None,
                     recovery_type="vm1_database_auto_restore",
                     initiated_by=None,
@@ -8587,6 +8651,17 @@ def acknowledge_vm1_restore_command(db: Session, command_id: str, success: bool)
 
 
 def _record_vm1_detection(db: Session, entry: SecurityMonitoredFile, change_type: str, new_hash: str | None, old_content: str = "", new_content: str = "", original_content_bytes: bytes | None = None) -> SecurityDetectionEvent | None:
+    if change_type == "vm1_content_modified" and old_content == new_content and new_hash:
+        entry.baseline_hash = new_hash
+        entry.current_hash = new_hash
+        entry.status = "clean"
+        db.add(entry)
+        db.commit()
+        logger.info(
+            "VM1 detection suppressed for %s: content unchanged from snapshot; updated baseline to %s.",
+            entry.relative_path, new_hash,
+        )
+        return None
     old_hash = entry.baseline_hash
     context = {
         "host_vm": "vm1",
