@@ -40,6 +40,13 @@ _MAX_OFFICE_NAME = 100
 _MAX_CONTACT_ARRAY_ITEMS = 10
 _MAX_CONTACT_ARRAY_LINE = 50
 _MAX_FORM_TITLE = 2000
+_MAX_WHO_WE_ARE = 1000
+_MAX_VISION = 500
+_MAX_LEGAL_BASIS = 1000
+_MAX_MISSION_STATEMENT = 500
+_MAX_PLEDGE_TEXT = 500
+_MAX_SERVICE_PLEDGES = 10
+_MAX_PLEDGE_NUMBER = 2
 
 
 def _is_valid_email(value: str) -> bool:
@@ -476,6 +483,47 @@ def _normalize_about_us_content(content: dict[str, Any]) -> dict[str, Any]:
     }
     if not normalized["page_title_en"] or not normalized["page_title_tl"]:
         raise HTTPException(status_code=400, detail="About Us page titles are required.")
+
+    # Length validations
+    for suffix in ("_en", "_tl"):
+        if len(normalized[f"page_title{suffix}"]) > _MAX_PAGE_TITLE:
+            raise HTTPException(status_code=400, detail=f"Page title must be {_MAX_PAGE_TITLE} characters or fewer.")
+        if len(normalized[f"page_subtitle{suffix}"]) > _MAX_PAGE_SUBTITLE:
+            raise HTTPException(status_code=400, detail=f"Page subtitle must be {_MAX_PAGE_SUBTITLE} characters or fewer.")
+        if len(normalized[f"who_we_are{suffix}"]) > _MAX_WHO_WE_ARE:
+            raise HTTPException(status_code=400, detail=f"Who We Are description must be {_MAX_WHO_WE_ARE} characters or fewer.")
+        if len(normalized[f"vision{suffix}"]) > _MAX_VISION:
+            raise HTTPException(status_code=400, detail=f"Vision must be {_MAX_VISION} characters or fewer.")
+        if len(normalized[f"legal_basis{suffix}"]) > _MAX_LEGAL_BASIS:
+            raise HTTPException(status_code=400, detail=f"Legal Basis must be {_MAX_LEGAL_BASIS} characters or fewer.")
+
+    # Mission items validation
+    for item in normalized["mission_items"]:
+        letter = item.get("letter", "")
+        if len(letter) > 1 or (letter and not letter.isalpha()):
+            raise HTTPException(status_code=400, detail="Mission item letter must be a single alphabetic character.")
+        if len(item.get("text", "")) > _MAX_MISSION_STATEMENT:
+            raise HTTPException(status_code=400, detail=f"Mission statement must be {_MAX_MISSION_STATEMENT} characters or fewer.")
+        if len(item.get("text_tl", "")) > _MAX_MISSION_STATEMENT:
+            raise HTTPException(status_code=400, detail=f"Mission statement must be {_MAX_MISSION_STATEMENT} characters or fewer.")
+
+    # Service pledges validation
+    pledges = normalized["service_pledges"]
+    if len(pledges) > _MAX_SERVICE_PLEDGES:
+        raise HTTPException(status_code=400, detail=f"Maximum {_MAX_SERVICE_PLEDGES} service pledges allowed.")
+    for pledge in pledges:
+        number = pledge.get("number", "")
+        if len(number) > _MAX_PLEDGE_NUMBER or (number and not number.isdigit()):
+            raise HTTPException(status_code=400, detail="Pledge number must be up to 2 digits.")
+        if len(pledge.get("text", "")) > _MAX_PLEDGE_TEXT:
+            raise HTTPException(status_code=400, detail=f"Pledge text must be {_MAX_PLEDGE_TEXT} characters or fewer.")
+        if len(pledge.get("text_tl", "")) > _MAX_PLEDGE_TEXT:
+            raise HTTPException(status_code=400, detail=f"Pledge text must be {_MAX_PLEDGE_TEXT} characters or fewer.")
+
+    # Image format validation
+    for img_key in ("city_hall_image", "office_image_1", "office_image_2", "office_image_3"):
+        _validate_image_base64(normalized[img_key])
+
     return normalized
 
 
