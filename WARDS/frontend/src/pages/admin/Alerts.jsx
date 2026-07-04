@@ -32,6 +32,13 @@ const Alerts = () => {
     fetchAlerts(1);
   }, []);
 
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchAlerts();
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [pageState.page]);
+
   const handleMarkAsRead = async (id) => {
     try {
       await alertAPI.markAsRead(id);
