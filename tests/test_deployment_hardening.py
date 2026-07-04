@@ -468,6 +468,16 @@ def test_vm1_hash_only_manifest_changes_are_deferred_not_detected():
     assert '"inline_priority": not git_head_match' in reporter
 
 
+def test_vm1_deferred_git_clean_files_can_be_marked_clean():
+    engine = (Path(__file__).resolve().parents[1] / "SECURITY" / "security_engine.py").read_text()
+
+    git_check = engine.index("if f.get(\"git_head_match\"):")
+    repeat_hash_check = engine.index("if previous_hash == current_hash:", git_check)
+
+    assert git_check < repeat_hash_check
+    assert "deferred deployment changes can" in engine
+
+
 def test_incident_actions_use_throttled_monitored_file_housekeeping():
     engine = (Path(__file__).resolve().parents[1] / "SECURITY" / "security_engine.py").read_text()
 

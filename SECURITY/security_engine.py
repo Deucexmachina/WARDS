@@ -8488,11 +8488,6 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
         entry.last_checked = now_utc()
 
         if current_hash != entry.baseline_hash:
-            # If the file hash hasn't changed since the last scan, don't log another detection
-            if previous_hash == current_hash:
-                entry.status = "modified"
-                db.add(entry)
-                continue
             # Suppress only if a restore command is already pending for this file
             has_pending_restore = _has_pending_vm1_restore_for_file(db, entry.relative_path)
             # If the VM1 reporter says this file matches git HEAD, it was changed
@@ -8514,6 +8509,13 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
                 entry.status = "clean"
                 db.add(entry)
                 _store_vm1_snapshot(rel_path, f.get("content_b64"))
+                continue
+            # If the file hash hasn't changed since the last scan, don't log another detection.
+            # This must run after the git-head check so deferred deployment changes can
+            # become clean on the next reporter pass.
+            if previous_hash == current_hash:
+                entry.status = "modified"
+                db.add(entry)
                 continue
             if not has_pending_restore:
                 # Resolve any existing open incidents for this file before creating a new one
