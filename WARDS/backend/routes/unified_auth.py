@@ -502,7 +502,7 @@ def is_account_locked(portal: str, identifier: str) -> bool:
     return False
 
 
-def record_failed_attempt(portal: str, identifier: str, client_ip: str | None = None):
+def record_failed_attempt(portal: str, identifier: str, client_ip: str | None = None, db=None, request=None):
     _refresh_abuse_state()
     key = tracking_key(portal, identifier)
     if key not in locked_accounts:
@@ -565,6 +565,17 @@ def record_failed_attempt(portal: str, identifier: str, client_ip: str | None = 
                 identifier,
                 portal,
                 strikes,
+            )
+        if db is not None:
+            alert_severity = "medium" if strikes == 1 else "high"
+            log_activity(
+                db,
+                "Brute Force Attempt",
+                identifier,
+                f"Portal: {portal}; Strike: {strikes}; Duration: {duration or 'permanent'}s; IP: {client_ip or 'unknown'}",
+                "malicious",
+                request=request,
+                severity=alert_severity,
             )
     else:
         logger.warning(
@@ -710,7 +721,7 @@ def log_activity(db: Session, action: str, user: str, details: str, log_type: st
                     type="malicious",
                     title=action,
                     message=full_details,
-                    severity="high",
+                    severity=severity,
                     read=False,
                 )
             )
@@ -1290,7 +1301,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
         password_valid = False
     logger.warning("[LOGIN] password_valid=%s for %s (portal=%s)", password_valid, credentials.identifier, portal)
     if not password_valid:
-        record_failed_attempt(portal, credentials.identifier, client_ip)
+        record_failed_attempt(portal, credentials.identifier, client_ip, db=db, request=request)
         if _is_suspicious_input(credentials.identifier):
             log_activity(
                 db,
@@ -1361,7 +1372,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
         recaptcha_ok = verify_recaptcha(credentials.recaptcha_token, client_ip)
         logger.warning("[LOGIN] recaptcha_ok=%s for %s", recaptcha_ok, credentials.identifier)
         if not recaptcha_ok:
-            record_failed_attempt(portal, credentials.identifier, client_ip)
+            record_failed_attempt(portal, credentials.identifier, client_ip, db=db, request=request)
             info = _lockout_info(portal, credentials.identifier)
             return JSONResponse(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -1422,7 +1433,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
                     request=request,
                     account=account,
                 )
-                record_failed_attempt(portal, credentials.identifier, client_ip)
+                record_failed_attempt(portal, credentials.identifier, client_ip, db=db, request=request)
                 info = _lockout_info(portal, credentials.identifier)
                 return JSONResponse(
                     status_code=status.HTTP_401_UNAUTHORIZED,
