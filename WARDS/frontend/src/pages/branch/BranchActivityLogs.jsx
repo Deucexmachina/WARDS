@@ -8,6 +8,7 @@ const typeColors = {
   admin: 'bg-purple-100 text-purple-800',
   admin_user: 'bg-purple-100 text-purple-800',
   security: 'bg-red-100 text-red-800',
+  malicious: 'bg-red-600 text-white',
   transaction: 'bg-green-100 text-green-800',
   auth: 'bg-blue-100 text-blue-800',
   user_auth: 'bg-blue-100 text-blue-800',

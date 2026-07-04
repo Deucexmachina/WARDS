@@ -1282,7 +1282,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
                 "Injection Attempt",
                 credentials.identifier,
                 f"Portal: {portal}; Reason: Suspicious characters detected in identifier",
-                "security",
+                "malicious",
                 request=request,
                 account=account,
             )
