@@ -507,6 +507,8 @@ def test_startup_registration_handles_duplicate_monitored_file_rows():
     engine = (Path(__file__).resolve().parents[1] / "SECURITY" / "security_engine.py").read_text()
 
     assert "seen_path_keys: set[str] = set()" in engine
+    assert "existing_by_path: dict[str, SecurityMonitoredFile] = {}" in engine
+    assert "existing = existing_by_path.get(path_key) or existing_by_relative.get(rel_key)" in engine
     assert "Initial file registration hit duplicate monitored-file row" in engine
     assert "except IntegrityError as exc:" in engine
 

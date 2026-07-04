@@ -3109,27 +3109,32 @@ def register_initial_files(db: Session, ensure_backup: bool = True, refresh_exis
                 db.add(file_entry)
     else:
         seen_path_keys: set[str] = set()
+        existing_by_path: dict[str, SecurityMonitoredFile] = {}
+        existing_by_relative: dict[str, SecurityMonitoredFile] = {}
+        for item in db.query(SecurityMonitoredFile).order_by(SecurityMonitoredFile.id.asc()).all():
+            if is_vm1_file(item) or is_database_entry(item):
+                continue
+            file_key = normalized_path_key(item.file_path) if item.file_path else ""
+            rel_key = str(item.relative_path or "").replace("\\", "/").lower()
+            canonical = None
+            if file_key:
+                canonical = existing_by_path.get(file_key)
+            if not canonical and rel_key:
+                canonical = existing_by_relative.get(rel_key)
+            if canonical and canonical.id != item.id:
+                item = merge_monitored_file_entry(db, item, canonical)
+            if file_key:
+                existing_by_path[file_key] = item
+            if rel_key:
+                existing_by_relative[rel_key] = item
         for root_name, path in iter_monitorable_files():
             path_key = normalized_path_key(path)
             if path_key in seen_path_keys:
                 continue
             seen_path_keys.add(path_key)
             relative = safe_rel(path)
-            matches = [
-                item for item in (
-                    db.query(SecurityMonitoredFile)
-                    .filter(or_(SecurityMonitoredFile.file_path == str(path), SecurityMonitoredFile.relative_path == relative))
-                    .order_by(SecurityMonitoredFile.id.asc())
-                    .all()
-                )
-                if not is_vm1_file(item)
-            ]
-            existing = None
-            if matches:
-                existing = next((item for item in matches if normalized_path_key(item.file_path) == path_key), None) or matches[0]
-                for duplicate in matches:
-                    if duplicate.id != existing.id:
-                        existing = merge_monitored_file_entry(db, duplicate, existing)
+            rel_key = relative.replace("\\", "/").lower()
+            existing = existing_by_path.get(path_key) or existing_by_relative.get(rel_key)
             if existing:
                 existing.file_path = str(path)
                 existing.relative_path = relative
@@ -3145,21 +3150,24 @@ def register_initial_files(db: Session, ensure_backup: bool = True, refresh_exis
                 else:
                     pass
                 db.add(existing)
+                existing_by_path[path_key] = existing
+                existing_by_relative[rel_key] = existing
                 continue
             current_hash = sha256_file(path)
-            db.add(
-                SecurityMonitoredFile(
-                    file_path=str(path),
-                    relative_path=relative,
-                    folder_root=root_name,
-                    baseline_hash=current_hash,
-                    current_hash=current_hash,
-                    status="clean",
-                    file_type=file_type(path),
-                    size_bytes=path.stat().st_size,
-                    last_checked=None,
-                )
+            new_entry = SecurityMonitoredFile(
+                file_path=str(path),
+                relative_path=relative,
+                folder_root=root_name,
+                baseline_hash=current_hash,
+                current_hash=current_hash,
+                status="clean",
+                file_type=file_type(path),
+                size_bytes=path.stat().st_size,
+                last_checked=None,
             )
+            db.add(new_entry)
+            existing_by_path[path_key] = new_entry
+            existing_by_relative[rel_key] = new_entry
             created += 1
     try:
         had_database_entry = bool(database_monitor_entries(db))
