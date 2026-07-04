@@ -1259,11 +1259,12 @@ async def upsert_tax_assessment(
     if not citizen_user:
         raise HTTPException(status_code=400, detail="Select a taxpayer account or submission before creating an assessment.")
 
-    branch = None
-    if payload.branch_id:
-        branch = db.query(Branch).filter(Branch.id == payload.branch_id).first()
-        if not branch:
-            raise HTTPException(status_code=404, detail="Assigned branch not found.")
+    if not payload.branch_id:
+        raise HTTPException(status_code=400, detail="Branch is required. Please select a branch.")
+
+    branch = db.query(Branch).filter(Branch.id == payload.branch_id).first()
+    if not branch:
+        raise HTTPException(status_code=404, detail="Assigned branch not found.")
 
     normalized_tdn = normalize_identifier(payload.tdn or "", "Tax Declaration Number") if tax_type == "RPT" else None
     normalized_permit = normalize_identifier(payload.mayor_permit_number or "", "Mayor's Permit Number") if tax_type == "BT" else None

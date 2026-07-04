@@ -1131,6 +1131,14 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
             )
 
         record_failed_attempt("unknown", credentials.identifier, client_ip)
+        log_activity(
+            db,
+            "Failed Unified Login",
+            credentials.identifier,
+            f"Portal: unknown; Reason: Account not found",
+            "security",
+            request=request,
+        )
         info = _lockout_info("unknown", credentials.identifier)
         return JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -2100,6 +2108,17 @@ async def unified_register(
 
     email = normalize_email(payload.email)
 
+    _DISPOSABLE_EMAIL_DOMAINS = {
+        "test.com", "fake.com", "mock.com", "sample.com", "temp.com",
+        "mailinator.com", "yopmail.com", "guerrillamail.com", "sharklasers.com",
+    }
+    domain = email.split("@")[1] if "@" in email else ""
+    if domain in _DISPOSABLE_EMAIL_DOMAINS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please use a real email address, not a temporary or test email.",
+        )
+
     existing = find_citizen_by_email(db, CitizenUser, email)
     if existing:
         raise HTTPException(
@@ -2108,6 +2127,12 @@ async def unified_register(
         )
 
     validate_password_strength(payload.password)
+
+    if payload.address and len(payload.address.strip()) > 50:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Address must be 50 characters or fewer.",
+        )
 
     citizen = CitizenUser(
         email=email,
@@ -2280,6 +2305,17 @@ async def unified_invite_register(
     db: Session = Depends(get_db),
 ):
     email = normalize_email(payload.email)
+
+    _DISPOSABLE_EMAIL_DOMAINS = {
+        "test.com", "fake.com", "mock.com", "sample.com", "temp.com",
+        "mailinator.com", "yopmail.com", "guerrillamail.com", "sharklasers.com",
+    }
+    domain = email.split("@")[1] if "@" in email else ""
+    if domain in _DISPOSABLE_EMAIL_DOMAINS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please use a real email address, not a temporary or test email.",
+        )
 
     invite = find_invite_by_token(db, Invite, payload.invite_token)
     if not invite or invite.used or is_expired_at(invite.expires_at):

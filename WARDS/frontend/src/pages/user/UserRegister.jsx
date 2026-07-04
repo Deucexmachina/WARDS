@@ -81,6 +81,14 @@ const getRegistrationConfirmPasswordError = (password, confirmPassword) => {
   return password === confirmPassword ? '' : 'Passwords do not match.';
 };
 
+const getRegistrationAddressError = (value) => {
+  const trimmed = String(value || '').trim();
+  if (trimmed.length > 50) {
+    return 'Address must be 50 characters or fewer.';
+  }
+  return '';
+};
+
 const UserRegister = () => {
   const navigate = useNavigate();
   const agreementScrollRef = useRef(null);
@@ -95,6 +103,7 @@ const UserRegister = () => {
   const [contactCheckingUniqueness, setContactCheckingUniqueness] = useState(false);
   const [passwordError, setPasswordError] = useState('');
   const [confirmPasswordError, setConfirmPasswordError] = useState('');
+  const [addressError, setAddressError] = useState('');
   const [recaptchaToken, setRecaptchaToken] = useState('');
   const [agreement, setAgreement] = useState(null);
   const [agreementError, setAgreementError] = useState('');
@@ -212,6 +221,10 @@ const UserRegister = () => {
     if (name === 'confirmPassword') {
       setConfirmPasswordError(getRegistrationConfirmPasswordError(formData.password, value));
     }
+
+    if (name === 'address') {
+      setAddressError(getRegistrationAddressError(value));
+    }
   };
 
   const handleContactBlur = async () => {
@@ -263,19 +276,22 @@ const UserRegister = () => {
     const nextContactError = getRegistrationContactError(formData.contact_number);
     const nextPasswordError = getRegistrationPasswordError(formData.password);
     const nextConfirmPasswordError = getRegistrationConfirmPasswordError(formData.password, formData.confirmPassword);
+    const nextAddressError = getRegistrationAddressError(formData.address);
 
     setEmailError(nextEmailError);
     setFullNameError(nextFullNameError);
     setContactError(nextContactError);
     setPasswordError(nextPasswordError);
     setConfirmPasswordError(nextConfirmPasswordError);
+    setAddressError(nextAddressError);
 
     if (
       nextEmailError ||
       nextFullNameError ||
       nextContactError ||
       nextPasswordError ||
-      nextConfirmPasswordError
+      nextConfirmPasswordError ||
+      nextAddressError
     ) {
       setError('Please review the highlighted fields.');
       setLoading(false);
@@ -438,8 +454,11 @@ const UserRegister = () => {
                       value={formData.address}
                       onChange={handleChange}
                       placeholder="Street, barangay, city"
-                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/30"
+                      maxLength={50}
+                      aria-invalid={addressError ? 'true' : 'false'}
+                      className={`w-full rounded-xl border px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:ring-2 focus:ring-emerald-500/30 ${addressError ? 'border-rose-300 bg-rose-50 focus:border-rose-400' : 'border-slate-200 bg-white focus:border-emerald-400'}`}
                     />
+                    {addressError ? <p className="mt-1.5 text-xs font-medium text-rose-600">{addressError}</p> : null}
                   </div>
                 </div>
               </div>
