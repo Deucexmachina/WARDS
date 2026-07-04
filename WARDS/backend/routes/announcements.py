@@ -1,4 +1,5 @@
 from datetime import datetime
+import re
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -127,6 +128,10 @@ def _fetch_announcement_row(db: Session, announcement_id: int, main_admin_only: 
     return db.execute(text(query), params).mappings().first()
 
 
+def _sanitize_announcement_text(raw: str) -> str:
+    return re.sub(r"[<>]", "", str(raw or "")).strip()
+
+
 def _build_announcement_values(
     title: str,
     content: str,
@@ -134,9 +139,9 @@ def _build_announcement_values(
     icon_color: Optional[str],
     created_by: str,
 ):
-    clean_title = title.strip()
-    clean_content = content.strip()
-    clean_author = created_by.strip() or "admin"
+    clean_title = _sanitize_announcement_text(title)
+    clean_content = _sanitize_announcement_text(content)
+    clean_author = _sanitize_announcement_text(created_by) or "admin"
 
     return {
         "title": build_redacted_text("ANNOUNCEMENT", clean_title, 255),
@@ -145,8 +150,8 @@ def _build_announcement_values(
         "content": build_redacted_text("ANNOUNCEMENT_CONTENT", clean_content, 65535),
         "content_enc": encrypt_optional_value(clean_content),
         "content_hash": hash_optional_value(clean_content),
-        "icon_type": (icon_type or "megaphone").strip() or "megaphone",
-        "icon_color": (icon_color or "blue").strip() or "blue",
+        "icon_type": _sanitize_announcement_text(icon_type) or "megaphone",
+        "icon_color": _sanitize_announcement_text(icon_color) or "blue",
         "created_by": build_redacted_text("ANNOUNCEMENT_AUTHOR", clean_author, 255),
         "created_by_enc": encrypt_optional_value(clean_author),
         "created_by_hash": hash_optional_value(clean_author),
