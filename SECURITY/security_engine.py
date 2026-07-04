@@ -8086,15 +8086,32 @@ def _store_vm1_snapshot(rel_path: str, content_b64: str | None):
 
 
 def _local_repo_path_for_vm1_file(rel_path: str) -> Path | None:
-    try:
-        candidate = (MASTER_ROOT / rel_path).resolve()
-        root = MASTER_ROOT.resolve()
-        if not candidate.is_relative_to(root):
-            return None
-        if candidate.exists() and candidate.is_file():
-            return candidate
-    except Exception:
-        return None
+    """Resolve a VM1-relative path against common volume-mounted repo roots.
+
+    The backend Dockerfile only copies WARDS/backend/, so /app/WARDS/frontend
+    does not exist.  We must also check /opt/wards/app and the direct WARDS/OCR
+    mounts so that _vm1_hash_matches_local_repo works for frontend files.
+    """
+    candidates = [MASTER_ROOT, Path("/opt/wards/app")]
+    if rel_path.startswith("WARDS/"):
+        candidates.append(Path("/WARDS"))
+        try:
+            suffix = Path(rel_path).relative_to("WARDS")
+            candidates.append(Path("/WARDS") / suffix)
+        except ValueError:
+            pass
+    if rel_path.startswith("OCR/"):
+        candidates.append(Path("/OCR"))
+    for root in candidates:
+        try:
+            candidate = (root / rel_path).resolve()
+            root_resolved = root.resolve()
+            if not candidate.is_relative_to(root_resolved):
+                continue
+            if candidate.exists() and candidate.is_file():
+                return candidate
+        except Exception:
+            pass
     return None
 
 
@@ -8588,6 +8605,19 @@ def acknowledge_vm1_restore_command(db: Session, command_id: str, success: bool)
             if not file_entry:
                 continue
             try:
+                expected_hash = cmd.get("expected_hash")
+                # Safety-net: if the file has already changed since the restore command
+                # was issued (e.g., a deployment updated it), don't overwrite the fresher
+                # baseline with a stale restore hash.
+                if file_entry.current_hash and expected_hash and file_entry.current_hash != expected_hash:
+                    logger.warning(
+                        "VM1 restore ack for %s skipped: file current_hash (%s...%s) no longer matches "
+                        "restore expected_hash (%s...%s). A deployment or manual update likely superseded it.",
+                        rel_path,
+                        file_entry.current_hash[:8], file_entry.current_hash[-8:],
+                        expected_hash[:8], expected_hash[-8:],
+                    )
+                    continue
                 clean_hash = None
                 content_file = cmd.get("restore_content_file")
                 if content_file:
@@ -8599,7 +8629,6 @@ def acknowledge_vm1_restore_command(db: Session, command_id: str, success: bool)
                         snapshot.parent.mkdir(parents=True, exist_ok=True)
                         snapshot.write_bytes(clean_bytes)
                 if not clean_hash:
-                    expected_hash = cmd.get("expected_hash")
                     if expected_hash:
                         clean_hash = expected_hash
                 if clean_hash:
