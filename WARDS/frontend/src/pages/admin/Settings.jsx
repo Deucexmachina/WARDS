@@ -471,6 +471,7 @@ const Settings = () => {
                           value={settings[entry.key]}
                           onChange={handleInputChange}
                           min={isNumber ? (entry.key === 'sessionTimeout' ? 30 : 1) : undefined}
+                          max={isNumber ? { maxQueuePerBranch: 100, maxQueuePerWindow: 25, queueTimeSlot: 15, sessionTimeout: 480 }[entry.key] : undefined}
                           className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm focus:border-transparent focus:ring-2 focus:ring-accent sm:w-40"
                         />
                       )}

@@ -48,7 +48,7 @@ class SettingsUpdateRequest(BaseModel):
     paymentGatewayEnabled: bool
     receiptRequestEnabled: bool
     maintenanceMode: bool
-    sessionTimeout: int = Field(ge=5)
+    sessionTimeout: int = Field(ge=5, le=480)
     maxLoginAttempts: int = Field(ge=1)
     reason: str | None = None
 

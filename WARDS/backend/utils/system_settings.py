@@ -126,8 +126,11 @@ def _normalize_value(setting_key: str, value):
         normalized = int(value)
         if normalized < 1 and setting_key != "sessionTimeout":
             raise HTTPException(status_code=400, detail=f"{metadata['label']} must be at least 1.")
-        if setting_key == "sessionTimeout" and normalized < 5:
-            raise HTTPException(status_code=400, detail="Session Timeout must be at least 5 minutes.")
+        if setting_key == "sessionTimeout":
+            if normalized < 5:
+                raise HTTPException(status_code=400, detail="Session Timeout must be at least 5 minutes.")
+            if normalized > 480:
+                raise HTTPException(status_code=400, detail="Session Timeout must be 480 minutes or fewer.")
         return normalized
     if value_type == "json":
         if not isinstance(value, list):
