@@ -268,6 +268,7 @@ export const receiptAPI = {
   }),
   listRequests: () => api.get('/receipts/requests'),
   listRequestHistory: () => api.get('/receipts/requests/history'),
+  getMyRequestHistory: (page = 1, pageSize = 5) => api.get(`/receipts/my-history?page=${page}&page_size=${pageSize}`),
   deleteRequest: (requestId) => api.delete(`/receipts/requests/${requestId}`),
   deleteRequestHistory: (requestId) => api.delete(`/receipts/requests/history/${requestId}`),
   releaseRequest: (requestId) => api.post(`/receipts/requests/${requestId}/release`),

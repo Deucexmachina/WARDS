@@ -3410,3 +3410,47 @@ async def upload_proof(
         allowed_extensions={".pdf", ".png", ".jpg", ".jpeg"},
     )
     return {"message": "Proof uploaded successfully", "filename": file.filename}
+
+
+@router.get("/my-history")
+async def get_my_receipt_request_history(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(5, ge=1, le=50),
+    db: Session = Depends(get_db),
+    current_citizen: CitizenUser | None = Depends(get_optional_current_user),
+):
+    if not current_citizen:
+        raise HTTPException(status_code=401, detail="Authentication required to view your receipt request history.")
+
+    citizen_email = (get_decrypted_or_raw(current_citizen, "email") or current_citizen.email or "").strip().lower()
+
+    # Active requests
+    active_query = db.query(ReceiptRequest).filter(
+        get_receipt_request_identity_filter(ReceiptRequest, current_citizen, citizen_email),
+    ).order_by(ReceiptRequest.created_at.desc())
+
+    # Historical (archived) requests
+    history_query = db.query(ReceiptRequestHistory).filter(
+        get_receipt_request_identity_filter(ReceiptRequestHistory, current_citizen, citizen_email),
+    ).order_by(ReceiptRequestHistory.archived_at.desc())
+
+    active_items = [serialize_receipt_request(r, db) for r in active_query.all()]
+    history_items = [serialize_receipt_request_history(r, db) for r in history_query.all()]
+
+    # Merge and sort by most recent date
+    all_items = active_items + history_items
+    all_items.sort(key=lambda x: (x.get("createdAt") or x.get("archivedAt") or ""), reverse=True)
+
+    total = len(all_items)
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    start = (page - 1) * page_size
+    end = start + page_size
+    paginated = all_items[start:end]
+
+    return {
+        "items": paginated,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "total_pages": total_pages,
+    }
