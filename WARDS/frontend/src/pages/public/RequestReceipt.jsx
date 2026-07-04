@@ -785,8 +785,6 @@ const RequestReceipt = () => {
                           name="txnDate"
                           value={formData.txnDate}
                           onChange={handleInputChange}
-                          min={todayDate}
-                          max={todayDate}
                           disabled={Boolean(systemStatus && (!systemStatus.receiptRequestEnabled || systemStatus.maintenanceMode))}
                           placeholder={text.transactionDate}
                         />
