@@ -3699,18 +3699,23 @@ async def check_paymongo_status(
             db.refresh(payment)
         return serialize_payment_public(payment)
 
-    if payment.paymongo_checkout_session_id:
+    paymongo_checkout_session_id = payment_value(payment, "paymongo_checkout_session_id")
+    paymongo_payment_intent_id = payment_value(payment, "paymongo_payment_intent_id")
+    paymongo_source_id = payment_value(payment, "paymongo_source_id")
+    paymongo_payment_id = payment_value(payment, "paymongo_payment_id")
+
+    if paymongo_checkout_session_id:
         try:
             previous_status = payment.status
-            checkout_session = paymongo_service.retrieve_checkout_session(payment.paymongo_checkout_session_id)
+            checkout_session = paymongo_service.retrieve_checkout_session(paymongo_checkout_session_id)
             update_payment_from_checkout_session(payment, checkout_session)
 
             if (
                 not is_confirmed_payment(payment)
                 and not get_failure_status(payment)
-                and payment.paymongo_payment_intent_id
+                and paymongo_payment_intent_id
             ):
-                payment_intent = paymongo_service.retrieve_payment_intent(payment.paymongo_payment_intent_id)
+                payment_intent = paymongo_service.retrieve_payment_intent(paymongo_payment_intent_id)
                 update_payment_from_payment_intent(payment, payment_intent)
 
             if payment.status in {"Verified", "PAYMENT_SUBMITTED", "Pending Transaction"}:
@@ -3736,14 +3741,14 @@ async def check_paymongo_status(
 
         return serialize_payment_public(payment)
     
-    if not payment.paymongo_source_id:
+    if not paymongo_source_id:
         return serialize_payment_public(payment)
-    
+
     try:
-        source_response = paymongo_service.retrieve_source(payment.paymongo_source_id)
+        source_response = paymongo_service.retrieve_source(paymongo_source_id)
         source_data = source_response.get("data", {})
         source_status = source_data.get("attributes", {}).get("status")
-        
+
         payment.paymongo_status = source_status
 
         if source_status in {"cancelled", "canceled", "failed", "expired"}:
@@ -3754,23 +3759,23 @@ async def check_paymongo_status(
                 details=f"Payment {ref_number} marked as {payment.status.lower()} from source status {source_status}",
                 type="transaction",
             ))
-        
+
         # Handle different source statuses
-        if source_status == "chargeable" and not payment.paymongo_payment_id:
+        if source_status == "chargeable" and not paymongo_payment_id:
             try:
                 payment_response = paymongo_service.create_payment(
-                    source_id=payment.paymongo_source_id,
+                    source_id=paymongo_source_id,
                     amount=payment.amount,
                     description=f"{payment.tax_type} - {payment.ref_number}"
                 )
-                
+
                 payment_data = payment_response.get("data", {})
                 payment_id = payment_data.get("id")
                 payment_status = payment_data.get("attributes", {}).get("status")
-                
+
                 payment.paymongo_payment_id = payment_id
                 payment.paymongo_status = payment_status
-                
+
                 # In test mode, payment might be immediately paid
                 if payment_status == "paid":
                     mark_payment_submitted(payment)
@@ -3791,7 +3796,7 @@ async def check_paymongo_status(
                         details=f"Payment {ref_number} failed",
                         type="transaction",
                     ))
-                    
+
             except Exception as e:
                 db.add(ActivityLog(
                     action="Payment Creation Error",
@@ -3799,14 +3804,14 @@ async def check_paymongo_status(
                     details=f"Error creating payment from source for {ref_number}: {str(e)}",
                     type="error",
                 ))
-        
-        elif payment.paymongo_payment_id:
-            payment_response = paymongo_service.retrieve_payment(payment.paymongo_payment_id)
+
+        elif paymongo_payment_id:
+            payment_response = paymongo_service.retrieve_payment(paymongo_payment_id)
             payment_data = payment_response.get("data", {})
             payment_status = payment_data.get("attributes", {}).get("status")
-            
+
             payment.paymongo_status = payment_status
-            
+
             if payment_status == "paid" and payment.status not in {"Verified", "PAYMENT_SUBMITTED", "Pending Transaction"}:
                 mark_payment_submitted(payment)
                 update_linked_request_status(db, payment)
