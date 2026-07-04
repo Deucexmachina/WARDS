@@ -109,6 +109,9 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
   const [recoveryOtpCode, setRecoveryOtpCode] = useState('');
   const [recoveryOtpError, setRecoveryOtpError] = useState('');
   const [showForgotPassword, setShowForgotPassword] = useState(false);
+
+  const sanitizeInput = (value) => String(value || '').replace(/[<>]/g, '').trim();
+
   const keystrokeRef = useRef({
     downs: {},
     dwell: [],
@@ -122,7 +125,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
   const location = useLocation();
 
   const getIdentifierLabel = () => 'Email Address';
-  const validateIdentifier = (value) => (String(value || '').trim() ? '' : `Please enter your ${getIdentifierLabel()}.`);
+  const validateIdentifier = (value) => (sanitizeInput(value) ? '' : `Please enter your ${getIdentifierLabel()}.`);
   const validatePassword = (value) => (String(value || '') ? '' : 'Please enter your Password.');
   const validateTotpCode = (value) => {
     const trimmedValue = String(value || '').trim();
@@ -552,7 +555,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
 
     try {
       const response = await unifiedAuthAPI.setupMfa({
-        identifier,
+        identifier: sanitizeInput(identifier),
         password,
         portal: requestedPortal,
       });
@@ -611,7 +614,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
 
     try {
       const response = await unifiedAuthAPI.login({
-        identifier,
+        identifier: sanitizeInput(identifier),
         password,
         portal: getSubmissionPortal(),
         recaptcha_token: recaptchaToken || undefined,
@@ -643,7 +646,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
       const requiresCaptchaFromServer = err.response?.data?.requires_captcha === true;
 
       if (requiresEmailVerification) {
-        const normalizedEmail = identifier.trim();
+        const normalizedEmail = sanitizeInput(identifier);
         sessionStorage.setItem(
           'pendingCitizenVerification',
           JSON.stringify({
@@ -723,7 +726,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
 
     try {
       const response = await unifiedAuthAPI.login({
-        identifier,
+        identifier: sanitizeInput(identifier),
         password,
         portal: getSubmissionPortal(),
         totp_code: totpCode,
@@ -770,7 +773,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
     setNotice('');
     try {
       const response = await unifiedAuthAPI.sendMfaRecoveryOtp({
-        identifier,
+        identifier: sanitizeInput(identifier),
         password,
         portal: getSubmissionPortal(),
       });
@@ -799,7 +802,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
     setNotice('');
     try {
       const response = await unifiedAuthAPI.verifyMfaRecoveryOtp({
-        identifier,
+        identifier: sanitizeInput(identifier),
         password,
         portal: getSubmissionPortal(),
         otp_code: recoveryOtpCode,
@@ -831,14 +834,14 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
     setNotice('');
     try {
       await unifiedAuthAPI.verifyMfaSetup({
-        identifier,
+        identifier: sanitizeInput(identifier),
         password,
         portal: getSubmissionPortal(),
         totp_code: totpCode,
       });
 
       const loginResponse = await unifiedAuthAPI.login({
-        identifier,
+        identifier: sanitizeInput(identifier),
         password,
         portal: getSubmissionPortal(),
         totp_code: totpCode,
@@ -897,14 +900,16 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
                   type="text"
                   value={identifier}
                   onChange={(event) => {
-                    setIdentifier(event.target.value);
-                    setIdentifierError(validateIdentifier(event.target.value));
+                    const sanitized = sanitizeInput(event.target.value);
+                    setIdentifier(sanitized);
+                    setIdentifierError(validateIdentifier(sanitized));
                     setError('');
                   }}
                   aria-invalid={identifierError ? 'true' : 'false'}
                   className={`w-full px-4 py-2.5 text-sm border rounded-xl bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:border-transparent transition ${copy.focusRing} ${identifierError ? 'border-red-400 bg-red-50' : 'border-gray-200'}`}
                   placeholder="name@example.com"
                   required
+                  maxLength={255}
                   autoComplete="email"
                 />
                 {identifierError && <p className="mt-1.5 text-xs font-medium text-red-600">{identifierError}</p>}
