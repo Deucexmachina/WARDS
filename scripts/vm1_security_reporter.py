@@ -270,28 +270,31 @@ def _iter_root_files(root_name: str, root_path: Path):
             "current_hash": current_hash,
             "content_b64": None,
             "inline_candidate": _should_inline_content(path, stat.st_size),
+            "inline_priority": not git_head_match,
             "git_head_match": git_head_match,
         }
 
 
 def iter_monitored_files():
     inline_budget = MAX_MANIFEST_CONTENT_BYTES
+    items = []
     for root_name, root_path in MONITORED_ROOTS.items():
-        for item in _iter_root_files(root_name, root_path):
-            if item.pop("inline_candidate", False) and item["size_bytes"] <= inline_budget:
-                item["content_b64"] = file_content_b64(Path(item["file_path"]))
-                if item["content_b64"]:
-                    inline_budget -= item["size_bytes"]
-            yield item
+        items.extend(_iter_root_files(root_name, root_path))
     for custom_path in CUSTOM_FOLDERS:
         if custom_path.exists() and custom_path.is_dir():
             root_name = custom_path.name
-            for item in _iter_root_files(root_name, custom_path):
-                if item.pop("inline_candidate", False) and item["size_bytes"] <= inline_budget:
-                    item["content_b64"] = file_content_b64(Path(item["file_path"]))
-                    if item["content_b64"]:
-                        inline_budget -= item["size_bytes"]
-                yield item
+            items.extend(_iter_root_files(root_name, custom_path))
+
+    # Changed files need content most urgently; without it VM2 can only see
+    # a hash delta and cannot produce a trustworthy diff or recovery command.
+    items.sort(key=lambda item: (not item.get("inline_priority", False), item["relative_path"]))
+    for item in items:
+        if item.pop("inline_candidate", False) and item["size_bytes"] <= inline_budget:
+            item["content_b64"] = file_content_b64(Path(item["file_path"]))
+            if item["content_b64"] is not None:
+                inline_budget -= item["size_bytes"]
+        item.pop("inline_priority", None)
+        yield item
 
 
 def send_manifest(files: list[dict]) -> bool:

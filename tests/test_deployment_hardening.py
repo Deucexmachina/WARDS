@@ -457,6 +457,22 @@ def test_vm1_config_exposes_force_scan_token_for_reporter():
     assert 'scan_and_send_manifest("forced" if force_scan_due else "interval")' in reporter
 
 
+def test_vm1_hash_only_manifest_changes_are_deferred_not_detected():
+    engine = (Path(__file__).resolve().parents[1] / "SECURITY" / "security_engine.py").read_text()
+    reporter = (Path(__file__).resolve().parents[1] / "scripts" / "vm1_security_reporter.py").read_text()
+
+    assert "deferring detection to avoid a hash-only false positive" in engine
+    assert 'set_setting(db, "vm1_scan_requested_at", now_utc().isoformat(), "vm2_hash_only_defer")' in engine
+    assert '"inline_priority": not git_head_match' in reporter
+
+
+def test_incident_actions_use_throttled_monitored_file_housekeeping():
+    engine = (Path(__file__).resolve().parents[1] / "SECURITY" / "security_engine.py").read_text()
+
+    assert "HOUSEKEEPING_THROTTLE_SECONDS = 300" in engine
+    assert engine.count("run_monitored_file_housekeeping(db)") >= 3
+
+
 def test_vm1_frontend_rebuild_does_not_recreate_backend_dependency():
     reporter = (Path(__file__).resolve().parents[1] / "scripts" / "vm1_security_reporter.py").read_text()
 

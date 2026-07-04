@@ -70,6 +70,7 @@ logger = logging.getLogger(__name__)
 # do not run on every incident mutation.
 _last_migrate_at: float = 0.0
 _last_dedupe_at: float = 0.0
+HOUSEKEEPING_THROTTLE_SECONDS = 300
 
 
 def _run_async_backup(fn):
@@ -80,6 +81,18 @@ def _run_async_backup(fn):
         except Exception as exc:
             logger.warning("Background backup failed: %s", exc)
     threading.Thread(target=_wrapper, daemon=True).start()
+
+
+def run_monitored_file_housekeeping(db: Session, *, force: bool = False) -> tuple[int, int]:
+    """Run expensive monitored-file cleanup only when it is due."""
+    now = time.time()
+    migrated = 0
+    deduped = 0
+    if force or now - _last_migrate_at >= HOUSEKEEPING_THROTTLE_SECONDS:
+        migrated = migrate_portable_monitored_files(db)
+    if force or now - _last_dedupe_at >= HOUSEKEEPING_THROTTLE_SECONDS:
+        deduped = dedupe_monitored_files_by_relative_path(db)
+    return migrated, deduped
 
 
 SECURITY_ROOT = MASTER_ROOT / "SECURITY"
@@ -5579,8 +5592,7 @@ def create_manual_backup(db: Session, initiated_by: int | None, label: str = "ma
             # VM2 security DB may not have the full admins schema (e.g. missing full_name column)
             initiated_by = None
     seed_settings(db)
-    migrate_portable_monitored_files(db)
-    dedupe_monitored_files_by_relative_path(db)
+    run_monitored_file_housekeeping(db)
     mark_stale_backup_events_failed(db)
     if not skip_file_registration:
         register_count = register_initial_files(db, ensure_backup=False, refresh_existing=False)
@@ -6454,8 +6466,7 @@ def ensure_missing_file_confirmation(db: Session, incidents: list[SecurityIncide
 
 
 def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missing_files: bool = False, *, create_event: bool = True) -> SecurityIncident:
-    migrate_portable_monitored_files(db)
-    dedupe_monitored_files_by_relative_path(db)
+    run_monitored_file_housekeeping(db)
     incident = db.query(SecurityIncident).filter(SecurityIncident.id == incident_id).first()
     if not incident:
         raise ValueError("Incident not found")
@@ -6728,8 +6739,7 @@ def resolve_incident(db: Session, incident_id: int, admin_id: int, confirm_missi
 
 
 def mark_false_positive(db: Session, incident_id: int, admin_id: int, refresh_backup: bool = True, confirm_missing_files: bool = False, *, create_event: bool = True) -> SecurityIncident:
-    migrate_portable_monitored_files(db)
-    dedupe_monitored_files_by_relative_path(db)
+    run_monitored_file_housekeeping(db)
     incident = db.query(SecurityIncident).filter(SecurityIncident.id == incident_id).first()
     if not incident:
         raise ValueError("Incident not found")
@@ -8571,14 +8581,29 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
                         pass
                 new_content = ""
                 content_b64 = f.get("content_b64")
-                if content_b64:
+                content_supplied = "content_b64" in f and content_b64 is not None
+                if content_supplied:
                     try:
                         new_content = base64.b64decode(content_b64).decode("utf-8", errors="replace")
                     except Exception:
-                        pass
+                        content_supplied = False
+                if not content_supplied and old_content.strip():
+                    logger.warning(
+                        "VM1 file %s hash changed to %s but manifest did not include content; "
+                        "deferring detection to avoid a hash-only false positive.",
+                        rel_path,
+                        current_hash,
+                    )
+                    entry.status = "modified"
+                    entry.current_hash = current_hash
+                    entry.last_checked = now_utc()
+                    db.add(entry)
+                    set_setting(db, "vm1_scan_requested_at", now_utc().isoformat(), "vm2_hash_only_defer")
+                    db.commit()
+                    continue
                 # Skip detection when both contents are empty (no meaningful diff possible).
                 # This typically happens for large files where content_b64 is not sent.
-                if not old_content.strip() and not new_content.strip():
+                if not old_content.strip() and not new_content.strip() and not content_supplied:
                     logger.warning(
                         "VM1 file %s hash changed but both old/new content are empty "
                         "(snapshot/content_b64 missing); updating baseline to %s and skipping detection.",

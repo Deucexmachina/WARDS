@@ -175,6 +175,37 @@ def test_vm1_reporter_excludes_vendor_dirs_and_budgets_inline_content(monkeypatc
     assert by_path["WARDS/backend/large.py"]["content_b64"] is None
 
 
+def test_vm1_reporter_prioritizes_changed_files_for_inline_content(monkeypatch, tmp_path):
+    reporter_path = Path(__file__).resolve().parents[1] / "scripts" / "vm1_security_reporter.py"
+    spec = importlib.util.spec_from_file_location("vm1_security_reporter_priority_test", reporter_path)
+    reporter = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(reporter)
+
+    root = tmp_path / "WARDS"
+    root.mkdir()
+    clean_file = root / "a_clean.py"
+    changed_file = root / "z_changed.py"
+    clean_file.write_text("c" * 40)
+    changed_file.write_text("m" * 40)
+
+    monkeypatch.setattr(reporter, "MONITORED_ROOTS", {"WARDS": root})
+    monkeypatch.setattr(reporter, "CUSTOM_FOLDERS", [])
+    monkeypatch.setattr(reporter, "MAX_INLINE_CONTENT_BYTES", 64)
+    monkeypatch.setattr(reporter, "MAX_MANIFEST_CONTENT_BYTES", 40)
+    monkeypatch.setattr(
+        reporter,
+        "_git_info_for_root",
+        lambda _root: (root, {"a_clean.py", "z_changed.py"}, {"z_changed.py"}),
+    )
+
+    files = list(reporter.iter_monitored_files())
+    by_path = {item["relative_path"]: item for item in files}
+
+    assert by_path["WARDS/z_changed.py"]["content_b64"]
+    assert by_path["WARDS/a_clean.py"]["content_b64"] is None
+
+
 def test_vm1_reporter_retries_413_with_hash_only_manifest(monkeypatch):
     reporter_path = Path(__file__).resolve().parents[1] / "scripts" / "vm1_security_reporter.py"
     spec = importlib.util.spec_from_file_location("vm1_security_reporter_retry_test", reporter_path)
