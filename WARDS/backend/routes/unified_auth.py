@@ -1306,6 +1306,15 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
         else:
             if not credentials.totp_code:
                 logger.warning("[LOGIN] MFA required for %s (portal=%s)", credentials.identifier, portal)
+                log_activity(
+                    db,
+                    "MFA Required",
+                    credentials.identifier,
+                    f"Portal: {portal}; Step: TOTP code requested",
+                    "security",
+                    request=request,
+                    account=account,
+                )
                 reset_failed_attempts(portal, credentials.identifier)
                 return {
                     "access_token": "",
@@ -1330,6 +1339,15 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
                     datetime.utcnow().isoformat(),
                     extended_ok,
                 )
+                log_activity(
+                    db,
+                    "MFA Verification Failed",
+                    credentials.identifier,
+                    f"Portal: {portal}; Reason: Invalid TOTP code",
+                    "security",
+                    request=request,
+                    account=account,
+                )
                 record_failed_attempt(portal, credentials.identifier, client_ip)
                 info = _lockout_info(portal, credentials.identifier)
                 return JSONResponse(
@@ -1337,6 +1355,15 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
                     content={"detail": "Invalid authenticator code. Please try again.", **info},
                 )
             logger.warning("[LOGIN] TOTP verification PASSED for %s (portal=%s)", credentials.identifier, portal)
+            log_activity(
+                db,
+                "MFA Verification Succeeded",
+                credentials.identifier,
+                f"Portal: {portal}",
+                "security",
+                request=request,
+                account=account,
+            )
 
     reset_failed_attempts(portal, credentials.identifier)
     clear_tracking(credentials.identifier)
