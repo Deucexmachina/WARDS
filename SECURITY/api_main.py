@@ -260,14 +260,18 @@ def api_scan_all(payload: dict = {}, request: Request = None, db=Depends(get_db)
 # ---------------------------------------------------------------------------
 @app.post("/v1/detections/context", dependencies=[Depends(require_api_key)])
 def api_detections_context(payload: dict = {}, db=Depends(get_db)):
-    from SECURITY.security_engine import record_context_detection
-    detection = record_context_detection(
-        db,
-        target_name=payload["target_name"],
-        actor=payload["actor"],
-        change_type=payload["change_type"],
-        context=payload.get("context", {}),
-    )
+    from SECURITY.security_engine import record_context_detection, record_traffic_detection
+    context = payload.get("context", {}) or {}
+    if payload.get("target_name") == "site_traffic" or context.get("target_type") == "traffic":
+        detection = record_traffic_detection(db, context)
+    else:
+        detection = record_context_detection(
+            db,
+            target_name=payload["target_name"],
+            actor=payload["actor"],
+            change_type=payload["change_type"],
+            context=context,
+        )
     return serialize_detection(detection) if detection else None
 
 

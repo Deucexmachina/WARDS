@@ -471,11 +471,29 @@ def test_vm1_hash_only_manifest_changes_are_deferred_not_detected():
 def test_vm1_deferred_git_clean_files_can_be_marked_clean():
     engine = (Path(__file__).resolve().parents[1] / "SECURITY" / "security_engine.py").read_text()
 
-    git_check = engine.index("if f.get(\"git_head_match\"):")
+    git_check = engine.index("if f.get(\"git_head_match\") or local_repo_match:")
     repeat_hash_check = engine.index("if previous_hash == current_hash:", git_check)
 
     assert git_check < repeat_hash_check
     assert "deferred deployment changes can" in engine
+
+
+def test_vm1_push_changes_can_be_verified_against_vm2_repo_hash():
+    engine = (Path(__file__).resolve().parents[1] / "SECURITY" / "security_engine.py").read_text()
+
+    assert "def _vm1_hash_matches_local_repo" in engine
+    assert "vm1_bulk_changes_match_local_repo" in engine
+    assert "deployment_evidence" in engine
+    assert "local_repo_hash" in engine
+
+
+def test_site_traffic_context_route_uses_traffic_detector():
+    api = (Path(__file__).resolve().parents[1] / "SECURITY" / "api_main.py").read_text()
+    middleware = (Path(__file__).resolve().parents[1] / "WARDS" / "backend" / "middleware" / "dos_protection.py").read_text()
+
+    assert "record_traffic_detection" in api
+    assert 'payload.get("target_name") == "site_traffic"' in api
+    assert '"top_source_ips": top_source_ips' in middleware
 
 
 def test_incident_actions_use_throttled_monitored_file_housekeeping():

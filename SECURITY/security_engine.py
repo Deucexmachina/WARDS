@@ -2348,6 +2348,48 @@ def detect_single_ip_traffic_abuse(context: dict | None, rules: dict | None = No
     return None
 
 
+def traffic_source_summary(context: dict | None, detection: dict | None = None) -> str:
+    context = context or {}
+    detection = detection or {}
+    raw_sources = (
+        context.get("top_source_ips")
+        or context.get("top_ips")
+        or context.get("source_ip_counts")
+        or context.get("source_ips")
+        or []
+    )
+    sources: list[tuple[str, int | None]] = []
+    if isinstance(raw_sources, dict):
+        raw_sources = [{"ip": ip, "request_count": count} for ip, count in raw_sources.items()]
+    if isinstance(raw_sources, list):
+        for item in raw_sources:
+            if isinstance(item, dict):
+                ip = item.get("ip") or item.get("source_ip") or item.get("address")
+                count = item.get("request_count") or item.get("count") or item.get("requests")
+            else:
+                ip = item
+                count = None
+            if ip and str(ip).lower() != "unknown":
+                try:
+                    sources.append((str(ip), int(count) if count is not None else None))
+                except (TypeError, ValueError):
+                    sources.append((str(ip), None))
+    peak_ip = detection.get("source_ip") or context.get("peak_source_ip") or context.get("source_ip")
+    if peak_ip and str(peak_ip).lower() != "unknown" and all(ip != str(peak_ip) for ip, _ in sources):
+        peak_count = detection.get("request_count") or context.get("peak_source_request_count")
+        try:
+            sources.insert(0, (str(peak_ip), int(peak_count) if peak_count is not None else None))
+        except (TypeError, ValueError):
+            sources.insert(0, (str(peak_ip), None))
+    if not sources:
+        return "unknown"
+    visible = sources[:3]
+    labels = [f"{ip} ({count})" if count is not None else ip for ip, count in visible]
+    if len(sources) > len(visible):
+        labels.append(f"+{len(sources) - len(visible)} more")
+    return ", ".join(labels)
+
+
 def record_traffic_detection(db: Session, context: dict | None) -> SecurityDetectionEvent | None:
     """Record a traffic anomaly detection using the same AI-rule pipeline as other context events."""
     context = dict(context or {})
@@ -2357,6 +2399,7 @@ def record_traffic_detection(db: Session, context: dict | None) -> SecurityDetec
     single_ip = detect_single_ip_traffic_abuse(context, rules)
     spike = detect_traffic_spike(context, rules)
     if ddos:
+        context["source_ip"] = traffic_source_summary(context, ddos)
         context.update({"ddos_attack": True, "traffic_detection": ddos, "target_type": "traffic"})
         return record_context_detection(
             db,
@@ -2367,6 +2410,7 @@ def record_traffic_detection(db: Session, context: dict | None) -> SecurityDetec
             force_flag="ddos_attack",
         )
     if single_ip:
+        context["source_ip"] = traffic_source_summary(context, single_ip)
         context.update({"single_ip_traffic_abuse": True, "traffic_detection": single_ip, "target_type": "traffic"})
         return record_context_detection(
             db,
@@ -2377,6 +2421,7 @@ def record_traffic_detection(db: Session, context: dict | None) -> SecurityDetec
             force_flag="single_ip_traffic_abuse",
         )
     if spike:
+        context["source_ip"] = traffic_source_summary(context, spike)
         context.update({"traffic_spike": True, "traffic_detection": spike, "target_type": "traffic"})
         return record_context_detection(
             db,
@@ -7859,6 +7904,44 @@ def _store_vm1_snapshot(rel_path: str, content_b64: str | None):
         pass
 
 
+def _local_repo_path_for_vm1_file(rel_path: str) -> Path | None:
+    try:
+        candidate = (MASTER_ROOT / rel_path).resolve()
+        root = MASTER_ROOT.resolve()
+        if not candidate.is_relative_to(root):
+            return None
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    except Exception:
+        return None
+    return None
+
+
+def _vm1_hash_matches_local_repo(rel_path: str, current_hash: str | None) -> bool:
+    if not current_hash:
+        return False
+    candidate = _local_repo_path_for_vm1_file(rel_path)
+    if not candidate:
+        return False
+    try:
+        return sha256_file(candidate).lower() == str(current_hash).lower()
+    except Exception:
+        return False
+
+
+def _store_vm1_snapshot_from_local_repo(rel_path: str) -> bool:
+    candidate = _local_repo_path_for_vm1_file(rel_path)
+    if not candidate:
+        return False
+    try:
+        target = VM1_SNAPSHOT_ROOT / rel_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(candidate, target)
+        return True
+    except Exception:
+        return False
+
+
 def _quarantine_vm1_snapshot(entry: SecurityMonitoredFile, detection_id: int) -> str | None:
     snapshot = VM1_SNAPSHOT_ROOT / entry.relative_path
     if not snapshot.exists():
@@ -7986,6 +8069,13 @@ def get_pending_vm1_restore_commands(db: Session) -> list[dict]:
 
 def vm1_bulk_changes_match_git_head(changed_entries: list[tuple[SecurityMonitoredFile, dict, str]]) -> bool:
     return bool(changed_entries) and all(bool(item.get("git_head_match")) for _, item, _ in changed_entries)
+
+
+def vm1_bulk_changes_match_local_repo(changed_entries: list[tuple[SecurityMonitoredFile, dict, str]]) -> bool:
+    return bool(changed_entries) and all(
+        _vm1_hash_matches_local_repo(entry.relative_path, current_hash)
+        for entry, _, current_hash in changed_entries
+    )
 
 
 def acknowledge_vm1_restore_command(db: Session, command_id: str, success: bool) -> bool:
@@ -8334,7 +8424,8 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
             for entry, _, _ in changed_entries
         )
         all_git_head_matches = vm1_bulk_changes_match_git_head(changed_entries)
-        if not has_open_incidents and all_git_head_matches:
+        all_local_repo_matches = vm1_bulk_changes_match_local_repo(changed_entries)
+        if not has_open_incidents and (all_git_head_matches or all_local_repo_matches):
             logger.info(
                 "Bulk VM1 file change detected (%d files) — treating as deployment, updating baselines.",
                 len(changed_entries),
@@ -8346,16 +8437,19 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
                 entry.last_checked = now_utc()
                 db.add(entry)
                 _store_vm1_snapshot(entry.relative_path, f.get("content_b64"))
+                if not f.get("content_b64"):
+                    _store_vm1_snapshot_from_local_repo(entry.relative_path)
             db.commit()
             return {
                 "registered": 0,
                 "changed": len(changed_entries),
                 "detections": 0,
                 "deployment_detected": True,
+                "deployment_evidence": "git_head" if all_git_head_matches else "local_repo_hash",
             }
-        if not all_git_head_matches:
+        if not all_git_head_matches and not all_local_repo_matches:
             logger.warning(
-                "Bulk VM1 file change detected (%d files) without deployment/git confirmation; "
+                "Bulk VM1 file change detected (%d files) without deployment/git/local-repo confirmation; "
                 "continuing with normal detection instead of accepting a new baseline.",
                 len(changed_entries),
             )
@@ -8493,7 +8587,8 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
             # If the VM1 reporter says this file matches git HEAD, it was changed
             # through the legitimate GitHub workflow. Cancel any stale pending
             # restores (they would revert a legitimate state) and update baseline.
-            if f.get("git_head_match"):
+            local_repo_match = _vm1_hash_matches_local_repo(entry.relative_path, current_hash)
+            if f.get("git_head_match") or local_repo_match:
                 if has_pending_restore:
                     # Remove stale restore commands for this file so they don't revert
                     # the legitimate git state on the next poll.
@@ -8509,6 +8604,8 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
                 entry.status = "clean"
                 db.add(entry)
                 _store_vm1_snapshot(rel_path, f.get("content_b64"))
+                if not f.get("content_b64"):
+                    _store_vm1_snapshot_from_local_repo(rel_path)
                 continue
             # If the file hash hasn't changed since the last scan, don't log another detection.
             # This must run after the git-head check so deferred deployment changes can

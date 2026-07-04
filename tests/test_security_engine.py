@@ -839,6 +839,28 @@ def test_single_ip_traffic_abuse_detection_and_taxonomy():
     assert classification["nist_category"] == "CAT 2 - Denial of Service"
 
 
+def test_traffic_source_summary_lists_top_ips():
+    from SECURITY import security_engine
+
+    summary = security_engine.traffic_source_summary(
+        {
+            "peak_source_ip": "203.0.113.10",
+            "peak_source_request_count": 160,
+            "top_source_ips": [
+                {"ip": "198.51.100.20", "request_count": 90},
+                {"ip": "203.0.113.30", "request_count": 70},
+                {"ip": "203.0.113.40", "request_count": 50},
+                {"ip": "203.0.113.50", "request_count": 40},
+            ],
+        },
+        {"source_ip": "203.0.113.10", "request_count": 160},
+    )
+
+    assert "203.0.113.10 (160)" in summary
+    assert "198.51.100.20 (90)" in summary
+    assert "+2 more" in summary
+
+
 def test_traffic_features_are_in_ml_vector():
     from SECURITY import security_engine
 

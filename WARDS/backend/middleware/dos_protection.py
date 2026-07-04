@@ -582,6 +582,11 @@ def _maybe_record_traffic_ai_detection(current_time: float) -> None:
     total_requests = sum(recent_counts)
     unique_ips = sum(1 for count in recent_counts if count > 0)
     peak_source_ip, peak_source_count = max(recent_by_ip.items(), key=lambda item: item[1], default=("unknown", 0))
+    top_source_ips = [
+        {"ip": ip, "request_count": count}
+        for ip, count in sorted(recent_by_ip.items(), key=lambda item: item[1], reverse=True)
+        if count > 0
+    ][:5]
     current_rps = total_requests / float(window)
     peak_source_rps = peak_source_count / float(window)
     baseline_rps = _traffic_baseline_rps or current_rps
@@ -602,6 +607,7 @@ def _maybe_record_traffic_ai_detection(current_time: float) -> None:
             "active_connection_count": sum(active_requests.values()),
             "peak_source_ip": peak_source_ip,
             "peak_source_request_count": peak_source_count,
+            "top_source_ips": top_source_ips,
             "peak_source_requests_per_second": peak_source_rps,
             "peak_source_active_connections": active_requests.get(peak_source_ip, 0),
             "source_ip_count": unique_ips,
