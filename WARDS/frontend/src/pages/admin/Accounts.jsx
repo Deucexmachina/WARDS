@@ -279,7 +279,8 @@ const Accounts = () => {
       } else if (name === 'password') {
         setFormData((current) => ({ ...current, password: value }));
       } else if (name === 'username') {
-        setFormData((current) => ({ ...current, username: value }));
+        const cleaned = value.replace(/[^A-Za-z0-9_]/g, '').slice(0, 32);
+        setFormData((current) => ({ ...current, username: cleaned }));
       } else if (name === 'full_name') {
         setFormData((current) => ({ ...current, full_name: value }));
         const normalized = normalizeCitizenFullName(value);
@@ -309,7 +310,11 @@ const Accounts = () => {
       return;
     }
 
-    const nextState = { ...formData, [name]: value };
+    let cleanedValue = value;
+    if (name === 'username') {
+      cleanedValue = value.replace(/[^A-Za-z0-9_]/g, '').slice(0, 32);
+    }
+    const nextState = { ...formData, [name]: cleanedValue };
     setFormData(nextState);
     if (name === 'email') {
       setEmailError(getAccountEmailValidationMessage(value, formData.role));
@@ -1174,6 +1179,7 @@ const Accounts = () => {
                               name="full_name"
                               value={formData.full_name}
                               onChange={handleInputChange}
+                              maxLength={50}
                               className={`${EDITABLE_INPUT_CLASS} ${fullNameError ? 'border-red-300 bg-red-50 text-red-900 focus:border-red-500 focus:ring-red-500/20' : ''}`}
                               placeholder="Enter full name"
                             />
@@ -1247,6 +1253,7 @@ const Accounts = () => {
                             name="full_name"
                             value={formData.full_name}
                             onChange={handleInputChange}
+                            maxLength={50}
                             className={`${EDITABLE_INPUT_CLASS} ${fullNameError ? 'border-red-300 bg-red-50 text-red-900 focus:border-red-500 focus:ring-red-500/20' : ''}`}
                             placeholder="Enter full name"
                           />
@@ -1273,6 +1280,7 @@ const Accounts = () => {
                               name="full_name"
                               value={formData.full_name}
                               onChange={handleInputChange}
+                              maxLength={50}
                               className={`${EDITABLE_INPUT_CLASS} ${fullNameError ? 'border-red-300 bg-red-50 text-red-900 focus:border-red-500 focus:ring-red-500/20' : ''}`}
                               placeholder="Enter full name (optional)"
                             />

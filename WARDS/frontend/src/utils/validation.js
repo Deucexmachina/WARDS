@@ -91,6 +91,10 @@ export const validateCitizenFullName = (value) => {
     return 'Full name is required.';
   }
 
+  if (normalized.length > 50) {
+    return 'Full name must be 50 characters or fewer.';
+  }
+
   if (!CITIZEN_NAME_PATTERN.test(normalized)) {
     return CITIZEN_NAME_RULE_MESSAGE;
   }

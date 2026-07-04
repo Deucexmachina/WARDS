@@ -20,7 +20,7 @@ PASSWORD_INVALID_MESSAGE = (
 )
 TIN_INVALID_MESSAGE = "Invalid TIN. Please enter a valid 9–12 digit Tax Identification Number."
 
-USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_.@-]{3,32}$")
+USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_]{3,32}$")
 TIN_ALLOWED_PATTERN = re.compile(r"^[\d\s-]+$")
 TIN_DIGITS_PATTERN = re.compile(r"^\d{9,12}$")
 CITIZEN_FULL_NAME_PATTERN = re.compile(r"^[A-Za-z ]+$")
@@ -130,6 +130,11 @@ def normalize_citizen_full_name(full_name: str) -> str:
     cleaned = re.sub(r"\s+", " ", (full_name or "").strip())
     if not cleaned:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Full name is required.")
+    if len(cleaned) > 50:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Full name must be 50 characters or fewer.",
+        )
     if not CITIZEN_FULL_NAME_PATTERN.fullmatch(cleaned):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -167,7 +172,7 @@ def normalize_username(username: str) -> str:
     if not USERNAME_PATTERN.fullmatch(cleaned):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username must be 3-32 characters and may only contain letters, numbers, dots, underscores, hyphens, or @.",
+            detail="Username must be 3-32 characters and may only contain letters, numbers, and underscores.",
         )
     return cleaned
 
