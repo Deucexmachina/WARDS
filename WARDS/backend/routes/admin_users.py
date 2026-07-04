@@ -8,7 +8,7 @@ from slowapi.util import get_remote_address
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
-from database.models import ActivityLog, Admin, BranchStaff, CitizenUser, get_db
+from database.models import ActivityLog, Admin, AdminLoginSecurityProfile, BranchStaff, CitizenUser, get_db
 from auth import get_current_admin_user, hash_password
 from utils.field_crypto import apply_citizen_user_security, serialize_citizen_user
 from utils.security_validation import (
@@ -304,6 +304,10 @@ async def delete_user(
     user = find_user(db, role, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    if isinstance(user, Admin):
+        db.query(AdminLoginSecurityProfile).filter(AdminLoginSecurityProfile.admin_id == user.id).delete(synchronize_session=False)
+
     db.add(ActivityLog(
         action="Admin User Deleted",
         user=current_admin.username,

@@ -9,7 +9,7 @@ from slowapi.util import get_remote_address
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
-from database.models import ActivityLog, Admin, Branch, BranchStaff, CitizenUser, PrivacyConsent, Queue, QueueHistory, TaxAssessmentRecord, TaxpayerIdentifierSubmission, get_db
+from database.models import ActivityLog, Admin, AdminLoginSecurityProfile, Branch, BranchStaff, CitizenUser, PrivacyConsent, Queue, QueueHistory, TaxAssessmentRecord, TaxpayerIdentifierSubmission, get_db
 from auth import get_current_admin_user, get_current_branch_staff, hash_password, verify_password, verify_account_password
 from utils.field_crypto import apply_citizen_user_security, get_decrypted_or_raw, serialize_citizen_user
 from utils.security_validation import (
@@ -666,6 +666,10 @@ async def delete_user(
     # Delete related privacy consents before deleting citizen user to avoid constraint violations
     if isinstance(account, CitizenUser):
         db.query(PrivacyConsent).filter(PrivacyConsent.citizen_user_id == account.id).delete()
+
+    # Delete related login security profiles before deleting admin to avoid NOT NULL constraint violation
+    if isinstance(account, Admin):
+        db.query(AdminLoginSecurityProfile).filter(AdminLoginSecurityProfile.admin_id == account.id).delete(synchronize_session=False)
 
     log_branch = db.query(Branch).filter(Branch.id == getattr(account, "branch_id", None)).first() if getattr(account, "branch_id", None) else None
     log_branch_name = get_decrypted_or_raw(log_branch, "name") or log_branch.name if log_branch else None
