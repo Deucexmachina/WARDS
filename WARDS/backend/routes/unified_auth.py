@@ -685,7 +685,7 @@ def get_client_ip(request) -> str:
     return "unknown"
 
 
-def log_activity(db: Session, action: str, user: str, details: str, log_type: str = "auth", *, request=None, role=None, branch=None, email=None, account=None):
+def log_activity(db: Session, action: str, user: str, details: str, log_type: str = "auth", *, request=None, role=None, branch=None, email=None, account=None, severity: str = "high"):
     if account is not None:
         role = role or getattr(account, "role", None)
         branch = branch or getattr(account, "branch", None)
