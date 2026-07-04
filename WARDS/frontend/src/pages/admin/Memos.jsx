@@ -161,6 +161,8 @@ const Memos = () => {
 
   const ALLOWED_MEMO_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.pdf', '.docx', '.xlsx'];
 
+  const MAX_MEMO_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+
   const handleFileChange = (event) => {
     const file = event.target.files?.[0] || null;
     if (file) {
@@ -170,6 +172,15 @@ const Memos = () => {
           open: true,
           title: 'Invalid File Type',
           message: 'Only JPG, PNG, Word, Excel, and PDF files are allowed.',
+        });
+        event.target.value = '';
+        return;
+      }
+      if (file.size > MAX_MEMO_ATTACHMENT_BYTES) {
+        setFileErrorModal({
+          open: true,
+          title: 'File Too Large',
+          message: 'Attachment must be 10MB or smaller.',
         });
         event.target.value = '';
         return;
@@ -601,15 +612,19 @@ const Memos = () => {
                   type="text"
                   name="title"
                   value={formData.title}
+                  maxLength={100}
                   onChange={handleInputChange}
                   className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent ${
                     validationErrors.title ? 'border-red-500 bg-red-50' : 'border-gray-300'
                   }`}
                   placeholder="Administrative policy, internal announcement, or operations memo"
                 />
-                {validationErrors.title && (
-                  <p className="mt-2 text-sm font-semibold text-red-600">{validationErrors.title}</p>
-                )}
+                <div className="mt-1 flex items-center justify-between">
+                  {validationErrors.title ? (
+                    <p className="text-sm font-semibold text-red-600">{validationErrors.title}</p>
+                  ) : <span />}
+                  <span className="text-xs text-gray-500">{formData.title.length}/100</span>
+                </div>
               </div>
 
               <div>
@@ -617,6 +632,7 @@ const Memos = () => {
                 <textarea
                   name="content"
                   value={formData.content}
+                  maxLength={500}
                   onChange={handleInputChange}
                   rows="8"
                   className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-accent focus:border-transparent ${
@@ -624,9 +640,12 @@ const Memos = () => {
                   }`}
                   placeholder="Write the full memo here..."
                 ></textarea>
-                {validationErrors.content && (
-                  <p className="mt-2 text-sm font-semibold text-red-600">{validationErrors.content}</p>
-                )}
+                <div className="mt-1 flex items-center justify-between">
+                  {validationErrors.content ? (
+                    <p className="text-sm font-semibold text-red-600">{validationErrors.content}</p>
+                  ) : <span />}
+                  <span className="text-xs text-gray-500">{formData.content.length}/500</span>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">

@@ -1508,46 +1508,62 @@ const PublicContentManagement = ({ portal = 'admin' }) => {
 
             <SectionCard title="Page Header" description="Control the hero title and subtitle shown at the top of the About Us page.">
               <div className="space-y-4">
-                <Field label="Title"><input value={aboutUsContent[`page_title_${editorLanguage}`]} onChange={(e) => updateAboutUsValue(`page_title_${editorLanguage}`, e.target.value)} className={textInputClass} /></Field>
-                <Field label="Subtitle"><textarea value={aboutUsContent[`page_subtitle_${editorLanguage}`]} onChange={(e) => updateAboutUsValue(`page_subtitle_${editorLanguage}`, e.target.value)} className={textAreaClass} /></Field>
+                <Field label="Title" hint={`${aboutUsContent[`page_title_${editorLanguage}`].length}/50`}><input value={aboutUsContent[`page_title_${editorLanguage}`]} onChange={(e) => updateAboutUsValue(`page_title_${editorLanguage}`, e.target.value)} className={textInputClass} maxLength={50} /></Field>
+                <Field label="Subtitle" hint={`${aboutUsContent[`page_subtitle_${editorLanguage}`].length}/100`}><textarea value={aboutUsContent[`page_subtitle_${editorLanguage}`]} onChange={(e) => updateAboutUsValue(`page_subtitle_${editorLanguage}`, e.target.value)} className={textAreaClass} maxLength={100} /></Field>
               </div>
             </SectionCard>
 
             <SectionCard title="Who We Are" description="Describe the City Treasurer's Office.">
-              <Field label="Description"><textarea value={aboutUsContent[`who_we_are_${editorLanguage}`]} onChange={(e) => updateAboutUsValue(`who_we_are_${editorLanguage}`, e.target.value)} className={textAreaClass} /></Field>
+              <Field label="Description" hint={`${aboutUsContent[`who_we_are_${editorLanguage}`].length}/1000`}><textarea value={aboutUsContent[`who_we_are_${editorLanguage}`]} onChange={(e) => updateAboutUsValue(`who_we_are_${editorLanguage}`, e.target.value)} className={textAreaClass} maxLength={1000} /></Field>
             </SectionCard>
 
             <RepeaterCard
               title="Mission Items"
               description="Each item is an ADVOCATE letter with its corresponding mission statement."
               items={aboutUsContent.mission_items}
-              onChange={(index, field, value) => updateAboutUsListItem('mission_items', index, field, value)}
+              onChange={(index, field, value) => {
+                if (field === 'letter') {
+                  value = value.replace(/[^a-zA-Z]/g, '').toUpperCase().slice(0, 1);
+                }
+                updateAboutUsListItem('mission_items', index, field, value);
+              }}
               onAdd={() => addAboutUsListItem('mission_items', makeMissionItem)}
               onRemove={(index) => removeAboutUsListItem('mission_items', index)}
               fields={[
-                { key: 'letter', label: 'Letter' },
-                { key: editorLanguage === 'en' ? 'text' : 'text_tl', label: 'Mission Statement', multiline: true },
+                { key: 'letter', label: 'Letter', maxLength: 1 },
+                { key: editorLanguage === 'en' ? 'text' : 'text_tl', label: 'Mission Statement', multiline: true, maxLength: 500 },
               ]}
             />
 
             <SectionCard title="Vision" description="The vision statement for the office.">
-              <Field label="Vision"><textarea value={aboutUsContent[`vision_${editorLanguage}`]} onChange={(e) => updateAboutUsValue(`vision_${editorLanguage}`, e.target.value)} className={textAreaClass} /></Field>
+              <Field label="Vision" hint={`${aboutUsContent[`vision_${editorLanguage}`].length}/500`}><textarea value={aboutUsContent[`vision_${editorLanguage}`]} onChange={(e) => updateAboutUsValue(`vision_${editorLanguage}`, e.target.value)} className={textAreaClass} maxLength={500} /></Field>
             </SectionCard>
 
             <SectionCard title="Legal Basis" description="The legal mandate citation for the City Treasurer's Office.">
-              <Field label="Legal Basis"><textarea value={aboutUsContent[`legal_basis_${editorLanguage}`]} onChange={(e) => updateAboutUsValue(`legal_basis_${editorLanguage}`, e.target.value)} className={textAreaClass} /></Field>
+              <Field label="Legal Basis" hint={`${aboutUsContent[`legal_basis_${editorLanguage}`].length}/1000`}><textarea value={aboutUsContent[`legal_basis_${editorLanguage}`]} onChange={(e) => updateAboutUsValue(`legal_basis_${editorLanguage}`, e.target.value)} className={textAreaClass} maxLength={1000} /></Field>
             </SectionCard>
 
             <RepeaterCard
               title="Service Pledges"
               description="The numbered service commitments displayed in the Service Pledge section."
               items={aboutUsContent.service_pledges}
-              onChange={(index, field, value) => updateAboutUsListItem('service_pledges', index, field, value)}
-              onAdd={() => addAboutUsListItem('service_pledges', makeServicePledge)}
+              onChange={(index, field, value) => {
+                if (field === 'number') {
+                  value = value.replace(/[^0-9]/g, '').slice(0, 2);
+                }
+                updateAboutUsListItem('service_pledges', index, field, value);
+              }}
+              onAdd={() => {
+                if (aboutUsContent.service_pledges.length >= 10) {
+                  alert('Maximum 10 service pledges allowed.');
+                  return;
+                }
+                addAboutUsListItem('service_pledges', makeServicePledge);
+              }}
               onRemove={(index) => removeAboutUsListItem('service_pledges', index)}
               fields={[
-                { key: 'number', label: 'Number (e.g. 01)' },
-                { key: editorLanguage === 'en' ? 'text' : 'text_tl', label: 'Pledge Text', multiline: true },
+                { key: 'number', label: 'Number (e.g. 01)', maxLength: 2 },
+                { key: editorLanguage === 'en' ? 'text' : 'text_tl', label: 'Pledge Text', multiline: true, maxLength: 500 },
               ]}
             />
 
@@ -1611,8 +1627,8 @@ const PublicContentManagement = ({ portal = 'admin' }) => {
 
             <SectionCard title="Page Header" description="Control the hero title and subtitle shown at the top of the public FAQs page.">
               <div className="space-y-4">
-                <Field label="Title"><input value={faqsContent[`page_title_${editorLanguage}`]} onChange={(e) => updateFaqsValue(`page_title_${editorLanguage}`, e.target.value)} className={textInputClass} /></Field>
-                <Field label="Subtitle"><textarea value={faqsContent[`page_subtitle_${editorLanguage}`]} onChange={(e) => updateFaqsValue(`page_subtitle_${editorLanguage}`, e.target.value)} className={textAreaClass} /></Field>
+                <Field label="Title" hint={`${faqsContent[`page_title_${editorLanguage}`].length}/50`}><input value={faqsContent[`page_title_${editorLanguage}`]} onChange={(e) => updateFaqsValue(`page_title_${editorLanguage}`, e.target.value)} className={textInputClass} maxLength={50} /></Field>
+                <Field label="Subtitle" hint={`${faqsContent[`page_subtitle_${editorLanguage}`].length}/200`}><textarea value={faqsContent[`page_subtitle_${editorLanguage}`]} onChange={(e) => updateFaqsValue(`page_subtitle_${editorLanguage}`, e.target.value)} className={textAreaClass} maxLength={200} /></Field>
               </div>
             </SectionCard>
 
@@ -1622,12 +1638,18 @@ const PublicContentManagement = ({ portal = 'admin' }) => {
               description={`Manage ${editorLanguage === 'en' ? 'English' : 'Tagalog'} FAQ items grouped by category.`}
               items={faqsContent[`faqs_${editorLanguage}`]}
               onChange={(index, field, value) => updateFaqsListItem(`faqs_${editorLanguage}`, index, field, value)}
-              onAdd={() => addFaqsListItem(`faqs_${editorLanguage}`)}
+              onAdd={() => {
+                if (faqsContent[`faqs_${editorLanguage}`].length >= 10) {
+                  alert('Maximum 10 FAQs allowed.');
+                  return;
+                }
+                addFaqsListItem(`faqs_${editorLanguage}`);
+              }}
               onRemove={(index) => removeFaqsListItem(`faqs_${editorLanguage}`, index)}
               fields={[
-                { key: 'question', label: 'Question' },
-                { key: 'category', label: 'Category' },
-                { key: 'answer', label: 'Answer', multiline: true },
+                { key: 'question', label: 'Question', maxLength: 100 },
+                { key: 'category', label: 'Category', maxLength: 50 },
+                { key: 'answer', label: 'Answer', multiline: true, maxLength: 500 },
               ]}
             />
           </div>
