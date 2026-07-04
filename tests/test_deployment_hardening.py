@@ -553,10 +553,13 @@ def test_vm1_config_exposes_force_scan_token_for_reporter():
     assert 'scan_and_send_manifest("forced" if force_scan_due else "interval")' in reporter
 
 
-def test_vm1_hash_only_manifest_changes_are_deferred_not_detected():
+def test_vm1_priority_hash_only_manifest_changes_create_detection():
     engine = (Path(__file__).resolve().parents[1] / "SECURITY" / "security_engine.py").read_text()
     reporter = (Path(__file__).resolve().parents[1] / "scripts" / "vm1_security_reporter.py").read_text()
 
+    assert "recording priority-file detection and triggering recovery" in engine
+    assert "Priority file auto-recovery was triggered from hash drift" in engine
+    assert "recording hash-only detection and triggering recovery" in engine
     assert "deferring detection to avoid a hash-only false positive" in engine
     assert "content_missing_for_nonempty_file" in engine
     assert "size_bytes > 0" in engine

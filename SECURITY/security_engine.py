@@ -9123,6 +9123,27 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
                         detections.append(detection)
                     continue
 
+                if not open_incident_exists and is_high_risk_file_path(entry.relative_path or "", get_ai_rules(db)):
+                    entry.status = "modified"
+                    changed += 1
+                    db.add(entry)
+                    db.commit()
+                    detection = _record_vm1_detection(
+                        db,
+                        entry,
+                        "vm1_content_modified",
+                        current_hash,
+                        old_content=old_content,
+                        new_content=(
+                            f"VM1 reported a repeated hash change for {entry.relative_path} "
+                            "without inline content. Priority file auto-recovery was triggered from hash drift."
+                        ),
+                        original_content_bytes=old_snapshot_bytes,
+                    )
+                    if detection:
+                        detections.append(detection)
+                    continue
+
                 entry.status = "modified"
                 db.add(entry)
                 _queue_vm1_restore_if_needed(
@@ -9225,6 +9246,28 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
                     and (not content_supplied or not new_content.strip())
                 )
                 if content_missing_for_nonempty_file:
+                    if is_high_risk_file_path(entry.relative_path or "", get_ai_rules(db)):
+                        logger.warning(
+                            "VM1 file %s hash changed to %s without inline content; "
+                            "recording priority-file detection and triggering recovery.",
+                            rel_path,
+                            current_hash,
+                        )
+                        detection = _record_vm1_detection(
+                            db,
+                            entry,
+                            "vm1_content_modified",
+                            current_hash,
+                            old_content=old_content,
+                            new_content=(
+                                f"VM1 reported a hash change for {entry.relative_path} "
+                                "without inline content. Priority file auto-recovery was triggered from hash drift."
+                            ),
+                            original_content_bytes=old_snapshot_bytes,
+                        )
+                        if detection:
+                            detections.append(detection)
+                        continue
                     logger.warning(
                         "VM1 file %s hash changed to %s but manifest did not include content; "
                         "deferring detection to avoid a hash-only false positive.",
@@ -9241,6 +9284,27 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
                 # Skip detection when both contents are empty (no meaningful diff possible).
                 # This typically happens for large files where content_b64 is not sent.
                 if not old_content.strip() and not new_content.strip() and not content_supplied:
+                    if is_high_risk_file_path(entry.relative_path or "", get_ai_rules(db)):
+                        logger.warning(
+                            "VM1 high-risk file %s changed without snapshot or inline content; "
+                            "recording hash-only detection and triggering recovery.",
+                            rel_path,
+                        )
+                        detection = _record_vm1_detection(
+                            db,
+                            entry,
+                            "vm1_content_modified",
+                            current_hash,
+                            old_content=old_content,
+                            new_content=(
+                                f"VM1 reported a hash change for {entry.relative_path} "
+                                "without snapshot or inline content. Priority file auto-recovery was triggered from hash drift."
+                            ),
+                            original_content_bytes=old_snapshot_bytes,
+                        )
+                        if detection:
+                            detections.append(detection)
+                        continue
                     logger.warning(
                         "VM1 file %s hash changed but both old/new content are empty "
                         "(snapshot/content_b64 missing); updating baseline to %s and skipping detection.",
