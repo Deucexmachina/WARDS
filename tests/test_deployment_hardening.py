@@ -462,6 +462,8 @@ def test_vm1_hash_only_manifest_changes_are_deferred_not_detected():
     reporter = (Path(__file__).resolve().parents[1] / "scripts" / "vm1_security_reporter.py").read_text()
 
     assert "deferring detection to avoid a hash-only false positive" in engine
+    assert "content_missing_for_nonempty_file" in engine
+    assert "size_bytes > 0" in engine
     assert 'set_setting(db, "vm1_scan_requested_at", now_utc().isoformat(), "vm2_hash_only_defer")' in engine
     assert '"inline_priority": not git_head_match' in reporter
 

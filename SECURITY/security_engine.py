@@ -8581,13 +8581,18 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
                         pass
                 new_content = ""
                 content_b64 = f.get("content_b64")
-                content_supplied = "content_b64" in f and content_b64 is not None
+                content_supplied = isinstance(content_b64, str) and bool(content_b64.strip())
                 if content_supplied:
                     try:
                         new_content = base64.b64decode(content_b64).decode("utf-8", errors="replace")
                     except Exception:
                         content_supplied = False
-                if not content_supplied and old_content.strip():
+                content_missing_for_nonempty_file = (
+                    old_content.strip()
+                    and size_bytes > 0
+                    and (not content_supplied or not new_content.strip())
+                )
+                if content_missing_for_nonempty_file:
                     logger.warning(
                         "VM1 file %s hash changed to %s but manifest did not include content; "
                         "deferring detection to avoid a hash-only false positive.",
