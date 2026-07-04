@@ -91,6 +91,10 @@ def get_current_manila_naive() -> datetime:
     return datetime.now(MANILA_TIMEZONE).replace(tzinfo=None)
 
 
+def _sanitize_branch_announcement(raw: str) -> str:
+    return re.sub(r"[<>]", "", str(raw or "")).strip()
+
+
 class BranchAnnouncementPayload(BaseModel):
     title: str = Field(..., max_length=200)
     content: str = Field(..., max_length=10000)
@@ -2421,10 +2425,10 @@ async def create_branch_announcement(
 
     try:
         announcement = Announcement(
-            title=payload.title,
-            content=payload.content,
-            icon_type=payload.icon_type,
-            icon_color=payload.icon_color,
+            title=_sanitize_branch_announcement(payload.title),
+            content=_sanitize_branch_announcement(payload.content),
+            icon_type=_sanitize_branch_announcement(payload.icon_type) or "megaphone",
+            icon_color=_sanitize_branch_announcement(payload.icon_color) or "blue",
             branch_id=current_staff.branch_id,
             created_by=current_staff.username,
             is_active=bool(payload.is_active),
@@ -2471,17 +2475,17 @@ async def update_branch_announcement(
         raise HTTPException(status_code=404, detail="Announcement not found")
 
     try:
-        announcement.title = payload.title
-        announcement.content = payload.content
-        announcement.icon_type = payload.icon_type
-        announcement.icon_color = payload.icon_color
+        announcement.title = _sanitize_branch_announcement(payload.title)
+        announcement.content = _sanitize_branch_announcement(payload.content)
+        announcement.icon_type = _sanitize_branch_announcement(payload.icon_type) or "megaphone"
+        announcement.icon_color = _sanitize_branch_announcement(payload.icon_color) or "blue"
         announcement.is_active = bool(payload.is_active)
         announcement.updated_at = datetime.utcnow()
         if announcement.is_active and not announcement.publish_date:
             announcement.publish_date = datetime.utcnow()
 
         mark_branch_announcement_viewed(db, announcement.id, current_staff.username, "branch_staff")
-        log_branch_action(db, current_staff, "Announcement Updated", f"Updated branch announcement: {payload.title}", request.client.host)
+        log_branch_action(db, current_staff, "Announcement Updated", f"Updated branch announcement: {_sanitize_branch_announcement(payload.title)}", request.client.host)
         db.commit()
         db.refresh(announcement)
     except HTTPException:

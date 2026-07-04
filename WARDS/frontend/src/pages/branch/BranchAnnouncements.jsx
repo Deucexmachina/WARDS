@@ -35,6 +35,8 @@ const BranchAnnouncements = () => {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
 
+  const sanitizeInput = (value) => String(value || '').replace(/[<>]/g, '').trim();
+
   useEffect(() => {
     fetchAnnouncements();
   }, []);
@@ -84,7 +86,11 @@ const BranchAnnouncements = () => {
 
   const handleInputChange = (event) => {
     const { name, value } = event.target;
-    setFormData({ ...formData, [name]: value });
+    let sanitized = value;
+    if (name === 'title' || name === 'content') {
+      sanitized = sanitizeInput(value);
+    }
+    setFormData({ ...formData, [name]: sanitized });
     if (validationErrors[name]) {
       setValidationErrors((previous) => ({ ...previous, [name]: '' }));
     }
@@ -155,16 +161,16 @@ const BranchAnnouncements = () => {
 
   const validateForm = () => {
     const errors = {};
-    const titleTrim = formData.title.trim();
-    const contentTrim = formData.content.trim();
-    if (!titleTrim) {
+    const titleClean = sanitizeInput(formData.title);
+    const contentClean = sanitizeInput(formData.content);
+    if (!titleClean) {
       errors.title = 'Please enter the Announcement Title.';
-    } else if (titleTrim.length > 200) {
+    } else if (titleClean.length > 200) {
       errors.title = 'Title must be 200 characters or fewer.';
     }
-    if (!contentTrim) {
+    if (!contentClean) {
       errors.content = 'Please enter the Announcement Content.';
-    } else if (contentTrim.length > 10000) {
+    } else if (contentClean.length > 10000) {
       errors.content = 'Content must be 10,000 characters or fewer.';
     }
     setValidationErrors(errors);
@@ -183,13 +189,18 @@ const BranchAnnouncements = () => {
     setLoading(true);
     setPageError('');
     setSuccessMessage('');
+    const payload = {
+      ...formData,
+      title: sanitizeInput(formData.title),
+      content: sanitizeInput(formData.content),
+    };
     try {
       let savedAnnouncement;
       if (editingAnnouncement) {
-        const response = await api.put(`/branch/announcements/${editingAnnouncement.id}`, formData);
+        const response = await api.put(`/branch/announcements/${editingAnnouncement.id}`, payload);
         savedAnnouncement = response.data;
       } else {
-        const response = await api.post('/branch/announcements', formData);
+        const response = await api.post('/branch/announcements', payload);
         savedAnnouncement = response.data;
       }
 
@@ -440,6 +451,7 @@ const BranchAnnouncements = () => {
                     name="title"
                     value={formData.title}
                     onChange={handleInputChange}
+                    maxLength={200}
                     className={`w-full rounded-lg border px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 ${validationErrors.title ? 'border-red-500 bg-red-50 focus:border-red-500 focus:ring-red-500/30' : 'border-slate-300 focus:border-accent focus:ring-accent/30'}`}
                     placeholder="Enter a clear, concise title"
                   />
@@ -454,6 +466,7 @@ const BranchAnnouncements = () => {
                     value={formData.content}
                     onChange={handleInputChange}
                     rows="5"
+                    maxLength={10000}
                     className={`w-full resize-y rounded-lg border px-3.5 py-2.5 text-sm leading-6 focus:outline-none focus:ring-2 ${validationErrors.content ? 'border-red-500 bg-red-50 focus:border-red-500 focus:ring-red-500/30' : 'border-slate-300 focus:border-accent focus:ring-accent/30'}`}
                     placeholder="Write your announcement..."
                   ></textarea>
