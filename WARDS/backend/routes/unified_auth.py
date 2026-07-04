@@ -2100,6 +2100,18 @@ async def unified_register(
 
     email = normalize_email(payload.email)
 
+    _FAKE_EMAIL_DOMAINS = {
+        "test.com", "example.com", "fake.com", "mock.com",
+        "sample.com", "temp.com", "mailinator.com", "yopmail.com",
+        "guerrillamail.com", "sharklasers.com",
+    }
+    domain = email.split("@")[1] if "@" in email else ""
+    if domain in _FAKE_EMAIL_DOMAINS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please use a real email address, not a temporary or test email.",
+        )
+
     existing = find_citizen_by_email(db, CitizenUser, email)
     if existing:
         raise HTTPException(
@@ -2286,6 +2298,18 @@ async def unified_invite_register(
     db: Session = Depends(get_db),
 ):
     email = normalize_email(payload.email)
+
+    _FAKE_EMAIL_DOMAINS = {
+        "test.com", "example.com", "fake.com", "mock.com",
+        "sample.com", "temp.com", "mailinator.com", "yopmail.com",
+        "guerrillamail.com", "sharklasers.com",
+    }
+    domain = email.split("@")[1] if "@" in email else ""
+    if domain in _FAKE_EMAIL_DOMAINS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please use a real email address, not a temporary or test email.",
+        )
 
     invite = find_invite_by_token(db, Invite, payload.invite_token)
     if not invite or invite.used or is_expired_at(invite.expires_at):
