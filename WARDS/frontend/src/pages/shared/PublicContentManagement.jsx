@@ -1627,8 +1627,8 @@ const PublicContentManagement = ({ portal = 'admin' }) => {
 
             <SectionCard title="Page Header" description="Control the hero title and subtitle shown at the top of the public FAQs page.">
               <div className="space-y-4">
-                <Field label="Title"><input value={faqsContent[`page_title_${editorLanguage}`]} onChange={(e) => updateFaqsValue(`page_title_${editorLanguage}`, e.target.value)} className={textInputClass} /></Field>
-                <Field label="Subtitle"><textarea value={faqsContent[`page_subtitle_${editorLanguage}`]} onChange={(e) => updateFaqsValue(`page_subtitle_${editorLanguage}`, e.target.value)} className={textAreaClass} /></Field>
+                <Field label="Title" hint={`${faqsContent[`page_title_${editorLanguage}`].length}/50`}><input value={faqsContent[`page_title_${editorLanguage}`]} onChange={(e) => updateFaqsValue(`page_title_${editorLanguage}`, e.target.value)} className={textInputClass} maxLength={50} /></Field>
+                <Field label="Subtitle" hint={`${faqsContent[`page_subtitle_${editorLanguage}`].length}/200`}><textarea value={faqsContent[`page_subtitle_${editorLanguage}`]} onChange={(e) => updateFaqsValue(`page_subtitle_${editorLanguage}`, e.target.value)} className={textAreaClass} maxLength={200} /></Field>
               </div>
             </SectionCard>
 
@@ -1638,12 +1638,18 @@ const PublicContentManagement = ({ portal = 'admin' }) => {
               description={`Manage ${editorLanguage === 'en' ? 'English' : 'Tagalog'} FAQ items grouped by category.`}
               items={faqsContent[`faqs_${editorLanguage}`]}
               onChange={(index, field, value) => updateFaqsListItem(`faqs_${editorLanguage}`, index, field, value)}
-              onAdd={() => addFaqsListItem(`faqs_${editorLanguage}`)}
+              onAdd={() => {
+                if (faqsContent[`faqs_${editorLanguage}`].length >= 10) {
+                  alert('Maximum 10 FAQs allowed.');
+                  return;
+                }
+                addFaqsListItem(`faqs_${editorLanguage}`);
+              }}
               onRemove={(index) => removeFaqsListItem(`faqs_${editorLanguage}`, index)}
               fields={[
-                { key: 'question', label: 'Question' },
-                { key: 'category', label: 'Category' },
-                { key: 'answer', label: 'Answer', multiline: true },
+                { key: 'question', label: 'Question', maxLength: 100 },
+                { key: 'category', label: 'Category', maxLength: 50 },
+                { key: 'answer', label: 'Answer', multiline: true, maxLength: 500 },
               ]}
             />
           </div>

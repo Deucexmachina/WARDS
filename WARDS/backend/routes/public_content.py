@@ -47,6 +47,10 @@ _MAX_MISSION_STATEMENT = 500
 _MAX_PLEDGE_TEXT = 500
 _MAX_SERVICE_PLEDGES = 10
 _MAX_PLEDGE_NUMBER = 2
+_MAX_FAQS = 10
+_MAX_FAQ_QUESTION = 100
+_MAX_FAQ_CATEGORY = 50
+_MAX_FAQ_ANSWER = 500
 
 
 def _is_valid_email(value: str) -> bool:
@@ -540,6 +544,26 @@ def _normalize_faqs_content(content: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="FAQs page titles are required.")
     if not normalized["faqs_en"] or not normalized["faqs_tl"]:
         raise HTTPException(status_code=400, detail="At least one FAQ is required for both English and Tagalog.")
+
+    # Length validations
+    for suffix in ("_en", "_tl"):
+        if len(normalized[f"page_title{suffix}"]) > _MAX_PAGE_TITLE:
+            raise HTTPException(status_code=400, detail=f"Page title must be {_MAX_PAGE_TITLE} characters or fewer.")
+        if len(normalized[f"page_subtitle{suffix}"]) > 200:
+            raise HTTPException(status_code=400, detail=f"Page subtitle must be 200 characters or fewer.")
+
+    for lang_key in ("faqs_en", "faqs_tl"):
+        faqs = normalized[lang_key]
+        if len(faqs) > _MAX_FAQS:
+            raise HTTPException(status_code=400, detail=f"Maximum {_MAX_FAQS} FAQs allowed.")
+        for faq in faqs:
+            if len(faq.get("question", "")) > _MAX_FAQ_QUESTION:
+                raise HTTPException(status_code=400, detail=f"FAQ question must be {_MAX_FAQ_QUESTION} characters or fewer.")
+            if len(faq.get("category", "")) > _MAX_FAQ_CATEGORY:
+                raise HTTPException(status_code=400, detail=f"FAQ category must be {_MAX_FAQ_CATEGORY} characters or fewer.")
+            if len(faq.get("answer", "")) > _MAX_FAQ_ANSWER:
+                raise HTTPException(status_code=400, detail=f"FAQ answer must be {_MAX_FAQ_ANSWER} characters or fewer.")
+
     return normalized
 
 
