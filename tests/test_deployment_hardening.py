@@ -503,6 +503,14 @@ def test_incident_actions_use_throttled_monitored_file_housekeeping():
     assert engine.count("run_monitored_file_housekeeping(db)") >= 3
 
 
+def test_startup_registration_handles_duplicate_monitored_file_rows():
+    engine = (Path(__file__).resolve().parents[1] / "SECURITY" / "security_engine.py").read_text()
+
+    assert "seen_path_keys: set[str] = set()" in engine
+    assert "Initial file registration hit duplicate monitored-file row" in engine
+    assert "except IntegrityError as exc:" in engine
+
+
 def test_vm1_frontend_rebuild_does_not_recreate_backend_dependency():
     reporter = (Path(__file__).resolve().parents[1] / "scripts" / "vm1_security_reporter.py").read_text()
 

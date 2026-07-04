@@ -3108,7 +3108,12 @@ def register_initial_files(db: Session, ensure_backup: bool = True, refresh_exis
                 file_entry.file_type = file_type(path)
                 db.add(file_entry)
     else:
+        seen_path_keys: set[str] = set()
         for root_name, path in iter_monitorable_files():
+            path_key = normalized_path_key(path)
+            if path_key in seen_path_keys:
+                continue
+            seen_path_keys.add(path_key)
             relative = safe_rel(path)
             matches = [
                 item for item in (
@@ -3121,7 +3126,6 @@ def register_initial_files(db: Session, ensure_backup: bool = True, refresh_exis
             ]
             existing = None
             if matches:
-                path_key = normalized_path_key(path)
                 existing = next((item for item in matches if normalized_path_key(item.file_path) == path_key), None) or matches[0]
                 for duplicate in matches:
                     if duplicate.id != existing.id:
@@ -3165,7 +3169,14 @@ def register_initial_files(db: Session, ensure_backup: bool = True, refresh_exis
     except Exception:
         pass
     dedupe_monitored_files_by_relative_path(db)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        logger.warning("Initial file registration hit duplicate monitored-file row; running dedupe and continuing: %s", exc)
+        migrate_portable_monitored_files(db)
+        dedupe_monitored_files_by_relative_path(db)
+        db.commit()
     if ensure_backup and not latest_backup_root(db):
         create_manual_backup(db, initiated_by=None, label="initial")
     return created
@@ -3484,6 +3495,17 @@ _ml_model_cache = {"model": None, "mtime": 0.0}
 _ml_model_lock = threading.Lock()
 
 
+def _invalidate_cached_ml_model(reason: str) -> None:
+    _ml_model_cache["model"] = None
+    _ml_model_cache["mtime"] = 0.0
+    for path in (IFOREST_MODEL_PATH, IFOREST_META_PATH):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+    logger.warning("Invalidated Isolation Forest model: %s", reason)
+
+
 def _get_cached_model():
     if not _JOBLIB_AVAILABLE or not IFOREST_MODEL_PATH.exists():
         return None
@@ -3522,6 +3544,7 @@ def ml_anomaly_score(log: dict) -> float:
         x = np.array([build_feature_vector(log)], dtype=float)
         if hasattr(model, "n_features_in_") and int(model.n_features_in_) != int(x.shape[1]):
             logger.warning("ML model feature mismatch: model=%s input=%s", model.n_features_in_, x.shape[1])
+            _invalidate_cached_ml_model("feature mismatch")
             return 0.0
         pred = model.predict(x)[0]
         raw = float(model.decision_function(x)[0])
