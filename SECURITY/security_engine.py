@@ -8349,6 +8349,7 @@ def _queue_vm1_database_restore_command(db: Session, detection_id: int | None = 
             SecurityRecoveryEvent.recovery_type.in_(
                 ["vm1_database_auto_restore", "vm1_database_auto_restore_queued"]
             ),
+            SecurityRecoveryEvent.status.in_(["in_progress", "pending"]),
         ).first()
         if existing_recovery:
             logger.info(
@@ -8417,12 +8418,86 @@ def process_vm1_database_integrity_report(db: Session, payload: dict) -> dict:
         .first()
     )
     if existing_incident:
-        restore_cmd = _queue_vm1_database_restore_command(db, existing_incident.detection_event_id, reason="existing_vm1_database_incident")
-        set_setting(db, "vm1_database_integrity_status", "restore_queued", "vm2_database_monitor")
+        # Build prediction/classification for this report so we can log a detection
+        _context = {
+            "target_type": "vm1_database",
+            "source_ip": "vm1_internal",
+            "host_vm": "vm1",
+            "database_integrity_deviation": True,
+            "vm1_database_scope": str(payload.get("scope") or "critical_system_settings"),
+            "vm1_database_row_count": payload.get("row_count"),
+            "vm1_database_sample": sample[:500],
+            "vm1_database_suspicious_content": suspicious,
+            "vm1_database_baseline_tainted": baseline_tainted,
+        }
+        if suspicious:
+            _prediction = AIPrediction("malicious", 0.95, 0.95, "VM1 critical database integrity checksum deviated from trusted baseline and suspicious content detected.")
+        else:
+            _prediction = AIPrediction("suspicious", 0.55, 0.65, "VM1 critical database integrity checksum deviated from trusted baseline without suspicious content markers.")
+        _flags = ["database_integrity_deviation"]
+        _classification = classify("content_modified", _prediction, _flags, _context)
+        _changed = {
+            "added": [{"line": 1, "text": f"VM1 DB checksum: {checksum}"}],
+            "removed": [{"line": 1, "text": f"Trusted checksum: {baseline or 'uninitialized'}"}],
+            "changed": [],
+            "truncated": False,
+            "total_added": 1,
+            "total_removed": 1,
+        }
+        _detection = SecurityDetectionEvent(
+            file_id=None,
+            target_type="vm1_database",
+            target_name="VM1_DATABASE/critical_system_settings",
+            actor="vm1_reporter",
+            change_type="content_modified",
+            old_hash=baseline or None,
+            new_hash=checksum,
+            is_legitimate=False,
+            admin_id=None,
+            ai_score=_prediction.score,
+            ai_prediction=_prediction.prediction,
+            confidence=_prediction.confidence,
+            severity_level=_classification["severity_level"],
+            cvss_score=_classification["cvss_score"],
+            nist_category=_classification["nist_category"],
+            enisa_threat_type=_classification["enisa_threat_type"],
+            trigger_summary="VM1 critical database settings checksum deviated from trusted baseline. Source IP: vm1_internal.",
+            accuracy_basis=_prediction.basis,
+            behavior_flags_json=json_dumps([BEHAVIOR_LABELS.get(flag, flag) for flag in _flags]),
+            changed_lines_json=json_dumps(_changed),
+            context_json=json_dumps(_context),
+        )
+        db.add(_detection)
+        db.commit()
+        db.refresh(_detection)
+        create_detection_system_alert(db, _detection)
+
+        # Update existing incident with latest state
+        existing_incident.response_action = "auto_recovered_pending_review" if suspicious else "manual_review_required"
+        db.add(existing_incident)
+        db.commit()
+
+        # Queue restore using the NEW detection_id so old completed recoveries don't block it
+        restore_cmd = _queue_vm1_database_restore_command(db, _detection.id, reason="existing_vm1_database_incident")
+        if restore_cmd:
+            _recovery = SecurityRecoveryEvent(
+                detection_event_id=_detection.id,
+                file_id=None,
+                recovery_type="vm1_database_auto_restore_queued",
+                initiated_by=None,
+                status="in_progress",
+                backup_path="latest_vm1_database_archive",
+                summary="VM1 database auto-recovery command queued for existing incident.",
+            )
+            db.add(_recovery)
+            db.commit()
+
+        set_setting(db, "vm1_database_integrity_status", "restore_queued" if suspicious else "manual_review", "vm2_database_monitor")
         return {
             "status": "existing_incident",
             "restore_queued": bool(restore_cmd),
             "command_id": restore_cmd.get("command_id") if restore_cmd else None,
+            "detection_id": _detection.id,
             "incident_id": existing_incident.id,
         }
 
@@ -9476,7 +9551,7 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
                 new_content if content_supplied else "",
             )
             has_open_incident = _has_open_incident(db, entry, "vm1_content_modified")
-            if malicious_content and not has_open_incident:
+            if malicious_content and not has_open_incident and not f.get("git_head_match"):
                 clean_bytes, clean_hash, clean_content = _vm1_local_repo_content(entry.relative_path)
                 snapshot_path = VM1_SNAPSHOT_ROOT / entry.relative_path
                 snapshot_content = read_text(snapshot_path) if snapshot_path.exists() else ""
