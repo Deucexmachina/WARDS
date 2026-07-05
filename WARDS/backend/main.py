@@ -1704,6 +1704,18 @@ def backfill_existing_log_integrity():
         db.close()
 
 
+def ensure_payment_citizen_user_id_column():
+    try:
+        with engine.begin() as conn:
+            columns = {col["name"] for col in inspect(conn).get_columns("payments")}
+            if "citizen_user_id" not in columns:
+                conn.execute(text("ALTER TABLE payments ADD COLUMN citizen_user_id INT"))
+                print("[MIGRATION] Added citizen_user_id column to payments")
+    except Exception as exc:
+        print(f"[MIGRATION] Could not add citizen_user_id column: {exc}")
+
+
+ensure_payment_citizen_user_id_column()
 backfill_existing_log_integrity()
 bootstrap_admin()
 bootstrap_superadmin()
