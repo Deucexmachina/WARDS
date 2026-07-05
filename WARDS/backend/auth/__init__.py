@@ -44,6 +44,7 @@ from auth.decorators import (
     set_auth_cookie,
     set_refresh_cookie,
     verify_branch_access,
+    log_blocked_security_attempt,
     _extract_token_from_request,
     _get_cookie_name,
 )
@@ -118,6 +119,7 @@ __all__ = [
     "set_auth_cookie",
     "set_refresh_cookie",
     "verify_branch_access",
+    "log_blocked_security_attempt",
     "_extract_token_from_request",
     "_get_cookie_name",
     # permissions

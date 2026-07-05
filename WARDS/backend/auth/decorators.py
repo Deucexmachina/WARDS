@@ -39,6 +39,10 @@ def _log_blocked_security_attempt(
     *,
     severity: str = "high",
 ) -> None:
+    try:
+        request.state.security_alert_logged = True
+    except Exception:
+        pass
     db = SessionLocal()
     try:
         host = request.headers.get("host") or "unknown"
@@ -47,17 +51,24 @@ def _log_blocked_security_attempt(
             f"host: {host}; ip: {_get_request_ip(request)}; "
             f"ua: {request.headers.get('user-agent') or 'unknown'}"
         )
-        db.add(ActivityLog(action=title, user=user, details=full_details, type="malicious", severity=severity))
-        db.add(
-            Alert(
-                type="malicious",
-                title=title,
-                message=full_details,
-                severity=severity,
-                read=False,
+        try:
+            db.add(ActivityLog(action=title, user=user, details=full_details, type="malicious", severity=severity))
+            db.commit()
+        except Exception:
+            db.rollback()
+        try:
+            db.add(
+                Alert(
+                    type="malicious",
+                    title=title,
+                    message=full_details,
+                    severity=severity,
+                    read=False,
+                )
             )
-        )
-        db.commit()
+            db.commit()
+        except Exception:
+            db.rollback()
     except Exception:
         pass
     finally:
@@ -101,6 +112,17 @@ def _portal_payload_for_token(token: str, request: Request | None = None) -> tup
                 pass
         return portal, payload
     return None, None
+
+
+def _extract_any_auth_token_from_request(request: Request) -> str | None:
+    for portal in ("admin", "branch", "public"):
+        token = request.cookies.get(_get_cookie_name(portal))
+        if token:
+            return token
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        return auth_header.split(" ", 1)[1]
+    return None
 
 
 def _describe_token_payload(payload: dict | None) -> str:
@@ -330,7 +352,7 @@ async def get_current_admin_user(
     except JWTError:
         pass
 
-    _log_auth_boundary_failure("admin", token, request)
+    _log_auth_boundary_failure("admin", token or _extract_any_auth_token_from_request(request), request)
     raise credentials_exception
 
 
@@ -429,7 +451,7 @@ async def get_current_user(
     except JWTError:
         pass
 
-    _log_auth_boundary_failure("public", token, request)
+    _log_auth_boundary_failure("public", token or _extract_any_auth_token_from_request(request), request)
     raise credentials_exception
 
 
@@ -501,7 +523,7 @@ async def get_current_branch_staff(
     except JWTError:
         pass
 
-    _log_auth_boundary_failure("branch", token, request)
+    _log_auth_boundary_failure("branch", token or _extract_any_auth_token_from_request(request), request)
     raise credentials_exception
 
 
@@ -565,7 +587,7 @@ async def get_current_admin_or_branch_staff(
     except (JWTError, HTTPException):
         pass
 
-    _log_auth_boundary_failure("admin_or_branch", token, request)
+    _log_auth_boundary_failure("admin_or_branch", token or _extract_any_auth_token_from_request(request), request)
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -671,7 +693,7 @@ async def get_current_admin_from_token(request: Request, db: Session) -> Admin:
     except JWTError:
         pass
 
-    _log_auth_boundary_failure("admin", token, request)
+    _log_auth_boundary_failure("admin", token or _extract_any_auth_token_from_request(request), request)
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid or expired token"

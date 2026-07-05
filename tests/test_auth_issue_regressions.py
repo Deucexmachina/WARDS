@@ -169,6 +169,7 @@ def test_frontend_auth_uses_cookie_aware_client_for_deployed_login_flows():
 
 def test_blocked_escalation_attempts_create_system_alerts():
     decorators_source = open("WARDS/backend/auth/decorators.py", encoding="utf-8").read()
+    main_source = open("WARDS/backend/main.py", encoding="utf-8").read()
     users_source = open("WARDS/backend/routes/users.py", encoding="utf-8").read()
     branch_source = open("WARDS/backend/routes/branch_portal.py", encoding="utf-8").read()
 
@@ -177,9 +178,17 @@ def test_blocked_escalation_attempts_create_system_alerts():
     assert "JWT Tampering Attempt" in decorators_source
     assert "Direct Backend Bypass Attempt" in decorators_source
     assert "Session expired: logged in from another device" in decorators_source
-    assert "_log_auth_boundary_failure(\"admin\", token, request)" in decorators_source
-    assert "_log_auth_boundary_failure(\"branch\", token, request)" in decorators_source
+    assert "_log_auth_boundary_failure(\"admin\", token or _extract_any_auth_token_from_request(request), request)" in decorators_source
+    assert "_extract_any_auth_token_from_request(request)" in decorators_source
+    assert "_log_auth_boundary_failure(\"branch\", token or _extract_any_auth_token_from_request(request), request)" in decorators_source
     assert "Alert(" in decorators_source
+    assert "db.rollback()" in decorators_source
+
+    assert "class BlockedAttemptAlertMiddleware" in main_source
+    assert "Session Token Reuse/Tampering Attempt" in main_source
+    assert "Parameter Pollution Elevation Attempt" in main_source
+    assert "Ownership Spoofing Attempt" in main_source
+    assert "app.add_middleware(BlockedAttemptAlertMiddleware)" in main_source
 
     assert "branch staff attempted Branch Admin account-management endpoint" in users_source
     assert "branch account self/admin role-elevation attempt" in users_source

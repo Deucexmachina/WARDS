@@ -64,6 +64,7 @@ except ImportError:
         return request.client.host if request.client and request.client.host else "unknown"
 from middleware.https import HttpsEnforcementMiddleware
 from middleware.injection_blocker import InjectionBlockingMiddleware
+from auth import log_blocked_security_attempt
 
 install_uvicorn_reload_path_filter()
 
@@ -222,6 +223,81 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 hsts_value += "; includeSubDomains"
             self._set_header_if_missing(response, "Strict-Transport-Security", hsts_value)
         
+        return response
+
+
+class BlockedAttemptAlertMiddleware(BaseHTTPMiddleware):
+    """Label blocked compromise attempts that are rejected before route code logs them."""
+
+    PROTECTED_PREFIXES = (
+        "/api/admin",
+        "/api/accounts",
+        "/api/activity-logs",
+        "/api/alerts",
+        "/api/announcements",
+        "/api/backup",
+        "/api/branch",
+        "/api/dashboard",
+        "/api/discrepancies",
+        "/api/memos",
+        "/api/payments",
+        "/api/policies",
+        "/api/receipts",
+        "/api/reports",
+        "/api/security",
+        "/api/settings",
+        "/api/tax-assessment",
+    )
+    PUBLIC_ALLOWED_PREFIXES = (
+        "/api/public/branches",
+        "/api/public/content",
+        "/api/public/faqs",
+        "/api/public/services",
+    )
+
+    def _is_protected_path(self, path: str) -> bool:
+        if any(path.startswith(prefix) for prefix in self.PUBLIC_ALLOWED_PREFIXES):
+            return False
+        return any(path.startswith(prefix) for prefix in self.PROTECTED_PREFIXES)
+
+    def _has_session_evidence(self, request: Request) -> bool:
+        if request.headers.get("authorization", "").startswith("Bearer "):
+            return True
+        return any(
+            request.cookies.get(name)
+            for name in ("wards_admin_access_token", "wards_branch_access_token", "wards_public_access_token")
+        )
+
+    def _label_attempt(self, request: Request, status_code: int) -> tuple[str | None, str | None]:
+        path = request.url.path
+        host = request.headers.get("host") or ""
+        direct_backend = host.endswith(":8000") or request.url.port == 8000
+        if direct_backend and self._is_protected_path(path) and status_code in {401, 403}:
+            return "Direct Backend Bypass Attempt", "direct backend/IP request was blocked by application authentication"
+        if path.startswith("/api/accounts") and status_code == 422:
+            return "Parameter Pollution Elevation Attempt", "account-management request failed schema validation; possible duplicate or malformed role/account parameters"
+        if self._is_protected_path(path) and status_code == 403 and self._has_session_evidence(request):
+            if path.startswith("/api/branch"):
+                return "Privilege Escalation Attempt", "authenticated session was blocked from branch-scoped or branch-privileged endpoint"
+            if path.startswith(("/api/payments", "/api/receipts", "/api/public/queue", "/api/tax-assessment")):
+                return "Ownership Spoofing Attempt", "authenticated session was blocked from another account or protected object"
+            return "Privilege Escalation Attempt", "authenticated session was blocked from a protected higher-privilege endpoint"
+        if self._is_protected_path(path) and status_code == 401 and self._has_session_evidence(request):
+            return "Session Token Reuse/Tampering Attempt", "protected endpoint rejected supplied session token or cookie"
+        return None, None
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        if response.status_code in {401, 403, 422} and not getattr(request.state, "security_alert_logged", False):
+            title, reason = self._label_attempt(request, response.status_code)
+            if title:
+                log_blocked_security_attempt(
+                    title,
+                    "unknown",
+                    f"Reason: {reason}; status_code: {response.status_code}",
+                    request,
+                    severity="high" if response.status_code in {401, 403} else "medium",
+                )
         return response
 
 
@@ -391,6 +467,7 @@ app.add_middleware(HttpsEnforcementMiddleware)
 
 
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(BlockedAttemptAlertMiddleware)
 
 
 app.add_middleware(RequestIntegrityMiddleware, secret=os.getenv("REQUEST_INTEGRITY_SECRET"))
