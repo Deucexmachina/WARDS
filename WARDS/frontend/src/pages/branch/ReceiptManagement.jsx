@@ -31,6 +31,18 @@ const wait = (ms) => new Promise((resolve) => {
   window.setTimeout(resolve, ms);
 });
 
+const DANGEROUS_CHARS_REGEX = /[<>{}();=&|`$\\]/g;
+
+const sanitizeOCRValue = (name, value) => {
+  if (name === 'amount') {
+    return value === '' ? '' : Number(value);
+  }
+  if (typeof value === 'string') {
+    return value.replace(DANGEROUS_CHARS_REGEX, '');
+  }
+  return value;
+};
+
 const dedupeRequestsById = (items) => {
   const seen = new Set();
   return (items || []).filter((item) => {
@@ -1029,10 +1041,11 @@ const ReceiptManagement = () => {
 
   const handleDraftChange = (event) => {
     const { name, value } = event.target;
-    setFieldErrors((prev) => ({ ...prev, [name]: validateField(name, value) }));
+    const sanitized = sanitizeOCRValue(name, value);
+    setFieldErrors((prev) => ({ ...prev, [name]: validateField(name, sanitized) }));
     setOcrDraft((current) => normalizeReceiptDraftReviewState({
       ...current,
-      [name]: name === 'amount' ? (value === '' ? '' : Number(value)) : value,
+      [name]: sanitized,
     }));
   };
 
