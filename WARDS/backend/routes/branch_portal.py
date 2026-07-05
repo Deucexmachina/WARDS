@@ -17,6 +17,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 
 from database.models import ActivityLog, Announcement, AnnouncementAttachment, AnnouncementView, Branch, BranchStaff, BusinessTaxApplication, CollectionAccount, Memo, MemoView, Payment, Policy, PolicyView, Queue, QueueHistory, ReceiptRequest, ReceiptRequestHistory, Remittance, RemittanceItem, Service, get_db
 from auth import get_current_branch_staff, require_any_branch_staff
+from auth.decorators import log_blocked_security_attempt
 from utils.file_delivery import deliver_file_response
 from utils.file_validation import validate_upload_file
 from utils.announcement_attachments import (
@@ -1753,6 +1754,18 @@ async def serve_queue(
     ensure_branch_queue_operations_enabled(db, current_staff.branch_id)
     queue = db.query(Queue).filter(Queue.id == queue_id, Queue.branch_id == current_staff.branch_id).first()
     if not queue:
+        other_branch_queue = db.query(Queue).filter(Queue.id == queue_id).first()
+        if other_branch_queue and other_branch_queue.branch_id != current_staff.branch_id:
+            log_blocked_security_attempt(
+                "Cross-Branch Access Attempt",
+                current_staff.email or current_staff.username or "unknown",
+                (
+                    "Reason: branch account attempted to delete a queue outside its assigned branch; "
+                    f"assigned_branch_id: {current_staff.branch_id}; "
+                    f"target_branch_id: {other_branch_queue.branch_id}; queue_id: {queue_id}"
+                ),
+                request,
+            )
         raise HTTPException(status_code=404, detail="Queue record not found")
     ensure_queue_window_access(db, current_staff, queue)
     if queue_value(queue, "status") != "Called":

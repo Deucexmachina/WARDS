@@ -165,3 +165,23 @@ def test_frontend_auth_uses_cookie_aware_client_for_deployed_login_flows():
     assert "localStorage.getItem('branchToken')" not in api_source
     assert "localStorage.getItem('userToken')" not in api_source
     assert "config.headers.Authorization = `Bearer ${token}`;" not in api_source
+
+
+def test_blocked_escalation_attempts_create_system_alerts():
+    decorators_source = open("WARDS/backend/auth/decorators.py", encoding="utf-8").read()
+    users_source = open("WARDS/backend/routes/users.py", encoding="utf-8").read()
+    branch_source = open("WARDS/backend/routes/branch_portal.py", encoding="utf-8").read()
+
+    assert "log_blocked_security_attempt" in decorators_source
+    assert "Privilege Escalation Attempt" in decorators_source
+    assert "JWT Tampering Attempt" in decorators_source
+    assert "Direct Backend Bypass Attempt" in decorators_source
+    assert "Session expired: logged in from another device" in decorators_source
+    assert "_log_auth_boundary_failure(\"admin\", token, request)" in decorators_source
+    assert "_log_auth_boundary_failure(\"branch\", token, request)" in decorators_source
+    assert "Alert(" in decorators_source
+
+    assert "branch staff attempted Branch Admin account-management endpoint" in users_source
+    assert "branch account self/admin role-elevation attempt" in users_source
+    assert "Cross-Branch Access Attempt" in branch_source
+    assert "attempted to delete a queue outside its assigned branch" in branch_source

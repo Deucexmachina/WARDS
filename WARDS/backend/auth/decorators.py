@@ -28,16 +28,32 @@ def _get_request_ip(request: Request) -> str:
 
 
 def _log_spoofing_attempt(user: str, details: str, request: Request, title: str = "Spoofing Attempt") -> None:
+    _log_blocked_security_attempt(title, user, details, request, severity="high")
+
+
+def _log_blocked_security_attempt(
+    title: str,
+    user: str,
+    details: str,
+    request: Request,
+    *,
+    severity: str = "high",
+) -> None:
     db = SessionLocal()
     try:
-        full_details = f"{details}; ip: {_get_request_ip(request)}; ua: {request.headers.get('user-agent') or 'unknown'}"
-        db.add(ActivityLog(action=title, user=user, details=full_details, type="malicious"))
+        host = request.headers.get("host") or "unknown"
+        full_details = (
+            f"{details}; method: {request.method}; path: {request.url.path}; "
+            f"host: {host}; ip: {_get_request_ip(request)}; "
+            f"ua: {request.headers.get('user-agent') or 'unknown'}"
+        )
+        db.add(ActivityLog(action=title, user=user, details=full_details, type="malicious", severity=severity))
         db.add(
             Alert(
                 type="malicious",
                 title=title,
                 message=full_details,
-                severity="high",
+                severity=severity,
                 read=False,
             )
         )
@@ -46,6 +62,101 @@ def _log_spoofing_attempt(user: str, details: str, request: Request, title: str 
         pass
     finally:
         db.close()
+
+
+def log_blocked_security_attempt(
+    title: str,
+    user: str,
+    details: str,
+    request: Request,
+    *,
+    severity: str = "high",
+) -> None:
+    _log_blocked_security_attempt(title, user, details, request, severity=severity)
+
+
+def _jwt_claims_without_verification(token: str) -> dict:
+    try:
+        return jwt.get_unverified_claims(token)
+    except Exception:
+        return {}
+
+
+def _token_identity_from_claims(claims: dict) -> str:
+    return str(claims.get("email") or claims.get("sub") or claims.get("username") or "unknown")
+
+
+def _portal_payload_for_token(token: str, request: Request | None = None) -> tuple[str, dict] | tuple[None, None]:
+    for portal, config in PORTAL_CONFIG.items():
+        if portal == "unknown":
+            continue
+        try:
+            payload = decode_token(token, config["secret_key"], options={"verify_exp": False})
+        except JWTError:
+            continue
+        if request is not None:
+            try:
+                _validate_token_binding(request, payload)
+            except HTTPException:
+                pass
+        return portal, payload
+    return None, None
+
+
+def _describe_token_payload(payload: dict | None) -> str:
+    payload = payload or {}
+    return (
+        f"token_portal: {payload.get('type') or payload.get('portal') or 'unknown'}; "
+        f"role: {payload.get('internal_role') or payload.get('role') or 'unknown'}; "
+        f"subject: {payload.get('email') or payload.get('sub') or 'unknown'}"
+    )
+
+
+def _log_auth_boundary_failure(expected_portal: str, token: str, request: Request, *, title: str | None = None) -> None:
+    if not token:
+        return
+    portal, payload = _portal_payload_for_token(token)
+    claims = payload or _jwt_claims_without_verification(token)
+    user = _token_identity_from_claims(claims)
+    host = request.headers.get("host") or ""
+    direct_backend = host.endswith(":8000") or request.url.port == 8000
+    expected_matches = (
+        portal == expected_portal
+        or (expected_portal == "admin_or_branch" and portal in {"admin", "branch"})
+    )
+    if portal and not expected_matches:
+        _log_blocked_security_attempt(
+            title or "Privilege Escalation Attempt",
+            user,
+            (
+                f"Reason: cross-portal token used against protected {expected_portal} endpoint; "
+                f"expected_portal: {expected_portal}; actual_portal: {portal}; "
+                f"{_describe_token_payload(payload)}"
+                + ("; direct_backend_ip_bypass: true" if direct_backend else "")
+            ),
+            request,
+        )
+        return
+    if claims:
+        _log_blocked_security_attempt(
+            title or "JWT Tampering Attempt",
+            user,
+            (
+                f"Reason: JWT rejected by protected {expected_portal} endpoint; "
+                f"possible tampered, expired, replayed, or wrong-signature token; "
+                f"{_describe_token_payload(claims)}"
+                + ("; direct_backend_ip_bypass: true" if direct_backend else "")
+            ),
+            request,
+        )
+        return
+    if direct_backend:
+        _log_blocked_security_attempt(
+            "Direct Backend Bypass Attempt",
+            "unknown",
+            f"Reason: direct backend request to protected {expected_portal} endpoint with invalid bearer token",
+            request,
+        )
 
 
 def _validate_token_binding(request: Request, payload: dict) -> None:
@@ -99,6 +210,15 @@ def _validate_active_session(portal: str, user_id: int | None, payload: dict, re
     stored_sid = r.get(f"wards:session:{portal}:{user_id}")
     token_sid = payload.get("sid")
     if stored_sid and token_sid and stored_sid != token_sid:
+        if request is not None:
+            _log_spoofing_attempt(
+                payload.get("email") or payload.get("sub") or "unknown",
+                (
+                    "Reason: Session expired: logged in from another device; "
+                    f"portal: {portal}; expected_sid: {stored_sid}; actual_sid: {token_sid}"
+                ),
+                request,
+            )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Session expired: logged in from another device.",
@@ -210,14 +330,26 @@ async def get_current_admin_user(
     except JWTError:
         pass
 
+    _log_auth_boundary_failure("admin", token, request)
     raise credentials_exception
 
 
 def require_admin_role(*allowed_roles: str):
     async def role_checker(
         current_user: Admin = Depends(get_current_admin_user),
+        request: Request = None,
     ) -> Admin:
         if current_user.role not in allowed_roles:
+            if request is not None:
+                _log_blocked_security_attempt(
+                    "Privilege Escalation Attempt",
+                    getattr(current_user, "email", None) or getattr(current_user, "username", "unknown"),
+                    (
+                        "Reason: authenticated admin role is not allowed for protected endpoint; "
+                        f"current_role: {current_user.role}; required_roles: {', '.join(allowed_roles)}"
+                    ),
+                    request,
+                )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Access denied. Required roles: {', '.join(allowed_roles)}"
@@ -233,8 +365,19 @@ def require_main_admin():
 def require_admin_or_branch_role(*allowed_roles: str):
     async def role_checker(
         current_user=Depends(get_current_admin_or_branch_staff),
+        request: Request = None,
     ):
         if current_user.role not in allowed_roles:
+            if request is not None:
+                _log_blocked_security_attempt(
+                    "Privilege Escalation Attempt",
+                    getattr(current_user, "email", None) or getattr(current_user, "username", "unknown"),
+                    (
+                        "Reason: authenticated account role is not allowed for protected endpoint; "
+                        f"current_role: {current_user.role}; required_roles: {', '.join(allowed_roles)}"
+                    ),
+                    request,
+                )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Access denied. Required roles: {', '.join(allowed_roles)}"
@@ -286,6 +429,7 @@ async def get_current_user(
     except JWTError:
         pass
 
+    _log_auth_boundary_failure("public", token, request)
     raise credentials_exception
 
 
@@ -357,6 +501,7 @@ async def get_current_branch_staff(
     except JWTError:
         pass
 
+    _log_auth_boundary_failure("branch", token, request)
     raise credentials_exception
 
 
@@ -420,6 +565,7 @@ async def get_current_admin_or_branch_staff(
     except (JWTError, HTTPException):
         pass
 
+    _log_auth_boundary_failure("admin_or_branch", token, request)
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -430,8 +576,19 @@ async def get_current_admin_or_branch_staff(
 def require_branch_role(*allowed_roles: str):
     async def role_checker(
         current_staff: BranchStaff = Depends(get_current_branch_staff),
+        request: Request = None,
     ) -> BranchStaff:
         if current_staff.role not in allowed_roles:
+            if request is not None:
+                _log_blocked_security_attempt(
+                    "Privilege Escalation Attempt",
+                    getattr(current_staff, "email", None) or getattr(current_staff, "username", "unknown"),
+                    (
+                        "Reason: branch account role is not allowed for protected endpoint; "
+                        f"current_role: {current_staff.role}; required_roles: {', '.join(allowed_roles)}"
+                    ),
+                    request,
+                )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Access denied. Required roles: {', '.join(allowed_roles)}"
@@ -459,11 +616,21 @@ def require_window_staff(staff: BranchStaff) -> BranchStaff:
 
 async def verify_branch_access(
     branch_id: int,
+    request: Request,
     current_user: Admin = Depends(get_current_admin_user),
 ) -> Admin:
     if current_user.role in {ROLE_MAIN_ADMIN, ROLE_SUPERADMIN}:
         return current_user
 
+    _log_blocked_security_attempt(
+        "Privilege Escalation Attempt",
+        getattr(current_user, "email", None) or getattr(current_user, "username", "unknown"),
+        (
+            "Reason: admin account attempted branch access without required role; "
+            f"current_role: {current_user.role}; target_branch_id: {branch_id}"
+        ),
+        request,
+    )
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Access denied to this branch"
@@ -504,6 +671,7 @@ async def get_current_admin_from_token(request: Request, db: Session) -> Admin:
     except JWTError:
         pass
 
+    _log_auth_boundary_failure("admin", token, request)
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid or expired token"
