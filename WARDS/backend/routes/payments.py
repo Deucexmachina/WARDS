@@ -1280,8 +1280,10 @@ def mark_payment_submitted(payment: Payment):
     elif is_receipt_request:
         payment.status = "Pending Transaction"
     else:
-        payment.verified_at = payment.verified_at or datetime.utcnow()
-        payment.status = "Verified"
+        # Online tax payments must be reviewed by the branch admin before they are
+        # considered verified. Do not set verified_at here; the branch verify endpoint
+        # will set it once the admin approves the transaction.
+        payment.status = "Pending Transaction"
     apply_payment_security(payment)
 
 
@@ -3589,9 +3591,9 @@ async def paymongo_webhook(request: Request, db: Session = Depends(get_db)):
                         send_verified_payment_receipt_if_needed(db, payment, "PayMongo source webhook")
                         
                         db.add(ActivityLog(
-                            action="Payment Verified via PayMongo",
+                            action="Payment Confirmed by PayMongo",
                             user=payment.email or payment.taxpayer_name,
-                            details=f"Payment {payment.ref_number} verified via PayMongo webhook",
+                            details=f"Payment {payment.ref_number} confirmed by PayMongo webhook and is now awaiting branch review",
                             type="transaction",
                         ))
                     
@@ -3688,9 +3690,9 @@ async def paymongo_webhook(request: Request, db: Session = Depends(get_db)):
                 if payment.status in {"Verified", "PAYMENT_SUBMITTED"}:
                     send_verified_payment_receipt_if_needed(db, payment, "PayMongo checkout webhook")
                 db.add(ActivityLog(
-                    action="Payment Verified via Checkout Session",
+                    action="Payment Confirmed by PayMongo",
                     user=payment.email or payment.taxpayer_name,
-                    details=f"Payment {payment.ref_number} verified via checkout session webhook",
+                    details=f"Payment {payment.ref_number} confirmed by PayMongo checkout session and is now awaiting branch review",
                     type="transaction",
                 ))
                 apply_payment_security(payment)
@@ -3818,9 +3820,9 @@ async def check_paymongo_status(
                     update_linked_request_status(db, payment)
                     send_verified_payment_receipt_if_needed(db, payment, "source status reconciliation")
                     db.add(ActivityLog(
-                        action="Payment Verified",
+                        action="Payment Confirmed by PayMongo",
                         user=payment.email or payment.taxpayer_name,
-                        details=f"Payment {ref_number} verified via status check",
+                        details=f"Payment {ref_number} confirmed by PayMongo status check and is now awaiting branch review",
                         type="transaction",
                     ))
                 elif payment_status == "failed":
