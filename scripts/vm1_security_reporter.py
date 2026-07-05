@@ -732,12 +732,15 @@ def apply_database_restore_command(cmd: dict) -> bool:
             log(f"VM1 database restore failed: {stderr[:300]}")
             return False
         log(f"VM1 database restored from latest VM2 archive for command {command_id}")
-        send_database_integrity_report("database_restore")
         return True
     except Exception as exc:
         log(f"VM1 database restore exception: {exc}")
         return False
     finally:
+        try:
+            send_database_integrity_report("database_restore")
+        except Exception as exc:
+            log(f"VM1 database integrity report after restore failed: {exc}")
         try:
             download_path.unlink(missing_ok=True)
         except Exception:

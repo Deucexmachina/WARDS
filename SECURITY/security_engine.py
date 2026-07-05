@@ -8676,28 +8676,41 @@ def acknowledge_vm1_restore_command(db: Session, command_id: str, success: bool)
                 detection_id = cmd.get("detection_id")
                 existing_recovery = db.query(SecurityRecoveryEvent).filter(
                     SecurityRecoveryEvent.detection_event_id == detection_id,
-                    SecurityRecoveryEvent.recovery_type == "vm1_database_auto_restore",
+                    SecurityRecoveryEvent.recovery_type.in_(
+                        ["vm1_database_auto_restore", "vm1_database_auto_restore_queued"]
+                    ),
                 ).first()
                 if existing_recovery:
-                    logger.info("VM1 database restore ack (success) for detection %s ignored; recovery already recorded.", detection_id)
-                    continue
-                set_setting(db, "vm1_database_integrity_status", "restore_acknowledged", "vm1_reporter")
-                expected = get_setting(db, "vm1_database_critical_settings_baseline_checksum", "")
-                baseline_tainted = (get_setting(db, "vm1_database_baseline_tainted", "false") or "false").lower() == "true"
-                if expected and not baseline_tainted:
-                    set_setting(db, "vm1_database_last_integrity_checksum", expected, "vm1_reporter")
-                recovery = SecurityRecoveryEvent(
-                    detection_event_id=detection_id,
-                    file_id=None,
-                    recovery_type="vm1_database_auto_restore",
-                    initiated_by=None,
-                    status="success",
-                    backup_path="latest_vm1_database_archive",
-                    completed_at=now_utc(),
-                    summary="VM1 database automatic restore acknowledged by VM1 reporter.",
-                )
-                db.add(recovery)
-                db.commit()
+                    if existing_recovery.status == "success":
+                        logger.info("VM1 database restore ack (success) for detection %s ignored; recovery already recorded.", detection_id)
+                        continue
+                    # Update the queued recovery to success
+                    existing_recovery.recovery_type = "vm1_database_auto_restore"
+                    existing_recovery.status = "success"
+                    existing_recovery.backup_path = "latest_vm1_database_archive"
+                    existing_recovery.completed_at = now_utc()
+                    existing_recovery.error_message = None
+                    existing_recovery.summary = "VM1 database automatic restore acknowledged by VM1 reporter."
+                    db.add(existing_recovery)
+                    db.commit()
+                else:
+                    set_setting(db, "vm1_database_integrity_status", "restore_acknowledged", "vm1_reporter")
+                    expected = get_setting(db, "vm1_database_critical_settings_baseline_checksum", "")
+                    baseline_tainted = (get_setting(db, "vm1_database_baseline_tainted", "false") or "false").lower() == "true"
+                    if expected and not baseline_tainted:
+                        set_setting(db, "vm1_database_last_integrity_checksum", expected, "vm1_reporter")
+                    recovery = SecurityRecoveryEvent(
+                        detection_event_id=detection_id,
+                        file_id=None,
+                        recovery_type="vm1_database_auto_restore",
+                        initiated_by=None,
+                        status="success",
+                        backup_path="latest_vm1_database_archive",
+                        completed_at=now_utc(),
+                        summary="VM1 database automatic restore acknowledged by VM1 reporter.",
+                    )
+                    db.add(recovery)
+                    db.commit()
                 continue
             rel_path = cmd.get("relative_path")
             if not rel_path:
@@ -8751,24 +8764,37 @@ def acknowledge_vm1_restore_command(db: Session, command_id: str, success: bool)
                 detection_id = cmd.get("detection_id")
                 existing_recovery = db.query(SecurityRecoveryEvent).filter(
                     SecurityRecoveryEvent.detection_event_id == detection_id,
-                    SecurityRecoveryEvent.recovery_type == "vm1_database_auto_restore",
+                    SecurityRecoveryEvent.recovery_type.in_(
+                        ["vm1_database_auto_restore", "vm1_database_auto_restore_queued"]
+                    ),
                 ).first()
                 if existing_recovery:
-                    logger.info("VM1 database restore ack (failure) for detection %s ignored; recovery already recorded.", detection_id)
-                    continue
-                recovery = SecurityRecoveryEvent(
-                    detection_event_id=detection_id,
-                    file_id=None,
-                    recovery_type="vm1_database_auto_restore",
-                    initiated_by=None,
-                    status="failed",
-                    backup_path="latest_vm1_database_archive",
-                    completed_at=now_utc(),
-                    error_message="VM1 reporter failed to apply database restore command.",
-                    summary="VM1 database automatic restore failed on VM1 reporter.",
-                )
-                db.add(recovery)
-                db.commit()
+                    if existing_recovery.status == "failed":
+                        logger.info("VM1 database restore ack (failure) for detection %s ignored; recovery already recorded.", detection_id)
+                        continue
+                    # Update the queued recovery to failed
+                    existing_recovery.recovery_type = "vm1_database_auto_restore"
+                    existing_recovery.status = "failed"
+                    existing_recovery.backup_path = "latest_vm1_database_archive"
+                    existing_recovery.completed_at = now_utc()
+                    existing_recovery.error_message = "VM1 reporter failed to apply database restore command."
+                    existing_recovery.summary = "VM1 database automatic restore failed on VM1 reporter."
+                    db.add(existing_recovery)
+                    db.commit()
+                else:
+                    recovery = SecurityRecoveryEvent(
+                        detection_event_id=detection_id,
+                        file_id=None,
+                        recovery_type="vm1_database_auto_restore",
+                        initiated_by=None,
+                        status="failed",
+                        backup_path="latest_vm1_database_archive",
+                        completed_at=now_utc(),
+                        error_message="VM1 reporter failed to apply database restore command.",
+                        summary="VM1 database automatic restore failed on VM1 reporter.",
+                    )
+                    db.add(recovery)
+                    db.commit()
                 set_setting(db, "vm1_database_integrity_status", "restore_failed", "vm1_reporter")
                 continue
             logger.error("VM1 reporter failed to apply file restore command for %s", cmd.get("relative_path") or "unknown")
