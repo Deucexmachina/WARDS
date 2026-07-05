@@ -31,17 +31,7 @@ const wait = (ms) => new Promise((resolve) => {
   window.setTimeout(resolve, ms);
 });
 
-const DANGEROUS_CHARS_REGEX = /[<>{}();=&|`$\\]/g;
-
-const sanitizeOCRValue = (name, value) => {
-  if (name === 'amount') {
-    return value === '' ? '' : Number(value);
-  }
-  if (typeof value === 'string') {
-    return value.replace(DANGEROUS_CHARS_REGEX, '');
-  }
-  return value;
-};
+const DANGEROUS_CHARS_REGEX = /[<>{}();=&|`$\\]/;
 
 const dedupeRequestsById = (items) => {
   const seen = new Set();
@@ -414,12 +404,13 @@ const validateField = (name, value) => {
   switch (name) {
     case 'ref_number':
       if (value && value.length > 100) return 'Reference number must be 100 characters or fewer.';
+      if (value && DANGEROUS_CHARS_REGEX.test(value)) return 'One or more fields contain an invalid value.';
       break;
     case 'taxpayer_name':
       if (value && value.length > 255) return 'Taxpayer name must be 255 characters or fewer.';
       if (value && value.trim().length > 0 && value.trim().length < 2) return 'Taxpayer name must be at least 2 characters.';
       if (value && /\d/.test(value)) return 'Taxpayer name must not contain numbers.';
-      if (value && /[<>]/.test(value)) return 'Taxpayer name must not contain < or > symbols.';
+      if (value && DANGEROUS_CHARS_REGEX.test(value)) return 'One or more fields contain an invalid value.';
       break;
     case 'transaction_date':
       if (value && /[^0-9/-]/.test(value)) {
@@ -461,6 +452,7 @@ const validateField = (name, value) => {
       break;
     case 'market_purpose_of_renewal':
       if (value && value.length > 255) return 'Purpose must be 255 characters or fewer.';
+      if (value && DANGEROUS_CHARS_REGEX.test(value)) return 'One or more fields contain an invalid value.';
       break;
     default:
       break;
@@ -1041,11 +1033,10 @@ const ReceiptManagement = () => {
 
   const handleDraftChange = (event) => {
     const { name, value } = event.target;
-    const sanitized = sanitizeOCRValue(name, value);
-    setFieldErrors((prev) => ({ ...prev, [name]: validateField(name, sanitized) }));
+    setFieldErrors((prev) => ({ ...prev, [name]: validateField(name, value) }));
     setOcrDraft((current) => normalizeReceiptDraftReviewState({
       ...current,
-      [name]: sanitized,
+      [name]: name === 'amount' ? (value === '' ? '' : Number(value)) : value,
     }));
   };
 
