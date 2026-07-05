@@ -1715,7 +1715,20 @@ def ensure_payment_citizen_user_id_column():
         print(f"[MIGRATION] Could not add citizen_user_id column: {exc}")
 
 
+def ensure_remittance_tables():
+    try:
+        from database.models import Remittance, RemittanceItem
+        with engine.begin() as conn:
+            tables = {t for t in inspect(conn).get_table_names()}
+            if "remittances" not in tables or "remittance_items" not in tables:
+                Base.metadata.create_all(conn, tables=[Remittance.__table__, RemittanceItem.__table__])
+                print("[MIGRATION] Created remittances and/or remittance_items tables")
+    except Exception as exc:
+        print(f"[MIGRATION] Could not create remittance tables: {exc}")
+
+
 ensure_payment_citizen_user_id_column()
+ensure_remittance_tables()
 backfill_existing_log_integrity()
 bootstrap_admin()
 bootstrap_superadmin()
