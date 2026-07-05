@@ -27,15 +27,15 @@ def _get_request_ip(request: Request) -> str:
     return get_client_ip(request)
 
 
-def _log_spoofing_attempt(user: str, details: str, request: Request) -> None:
+def _log_spoofing_attempt(user: str, details: str, request: Request, title: str = "Spoofing Attempt") -> None:
     db = SessionLocal()
     try:
         full_details = f"{details}; ip: {_get_request_ip(request)}; ua: {request.headers.get('user-agent') or 'unknown'}"
-        db.add(ActivityLog(action="Spoofing Attempt", user=user, details=full_details, type="malicious"))
+        db.add(ActivityLog(action=title, user=user, details=full_details, type="malicious"))
         db.add(
             Alert(
                 type="malicious",
-                title="Spoofing Attempt",
+                title=title,
                 message=full_details,
                 severity="high",
                 read=False,
@@ -99,13 +99,6 @@ def _validate_active_session(portal: str, user_id: int | None, payload: dict, re
     stored_sid = r.get(f"wards:session:{portal}:{user_id}")
     token_sid = payload.get("sid")
     if stored_sid and token_sid and stored_sid != token_sid:
-        if request is not None:
-            user = payload.get("email") or payload.get("sub") or str(user_id)
-            _log_spoofing_attempt(
-                user,
-                f"Reason: Session expired: logged in from another device; portal: {portal}; expected_sid: {stored_sid}; actual_sid: {token_sid}",
-                request,
-            )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Session expired: logged in from another device.",
