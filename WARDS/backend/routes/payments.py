@@ -1263,6 +1263,13 @@ def map_workflow_status_to_serialized(status_value: str | None) -> str:
 
 def mark_payment_submitted(payment: Payment):
     payment.paymongo_status = "paid"
+    is_receipt_request = (
+        payment.source_module == "receipt_request"
+        or (
+            payment.related_request_id
+            and (payment.tax_type or get_decrypted_or_raw(payment, "tax_type") or "") == "Receipt Request Fee"
+        )
+    )
     if payment.source_module in {"rpt_online_payment", "business_tax_online_payment"}:
         payment.verified_at = payment.verified_at or datetime.utcnow()
         payment.status = "PAYMENT_SUBMITTED"
@@ -1270,7 +1277,7 @@ def mark_payment_submitted(payment: Payment):
         metadata["payment_timestamp"] = payment.verified_at.isoformat()
         metadata["awaiting_treasury_validation"] = True
         set_payment_metadata(payment, metadata)
-    elif payment.source_module == "receipt_request":
+    elif is_receipt_request:
         payment.status = "Pending Transaction"
     else:
         payment.verified_at = payment.verified_at or datetime.utcnow()

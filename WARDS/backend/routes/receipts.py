@@ -666,10 +666,7 @@ def is_verified_receipt_payment(payment: Payment | None) -> bool:
     if not payment:
         return False
     normalized_status = (payment.status or "").strip().lower()
-    return (
-        normalized_status in {"verified", "payment verified", "payment_verified", "or_generated", "completed", "confirmed"}
-        or payment.verified_at is not None
-    )
+    return normalized_status in {"verified", "payment verified", "payment_verified"}
 
 
 def get_receipt_request_payment_status(request: ReceiptRequest, payment: Payment | None) -> str:

@@ -2,7 +2,6 @@
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from types import SimpleNamespace
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
