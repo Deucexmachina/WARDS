@@ -1,5 +1,6 @@
 import json
 import re
+import urllib.parse
 from typing import Any
 
 from fastapi import Request
@@ -85,6 +86,59 @@ def _scan_dict(data: Any) -> tuple[str, str] | None:
     return None
 
 
+def _extract_boundary(content_type: str) -> bytes | None:
+    match = re.search(r'boundary=([^;]+)', content_type, re.IGNORECASE)
+    if match:
+        boundary = match.group(1).strip().strip('"')
+        return boundary.encode('utf-8')
+    return None
+
+
+def _extract_multipart_text_fields(body: bytes, boundary: bytes) -> list[tuple[str, str]]:
+    """Extract non-file form field values from a multipart body."""
+    fields: list[tuple[str, str]] = []
+    delimiter = b"--" + boundary
+    parts = body.split(delimiter)
+    for part in parts:
+        part = part.strip()
+        if not part or part == b"--":
+            continue
+
+        header_end = part.find(b"\r\n\r\n")
+        if header_end == -1:
+            header_end = part.find(b"\n\n")
+            offset = 2 if header_end != -1 else None
+        else:
+            offset = 4
+
+        if offset is None:
+            continue
+
+        headers = part[:header_end].decode('utf-8', errors='replace')
+        content = part[header_end + offset:]
+
+        if content.endswith(b"\r\n"):
+            content = content[:-2]
+        elif content.endswith(b"\n"):
+            content = content[:-1]
+
+        if 'filename=' in headers:
+            continue
+
+        name_match = re.search(r'name="([^"]+)"', headers)
+        if name_match:
+            name = name_match.group(1)
+            value = content.decode('utf-8', errors='replace')
+            fields.append((name, value))
+
+    return fields
+
+
+def _reinject_body(request: Request, body: bytes) -> None:
+    async def _receive():
+        return {"type": "http.request", "body": body}
+    request._receive = _receive
+
 
 class InjectionBlockingMiddleware(BaseHTTPMiddleware):
     """
@@ -101,6 +155,7 @@ class InjectionBlockingMiddleware(BaseHTTPMiddleware):
 
         if request.method in ("POST", "PUT", "PATCH"):
             content_type = request.headers.get("content-type", "")
+
             if "application/json" in content_type:
                 body = await request.body()
                 if body:
@@ -114,10 +169,36 @@ class InjectionBlockingMiddleware(BaseHTTPMiddleware):
                         if hit:
                             return _blocked_response(hit[0], hit[1], request)
 
-                    async def _receive():
-                        return {"type": "http.request", "body": body}
+                    _reinject_body(request, body)
 
-                    request._receive = _receive  
+            elif "application/x-www-form-urlencoded" in content_type:
+                body = await request.body()
+                if body:
+                    text = body.decode('utf-8', errors='replace')
+                    params = urllib.parse.parse_qsl(text)
+                    for key, val in params:
+                        if _is_suspicious(val):
+                            return _blocked_response(key, val, request)
+                    _reinject_body(request, body)
+
+            elif "multipart/form-data" in content_type:
+                body = await request.body()
+                if body:
+                    boundary = _extract_boundary(content_type)
+                    if boundary:
+                        fields = _extract_multipart_text_fields(body, boundary)
+                        for key, val in fields:
+                            if _is_suspicious(val):
+                                return _blocked_response(key, val, request)
+                    _reinject_body(request, body)
+
+            elif "text/plain" in content_type:
+                body = await request.body()
+                if body:
+                    text = body.decode('utf-8', errors='replace')
+                    if _is_suspicious(text):
+                        return _blocked_response("body", text, request)
+                    _reinject_body(request, body)
 
         return await call_next(request)
 
