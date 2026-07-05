@@ -9,6 +9,7 @@ from database.models import ActivityLog, Alert, Admin, BranchStaff, CitizenUser,
 from auth.token_revocation import is_token_revoked
 from utils.field_crypto import find_citizen_by_email
 from utils.redis_client import get_redis_client
+from utils.request_helpers import get_client_ip
 from auth.jwt_utils import (
     ALGORITHM,
     ADMIN_SECRET_KEY,
@@ -23,10 +24,7 @@ BINDING_CHECK_UA = os.getenv("TOKEN_BINDING_UA", "false").lower() == "true"
 
 
 def _get_request_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",", 1)[0].strip() or "unknown"
-    return request.client.host if request.client else "unknown"
+    return get_client_ip(request)
 
 
 def _log_spoofing_attempt(user: str, details: str, request: Request) -> None:
@@ -54,7 +52,11 @@ def _validate_token_binding(request: Request, payload: dict) -> None:
     """Raise 401 if token ip or ua claims do not match the current request."""
     if not BINDING_STRICT_MODE:
         return
-    client_ip = request.client.host if request.client else "unknown"
+    # Super Admin manages branches from a variety of networks/devices; do not
+    # flag them as spoofing for routine branch management.
+    if payload.get("internal_role") == ROLE_SUPERADMIN:
+        return
+    client_ip = get_client_ip(request)
     user_agent = request.headers.get("user-agent") or ""
     token_ip = payload.get("ip")
     token_ua = payload.get("ua")
@@ -86,6 +88,10 @@ def _validate_token_binding(request: Request, payload: dict) -> None:
 def _validate_active_session(portal: str, user_id: int | None, payload: dict, request: Request | None = None) -> None:
     """Raise 401 if the token session ID no longer matches the stored active session."""
     if not user_id:
+        return
+    # Super Admin manages branches from a variety of networks/devices; do not
+    # flag them as spoofing for routine branch management.
+    if payload.get("internal_role") == ROLE_SUPERADMIN:
         return
     r = get_redis_client()
     if not r:

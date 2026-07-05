@@ -33,6 +33,7 @@ from slowapi.errors import RateLimitExceeded
 
 from database.models import ActivityLog, Alert, Admin, AdminLoginSecurityProfile, BranchStaff, CitizenUser, EmailOTP, Invite, MFASecret, get_db
 from utils.redis_client import get_redis_client
+from utils.request_helpers import get_client_ip
 from services.email_service import (
     _safe_html,
     send_account_change_notification_email,
@@ -701,39 +702,6 @@ def verify_recaptcha(token: str, client_ip: str) -> bool:
         return False
 
 
-def get_client_ip(request) -> str:
-    """Extract real client IP, respecting reverse-proxy / CDN headers."""
-    if request is None:
-        return "unknown"
-    # Cloudflare
-    cf_ip = request.headers.get("cf-connecting-ip")
-    if cf_ip:
-        return cf_ip.strip()
-    # Cloudflare Enterprise / Akamai
-    true_client = request.headers.get("true-client-ip")
-    if true_client:
-        return true_client.strip()
-    # Standard proxies (nginx, AWS ALB, Heroku, etc.)
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    real_ip = request.headers.get("x-real-ip")
-    if real_ip:
-        return real_ip.strip()
-    # RFC 7239 Forwarded
-    forwarded_rfc = request.headers.get("forwarded")
-    if forwarded_rfc:
-        match = forwarded_rfc.split("for=")
-        if len(match) > 1:
-            ip_candidate = match[1].split(";")[0].split(",")[0].strip().strip('"')
-            if ip_candidate:
-                return ip_candidate
-    # Direct connection
-    if request.client and request.client.host:
-        return request.client.host
-    return "unknown"
-
-
 def log_activity(db: Session, action: str, user: str, details: str, log_type: str = "auth", *, request=None, role=None, branch=None, email=None, account=None, severity: str = "high"):
     if account is not None:
         role = role or getattr(account, "role", None)
@@ -1280,7 +1248,7 @@ def get_account_type_label(portal: str, account: object) -> str:
 @router.post("/login", response_model=UnifiedToken)
 @limiter.limit("10/minute")
 async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: Session = Depends(get_db)):
-    client_ip = request.client.host
+    client_ip = get_client_ip(request)
 
     portal, account = find_account_for_portal(db, credentials.identifier, credentials.portal)
     abuse_key = tracking_key(portal or "unknown", credentials.identifier)
@@ -1712,7 +1680,7 @@ async def unified_refresh_token(request: Request, payload: RefreshTokenRequest, 
     token_payload = build_token_payload(
         portal,
         account,
-        ip=request.client.host if request.client else None,
+        ip=get_client_ip(request),
         ua=request.headers.get("user-agent"),
     )
     if sid:

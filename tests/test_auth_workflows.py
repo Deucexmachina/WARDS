@@ -249,3 +249,43 @@ def test_token_binding_rejects_changed_user_agent(monkeypatch):
         _validate_token_binding(request, {"ip": "127.0.0.1", "ua": "old-agent"})
 
     assert "device" in str(exc.value.detail).lower()
+
+
+def test_token_binding_uses_real_client_ip_from_proxy_headers(monkeypatch):
+    """When the app is behind a reverse proxy, binding must use X-Forwarded-For,
+    not request.client.host."""
+    monkeypatch.setattr(decorators, "BINDING_CHECK_UA", False)
+    # Proxy is 10.0.0.1, real client is 1.2.3.4
+    request = SimpleNamespace(
+        client=SimpleNamespace(host="10.0.0.1"),
+        headers={"x-forwarded-for": "1.2.3.4"},
+    )
+
+    # Same real client IP: should pass
+    _validate_token_binding(request, {"ip": "1.2.3.4"})
+
+    # Different real client IP: should raise
+    with pytest.raises(Exception) as exc:
+        _validate_token_binding(request, {"ip": "5.6.7.8"})
+
+    assert "ip" in str(exc.value.detail).lower()
+
+
+def test_token_binding_exempts_superadmin_for_branch_management(monkeypatch):
+    """Super Admin should not be flagged as spoofing when managing branches from
+    a different IP or device."""
+    monkeypatch.setattr(decorators, "BINDING_CHECK_UA", True)
+    request = SimpleNamespace(
+        client=SimpleNamespace(host="9.9.9.9"),
+        headers={"user-agent": "different-agent"},
+    )
+
+    # Super Admin with different IP and UA: should pass without exception
+    _validate_token_binding(
+        request,
+        {
+            "ip": "1.2.3.4",
+            "ua": "original-agent",
+            "internal_role": "superadmin",
+        },
+    )
