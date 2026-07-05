@@ -37,6 +37,25 @@ const DEFAULT_PASSWORD_FORM = {
   confirm_new_password: '',
 };
 
+const TDN_FORMAT_REGEX = /^C-\d{3}-\d{5}$/i;
+const MAYOR_PERMIT_FORMAT_REGEX = /^\d{2}-\d{6}$|^\d{4}-\d{6}$/;
+const SEC_DTI_CDA_FORMAT_REGEX = /^\d{8}$|^\d{4}\d{2}\d{7}-\d{2}$|^\d{4}-\d{10}$/;
+
+const getIdentifierFormatError = (name, value) => {
+  if (!value || !String(value).trim()) return '';
+  const trimmed = String(value).trim();
+  switch (name) {
+    case 'tdn':
+      return TDN_FORMAT_REGEX.test(trimmed) ? '' : 'Invalid TDN format. Expected: C-XXX-XXXXX';
+    case 'mayor_permit_number':
+      return MAYOR_PERMIT_FORMAT_REGEX.test(trimmed) ? '' : "Invalid Mayor's Permit format. Expected: XX-XXXXXX or YYYY-XXXXXX";
+    case 'sec_dti_cda_number':
+      return SEC_DTI_CDA_FORMAT_REGEX.test(trimmed) ? '' : 'Invalid registration format. Expected DTI: XXXXXXXX, SEC: YYYYMMXXXXXXX-XX, or CDA: XXXX-XXXXXXXXXX';
+    default:
+      return '';
+  }
+};
+
 const statusTone = {
   'Pending Verification': 'bg-amber-100 text-amber-800 border-amber-200',
   Verified: 'bg-emerald-100 text-emerald-800 border-emerald-200',
@@ -389,7 +408,8 @@ const AccountManagement = () => {
       [name]: name === 'supporting_file' ? file : value,
       taxpayer_type: name === 'submission_type' && value === 'RPT' ? profile.taxpayer_type : current.taxpayer_type,
     }));
-    setIdentifierErrors((current) => ({ ...current, [name]: '' }));
+    const formatError = getIdentifierFormatError(name, value);
+    setIdentifierErrors((current) => ({ ...current, [name]: formatError }));
     if (name === 'submission_type') setIdentifierErrors({});
     setMessage('');
     setError('');
@@ -532,9 +552,21 @@ const AccountManagement = () => {
     const nextIdentifierErrors = {};
     if (identifierForm.submission_type === 'RPT') {
       if (!String(identifierForm.tdn || '').trim()) nextIdentifierErrors.tdn = 'Tax Declaration Number is required.';
+      else {
+        const tdnError = getIdentifierFormatError('tdn', identifierForm.tdn);
+        if (tdnError) nextIdentifierErrors.tdn = tdnError;
+      }
     } else {
       if (!String(identifierForm.mayor_permit_number || '').trim()) nextIdentifierErrors.mayor_permit_number = "Mayor's Permit Number is required.";
+      else {
+        const permitError = getIdentifierFormatError('mayor_permit_number', identifierForm.mayor_permit_number);
+        if (permitError) nextIdentifierErrors.mayor_permit_number = permitError;
+      }
       if (!String(identifierForm.sec_dti_cda_number || '').trim()) nextIdentifierErrors.sec_dti_cda_number = 'SEC/DTI/CDA Registration Number is required.';
+      else {
+        const regError = getIdentifierFormatError('sec_dti_cda_number', identifierForm.sec_dti_cda_number);
+        if (regError) nextIdentifierErrors.sec_dti_cda_number = regError;
+      }
     }
     if (!identifierForm.supporting_file) nextIdentifierErrors.supporting_file = 'A supporting document is required.';
     if (Object.keys(nextIdentifierErrors).length) {
@@ -757,19 +789,19 @@ const AccountManagement = () => {
                     {identifierForm.submission_type === 'RPT' ? (
                       <label className="block">
                         <span className="mb-2 block text-sm font-semibold text-slate-700">Tax Declaration Number (TDN)</span>
-                        <input name="tdn" value={identifierForm.tdn} onChange={handleIdentifierChange} className={`w-full rounded-2xl border px-4 py-3 text-sm uppercase outline-none transition focus:ring-2 focus:ring-[#0f5b83]/10 ${identifierErrors.tdn ? 'border-rose-400 bg-rose-50 focus:border-rose-500' : 'border-slate-300 focus:border-[#0f5b83]'}`} />
+                        <input name="tdn" value={identifierForm.tdn} onChange={handleIdentifierChange} placeholder="C-123-45678" className={`w-full rounded-2xl border px-4 py-3 text-sm uppercase outline-none transition focus:ring-2 focus:ring-[#0f5b83]/10 ${identifierErrors.tdn ? 'border-rose-400 bg-rose-50 focus:border-rose-500' : 'border-slate-300 focus:border-[#0f5b83]'}`} />
                         {identifierErrors.tdn ? <span className="mt-2 block text-xs font-medium text-rose-600">{identifierErrors.tdn}</span> : null}
                       </label>
                     ) : (
                       <>
                         <label className="block">
                           <span className="mb-2 block text-sm font-semibold text-slate-700">Mayor&apos;s Permit Number</span>
-                          <input name="mayor_permit_number" value={identifierForm.mayor_permit_number} onChange={handleIdentifierChange} className={`w-full rounded-2xl border px-4 py-3 text-sm uppercase outline-none transition focus:ring-2 focus:ring-[#0f5b83]/10 ${identifierErrors.mayor_permit_number ? 'border-rose-400 bg-rose-50 focus:border-rose-500' : 'border-slate-300 focus:border-[#0f5b83]'}`} />
+                          <input name="mayor_permit_number" value={identifierForm.mayor_permit_number} onChange={handleIdentifierChange} placeholder="12-345678 or 2025-345678" className={`w-full rounded-2xl border px-4 py-3 text-sm uppercase outline-none transition focus:ring-2 focus:ring-[#0f5b83]/10 ${identifierErrors.mayor_permit_number ? 'border-rose-400 bg-rose-50 focus:border-rose-500' : 'border-slate-300 focus:border-[#0f5b83]'}`} />
                           {identifierErrors.mayor_permit_number ? <span className="mt-2 block text-xs font-medium text-rose-600">{identifierErrors.mayor_permit_number}</span> : null}
                         </label>
                         <label className="block">
                           <span className="mb-2 block text-sm font-semibold text-slate-700">SEC/DTI/CDA Registration Number</span>
-                          <input name="sec_dti_cda_number" value={identifierForm.sec_dti_cda_number} onChange={handleIdentifierChange} className={`w-full rounded-2xl border px-4 py-3 text-sm uppercase outline-none transition focus:ring-2 focus:ring-[#0f5b83]/10 ${identifierErrors.sec_dti_cda_number ? 'border-rose-400 bg-rose-50 focus:border-rose-500' : 'border-slate-300 focus:border-[#0f5b83]'}`} />
+                          <input name="sec_dti_cda_number" value={identifierForm.sec_dti_cda_number} onChange={handleIdentifierChange} placeholder="DTI: 12345678 / SEC: 2025012345678-01 / CDA: 1234-5678901234" className={`w-full rounded-2xl border px-4 py-3 text-sm uppercase outline-none transition focus:ring-2 focus:ring-[#0f5b83]/10 ${identifierErrors.sec_dti_cda_number ? 'border-rose-400 bg-rose-50 focus:border-rose-500' : 'border-slate-300 focus:border-[#0f5b83]'}`} />
                           {identifierErrors.sec_dti_cda_number ? <span className="mt-2 block text-xs font-medium text-rose-600">{identifierErrors.sec_dti_cda_number}</span> : null}
                         </label>
                       </>

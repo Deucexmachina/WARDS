@@ -146,7 +146,12 @@ def normalize_mime_type(mime_type: str) -> str:
 
 REVIEWABLE_STATUSES = {"Pending Verification", "Verified", "Rejected"}
 ACTIVE_ASSESSMENT_STATUSES = {"Active", "Inactive"}
-IDENTIFIER_PATTERN = re.compile(r"^[A-Z0-9-]{6,40}$")
+TDN_PATTERN = re.compile(r"^C-\d{3}-\d{5}$", re.IGNORECASE)
+MAYOR_PERMIT_PATTERN = re.compile(r"^(\d{2}-\d{6}|\d{4}-\d{6})$")
+DTI_PATTERN = re.compile(r"^\d{8}$")
+SEC_PATTERN = re.compile(r"^\d{4}\d{2}\d{7}-\d{2}$")
+CDA_PATTERN = re.compile(r"^\d{4}-\d{10}$")
+SEC_DTI_CDA_PATTERN = re.compile(r"^(\d{8}|\d{4}\d{2}\d{7}-\d{2}|\d{4}-\d{10})$")
 ASSESSMENT_CLEAR_PAYMENT_STATUSES = {"PAYMENT_VERIFIED", "OR_GENERATED", "COMPLETED", "VERIFIED"}
 
 
@@ -229,9 +234,11 @@ def normalize_submission_type(value: str) -> str:
     return normalized
 
 
-def normalize_identifier(value: str, label: str) -> str:
+def normalize_identifier(value: str, label: str, pattern: re.Pattern | None = None) -> str:
     normalized = (value or "").strip().upper()
-    if not normalized or not IDENTIFIER_PATTERN.fullmatch(normalized):
+    if not normalized:
+        raise HTTPException(status_code=400, detail=f"Invalid {label} format.")
+    if pattern and not pattern.fullmatch(normalized):
         raise HTTPException(status_code=400, detail=f"Invalid {label} format.")
     return normalized
 
@@ -861,13 +868,13 @@ async def create_taxpayer_identifier_submission(
     identifier_value = ""
 
     if normalized_submission_type == "RPT":
-        normalized_tdn = normalize_identifier(tdn or "", "Tax Declaration Number")
+        normalized_tdn = normalize_identifier(tdn or "", "Tax Declaration Number", TDN_PATTERN)
         identifier_value = normalized_tdn
     else:
         if normalized_taxpayer_type != "Business Owner":
             raise HTTPException(status_code=400, detail="Business Tax submissions require taxpayer type Business Owner.")
-        normalized_permit = normalize_identifier(mayor_permit_number or "", "Mayor's Permit Number")
-        normalized_registration = normalize_identifier(sec_dti_cda_number or "", "SEC/DTI/CDA Number")
+        normalized_permit = normalize_identifier(mayor_permit_number or "", "Mayor's Permit Number", MAYOR_PERMIT_PATTERN)
+        normalized_registration = normalize_identifier(sec_dti_cda_number or "", "SEC/DTI/CDA Number", SEC_DTI_CDA_PATTERN)
         identifier_value = f"{normalized_permit} / {normalized_registration}"
 
     ensure_identifier_not_owned_by_another_user(
@@ -1291,9 +1298,9 @@ async def upsert_tax_assessment(
     if not branch:
         raise HTTPException(status_code=404, detail="Assigned branch not found.")
 
-    normalized_tdn = normalize_identifier(payload.tdn or "", "Tax Declaration Number") if tax_type == "RPT" else None
-    normalized_permit = normalize_identifier(payload.mayor_permit_number or "", "Mayor's Permit Number") if tax_type == "BT" else None
-    normalized_registration = normalize_identifier(payload.sec_dti_cda_number or "", "SEC/DTI/CDA Number") if tax_type == "BT" else None
+    normalized_tdn = normalize_identifier(payload.tdn or "", "Tax Declaration Number", TDN_PATTERN) if tax_type == "RPT" else None
+    normalized_permit = normalize_identifier(payload.mayor_permit_number or "", "Mayor's Permit Number", MAYOR_PERMIT_PATTERN) if tax_type == "BT" else None
+    normalized_registration = normalize_identifier(payload.sec_dti_cda_number or "", "SEC/DTI/CDA Number", SEC_DTI_CDA_PATTERN) if tax_type == "BT" else None
 
     if tax_type == "RPT":
         if not normalized_tdn:
