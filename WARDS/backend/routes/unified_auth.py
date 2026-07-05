@@ -152,6 +152,8 @@ SERVER_STARTED_AT = _get_server_started_at()
 MAX_LOGIN_ATTEMPTS = int(os.getenv("MAX_LOGIN_ATTEMPTS", "5"))
 RATE_LIMIT_WINDOW = 60
 MAX_REQUESTS_PER_WINDOW = 30
+CREDENTIAL_STUFFING_THRESHOLD = int(os.getenv("CREDENTIAL_STUFFING_THRESHOLD", "5"))
+CREDENTIAL_STUFFING_WINDOW = int(os.getenv("CREDENTIAL_STUFFING_WINDOW", "300"))
 STRIKE_RESET_SECONDS = 24 * 60 * 60  # Reset strikes 1-5 after 24h of inactivity
 MFA_VALID_WINDOW_STEPS = 2
 
@@ -219,6 +221,7 @@ def _add_permanent_ip_block(ip: str, reason: str) -> None:
             pass
 
 _ABUSE_STATE_PATH = Path(os.getenv("ABUSE_STATE_PATH", "./abuse_state.json"))
+_CREDENTIAL_STUFFING_STATE_PATH = Path(os.getenv("CREDENTIAL_STUFFING_STATE_PATH", "./credential_stuffing_state.json"))
 
 
 def utc_now() -> datetime:
@@ -290,6 +293,63 @@ def _save_abuse_state() -> None:
 
 
 login_attempts, locked_accounts = _load_abuse_state()
+
+
+def _load_credential_stuffing_state() -> dict[str, list[dict]]:
+    r = get_redis_client()
+    if r:
+        try:
+            raw = r.hgetall("wards:auth:credential_stuffing_attempts")
+            return {k: json.loads(v) for k, v in raw.items()}
+        except Exception:
+            return {}
+    if not _CREDENTIAL_STUFFING_STATE_PATH.exists():
+        return {}
+    try:
+        with _CREDENTIAL_STUFFING_STATE_PATH.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("credential_stuffing_attempts", {})
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_credential_stuffing_state() -> None:
+    r = get_redis_client()
+    if r:
+        try:
+            pipe = r.pipeline()
+            pipe.delete("wards:auth:credential_stuffing_attempts")
+            if _credential_stuffing_attempts:
+                pipe.hset("wards:auth:credential_stuffing_attempts", mapping={k: json.dumps(v) for k, v in _credential_stuffing_attempts.items()})
+            pipe.execute()
+        except Exception:
+            pass
+        return
+    try:
+        with _CREDENTIAL_STUFFING_STATE_PATH.open("w", encoding="utf-8") as f:
+            json.dump({"credential_stuffing_attempts": _credential_stuffing_attempts}, f)
+    except OSError:
+        pass
+
+
+def _refresh_credential_stuffing_state() -> None:
+    """Reload distributed credential stuffing state from Redis."""
+    r = get_redis_client()
+    if not r:
+        return
+    try:
+        global _credential_stuffing_attempts
+        raw = r.hgetall("wards:auth:credential_stuffing_attempts")
+        _credential_stuffing_attempts = {
+            (k.decode() if isinstance(k, bytes) else k): json.loads(v.decode() if isinstance(v, bytes) else v)
+            for k, v in raw.items()
+        }
+    except Exception:
+        pass
+
+
+_credential_stuffing_attempts: dict[str, list[dict]] = _load_credential_stuffing_state()
+_credential_stuffing_last_alerted: dict[str, float] = {}
 
 
 class UnifiedLoginRequest(BaseModel):
@@ -636,6 +696,7 @@ def record_failed_attempt(portal: str, identifier: str, client_ip: str | None = 
             strikes,
         )
     _save_abuse_state()
+    record_credential_stuffing_attempt(client_ip, identifier, portal, db=db, request=request)
 
 
 def reset_failed_attempts(portal: str, identifier: str):
@@ -644,6 +705,54 @@ def reset_failed_attempts(portal: str, identifier: str):
     if key in locked_accounts:
         del locked_accounts[key]
     _save_abuse_state()
+
+
+def record_credential_stuffing_attempt(client_ip: str | None, identifier: str, portal: str, db=None, request=None):
+    """Track failed login attempts per IP across multiple identifiers.
+
+    When the same IP fails login for many different usernames within a short
+    window, it is likely a credential stuffing attack. Logs once per window.
+    """
+    if not client_ip or not identifier:
+        return
+    _refresh_credential_stuffing_state()
+    now = time.time()
+    window = CREDENTIAL_STUFFING_WINDOW
+
+    if client_ip not in _credential_stuffing_attempts:
+        _credential_stuffing_attempts[client_ip] = []
+
+    _credential_stuffing_attempts[client_ip] = [
+        entry for entry in _credential_stuffing_attempts[client_ip]
+        if now - entry.get("timestamp", 0) < window
+    ]
+
+    _credential_stuffing_attempts[client_ip].append({
+        "timestamp": now,
+        "identifier": identifier,
+        "portal": portal,
+    })
+    _save_credential_stuffing_state()
+
+    distinct_identifiers = {
+        entry.get("identifier")
+        for entry in _credential_stuffing_attempts[client_ip]
+        if entry.get("identifier")
+    }
+
+    if len(distinct_identifiers) >= CREDENTIAL_STUFFING_THRESHOLD:
+        last_alerted = _credential_stuffing_last_alerted.get(client_ip, 0)
+        if now - last_alerted >= window:
+            _credential_stuffing_last_alerted[client_ip] = now
+            if db is not None:
+                log_activity(
+                    db,
+                    "Credential Stuffing Attempt",
+                    client_ip,
+                    f"Portal: {portal}; Distinct identifiers: {len(distinct_identifiers)}; IP: {client_ip}",
+                    "malicious",
+                    request=request,
+                )
 
 
 def requires_captcha(portal: str, identifier: str) -> bool:
@@ -1273,7 +1382,7 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
                 content={"detail": "Invalid credentials or account status.", **info},
             )
 
-        record_failed_attempt("unknown", credentials.identifier, client_ip)
+        record_failed_attempt("unknown", credentials.identifier, client_ip, db=db, request=request)
         if _is_suspicious_input(credentials.identifier):
             log_activity(
                 db,
