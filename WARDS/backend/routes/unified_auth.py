@@ -22,7 +22,7 @@ import io
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse
 from jose import JWTError, jwt
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 from passlib.exc import UnknownHashError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -53,6 +53,7 @@ from utils.field_crypto import (
 )
 from utils.security_validation import censor_email, normalize_email
 from utils.system_settings import get_setting_value
+from utils.security_validation import reject_dangerous_characters
 from auth import (
     ALGORITHM,
     PASSWORD_RESET_SECRET_KEY,
@@ -298,11 +299,23 @@ class UnifiedLoginRequest(BaseModel):
     recaptcha_token: Optional[str] = None
     keystroke_metrics: Optional[dict] = None
 
+    @field_validator("identifier", "portal", "totp_code", "recaptcha_token")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
+
 
 class UnifiedSetupMFARequest(BaseModel):
     identifier: str
     password: str
     portal: Optional[str] = None
+
+    @field_validator("identifier", "portal")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
 
 
 class UnifiedVerifyMFASetup(BaseModel):
@@ -311,11 +324,23 @@ class UnifiedVerifyMFASetup(BaseModel):
     portal: Optional[str] = None
     totp_code: str
 
+    @field_validator("identifier", "portal", "totp_code")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
+
 
 class UnifiedMFARecoverySendOTPRequest(BaseModel):
     identifier: str
     password: str
     portal: Optional[str] = None
+
+    @field_validator("identifier", "portal")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
 
 
 class UnifiedMFARecoveryVerifyOTPRequest(BaseModel):
@@ -323,6 +348,12 @@ class UnifiedMFARecoveryVerifyOTPRequest(BaseModel):
     password: str
     portal: Optional[str] = None
     otp_code: str
+
+    @field_validator("identifier", "portal", "otp_code")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
 
 
 class UnifiedToken(BaseModel):
@@ -338,15 +369,33 @@ class UnifiedToken(BaseModel):
 class RefreshTokenRequest(BaseModel):
     refresh_token: Optional[str] = None
 
+    @field_validator("refresh_token")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
+
 
 class UnifiedPasswordResetRequest(BaseModel):
     email: EmailStr
     portal: Optional[str] = None
 
+    @field_validator("portal")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
+
 
 class UnifiedPasswordResetConfirm(BaseModel):
     token: str
     new_password: str
+
+    @field_validator("token")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
 
 
 def normalize_identifier(identifier: str) -> str:

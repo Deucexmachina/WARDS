@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional, List
 from datetime import datetime
 import os
@@ -15,6 +15,7 @@ from database.models import Memo, MemoView, get_db, ActivityLog, Admin, Branch
 from auth import get_current_admin_user, require_main_admin
 from utils.field_crypto import apply_memo_security, apply_memo_view_security, get_decrypted_or_raw, get_memo_viewed_ids, find_memo_view
 from utils.rbac import require_permission
+from utils.security_validation import reject_dangerous_characters
 
 router = APIRouter()
 
@@ -25,12 +26,24 @@ class MemoCreate(BaseModel):
     recipient_type: str = "all"  # all, specific_branches
     priority: str = "normal"
 
+    @field_validator("title", "content", "recipients", "recipient_type", "priority")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
+
 class MemoUpdate(BaseModel):
     title: str
     content: str
     recipients: str
     recipient_type: str = "all"
     priority: str = "normal"
+
+    @field_validator("title", "content", "recipients", "recipient_type", "priority")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
 
 
 def serialize_memo(memo: Memo, branch_lookup: dict[int, str], current_username: str = None, db: Session = None) -> dict:

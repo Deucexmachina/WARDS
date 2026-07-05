@@ -11,6 +11,28 @@ from database.models import Admin, Branch, BranchStaff, CitizenUser
 from utils.field_crypto import find_citizen_by_contact_number, find_citizen_by_email, find_citizen_by_tin, hash_optional_value
 
 
+# Characters commonly used in single-line code injection (XSS, command injection, template injection).
+# Rejects: < > { } ( ) ; = & | ` $ \
+DANGEROUS_CHARS_PATTERN = re.compile(r"[<>{\}();=&|`$\\]")
+
+
+def reject_dangerous_characters(value: str | None, field_name: str = "input") -> str | None:
+    """Reject strings containing characters that can trigger single-line code injection.
+
+    Raises HTTPException 400 if dangerous characters are found.
+    Returns the cleaned string on success, or None if input was None.
+    """
+    if value is None:
+        return None
+    text = str(value)
+    if DANGEROUS_CHARS_PATTERN.search(text):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid characters in {field_name}. Please avoid symbols that can be used for code injection.",
+        )
+    return text
+
+
 DUPLICATE_EMAIL_MESSAGE = "This email has already been used."
 DUPLICATE_CONTACT_NUMBER_MESSAGE = "This contact number is unavailable. Please enter a different contact number."
 EMAIL_INVALID_MESSAGE = "Please enter a valid email address."

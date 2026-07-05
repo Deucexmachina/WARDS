@@ -11,7 +11,7 @@ from typing import List
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session, defer
 from sqlalchemy.exc import IntegrityError, OperationalError
 
@@ -30,7 +30,7 @@ from services.email_service import send_payment_receipt_email
 from routes.payments import apply_business_tax_application_security_fields, revert_linked_request_status_for_declined_payment, update_linked_request_status
 from utils.field_crypto import apply_announcement_view_security, apply_memo_security, apply_memo_view_security, apply_payment_security, apply_queue_security, apply_receipt_request_security, collection_account_number_value, collection_account_value, decrypt_optional_value, find_announcement_view, find_memo_view, get_announcement_viewed_ids, get_decrypted_or_raw, get_memo_viewed_ids, hash_aware_any, hash_aware_match, hash_optional_value, queue_value, remittance_numeric_value, remittance_value
 from utils.distributed_ledger import append_ledger_entry
-from utils.security_validation import format_tin, normalize_citizen_full_name, normalize_ph_contact_number
+from utils.security_validation import format_tin, normalize_citizen_full_name, normalize_ph_contact_number, reject_dangerous_characters
 from utils.branch_system_settings import get_branch_setting_value
 from utils.branch_window_config import (
     default_assigned_window_number as resolve_default_assigned_window_number,
@@ -102,10 +102,22 @@ class BranchAnnouncementPayload(BaseModel):
     icon_color: Optional[str] = "blue"
     is_active: Optional[bool] = True
 
+    @field_validator("title", "content", "icon_type", "icon_color")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
+
 
 class BranchRemittanceCreatePayload(BaseModel):
     payment_ids: List[int]
     remarks: Optional[str] = None
+
+    @field_validator("remarks")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
 
 
 class BranchMemoPayload(BaseModel):
@@ -113,6 +125,12 @@ class BranchMemoPayload(BaseModel):
     content: str
     recipient_type: str = "specific_branches"
     priority: str = "normal"
+
+    @field_validator("title", "content", "recipient_type", "priority")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
 
 
 def normalize_payment_status(status_value: Optional[str]) -> str:

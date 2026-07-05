@@ -9,7 +9,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, Request
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -46,6 +46,7 @@ from utils.security_validation import (
     normalize_identity_name,
     normalize_ph_contact_number,
     normalize_tin,
+    reject_dangerous_characters,
     validate_strong_password,
 )
 
@@ -194,6 +195,12 @@ class TaxAssessmentUpsertRequest(BaseModel):
     business_type: str | None = None
     annual_gross_sales: float = Field(default=0, ge=1)
     business_tax_rate: float = Field(default=0, ge=0.0001, le=1)
+
+    @field_validator("taxpayer_name", "taxpayer_type", "address", "tax_year", "remarks", "rejection_reason", "property_type", "property_address", "business_name", "business_type")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
 
 
 def normalize_taxpayer_type(value: str) -> str:

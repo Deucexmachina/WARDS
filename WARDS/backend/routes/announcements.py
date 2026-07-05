@@ -4,7 +4,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 from sqlalchemy.orm import Session, defer
 
@@ -28,6 +28,7 @@ from utils.field_crypto import (
     hash_optional_value,
 )
 from utils.rbac import require_permission
+from utils.security_validation import reject_dangerous_characters
 
 router = APIRouter()
 
@@ -55,6 +56,12 @@ class AnnouncementCreate(BaseModel):
     icon_color: Optional[str] = "blue"
     is_active: Optional[bool] = True
 
+    @field_validator("title", "content", "icon_type", "icon_color")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
+
 
 class AnnouncementUpdate(BaseModel):
     title: str = Field(..., max_length=200)
@@ -62,6 +69,12 @@ class AnnouncementUpdate(BaseModel):
     icon_type: Optional[str] = "megaphone"
     icon_color: Optional[str] = "blue"
     is_active: Optional[bool] = True
+
+    @field_validator("title", "content", "icon_type", "icon_color")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
 
 
 def _bool_to_db(value: Optional[bool], default: bool = True) -> int:
