@@ -2144,7 +2144,7 @@ async def unified_verify(request: Request, db: Session = Depends(get_db)):
             detail="Missing or invalid authorization",
         )
 
-    portal, account, _payload = decode_active_account_from_bearer_token(token, db)
+    portal, account, _payload = decode_active_account_from_bearer_token(token, db, request=request)
     if requested_portal and portal != requested_portal:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -2179,7 +2179,7 @@ async def unified_setup_mfa_authenticated(request: Request, db: Session = Depend
             detail="Missing or invalid authorization",
         )
 
-    portal, account, _payload = decode_active_account_from_bearer_token(token, db)
+    portal, account, _payload = decode_active_account_from_bearer_token(token, db, request=request)
 
     if portal not in {"public", "admin", "branch"}:
         raise HTTPException(
@@ -2223,7 +2223,7 @@ async def unified_me(request: Request, db: Session = Depends(get_db)):
             detail="Missing or invalid authorization",
         )
 
-    portal, account, _payload = decode_active_account_from_bearer_token(token, db)
+    portal, account, _payload = decode_active_account_from_bearer_token(token, db, request=request)
     mfa_setup_required = get_mfa_secret(db, portal, get_mfa_username(portal, account)) is None
     return build_user_response(portal, account, mfa_setup_required)
 

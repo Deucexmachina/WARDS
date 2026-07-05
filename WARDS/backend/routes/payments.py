@@ -75,7 +75,7 @@ async def resolve_auth_from_request(request: Request, db: Session = Depends(get_
             headers={"WWW-Authenticate": "Bearer"},
         )
     portal, account, payload = decode_active_account_from_bearer_token(
-        token, db, allowed_portals=("public", "admin", "branch")
+        token, db, allowed_portals=("public", "admin", "branch"), request=request
     )
     _validate_token_binding(request, payload)
     return portal, account
@@ -88,7 +88,7 @@ async def resolve_optional_auth_from_request(request: Request, db: Session = Dep
         return None, None
     try:
         portal, account, payload = decode_active_account_from_bearer_token(
-            token, db, allowed_portals=("public", "admin", "branch")
+            token, db, allowed_portals=("public", "admin", "branch"), request=request
         )
         _validate_token_binding(request, payload)
         return portal, account

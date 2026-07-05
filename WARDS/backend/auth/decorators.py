@@ -515,6 +515,7 @@ def decode_active_account_from_bearer_token(
     token: str,
     db: Session,
     allowed_portals: tuple[str, ...] = ("public", "admin", "branch"),
+    request: Request | None = None,
 ):
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token")
