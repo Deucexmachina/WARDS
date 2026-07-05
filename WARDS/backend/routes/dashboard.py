@@ -11,6 +11,7 @@ from database.models import (
 from auth import get_current_admin_user
 from utils.rbac import require_permission
 from utils.field_crypto import get_decrypted_or_raw, hash_aware_match, queue_value, hash_optional_value
+from utils.cloudflare_alerts import sync_cloudflare_security_alerts
 from utils.security_client import sync_security_alerts
 
 CONFIRMED_PAYMENT_STATUSES = {
@@ -200,6 +201,10 @@ async def get_dashboard_statistics(
     # Sync security system alerts from VM2 into the main DB so the main dashboard stays current
     try:
         sync_security_alerts(db, limit=50)
+    except Exception:
+        pass
+    try:
+        sync_cloudflare_security_alerts(db, minutes=90)
     except Exception:
         pass
     alerts = db.query(Alert).order_by(Alert.created_at.desc()).all()

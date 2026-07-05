@@ -172,6 +172,9 @@ def test_blocked_escalation_attempts_create_system_alerts():
     main_source = open("WARDS/backend/main.py", encoding="utf-8").read()
     users_source = open("WARDS/backend/routes/users.py", encoding="utf-8").read()
     branch_source = open("WARDS/backend/routes/branch_portal.py", encoding="utf-8").read()
+    alerts_source = open("WARDS/backend/routes/alerts.py", encoding="utf-8").read()
+    dashboard_source = open("WARDS/backend/routes/dashboard.py", encoding="utf-8").read()
+    cloudflare_source = open("WARDS/backend/utils/cloudflare_alerts.py", encoding="utf-8").read()
 
     assert "log_blocked_security_attempt" in decorators_source
     assert "Privilege Escalation Attempt" in decorators_source
@@ -194,3 +197,36 @@ def test_blocked_escalation_attempts_create_system_alerts():
     assert "branch account self/admin role-elevation attempt" in users_source
     assert "Cross-Branch Access Attempt" in branch_source
     assert "attempted to delete a queue outside its assigned branch" in branch_source
+
+    assert "sync_cloudflare_security_alerts" in alerts_source
+    assert "sync_cloudflare_security_alerts" in dashboard_source
+    assert "firewallEventsAdaptive" in cloudflare_source
+    assert "CLOUDFLARE_API_TOKEN" in cloudflare_source
+    assert "Privilege Escalation Attempt" in cloudflare_source
+    assert "Staff Account Authorization Attempt" in cloudflare_source
+    assert "MFA/TOTP Bypass Attempt" in cloudflare_source
+    assert "reCAPTCHA Bypass Attempt" in cloudflare_source
+    assert "Password Reset Token Tampering Attempt" in cloudflare_source
+    assert "Session Token Reuse/Tampering Attempt" in cloudflare_source
+    assert "Payment Reference Spoofing Attempt" in cloudflare_source
+    assert "Receipt Ownership Spoofing Attempt" in cloudflare_source
+    assert "Queue Ownership Spoofing Attempt" in cloudflare_source
+    assert "Branch Spoofing Attempt" in cloudflare_source
+    assert "Source IP Header Spoofing Attempt" in cloudflare_source
+
+
+def test_cloudflare_security_event_classifier_labels_penetration_tests():
+    from utils.cloudflare_alerts import _classify_cloudflare_event
+
+    cases = [
+        ({"clientRequestPath": "/api/accounts/29", "clientRequestQuery": ""}, "Staff Account Authorization Attempt"),
+        ({"clientRequestPath": "/api/accounts/29", "clientRequestQuery": "role=superadmin"}, "Privilege Escalation Attempt"),
+        ({"clientRequestPath": "/api/auth/unified/verify-mfa", "clientRequestQuery": "totp=000000"}, "MFA/TOTP Bypass Attempt"),
+        ({"clientRequestPath": "/api/payments/paymongo/status/RCP-1", "clientRequestQuery": "paid=true"}, "Payment Reference Spoofing Attempt"),
+        ({"clientRequestPath": "/api/receipts/requests/2", "clientRequestQuery": "receipt_id=2"}, "Receipt Ownership Spoofing Attempt"),
+        ({"clientRequestPath": "/api/public/queue/history", "clientRequestQuery": "queue_number=PA-001"}, "Queue Ownership Spoofing Attempt"),
+        ({"clientRequestPath": "/api/branch/queue", "clientRequestQuery": "branch_id=2"}, "Branch Spoofing Attempt"),
+    ]
+
+    for event, expected_title in cases:
+        assert _classify_cloudflare_event(event)[0] == expected_title

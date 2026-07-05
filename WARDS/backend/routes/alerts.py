@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from database.models import Alert, AlertView, Admin, get_db
 from auth import get_current_admin_user
+from utils.cloudflare_alerts import sync_cloudflare_security_alerts
 from utils.rbac import check_permission
 
 router = APIRouter()
@@ -25,6 +26,14 @@ def scoped_alert_query(db: Session, user: Admin):
         return query
     return query.filter(Alert.type.in_(BRANCH_ALERT_TYPES))
 
+
+def sync_external_security_alerts(db: Session) -> None:
+    """Best-effort import of edge-blocked attacks before alert queries."""
+    try:
+        sync_cloudflare_security_alerts(db, minutes=90)
+    except Exception:
+        pass
+
 @router.get("/")
 async def get_all_alerts(
     page: int = Query(1, ge=1),
@@ -36,6 +45,7 @@ async def get_all_alerts(
 ):
     if not can_view_alerts(current_user):
         raise HTTPException(status_code=403, detail="Permission denied: alert viewing required")
+    sync_external_security_alerts(db)
     viewer_type = viewer_type_for(current_user)
     query = scoped_alert_query(db, current_user)
     if severity:
@@ -84,6 +94,7 @@ async def get_unread_alert_count(
 ):
     if not can_view_alerts(current_user):
         raise HTTPException(status_code=403, detail="Permission denied: alert viewing required")
+    sync_external_security_alerts(db)
     viewer_type = viewer_type_for(current_user)
     viewed_ids = {
         row.alert_id
