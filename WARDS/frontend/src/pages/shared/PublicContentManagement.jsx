@@ -121,18 +121,18 @@ const textAreaClass = `${textInputClass} min-h-[140px] resize-y`;
 
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 
-const ImageUploadField = ({ label, value, onChange, hint }) => {
+const ImageUploadField = ({ label, value, onChange, hint, setAlertModal }) => {
   const handleFile = (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
     const validTypes = ['image/png', 'image/jpeg', 'image/jpg'];
     if (!validTypes.includes(file.type)) {
-      alert('Only PNG and JPG images are allowed.');
+      setAlertModal({ title: 'Invalid File Type', message: 'Only PNG and JPG images are allowed.' });
       event.target.value = '';
       return;
     }
     if (file.size > MAX_IMAGE_BYTES) {
-      alert(`Image must be under 2 MB. "${file.name}" is ${(file.size / 1024 / 1024).toFixed(1)} MB.`);
+      setAlertModal({ title: 'File Too Large', message: `Image must be under 2 MB. "${file.name}" is ${(file.size / 1024 / 1024).toFixed(1)} MB.` });
       event.target.value = '';
       return;
     }
@@ -280,6 +280,31 @@ const LanguageToggle = ({ value, onChange }) => (
         {lang}
       </button>
     ))}
+  </div>
+);
+
+const AlertModal = ({ title, message, onClose }) => (
+  <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/60 px-4 py-6">
+    <div className="w-full max-w-md rounded-[28px] bg-white p-6 shadow-[0_30px_80px_rgba(15,23,42,0.28)] md:p-8">
+      <div className="flex items-start gap-4">
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-100 text-amber-600">
+          <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+        </div>
+        <div className="min-w-0">
+          <h2 className="text-xl font-bold text-slate-900">{title}</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-600">{message}</p>
+        </div>
+      </div>
+      <div className="mt-6 flex justify-end">
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-2xl bg-[#0f5b83] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#0c4d6f]"
+        >
+          OK
+        </button>
+      </div>
+    </div>
   </div>
 );
 
@@ -835,6 +860,7 @@ const PublicContentManagement = ({ portal = 'admin' }) => {
   const [notice, setNotice] = useState({ tone: '', message: '' });
   const [savingPage, setSavingPage] = useState('');
   const [publishModal, setPublishModal] = useState(null);
+  const [alertModal, setAlertModal] = useState(null);
   const publishedSnapshots = useRef({ home: null, guide: null, contact: null, about: null, faqs: null });
 
   useEffect(() => {
@@ -1221,6 +1247,13 @@ const PublicContentManagement = ({ portal = 'admin' }) => {
           publishing={Boolean(savingPage)}
         />
       )}
+      {alertModal && (
+        <AlertModal
+          title={alertModal.title}
+          message={alertModal.message}
+          onClose={() => setAlertModal(null)}
+        />
+      )}
       <WardsPageHero
         eyebrow={portal === 'admin' ? 'Super Admin Dashboard' : 'Branch Admin Dashboard'}
         title="Public Content Management"
@@ -1270,6 +1303,7 @@ const PublicContentManagement = ({ portal = 'admin' }) => {
                 label="Hero Background"
                 value={homeContent.hero_bg_image}
                 onChange={(val) => setHomeContent((c) => ({ ...c, hero_bg_image: val }))}
+                setAlertModal={setAlertModal}
                 hint="Recommended: landscape photo, at least 1280×520px. Max 2 MB."
               />
             </SectionCard>
@@ -1383,7 +1417,7 @@ const PublicContentManagement = ({ portal = 'admin' }) => {
               onAdd={() => {
                 const list = guideContent[`guides_${editorLanguage}`];
                 if (list.length >= 10) {
-                  alert('Maximum 10 guides allowed.');
+                  setAlertModal({ title: 'Limit Reached', message: 'Maximum 10 guides allowed.' });
                   return;
                 }
                 addGuideListItem(`guides_${editorLanguage}`, makeGuideItem);
@@ -1410,7 +1444,7 @@ const PublicContentManagement = ({ portal = 'admin' }) => {
               onChange={(index, field, value) => updateGuideListItem('help_contacts', index, field, value)}
               onAdd={() => {
                 if (guideContent.help_contacts.length >= 10) {
-                  alert('Maximum 10 help contacts allowed.');
+                  setAlertModal({ title: 'Limit Reached', message: 'Maximum 10 help contacts allowed.' });
                   return;
                 }
                 addGuideListItem('help_contacts', makeHelpContact);
@@ -1555,7 +1589,7 @@ const PublicContentManagement = ({ portal = 'admin' }) => {
               }}
               onAdd={() => {
                 if (aboutUsContent.service_pledges.length >= 10) {
-                  alert('Maximum 10 service pledges allowed.');
+                  setAlertModal({ title: 'Limit Reached', message: 'Maximum 10 service pledges allowed.' });
                   return;
                 }
                 addAboutUsListItem('service_pledges', makeServicePledge);
@@ -1574,23 +1608,27 @@ const PublicContentManagement = ({ portal = 'admin' }) => {
                   value={aboutUsContent.city_hall_image}
                   onChange={(val) => updateAboutUsValue('city_hall_image', val)}
                   hint="Displayed beside the Mission and Vision cards."
+                  setAlertModal={setAlertModal}
                 />
                 <ImageUploadField
                   label="Office Photo 1 (Service Pledge gallery)"
                   value={aboutUsContent.office_image_1}
                   onChange={(val) => updateAboutUsValue('office_image_1', val)}
                   hint="First photo in the Service Pledge photo strip."
+                  setAlertModal={setAlertModal}
                 />
                 <ImageUploadField
                   label="Office Photo 2 (Service Pledge gallery)"
                   value={aboutUsContent.office_image_2}
                   onChange={(val) => updateAboutUsValue('office_image_2', val)}
                   hint="Second photo in the Service Pledge photo strip."
+                  setAlertModal={setAlertModal}
                 />
                 <ImageUploadField
                   label="Office Photo 3 (Service Pledge gallery)"
                   value={aboutUsContent.office_image_3}
                   onChange={(val) => updateAboutUsValue('office_image_3', val)}
+                  setAlertModal={setAlertModal}
                   hint="Third photo in the Service Pledge photo strip."
                 />
               </div>
@@ -1640,7 +1678,7 @@ const PublicContentManagement = ({ portal = 'admin' }) => {
               onChange={(index, field, value) => updateFaqsListItem(`faqs_${editorLanguage}`, index, field, value)}
               onAdd={() => {
                 if (faqsContent[`faqs_${editorLanguage}`].length >= 10) {
-                  alert('Maximum 10 FAQs allowed.');
+                  setAlertModal({ title: 'Limit Reached', message: 'Maximum 10 FAQs allowed.' });
                   return;
                 }
                 addFaqsListItem(`faqs_${editorLanguage}`);
