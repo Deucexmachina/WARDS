@@ -218,14 +218,14 @@ def _blocked_response(field: str, bad_value: str, request: Request) -> JSONRespo
         def _do_log():
             db = SessionLocal()
             try:
-                client_ip = _get_client_ip(request)
+                snippet = bad_value[:200] if bad_value else ""
                 log_activity(
                     db,
                     action="Injection Attempt Blocked",
                     user="unknown",
                     details=(
                         f"blocked {request.method} {request.url.path} | "
-                        f"field={field} | ip={client_ip}"
+                        f"field={field} | input: {snippet}"
                     ),
                     log_type="malicious",
                     request=request,
