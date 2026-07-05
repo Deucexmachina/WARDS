@@ -227,7 +227,7 @@ def _blocked_response(field: str, bad_value: str, request: Request) -> JSONRespo
                         f"blocked {request.method} {request.url.path} | "
                         f"field={field} | ip={client_ip}"
                     ),
-                    log_type="security",
+                    log_type="malicious",
                     request=request,
                     severity="high",
                 )
