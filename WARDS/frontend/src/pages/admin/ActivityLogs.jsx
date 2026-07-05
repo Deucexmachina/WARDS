@@ -118,7 +118,6 @@ const ActivityLogs = () => {
               <option value="">All Types</option>
               <option value="admin">Admin</option>
               <option value="security">Security</option>
-              <option value="malicious">Malicious</option>
               <option value="transaction">Transaction</option>
               <option value="auth">Auth</option>
               <option value="branch_portal">Branch Portal</option>

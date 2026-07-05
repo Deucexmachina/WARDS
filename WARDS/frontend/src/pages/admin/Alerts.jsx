@@ -11,7 +11,6 @@ const Alerts = () => {
   const branchUser = JSON.parse(localStorage.getItem('branchUser') || '{}');
   const isBranchAlertView = ['branch_admin', 'branch_staff'].includes(branchUser?.internal_role || branchUser?.role);
   const [filters, setFilters] = useState({
-    type: '',
     severity: '',
     read: '',
   });
@@ -122,23 +121,7 @@ const Alerts = () => {
 
       <section className="rounded-xl bg-white p-6 shadow">
         <h2 className="text-xl font-bold text-primary mb-4">Filter Alerts</h2>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-          <div>
-            <label className="block text-gray-700 font-semibold mb-2">Alert Type</label>
-            <select
-              name="type"
-              value={filters.type}
-              onChange={handleFilterChange}
-              className="w-full rounded-lg border border-gray-300 px-4 py-3 focus:ring-2 focus:ring-accent focus:border-transparent bg-white"
-            >
-              <option value="">All Types</option>
-              <option value="security">Security</option>
-              <option value="anomaly">Anomaly</option>
-              <option value="malicious">Malicious</option>
-              <option value="branch">Branch</option>
-              <option value="operational">Operational</option>
-            </select>
-          </div>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <div>
             <label className="block text-gray-700 font-semibold mb-2">Severity</label>
             <select

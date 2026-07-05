@@ -29,7 +29,6 @@ def scoped_alert_query(db: Session, user: Admin):
 async def get_all_alerts(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
-    type: Optional[str] = None,
     severity: Optional[str] = None,
     read: Optional[str] = None,
     current_user: Admin = Depends(get_current_admin_user),
@@ -39,8 +38,6 @@ async def get_all_alerts(
         raise HTTPException(status_code=403, detail="Permission denied: alert viewing required")
     viewer_type = viewer_type_for(current_user)
     query = scoped_alert_query(db, current_user)
-    if type:
-        query = query.filter(Alert.type == type)
     if severity:
         query = query.filter(Alert.severity == severity)
 
