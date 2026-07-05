@@ -15,6 +15,8 @@ import { CustomSelect } from '../../components/FormControls';
 
 const CLOSED_STATUSES = new Set(['Solved', 'Rejected']);
 
+const DANGEROUS_CHARS_REGEX = /[<>{}();=&|`$\\]/;
+
 const formatDateTime = (value) => formatUtc8DateTime(value);
 
 const formatCurrency = (value) => {
@@ -68,6 +70,14 @@ const DiscrepancyReports = () => {
   const [showReplyComposer, setShowReplyComposer] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
+  const [fieldErrors, setFieldErrors] = useState({});
+
+  const validateDiscrepancyInput = (value) => {
+    if (value && DANGEROUS_CHARS_REGEX.test(value)) {
+      return 'One or more fields contain an invalid value.';
+    }
+    return '';
+  };
 
   const fetchReports = async () => {
     try {
@@ -140,6 +150,15 @@ const DiscrepancyReports = () => {
 
   const handleVerify = async () => {
     if (!selectedReport) {
+      return;
+    }
+
+    const activeField = showReplyComposer ? replyDraft : verificationNotes;
+    const activeFieldName = showReplyComposer ? 'replyDraft' : 'verificationNotes';
+    const fieldError = validateDiscrepancyInput(activeField);
+    if (fieldError) {
+      setFieldErrors((prev) => ({ ...prev, [activeFieldName]: fieldError }));
+      setError('One or more fields contain an invalid value. Please check your input and try again.');
       return;
     }
 
@@ -419,12 +438,19 @@ const DiscrepancyReports = () => {
                         <label className="mb-2 block text-sm font-semibold text-slate-700">Resolution Notes</label>
                         <textarea
                           value={verificationNotes}
-                          onChange={(event) => setVerificationNotes(event.target.value)}
+                          onChange={(event) => {
+                            const error = validateDiscrepancyInput(event.target.value);
+                            setFieldErrors((prev) => ({ ...prev, verificationNotes: error }));
+                            setVerificationNotes(event.target.value);
+                          }}
                           rows="6"
                           disabled={isClosedReport || saving}
-                          className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-800 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100"
+                          className={`w-full rounded-2xl border px-4 py-3 text-slate-800 focus:ring-2 disabled:bg-slate-100 ${fieldErrors.verificationNotes ? 'border-red-500 bg-red-50 focus:border-red-500 focus:ring-red-500' : 'border-slate-300 focus:border-blue-500 focus:ring-blue-500'}`}
                           placeholder="Document the review findings, instructions to the branch, or final resolution notes."
                         ></textarea>
+                        {fieldErrors.verificationNotes ? (
+                          <p className="mt-1 text-xs font-semibold text-red-600">{fieldErrors.verificationNotes}</p>
+                        ) : null}
                       </div>
                     )}
 
@@ -454,11 +480,18 @@ const DiscrepancyReports = () => {
                         <label className="mb-2 block text-sm font-semibold text-slate-700">Administrative Reply</label>
                         <textarea
                           value={replyDraft}
-                          onChange={(event) => setReplyDraft(event.target.value)}
+                          onChange={(event) => {
+                            const error = validateDiscrepancyInput(event.target.value);
+                            setFieldErrors((prev) => ({ ...prev, replyDraft: error }));
+                            setReplyDraft(event.target.value);
+                          }}
                           rows="6"
-                          className="w-full rounded-2xl border border-slate-300 px-4 py-3 focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+                          className={`w-full rounded-2xl border px-4 py-3 focus:ring-2 ${fieldErrors.replyDraft ? 'border-red-500 bg-red-50 focus:border-red-500 focus:ring-red-500' : 'border-slate-300 focus:border-blue-500 focus:ring-blue-500'}`}
                           placeholder="Type the response that should appear in the discrepancy history."
                         ></textarea>
+                        {fieldErrors.replyDraft ? (
+                          <p className="mt-1 text-xs font-semibold text-red-600">{fieldErrors.replyDraft}</p>
+                        ) : null}
                         <div className="mt-4 flex gap-3">
                           <button
                             onClick={handleVerify}
