@@ -10,11 +10,18 @@ const Alerts = () => {
   const [jumpPage, setJumpPage] = useState('');
   const branchUser = JSON.parse(localStorage.getItem('branchUser') || '{}');
   const isBranchAlertView = ['branch_admin', 'branch_staff'].includes(branchUser?.internal_role || branchUser?.role);
+  const [filters, setFilters] = useState({
+    type: '',
+    severity: '',
+    read: '',
+  });
 
   const fetchAlerts = async (page = pageState.page) => {
       try {
       const safePage = Math.max(1, Number(page || 1));
-      const response = await alertAPI.getAll({ page: safePage, page_size: 10 });
+      const params = { ...filters, page: safePage, page_size: 10 };
+      Object.keys(params).forEach((k) => { if (params[k] === '') delete params[k]; });
+      const response = await alertAPI.getAll(params);
       const data = response.data || {};
       setAlerts(data.items || []);
       setPageState({
@@ -37,7 +44,16 @@ const Alerts = () => {
       fetchAlerts();
     }, 5000);
     return () => clearInterval(interval);
-  }, [pageState.page]);
+  }, [filters, pageState.page]);
+
+  const handleFilterChange = (event) => {
+    const { name, value } = event.target;
+    setFilters((current) => ({ ...current, [name]: value }));
+  };
+
+  const handleApplyFilters = () => {
+    fetchAlerts(1);
+  };
 
   const handleMarkAsRead = async (id) => {
     try {
@@ -103,6 +119,63 @@ const Alerts = () => {
         title="System Alerts"
         subtitle={isBranchAlertView ? 'Monitor branch operational alerts and system anomalies that need staff attention.' : 'Monitor security notices, anomaly flags, and platform warnings that need administrative attention.'}
       />
+
+      <section className="rounded-xl bg-white p-6 shadow">
+        <h2 className="text-xl font-bold text-primary mb-4">Filter Alerts</h2>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+          <div>
+            <label className="block text-gray-700 font-semibold mb-2">Alert Type</label>
+            <select
+              name="type"
+              value={filters.type}
+              onChange={handleFilterChange}
+              className="w-full rounded-lg border border-gray-300 px-4 py-3 focus:ring-2 focus:ring-accent focus:border-transparent bg-white"
+            >
+              <option value="">All Types</option>
+              <option value="security">Security</option>
+              <option value="anomaly">Anomaly</option>
+              <option value="malicious">Malicious</option>
+              <option value="branch">Branch</option>
+              <option value="operational">Operational</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-gray-700 font-semibold mb-2">Severity</label>
+            <select
+              name="severity"
+              value={filters.severity}
+              onChange={handleFilterChange}
+              className="w-full rounded-lg border border-gray-300 px-4 py-3 focus:ring-2 focus:ring-accent focus:border-transparent bg-white"
+            >
+              <option value="">All Severities</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-gray-700 font-semibold mb-2">Read Status</label>
+            <select
+              name="read"
+              value={filters.read}
+              onChange={handleFilterChange}
+              className="w-full rounded-lg border border-gray-300 px-4 py-3 focus:ring-2 focus:ring-accent focus:border-transparent bg-white"
+            >
+              <option value="">All</option>
+              <option value="false">Unread</option>
+              <option value="true">Read</option>
+            </select>
+          </div>
+          <div className="flex items-end">
+            <button
+              onClick={handleApplyFilters}
+              className="w-full rounded-lg bg-primary px-4 py-3 font-semibold text-white transition hover:bg-secondary"
+            >
+              Apply Filters
+            </button>
+          </div>
+        </div>
+      </section>
 
       {alerts.some((alert) => !alert.read) && (
         <div className="flex justify-end">

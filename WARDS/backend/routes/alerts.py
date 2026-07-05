@@ -1,3 +1,4 @@
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -28,13 +29,31 @@ def scoped_alert_query(db: Session, user: Admin):
 async def get_all_alerts(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
+    type: Optional[str] = None,
+    severity: Optional[str] = None,
+    read: Optional[str] = None,
     current_user: Admin = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
     if not can_view_alerts(current_user):
         raise HTTPException(status_code=403, detail="Permission denied: alert viewing required")
     viewer_type = viewer_type_for(current_user)
-    query = scoped_alert_query(db, current_user).order_by(Alert.created_at.desc())
+    query = scoped_alert_query(db, current_user)
+    if type:
+        query = query.filter(Alert.type == type)
+    if severity:
+        query = query.filter(Alert.severity == severity)
+
+    viewed_subq = db.query(AlertView.alert_id).filter(
+        AlertView.viewer_username == current_user.username,
+        AlertView.viewer_type == viewer_type,
+    ).subquery()
+    if read == "true":
+        query = query.filter(Alert.id.in_(viewed_subq))
+    elif read == "false":
+        query = query.filter(~Alert.id.in_(viewed_subq))
+
+    query = query.order_by(Alert.created_at.desc())
     total = query.count()
     total_pages = max(1, (total + page_size - 1) // page_size)
     page = min(max(1, page), total_pages)

@@ -109,14 +109,22 @@ const ActivityLogs = () => {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-6">
           <div>
             <label className="block text-gray-700 font-semibold mb-2">Activity Type</label>
-            <input
-              type="text"
+            <select
               name="type"
               value={filters.type}
               onChange={handleFilterChange}
-              placeholder="admin, security, transaction"
-              className="w-full rounded-lg border border-gray-300 px-4 py-3 focus:ring-2 focus:ring-accent focus:border-transparent"
-            />
+              className="w-full rounded-lg border border-gray-300 px-4 py-3 focus:ring-2 focus:ring-accent focus:border-transparent bg-white"
+            >
+              <option value="">All Types</option>
+              <option value="admin">Admin</option>
+              <option value="security">Security</option>
+              <option value="malicious">Malicious</option>
+              <option value="transaction">Transaction</option>
+              <option value="auth">Auth</option>
+              <option value="branch_portal">Branch Portal</option>
+              <option value="public_content">Public Content</option>
+              <option value="error">Error</option>
+            </select>
           </div>
           <div>
             <label className="block text-gray-700 font-semibold mb-2">Severity</label>
