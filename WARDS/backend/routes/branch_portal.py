@@ -302,17 +302,20 @@ def serialize_queue_history(queue: QueueHistory):
     }
 
 
-def log_branch_action(db: Session, staff: BranchStaff, action: str, details: str, ip: Optional[str] = None):
+def log_branch_action(db: Session, staff: BranchStaff, action: str, details: str, ip: Optional[str] = None, severity: Optional[str] = None):
     branch = db.query(Branch).filter(Branch.id == staff.branch_id).first()
     branch_name = (get_decrypted_or_raw(branch, "name") or branch.name) if branch else f"Branch {staff.branch_id}"
     role_label = staff.role or "branch_staff"
     ip_part = f" | ip: {ip}" if ip else ""
-    db.add(ActivityLog(
+    log_entry = ActivityLog(
         action=action,
         user=staff.username,
         details=f"branch: {branch_name} | role: {role_label}{ip_part} | {details}",
         type="branch_portal",
-    ))
+    )
+    if severity:
+        log_entry.severity = severity
+    db.add(log_entry)
 
 
 def get_staff_display_name(staff: BranchStaff) -> str:
@@ -1140,7 +1143,7 @@ def create_branch_remittance_record(
     branch_account.current_balance = max(0.0, float(branch_account.current_balance or 0) - total_amount)
     branch_account.total_remitted = float(branch_account.total_remitted or 0) + total_amount
     branch_account.updated_at = datetime.utcnow()
-    log_branch_action(db, current_staff, "Remittance Submitted", f"Submitted {remittance_number} for {format_currency(total_amount)}", ip=ip)
+    log_branch_action(db, current_staff, "Remittance Submitted", f"Submitted {remittance_number} for {format_currency(total_amount)}", ip=ip, severity="medium")
 
     append_ledger_entry(
         entry_type="remittance_submitted",
@@ -2127,7 +2130,7 @@ async def verify_branch_payment(
         )
         if email_result.get("sent"):
             payment.receipt_sent_at = datetime.utcnow()
-            log_branch_action(db, current_staff, "Verification Email Sent", f"Verification email sent for {payment.ref_number}", request.client.host)
+            log_branch_action(db, current_staff, "Verification Email Sent", f"Verification email sent for {payment.ref_number}", request.client.host, severity="low")
         else:
             log_branch_action(
                 db,
@@ -2135,8 +2138,9 @@ async def verify_branch_payment(
                 "Verification Email Not Sent",
                 f"Verification email was not sent for {payment.ref_number}: {email_result.get('message')}",
                 request.client.host,
+                severity="low",
             )
-    log_branch_action(db, current_staff, "Payment Verified", f"Verified payment {payment.ref_number}", request.client.host)
+    log_branch_action(db, current_staff, "Payment Verified", f"Verified payment {payment.ref_number}", request.client.host, severity="medium")
     db.commit()
 
     return {"message": "Payment verified successfully", "status": payment.status}
@@ -2171,7 +2175,7 @@ async def decline_branch_payment(
             bt_application.payment_status = "Failed"
             bt_application.returned_at = datetime.utcnow()
             bt_application.verifier_remarks = "Business Tax submission was returned for correction by branch treasury personnel."
-    log_branch_action(db, current_staff, "Payment Declined", f"Declined payment {payment.ref_number}", request.client.host)
+    log_branch_action(db, current_staff, "Payment Declined", f"Declined payment {payment.ref_number}", request.client.host, severity="medium")
     db.commit()
 
     return {"message": "Payment declined successfully", "status": payment.status}
@@ -2197,7 +2201,7 @@ async def delete_branch_payment(
 
     ref_number = payment.ref_number
     db.delete(payment)
-    log_branch_action(db, current_staff, "Payment Deleted", f"Deleted payment {ref_number}", request.client.host)
+    log_branch_action(db, current_staff, "Payment Deleted", f"Deleted payment {ref_number}", request.client.host, severity="medium")
     db.commit()
 
     return {"message": "Payment deleted successfully", "ref_number": ref_number}

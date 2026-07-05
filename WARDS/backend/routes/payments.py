@@ -3101,7 +3101,8 @@ async def accept_main_remittance(
         action="Remittance Accepted",
         user=remittance.reviewed_by,
         details=f"branch: {branch_name} | Accepted remittance {remittance.remittance_number}",
-        type="remittance",
+        type="transaction",
+        severity="medium",
     ))
     db.commit()
     db.refresh(remittance)
@@ -3146,7 +3147,8 @@ async def reject_main_remittance(
         action="Remittance Rejected",
         user=remittance.reviewed_by,
         details=f"branch: {branch_name} | Rejected remittance {remittance.remittance_number}",
-        type="remittance",
+        type="transaction",
+        severity="medium",
     ))
     db.commit()
     db.refresh(remittance)
@@ -3238,6 +3240,7 @@ async def verify_payment_by_id(
         user=current_admin.username,
         details=f"branch: {payment_branch_name} | Payment {payment.ref_number} verified by admin",
         type="transaction",
+        severity="medium",
     ))
     db.commit()
 
@@ -3273,6 +3276,7 @@ async def decline_payment(
         user=current_admin.username,
         details=f"branch: {payment_branch_name} | Payment {payment.ref_number} declined by admin",
         type="transaction",
+        severity="medium",
     ))
     db.commit()
     
@@ -3293,6 +3297,14 @@ async def request_payment_clarification(
     payment.status = "CLARIFICATION_REQUESTED"
     payment.treasury_remarks = remarks.strip() or "Please provide clarification regarding this payment."
     payment.treasury_updated_at = datetime.utcnow()
+    payment_branch_name = resolve_payment_branch_name(payment) or "System"
+    db.add(ActivityLog(
+        action="Payment Clarification Requested",
+        user=current_admin.username,
+        details=f"branch: {payment_branch_name} | Payment {payment.ref_number} clarification requested by admin",
+        type="transaction",
+        severity="medium",
+    ))
     if payment.source_module == "business_tax_online_payment" and payment.related_request_id:
         application = db.query(BusinessTaxApplication).filter(
             BusinessTaxApplication.tracking_number == payment.related_request_id
