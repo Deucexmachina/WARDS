@@ -340,33 +340,43 @@ def citizen_tin(user: CitizenUser) -> str | None:
 def get_payments_for_citizen(db: Session, citizen_user: CitizenUser):
     """Return a query scoped to payments belonging to the given citizen user."""
     query = db.query(Payment)
-    user_email = citizen_email(citizen_user)
-    if user_email:
-        query = query.filter(
-            or_(
-                Payment.email == user_email,
-                Payment.email_hash == hash_optional_value(user_email),
-            )
-        )
+    # Strong ownership check via citizen_user_id.
+    if citizen_user.id is not None:
+        query = query.filter(Payment.citizen_user_id == citizen_user.id)
     else:
-        user_name = citizen_name(citizen_user)
-        user_tin = citizen_tin(citizen_user)
-        filters = []
-        if user_name:
-            filters.append(Payment.taxpayer_name == user_name)
-            filters.append(Payment.taxpayer_name_hash == hash_optional_value(user_name))
-        if user_tin:
-            filters.append(Payment.tin == user_tin)
-            filters.append(Payment.tin_hash == hash_optional_value(user_tin))
-        if filters:
-            query = query.filter(or_(*filters))
+        # Fallback to email/name/tin when citizen_user_id is missing.
+        user_email = citizen_email(citizen_user)
+        if user_email:
+            query = query.filter(
+                or_(
+                    Payment.email == user_email,
+                    Payment.email_hash == hash_optional_value(user_email),
+                )
+            )
         else:
-            query = query.filter(false())
+            user_name = citizen_name(citizen_user)
+            user_tin = citizen_tin(citizen_user)
+            filters = []
+            if user_name:
+                filters.append(Payment.taxpayer_name == user_name)
+                filters.append(Payment.taxpayer_name_hash == hash_optional_value(user_name))
+            if user_tin:
+                filters.append(Payment.tin == user_tin)
+                filters.append(Payment.tin_hash == hash_optional_value(user_tin))
+            if filters:
+                query = query.filter(or_(*filters))
+            else:
+                query = query.filter(false())
     return query
 
 
 def verify_payment_ownership(payment: Payment, citizen_user: CitizenUser):
     """Raise 403 if the payment does not belong to the citizen user."""
+    # Strong ownership check via citizen_user_id.
+    if payment.citizen_user_id is not None and citizen_user.id is not None:
+        if payment.citizen_user_id == citizen_user.id:
+            return
+    # Fallback to email/name/tin when citizen_user_id is missing.
     user_email = citizen_email(citizen_user)
     if user_email:
         if (
@@ -2257,6 +2267,7 @@ async def generate_rpt_payment_reference(
     }
 
     payment = Payment(
+        citizen_user_id=current_user.id,
         ref_number=ref_number,
         txn_id=txn_id,
         taxpayer_name=citizen_name(current_user),
@@ -2599,6 +2610,7 @@ async def generate_business_tax_reference(
     }
 
     payment = Payment(
+        citizen_user_id=current_user.id,
         ref_number=ref_number,
         txn_id=txn_id,
         taxpayer_name=citizen_name(current_user),
@@ -2672,6 +2684,7 @@ async def generate_payment_reference(
         raise HTTPException(status_code=400, detail="Amount must be greater than zero")
 
     payment = Payment(
+        citizen_user_id=current_user.id,
         ref_number=ref_number,
         txn_id=txn_id,
         taxpayer_name=citizen_name(current_user),
@@ -3340,10 +3353,14 @@ async def upload_public_payment_proof(
         raise HTTPException(status_code=404, detail="Payment not found")
     if payment.source_module not in {"rpt_online_payment", "business_tax_online_payment"}:
         raise HTTPException(status_code=400, detail="Payment proof upload is only available for public tax payment workflows.")
-    payment_email = payment_value(payment, "email")
-    current_user_email = citizen_email(current_user)
-    if payment_email and current_user_email and payment_email.lower() != current_user_email.lower():
-        raise HTTPException(status_code=403, detail="You are not authorized to upload proof for this transaction.")
+    if payment.citizen_user_id is not None and current_user.id is not None:
+        if payment.citizen_user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="You are not authorized to upload proof for this transaction.")
+    else:
+        payment_email = payment_value(payment, "email")
+        current_user_email = citizen_email(current_user)
+        if payment_email and current_user_email and payment_email.lower() != current_user_email.lower():
+            raise HTTPException(status_code=403, detail="You are not authorized to upload proof for this transaction.")
 
     file_bytes = await file.read()
     if len(file_bytes) > MAX_PROOF_FILE_SIZE_BYTES:

@@ -381,6 +381,16 @@ def payment_matches_assessment(payment: Payment, assessment: TaxAssessmentRecord
     if not payment_is_successfully_verified(payment):
         return False
 
+    if payment.citizen_user_id is not None and assessment.citizen_user_id is not None:
+        if payment.citizen_user_id != assessment.citizen_user_id:
+            return False
+    else:
+        # Fallback: match payment email to assessment taxpayer email
+        payment_email = (get_decrypted_or_raw(payment, "email") or payment.email or "").strip().lower()
+        assessment_email = (tax_assessment_value(assessment, "taxpayer_email") or "").strip().lower()
+        if assessment_email and payment_email and assessment_email != payment_email:
+            return False
+
     if tax_type == "RPT" and payment.source_module == "rpt_online_payment":
         tdn = (tax_assessment_value(assessment, "tdn") or "").strip().upper()
         payment_refs = (get_decrypted_or_raw(payment, "property_ref_number") or payment.property_ref_number or "").upper()
@@ -403,23 +413,28 @@ def filter_unsettled_public_assessments(
     if not assessments:
         return []
 
-    user_email = citizen_email(current_user)
-    if not user_email:
-        # Cannot safely attribute payments without a known email; returning all
-        # assessments avoids incorrectly hiding them due to cross-citizen matches.
-        return assessments
-
-    normalized_email = user_email.strip().lower()
+    # Use citizen_user_id for strong ownership when available.
     candidate_payments = (
         db.query(Payment)
         .filter(Payment.source_module.in_(("rpt_online_payment", "business_tax_online_payment")))
         .order_by(Payment.created_at.desc())
         .all()
     )
-    candidate_payments = [
-        payment for payment in candidate_payments
-        if (get_decrypted_or_raw(payment, "email") or payment.email or "").strip().lower() == normalized_email
-    ]
+    if current_user.id is not None:
+        candidate_payments = [
+            payment for payment in candidate_payments
+            if payment.citizen_user_id == current_user.id
+        ]
+    else:
+        # Fallback to email when citizen_user_id is unavailable.
+        user_email = citizen_email(current_user)
+        if not user_email:
+            return assessments
+        normalized_email = user_email.strip().lower()
+        candidate_payments = [
+            payment for payment in candidate_payments
+            if (get_decrypted_or_raw(payment, "email") or payment.email or "").strip().lower() == normalized_email
+        ]
 
     return [
         assessment for assessment in assessments

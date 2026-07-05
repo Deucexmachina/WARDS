@@ -283,6 +283,7 @@ class Payment(Base):
     __tablename__ = "payments"
     
     id = Column(Integer, primary_key=True, index=True)
+    citizen_user_id = Column(Integer, ForeignKey("citizen_users.id"), nullable=True, index=True)
     ref_number = Column(String, unique=True, index=True)
     ref_number_hash = Column(String, nullable=True, index=True)
     ref_number_enc = Column(Text, nullable=True)

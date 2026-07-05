@@ -53,7 +53,7 @@ def _make_citizen(db, email="jane@example.com"):
     return citizen
 
 
-def _make_payment(db, **kwargs):
+def _make_payment(db, citizen=None, **kwargs):
     defaults = {
         "ref_number": "REF-001",
         "txn_id": "TXN-001",
@@ -68,6 +68,8 @@ def _make_payment(db, **kwargs):
         "verified_at": datetime(2026, 1, 1),
     }
     defaults.update(kwargs)
+    if citizen is not None:
+        defaults.setdefault("citizen_user_id", citizen.id)
     payment = Payment(**defaults)
     db.add(payment)
     db.flush()
@@ -134,6 +136,7 @@ def test_bt_assessment_not_hidden_by_amount_match_for_different_business():
         # Payment for Business A (mayor permit MP-001)
         _make_payment(
             db,
+            citizen=citizen,
             source_module="business_tax_online_payment",
             property_ref_number="MP-001",
             amount=5000.0,
@@ -187,6 +190,7 @@ def test_filter_unsettled_returns_all_when_citizen_email_is_missing():
 
         _make_payment(
             db,
+            citizen=other,
             email="other@example.com",
             taxpayer_name="Other",
             tin="999-999-999-000",
@@ -216,6 +220,7 @@ def test_rpt_assessment_hidden_when_tdn_paid():
 
         _make_payment(
             db,
+            citizen=citizen,
             property_ref_number="A-123-45678",
             amount=1500.0,
             status="PAYMENT_VERIFIED",
@@ -242,6 +247,7 @@ def test_bt_assessment_hidden_when_permit_paid():
 
         _make_payment(
             db,
+            citizen=citizen,
             source_module="business_tax_online_payment",
             property_ref_number="MP-001",
             amount=5000.0,
@@ -266,6 +272,44 @@ def test_bt_assessment_hidden_when_permit_paid():
 
         result = tax_routes.filter_unsettled_public_assessments(db, citizen, [assessment])
         assert len(result) == 0, "Settled BT assessment should be hidden when mayor permit matches"
+    finally:
+        database_models.SQLALCHEMY_DATABASE_URL = original_database_url
+        db.close()
+        engine.dispose()
+        temp_dir.cleanup()
+
+
+def test_rpt_assessment_not_hidden_by_other_citizens_payment_with_same_tdn():
+    """Citizen B's verified payment for a TDN must not settle Citizen A's assessment for the same TDN."""
+    temp_dir, engine, db, original_database_url = make_session()
+    try:
+        citizen_a = _make_citizen(db, email="alice@example.com")
+        citizen_b = CitizenUser(
+            full_name="Bob Smith",
+            email="bob@example.com",
+            tin="999-888-777-000",
+            status="Active",
+        )
+        db.add(citizen_b)
+        db.commit()
+
+        # Citizen B has a verified payment for the TDN
+        _make_payment(
+            db,
+            citizen=citizen_b,
+            email="bob@example.com",
+            property_ref_number="A-123-45678",
+            amount=1500.0,
+            status="PAYMENT_VERIFIED",
+        )
+
+        # Citizen A has a pending assessment for the same TDN
+        assessment = _make_assessment(db, citizen_a, tdn="A-123-45678")
+        db.commit()
+
+        result = tax_routes.filter_unsettled_public_assessments(db, citizen_a, [assessment])
+        assert len(result) == 1, "Citizen A's assessment should remain visible; Citizen B's payment must not settle it"
+        assert result[0].id == assessment.id
     finally:
         database_models.SQLALCHEMY_DATABASE_URL = original_database_url
         db.close()

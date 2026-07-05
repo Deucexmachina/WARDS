@@ -53,6 +53,7 @@ def test_get_payments_for_citizen_filters_by_email():
         db.flush()
 
         p1 = Payment(
+            citizen_user_id=citizen.id,
             ref_number="REF-001",
             txn_id="TXN-001",
             taxpayer_name="Jane Doe",
@@ -107,6 +108,7 @@ def test_get_payments_for_citizen_filters_by_name_and_tin_when_no_email():
         db.flush()
 
         p1 = Payment(
+            citizen_user_id=citizen.id,
             ref_number="REF-001",
             txn_id="TXN-001",
             taxpayer_name="Jane Doe",
@@ -166,6 +168,7 @@ def test_verify_payment_ownership_raises_for_other_user():
         db.flush()
 
         payment = Payment(
+            citizen_user_id=other.id,
             ref_number="REF-001",
             txn_id="TXN-001",
             taxpayer_name="John Smith",

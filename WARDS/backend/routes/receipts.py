@@ -3410,6 +3410,7 @@ async def pay_request_fee(
 
     payment_ref, txn_id = unique_receipt_payment_refs()
     payment = Payment(
+        citizen_user_id=receipt_request.citizen_user_id,
         ref_number=payment_ref,
         txn_id=txn_id,
         taxpayer_name=receipt_request_value(receipt_request, "taxpayer_name"),
