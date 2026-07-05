@@ -62,6 +62,7 @@ except ImportError:
             return forwarded.split(",", 1)[0].strip() or "unknown"
         return request.client.host if request.client and request.client.host else "unknown"
 from middleware.https import HttpsEnforcementMiddleware
+from middleware.injection_blocker import InjectionBlockingMiddleware
 
 install_uvicorn_reload_path_filter()
 
@@ -387,18 +388,20 @@ app.add_middleware(
 
 app.add_middleware(HttpsEnforcementMiddleware)
 
-# Security Headers Middleware
-# Adds security headers to all responses (CSP, X-Frame-Options, etc.)
+
 app.add_middleware(SecurityHeadersMiddleware)
 
-# Request Integrity Middleware (optional; only enforced when REQUEST_INTEGRITY_SECRET is set)
+
 app.add_middleware(RequestIntegrityMiddleware, secret=os.getenv("REQUEST_INTEGRITY_SECRET"))
 
-# DoS Protection Middleware (order matters - size first, then timeout, then connection/abuse)
+
 app.add_middleware(RequestSizeMiddleware)
 app.add_middleware(RequestTimeoutMiddleware)
 app.add_middleware(ConnectionLimitMiddleware)
 app.add_middleware(AbuseDetectionMiddleware)
+
+
+app.add_middleware(InjectionBlockingMiddleware)
 
 Base.metadata.create_all(bind=engine)
 
@@ -1277,7 +1280,6 @@ def bootstrap_admin():
             admin.email = admin_email.lower()
             admin.status = "Active"
             admin.is_verified = True
-            # Do NOT overwrite hashed_password — preserve manual password changes
         else:
             db.add(Admin(
                 username=admin_username,
@@ -1307,7 +1309,6 @@ def bootstrap_superadmin():
             admin.email = superadmin_email.lower()
             admin.status = "Active"
             admin.is_verified = True
-            # Do NOT overwrite hashed_password — preserve manual password changes
         else:
             db.add(Admin(
                 username=superadmin_username,
@@ -1910,9 +1911,6 @@ app.include_router(window_staff_account.router, prefix="/api/branch/account", ta
 app.include_router(kiosk.router, prefix="/api/kiosk", tags=["Kiosk"])
 app.include_router(reports.branch_router, prefix="/api/branch/reports", tags=["Branch Reports"])
 app.include_router(admin_users.router, prefix="/api/admin", tags=["Admin Users"])
-# Unified auth is intentionally mounted at two prefixes:
-# /api/auth/unified  – primary endpoint for all portals (admin, branch, public)
-# /api/public/auth   – backward-compatible alias for public portal login flows
 app.include_router(unified_auth.router, prefix="/api/auth/unified", tags=["Unified Authentication"])
 app.include_router(branches.router, prefix="/api/branches", tags=["Branches"])
 app.include_router(reports.router, prefix="/api/reports", tags=["Reports"])
