@@ -167,8 +167,9 @@ const getAssessmentValidationErrors = (form) => {
     else if (!IDENTIFIER_PATTERN.test(String(form.tdn).trim().toUpperCase())) errors.tdn = 'TDN must be 6–40 uppercase letters, numbers, or hyphens.';
     if (!String(form.property_type || '').trim()) errors.property_type = 'Property Type is required.';
     if (!String(form.property_address || '').trim()) errors.property_address = 'Property Address is required.';
-    if (Number(form.fair_market_value || 0) <= 0) errors.fair_market_value = 'Fair Market Value must be greater than 0.';
-    if (Number(form.assessment_level || 0) <= 0 || Number(form.assessment_level || 0) > 1) errors.assessment_level = 'Assessment Level must be between 0.01 and 1.';
+    if (Number(form.fair_market_value || 0) < 1) errors.fair_market_value = 'Fair Market Value must be at least \u20b11.00.';
+    if (Number(form.assessment_level || 0) < 0.01 || Number(form.assessment_level || 0) > 1) errors.assessment_level = 'Assessment Level must be at least 0.01 and not exceed 1.';
+    if (Number(form.months_late || 0) < 0) errors.months_late = 'Months Late must be at least 0.';
     if (Number(form.discount_rate || 0) < 0 || Number(form.discount_rate || 0) > 1) errors.discount_rate = 'Discount Rate must be between 0 and 1.';
   } else if (form.tax_type === 'BT') {
     if (form.taxpayer_type !== 'Business Owner') errors.taxpayer_type = 'Business Tax assessments require Business Owner.';
@@ -178,8 +179,10 @@ const getAssessmentValidationErrors = (form) => {
     else if (!IDENTIFIER_PATTERN.test(String(form.sec_dti_cda_number).trim().toUpperCase())) errors.sec_dti_cda_number = 'Registration number must be 6–40 uppercase letters, numbers, or hyphens.';
     if (!String(form.business_name || '').trim()) errors.business_name = 'Business Name is required.';
     if (!String(form.business_type || '').trim()) errors.business_type = 'Business Type is required.';
-    if (Number(form.annual_gross_sales || 0) <= 0) errors.annual_gross_sales = 'Annual Gross Sales must be greater than 0.';
+    if (Number(form.annual_gross_sales || 0) < 1) errors.annual_gross_sales = 'Annual Gross Sales must be at least \u20b11.00.';
     if (Number(form.business_tax_rate || 0) <= 0 || Number(form.business_tax_rate || 0) > 1) errors.business_tax_rate = 'Business Tax Rate must be between 0.0001 and 1.';
+    if (Number(form.months_late || 0) < 0) errors.months_late = 'Months Late must be at least 0.';
+    if (Number(form.discount_rate || 0) < 0 || Number(form.discount_rate || 0) > 1) errors.discount_rate = 'Discount Rate must be between 0 and 1.';
   } else {
     errors.tax_type = 'Unsupported tax type.';
   }
@@ -848,12 +851,12 @@ const TaxAssessment = () => {
               </label>
               <label className="block">
                 <span className="mb-2 block text-sm font-semibold text-slate-700">Fair Market Value</span>
-                <input type="number" min="0" step="0.01" name="fair_market_value" value={assessmentForm.fair_market_value} onChange={handleAssessmentFormChange} className={`w-full rounded-2xl border px-4 py-3 text-sm ${assessmentValidationErrors.fair_market_value ? 'border-rose-400 bg-rose-50' : 'border-slate-300'}`} />
+                <input type="number" min="1" step="0.01" name="fair_market_value" value={assessmentForm.fair_market_value} onChange={handleAssessmentFormChange} className={`w-full rounded-2xl border px-4 py-3 text-sm ${assessmentValidationErrors.fair_market_value ? 'border-rose-400 bg-rose-50' : 'border-slate-300'}`} />
                 {assessmentValidationErrors.fair_market_value ? <span className="mt-2 block text-xs font-medium text-rose-600">{assessmentValidationErrors.fair_market_value}</span> : null}
               </label>
               <label className="block">
                 <span className="mb-2 block text-sm font-semibold text-slate-700">Assessment Level</span>
-                <input type="number" min="0" step="0.01" name="assessment_level" value={assessmentForm.assessment_level} onChange={handleAssessmentFormChange} className={`w-full rounded-2xl border px-4 py-3 text-sm ${assessmentValidationErrors.assessment_level ? 'border-rose-400 bg-rose-50' : 'border-slate-300'}`} />
+                <input type="number" min="0.01" step="0.01" name="assessment_level" value={assessmentForm.assessment_level} onChange={handleAssessmentFormChange} className={`w-full rounded-2xl border px-4 py-3 text-sm ${assessmentValidationErrors.assessment_level ? 'border-rose-400 bg-rose-50' : 'border-slate-300'}`} />
                 {assessmentValidationErrors.assessment_level ? <span className="mt-2 block text-xs font-medium text-rose-600">{assessmentValidationErrors.assessment_level}</span> : null}
               </label>
               <label className="block">
@@ -890,13 +893,23 @@ const TaxAssessment = () => {
               </label>
               <label className="block">
                 <span className="mb-2 block text-sm font-semibold text-slate-700">Annual Gross Sales</span>
-                <input type="number" min="0" step="0.01" name="annual_gross_sales" value={assessmentForm.annual_gross_sales} onChange={handleAssessmentFormChange} className={`w-full rounded-2xl border px-4 py-3 text-sm ${assessmentValidationErrors.annual_gross_sales ? 'border-rose-400 bg-rose-50' : 'border-slate-300'}`} />
+                <input type="number" min="1" step="0.01" name="annual_gross_sales" value={assessmentForm.annual_gross_sales} onChange={handleAssessmentFormChange} className={`w-full rounded-2xl border px-4 py-3 text-sm ${assessmentValidationErrors.annual_gross_sales ? 'border-rose-400 bg-rose-50' : 'border-slate-300'}`} />
                 {assessmentValidationErrors.annual_gross_sales ? <span className="mt-2 block text-xs font-medium text-rose-600">{assessmentValidationErrors.annual_gross_sales}</span> : null}
               </label>
               <label className="block">
                 <span className="mb-2 block text-sm font-semibold text-slate-700">Business Tax Rate</span>
                 <input type="number" min="0" step="0.0001" name="business_tax_rate" value={assessmentForm.business_tax_rate} onChange={handleAssessmentFormChange} className={`w-full rounded-2xl border px-4 py-3 text-sm ${assessmentValidationErrors.business_tax_rate ? 'border-rose-400 bg-rose-50' : 'border-slate-300'}`} />
                 {assessmentValidationErrors.business_tax_rate ? <span className="mt-2 block text-xs font-medium text-rose-600">{assessmentValidationErrors.business_tax_rate}</span> : null}
+              </label>
+              <label className="block">
+                <span className="mb-2 block text-sm font-semibold text-slate-700">Months Late</span>
+                <input type="number" min="0" name="months_late" value={assessmentForm.months_late} onChange={handleAssessmentFormChange} className={`w-full rounded-2xl border px-4 py-3 text-sm ${assessmentValidationErrors.months_late ? 'border-rose-400 bg-rose-50' : 'border-slate-300'}`} />
+                {assessmentValidationErrors.months_late ? <span className="mt-2 block text-xs font-medium text-rose-600">{assessmentValidationErrors.months_late}</span> : null}
+              </label>
+              <label className="block">
+                <span className="mb-2 block text-sm font-semibold text-slate-700">Discount Rate</span>
+                <input type="number" min="0" step="0.01" name="discount_rate" value={assessmentForm.discount_rate} onChange={handleAssessmentFormChange} className={`w-full rounded-2xl border px-4 py-3 text-sm ${assessmentValidationErrors.discount_rate ? 'border-rose-400 bg-rose-50' : 'border-slate-300'}`} />
+                {assessmentValidationErrors.discount_rate ? <span className="mt-2 block text-xs font-medium text-rose-600">{assessmentValidationErrors.discount_rate}</span> : null}
               </label>
             </div>
           )}

@@ -184,16 +184,16 @@ class TaxAssessmentUpsertRequest(BaseModel):
     tdn: str | None = None
     property_type: str | None = None
     property_address: str | None = None
-    fair_market_value: float = Field(default=0, ge=0)
-    assessment_level: float = Field(default=0, ge=0)
+    fair_market_value: float = Field(default=0, ge=1)
+    assessment_level: float = Field(default=0, ge=0.01, le=1)
     months_late: int = Field(default=0, ge=0)
-    discount_rate: float = Field(default=0, ge=0)
+    discount_rate: float = Field(default=0, ge=0, le=1)
     mayor_permit_number: str | None = None
     sec_dti_cda_number: str | None = None
     business_name: str | None = None
     business_type: str | None = None
-    annual_gross_sales: float = Field(default=0, ge=0)
-    business_tax_rate: float = Field(default=0, ge=0)
+    annual_gross_sales: float = Field(default=0, ge=1)
+    business_tax_rate: float = Field(default=0, ge=0.0001, le=1)
 
 
 def normalize_taxpayer_type(value: str) -> str:
@@ -550,10 +550,12 @@ def validate_assessment_payload(payload: TaxAssessmentUpsertRequest, *, tax_type
             raise HTTPException(status_code=400, detail="Property Type is required for RPT assessments.")
         if not (payload.property_address or "").strip():
             raise HTTPException(status_code=400, detail="Property Address is required for RPT assessments.")
-        if float(payload.fair_market_value or 0) <= 0:
-            raise HTTPException(status_code=400, detail="Fair Market Value must be greater than 0.")
-        if float(payload.assessment_level or 0) <= 0 or float(payload.assessment_level or 0) > 1:
-            raise HTTPException(status_code=400, detail="Assessment Level must be greater than 0 and not exceed 1.")
+        if float(payload.fair_market_value or 0) < 1:
+            raise HTTPException(status_code=400, detail="Fair Market Value must be at least \u20b11.00.")
+        if float(payload.assessment_level or 0) < 0.01 or float(payload.assessment_level or 0) > 1:
+            raise HTTPException(status_code=400, detail="Assessment Level must be at least 0.01 and not exceed 1.")
+        if int(payload.months_late or 0) < 0:
+            raise HTTPException(status_code=400, detail="Months Late must be at least 0.")
         if float(payload.discount_rate or 0) < 0 or float(payload.discount_rate or 0) > 1:
             raise HTTPException(status_code=400, detail="Discount Rate must be between 0 and 1.")
         return
@@ -564,10 +566,14 @@ def validate_assessment_payload(payload: TaxAssessmentUpsertRequest, *, tax_type
         raise HTTPException(status_code=400, detail="Business Name is required for BT assessments.")
     if not (payload.business_type or "").strip():
         raise HTTPException(status_code=400, detail="Business Type is required for BT assessments.")
-    if float(payload.annual_gross_sales or 0) <= 0:
-        raise HTTPException(status_code=400, detail="Annual Gross Sales must be greater than 0.")
+    if float(payload.annual_gross_sales or 0) < 1:
+        raise HTTPException(status_code=400, detail="Annual Gross Sales must be at least \u20b11.00.")
     if float(payload.business_tax_rate or 0) <= 0 or float(payload.business_tax_rate or 0) > 1:
         raise HTTPException(status_code=400, detail="Business Tax Rate must be greater than 0 and not exceed 1.")
+    if int(payload.months_late or 0) < 0:
+        raise HTTPException(status_code=400, detail="Months Late must be at least 0.")
+    if float(payload.discount_rate or 0) < 0 or float(payload.discount_rate or 0) > 1:
+        raise HTTPException(status_code=400, detail="Discount Rate must be between 0 and 1.")
 
 
 def ensure_identifier_not_owned_by_another_user(
