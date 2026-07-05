@@ -38,8 +38,52 @@ from utils.field_crypto import apply_payment_security, apply_queue_security, app
 from utils.security_validation import normalize_email
 from utils.system_settings import SYSTEM_DISABLED_MESSAGE, get_setting_value
 from auth import get_optional_current_user
+from routes.unified_auth import log_activity
 
 router = APIRouter()
+
+
+def _is_suspicious_input(value: str) -> bool:
+    if not value:
+        return False
+    text = str(value).lower()
+    if re.search(r"[<>]", text):
+        return True
+    if re.search(r"&lt;|&gt;|&amp;|&#\d+;|&#x[0-9a-f]+;", text):
+        return True
+    if re.search(
+        r"(?:javascript|data|vbscript):|"
+        r"<\s*\w+.*?\bon\w+\s*=|"
+        r"alert\s*\(|prompt\s*\(|confirm\s*\(|"
+        r"eval\s*\(|expression\s*\(|"
+        r"document\.(?:cookie|location|write)|"
+        r"window\.(?:location|open)",
+        text,
+    ):
+        return True
+    if re.search(
+        r"script.*(?:alert|prompt|confirm|eval|document\.|window\.)|"
+        r"(?:alert|prompt|confirm|eval).*script",
+        text,
+    ):
+        return True
+    sql_rx = (
+        r"(?:--|/\*|;)\s*(?:drop|delete|update|insert|union|select|exec|execute)|"
+        r"(?:union|select|insert|update|delete|drop|create|alter)\s+.*?\s+(?:from|into|table|database)|"
+        r"or\s+1\s*=\s*1|and\s+1\s*=\s*1|"
+        r"'\s*or\s*'|\"\s*or\s*\"|"
+        r"waitfor\s+delay|benchmark\s*\(|sleep\s*\(|"
+        r";%20|char\s*\(|concat\s*\(|group_concat"
+    )
+    if re.search(sql_rx, text):
+        return True
+    if re.search(r"\.\./|\.\.\\", text):
+        return True
+    if re.search(r"[|&;`$]|\$\(.*?(?:\)|$)|`.*?(?:`|$)", text):
+        return True
+    if "\x00" in text:
+        return True
+    return False
 
 
 def resolve_frontend_base_url(request: Request) -> str:
@@ -3169,6 +3213,16 @@ async def create_receipt_request(
     transaction_date = validate_transaction_date((receipt_req.txnDate or "").strip())
     normalized_email = normalize_email(receipt_req.email, check_deliverability=True)
     normalized_ref_number = normalize_reference_number(receipt_req.refNumber)
+    if _is_suspicious_input(normalized_ref_number):
+        log_activity(
+            db,
+            "Injection Attempt",
+            receipt_req.email or "unknown",
+            f"Portal: receipt-request; Reason: Suspicious characters detected in refNumber; Input: {normalized_ref_number}",
+            "malicious",
+            request=request,
+        )
+        raise HTTPException(status_code=400, detail="Invalid reference number format.")
     request_reason, request_reason_other = validate_receipt_request_reason(receipt_req.requestReason, receipt_req.requestReasonOther)
     limit_account = current_citizen or find_citizen_by_email(db, CitizenUser, normalized_email)
     tax_type = normalize_receipt_category(receipt_req.taxType)
