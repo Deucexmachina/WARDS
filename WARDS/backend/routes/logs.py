@@ -63,6 +63,7 @@ def _apply_branch_filter(query, branch_name: str):
 async def get_activity_logs_unread_count(
     since: Optional[str] = None,
     branch_name: Optional[str] = None,
+    severity: Optional[str] = None,
     current_user: Admin | BranchStaff = Depends(get_logs_current_user),
     db: Session = Depends(get_db)
 ):
@@ -77,6 +78,8 @@ async def get_activity_logs_unread_count(
 
     if since:
         query = query.filter(ActivityLog.created_at > datetime.fromisoformat(since))
+    if severity:
+        query = query.filter(ActivityLog.severity == severity)
 
     # Branch admins are always scoped to their own branch
     effective_branch = _get_branch_name_for_user(current_user, db) if is_branch_admin else branch_name
@@ -92,6 +95,7 @@ async def get_activity_logs(
     dateFrom: Optional[str] = None,
     dateTo: Optional[str] = None,
     branch_name: Optional[str] = None,
+    severity: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
     current_user: Admin | BranchStaff = Depends(get_logs_current_user),
@@ -114,6 +118,8 @@ async def get_activity_logs(
         query = query.filter(ActivityLog.created_at >= datetime.fromisoformat(dateFrom))
     if dateTo:
         query = query.filter(ActivityLog.created_at < datetime.fromisoformat(dateTo) + timedelta(days=1))
+    if severity:
+        query = query.filter(ActivityLog.severity == severity)
 
     # Branch admins are always scoped to their own branch; super/main admins may pass branch_name
     effective_branch = _get_branch_name_for_user(current_user, db) if is_branch_admin else branch_name

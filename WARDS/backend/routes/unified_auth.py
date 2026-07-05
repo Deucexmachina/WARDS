@@ -758,7 +758,7 @@ def log_activity(db: Session, action: str, user: str, details: str, log_type: st
         separator = " | " if " | " in details else "; "
         full_details = f"{details}{separator}{' | '.join(meta_parts)}"
     try:
-        db.add(ActivityLog(action=action, user=user, details=full_details, type=log_type))
+        db.add(ActivityLog(action=action, user=user, details=full_details, type=log_type, severity=severity))
         db.commit()
     except (AttributeError, TypeError):
         pass

@@ -1080,6 +1080,7 @@ class ActivityLog(Base):
     user = Column(String)
     details = Column(Text)
     type = Column(String)
+    severity = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     previous_integrity_hash = Column(String(128), nullable=True)
     integrity_hash = Column(String(128), nullable=True, index=True)

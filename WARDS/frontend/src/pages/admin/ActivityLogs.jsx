@@ -38,6 +38,7 @@ const ActivityLogs = () => {
   const [earliestRecordDate, setEarliestRecordDate] = useState(null);
   const [filters, setFilters] = useState({
     type: '',
+    severity: '',
     dateFrom: '',
     dateTo: '',
     user: '',
@@ -105,7 +106,7 @@ const ActivityLogs = () => {
 
       <section className="rounded-xl bg-white p-6 shadow">
         <h2 className="text-xl font-bold text-primary mb-4">Filter Logs</h2>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-6">
           <div>
             <label className="block text-gray-700 font-semibold mb-2">Activity Type</label>
             <input
@@ -116,6 +117,20 @@ const ActivityLogs = () => {
               placeholder="admin, security, transaction"
               className="w-full rounded-lg border border-gray-300 px-4 py-3 focus:ring-2 focus:ring-accent focus:border-transparent"
             />
+          </div>
+          <div>
+            <label className="block text-gray-700 font-semibold mb-2">Severity</label>
+            <select
+              name="severity"
+              value={filters.severity}
+              onChange={handleFilterChange}
+              className="w-full rounded-lg border border-gray-300 px-4 py-3 focus:ring-2 focus:ring-accent focus:border-transparent bg-white"
+            >
+              <option value="">All Severities</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
           </div>
           <div>
             <label className="block text-gray-700 font-semibold mb-2">User</label>
