@@ -1659,7 +1659,8 @@ async def unified_refresh_token(request: Request, payload: RefreshTokenRequest, 
 
     sid = decoded.get("sid")
     user_id = decoded.get("user_id")
-    if sid and user_id:
+    internal_role = decoded.get("internal_role")
+    if sid and user_id and internal_role != "superadmin":
         r = get_redis_client()
         if r:
             stored_sid = r.get(f"wards:session:{portal}:{user_id}")
