@@ -60,7 +60,33 @@ LOG_PREFIX = "[VM1-REPORTER]"
 
 CRITICAL_INLINE_RELATIVE_PATHS = {
     "WARDS/frontend/index.html",
+    "WARDS/backend/routes/security_dashboard.py",
+    "WARDS/backend/routes/unified_auth.py",
+    "WARDS/backend/routes/receipts.py",
+    "WARDS/backend/routes/payments.py",
+    "WARDS/backend/auth.py",
+    "WARDS/backend/main.py",
 }
+
+CRITICAL_INLINE_PATH_PARTS = (
+    "/auth/",
+    "/middleware/",
+    "/security/",
+    "/utils/security_",
+    "/utils/request_signing",
+    "/utils/field_crypto",
+    "/utils/log_integrity",
+)
+
+CRITICAL_INLINE_NAME_PARTS = (
+    "auth",
+    "mfa",
+    "security",
+    "payment",
+    "receipt",
+    "backup",
+    "recovery",
+)
 
 EXCLUDED_DIRS = {
     ".git",
@@ -188,8 +214,21 @@ def _should_inline_content(path: Path, size_bytes: int) -> bool:
     return lower_name in MONITORED_SPECIAL_FILENAMES or any(lower_name.endswith(item) for item in MONITORED_SPECIAL_NAME_SUFFIXES)
 
 
+def _is_critical_inline_path(relative_path: str, path: Path) -> bool:
+    normalized = relative_path.replace("\\", "/")
+    if normalized in CRITICAL_INLINE_RELATIVE_PATHS:
+        return True
+    lowered = f"/{normalized.lower()}"
+    if any(part in lowered for part in CRITICAL_INLINE_PATH_PARTS):
+        return True
+    if path.suffix.lower() in {".py", ".js", ".jsx", ".ts", ".tsx", ".html"}:
+        name = path.name.lower()
+        return any(part in name for part in CRITICAL_INLINE_NAME_PARTS)
+    return False
+
+
 def _inline_priority_rank(relative_path: str, path: Path, git_head_match: bool) -> int:
-    if relative_path in CRITICAL_INLINE_RELATIVE_PATHS:
+    if _is_critical_inline_path(relative_path, path):
         return 0
     if not git_head_match and path.suffix.lower() in INLINE_CONTENT_SUFFIXES:
         return 1
@@ -288,9 +327,9 @@ def _iter_root_files(root_name: str, root_path: Path):
             "current_hash": current_hash,
             "content_b64": None,
             "inline_candidate": _should_inline_content(path, stat.st_size),
-            "inline_priority": not git_head_match or relative_path in CRITICAL_INLINE_RELATIVE_PATHS,
+            "inline_priority": not git_head_match or _is_critical_inline_path(relative_path, path),
             "inline_priority_rank": _inline_priority_rank(relative_path, path, git_head_match),
-            "inline_always": relative_path in CRITICAL_INLINE_RELATIVE_PATHS,
+            "inline_always": _is_critical_inline_path(relative_path, path),
             "git_head_match": git_head_match,
         }
 

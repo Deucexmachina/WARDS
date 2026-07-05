@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from database.models import ActivityLog, Admin, AdminLoginSecurityProfile, Branch, BranchStaff, CitizenUser, Payment, PrivacyConsent, Queue, QueueHistory, ReceiptRequest, ReceiptRequestHistory, TaxAssessmentRecord, TaxpayerIdentifierSubmission, get_db
 from auth import get_current_admin_user, get_current_branch_staff, hash_password, verify_password, verify_account_password
+from auth.decorators import log_blocked_security_attempt
 from utils.field_crypto import apply_citizen_user_security, get_decrypted_or_raw, serialize_citizen_user
 from utils.security_validation import (
     ensure_contact_number_is_unique,
@@ -58,6 +59,15 @@ async def get_accounts_current_user(
         except HTTPException:
             raise admin_exc
         if staff.role != "branch_admin":
+            log_blocked_security_attempt(
+                "Privilege Escalation Attempt",
+                staff.email or staff.username or "unknown",
+                (
+                    "Reason: branch staff attempted Branch Admin account-management endpoint; "
+                    f"current_role: {staff.role}; required_role: branch_admin"
+                ),
+                request,
+            )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only Branch Admin accounts can manage branch accounts.",
@@ -534,8 +544,26 @@ async def update_user(
 
     if isinstance(account, Admin):
         if not is_admin_role(user.role):
+            log_blocked_security_attempt(
+                "Privilege Escalation Attempt",
+                getattr(current_user, "email", None) or getattr(current_user, "username", "unknown"),
+                (
+                    "Reason: attempted to change an admin account to a non-admin role; "
+                    f"target_user_id: {user_id}; requested_role: {user.role}"
+                ),
+                request,
+            )
             raise HTTPException(status_code=400, detail="Admin accounts must keep an admin role")
         if user.role == "main_admin" and current_user.role not in {"main_admin", "superadmin"}:
+            log_blocked_security_attempt(
+                "Privilege Escalation Attempt",
+                getattr(current_user, "email", None) or getattr(current_user, "username", "unknown"),
+                (
+                    "Reason: attempted to assign main_admin without sufficient authority; "
+                    f"current_role: {current_user.role}; target_user_id: {user_id}; requested_role: {user.role}"
+                ),
+                request,
+            )
             raise HTTPException(status_code=403, detail="Only Main Admin or Super Admin can assign the main_admin role")
         if user.username:
             username = normalize_username(user.username)
@@ -546,6 +574,16 @@ async def update_user(
         branch_name = "All Branches"
     elif isinstance(account, BranchStaff):
         if not is_branch_role(user.role):
+            log_blocked_security_attempt(
+                "Privilege Escalation Attempt",
+                getattr(current_user, "email", None) or getattr(current_user, "username", "unknown"),
+                (
+                    "Reason: branch account self/admin role-elevation attempt; "
+                    f"target_user_id: {user_id}; requested_role: {user.role}; "
+                    f"current_role: {getattr(current_user, 'role', 'unknown')}"
+                ),
+                request,
+            )
             raise HTTPException(status_code=400, detail="Branch accounts must keep a branch role")
         if user.username:
             username = normalize_username(user.username)

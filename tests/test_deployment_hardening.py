@@ -599,7 +599,8 @@ def test_vm1_priority_hash_only_manifest_changes_create_detection():
     assert "content_missing_for_nonempty_file" in engine
     assert "size_bytes > 0" in engine
     assert 'set_setting(db, "vm1_scan_requested_at", now_utc().isoformat(), "vm2_hash_only_defer")' in engine
-    assert '"inline_priority": not git_head_match or relative_path in CRITICAL_INLINE_RELATIVE_PATHS' in reporter
+    assert '"inline_priority": not git_head_match or _is_critical_inline_path(relative_path, path)' in reporter
+    assert '"inline_always": _is_critical_inline_path(relative_path, path)' in reporter
     assert "CRITICAL_INLINE_RELATIVE_PATHS" in reporter
     assert '"WARDS/frontend/index.html"' in reporter
     assert "inline_always" in reporter
