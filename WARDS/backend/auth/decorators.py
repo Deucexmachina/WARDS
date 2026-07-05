@@ -547,6 +547,8 @@ def decode_active_account_from_bearer_token(
         if not account or getattr(account, "status", "Active") != "Active":
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
 
+        if request is not None:
+            _validate_token_binding(request, payload)
         _validate_active_session(portal, payload.get("user_id"), payload, request)
         return portal, account, payload
 
