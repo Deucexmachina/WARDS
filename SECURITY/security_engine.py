@@ -8418,6 +8418,27 @@ def process_vm1_database_integrity_report(db: Session, payload: dict) -> dict:
         .first()
     )
     if existing_incident:
+        # Deduplicate: if the last detection for vm1_database has the same checksum,
+        # this is a repeat report for the same defacement. Don't spam detection/recovery logs.
+        last_detection = (
+            db.query(SecurityDetectionEvent)
+            .filter(SecurityDetectionEvent.target_type == "vm1_database")
+            .order_by(SecurityDetectionEvent.detected_at.desc())
+            .first()
+        )
+        if last_detection and last_detection.new_hash == checksum:
+            # Same defacement still active — just ensure a restore is queued if none pending
+            restore_cmd = _queue_vm1_database_restore_command(
+                db, last_detection.id, reason="existing_vm1_database_incident"
+            )
+            return {
+                "status": "existing_incident",
+                "restore_queued": bool(restore_cmd),
+                "command_id": restore_cmd.get("command_id") if restore_cmd else None,
+                "detection_id": last_detection.id,
+                "incident_id": existing_incident.id,
+            }
+
         # Build prediction/classification for this report so we can log a detection
         _context = {
             "target_type": "vm1_database",

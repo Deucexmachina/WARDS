@@ -702,8 +702,14 @@ def apply_database_restore_command(cmd: dict) -> bool:
                     if chunk:
                         handle.write(chunk)
 
-        with gzip.open(download_path, "rb") as source:
-            sql_payload = source.read()
+        with open(download_path, "rb") as f:
+            header = f.read(2)
+        if header == b'\x1f\x8b':
+            with gzip.open(download_path, "rb") as source:
+                sql_payload = source.read()
+        else:
+            with open(download_path, "rb") as f:
+                sql_payload = f.read()
 
         compose_cmd, cwd = _compose_base_command()
         restore = subprocess.run(
