@@ -5,7 +5,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from jose import JWTError, jwt
 
-from database.models import Admin, BranchStaff, CitizenUser, get_db
+from database.models import ActivityLog, Alert, Admin, BranchStaff, CitizenUser, get_db, SessionLocal
 from auth.token_revocation import is_token_revoked
 from utils.field_crypto import find_citizen_by_email
 from utils.redis_client import get_redis_client
@@ -22,6 +22,34 @@ BINDING_STRICT_MODE = os.getenv("TOKEN_BINDING_STRICT", "true").lower() == "true
 BINDING_CHECK_UA = os.getenv("TOKEN_BINDING_UA", "false").lower() == "true"
 
 
+def _get_request_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",", 1)[0].strip() or "unknown"
+    return request.client.host if request.client else "unknown"
+
+
+def _log_spoofing_attempt(user: str, details: str, request: Request) -> None:
+    db = SessionLocal()
+    try:
+        full_details = f"{details}; ip: {_get_request_ip(request)}; ua: {request.headers.get('user-agent') or 'unknown'}"
+        db.add(ActivityLog(action="Spoofing Attempt", user=user, details=full_details, type="malicious"))
+        db.add(
+            Alert(
+                type="malicious",
+                title="Spoofing Attempt",
+                message=full_details,
+                severity="high",
+                read=False,
+            )
+        )
+        db.commit()
+    except Exception:
+        pass
+    finally:
+        db.close()
+
+
 def _validate_token_binding(request: Request, payload: dict) -> None:
     """Raise 401 if token ip or ua claims do not match the current request."""
     if not BINDING_STRICT_MODE:
@@ -30,13 +58,24 @@ def _validate_token_binding(request: Request, payload: dict) -> None:
     user_agent = request.headers.get("user-agent") or ""
     token_ip = payload.get("ip")
     token_ua = payload.get("ua")
+    user = payload.get("email") or payload.get("sub") or "unknown"
     if token_ip and token_ip != client_ip:
+        _log_spoofing_attempt(
+            user,
+            f"Reason: Session binding mismatch (IP); expected_ip: {token_ip}; actual_ip: {client_ip}",
+            request,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Session binding mismatch (IP). Please log in again.",
             headers={"WWW-Authenticate": "Bearer"},
         )
     if BINDING_CHECK_UA and token_ua and token_ua != user_agent:
+        _log_spoofing_attempt(
+            user,
+            f"Reason: Session binding mismatch (device); expected_ua: {token_ua}; actual_ua: {user_agent}",
+            request,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Session binding mismatch (device). Please log in again.",
@@ -44,7 +83,7 @@ def _validate_token_binding(request: Request, payload: dict) -> None:
         )
 
 
-def _validate_active_session(portal: str, user_id: int | None, payload: dict) -> None:
+def _validate_active_session(portal: str, user_id: int | None, payload: dict, request: Request | None = None) -> None:
     """Raise 401 if the token session ID no longer matches the stored active session."""
     if not user_id:
         return
@@ -54,6 +93,13 @@ def _validate_active_session(portal: str, user_id: int | None, payload: dict) ->
     stored_sid = r.get(f"wards:session:{portal}:{user_id}")
     token_sid = payload.get("sid")
     if stored_sid and token_sid and stored_sid != token_sid:
+        if request is not None:
+            user = payload.get("email") or payload.get("sub") or str(user_id)
+            _log_spoofing_attempt(
+                user,
+                f"Reason: Session expired: logged in from another device; portal: {portal}; expected_sid: {stored_sid}; actual_sid: {token_sid}",
+                request,
+            )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Session expired: logged in from another device.",
@@ -149,7 +195,7 @@ async def get_current_admin_user(
     try:
         payload = decode_token(token, ADMIN_SECRET_KEY)
         _validate_token_binding(request, payload)
-        _validate_active_session("admin", payload.get("user_id"), payload)
+        _validate_active_session("admin", payload.get("user_id"), payload, request)
         email = payload.get("email") or payload.get("sub")
         username = payload.get("sub")
         token_type = payload.get("type")
@@ -230,7 +276,7 @@ async def get_current_user(
     try:
         payload = decode_token(token, USER_SECRET_KEY)
         _validate_token_binding(request, payload)
-        _validate_active_session("public", payload.get("user_id"), payload)
+        _validate_active_session("public", payload.get("user_id"), payload, request)
         email = payload.get("email") or payload.get("sub")
         token_type = payload.get("type")
 
@@ -259,7 +305,7 @@ async def get_optional_current_user(
     try:
         payload = decode_token(token, USER_SECRET_KEY)
         _validate_token_binding(request, payload)
-        _validate_active_session("public", payload.get("user_id"), payload)
+        _validate_active_session("public", payload.get("user_id"), payload, request)
         email = payload.get("email") or payload.get("sub")
         token_type = payload.get("type")
         if email and token_type in ("user", "public"):
@@ -296,7 +342,7 @@ async def get_current_branch_staff(
     try:
         payload = decode_token(token, BRANCH_SECRET_KEY)
         _validate_token_binding(request, payload)
-        _validate_active_session("branch", payload.get("user_id"), payload)
+        _validate_active_session("branch", payload.get("user_id"), payload, request)
         email = payload.get("email") or payload.get("sub")
         username = payload.get("sub")
         token_type = payload.get("type")
@@ -339,7 +385,7 @@ async def get_current_admin_or_branch_staff(
     try:
         payload = decode_token(token, ADMIN_SECRET_KEY)
         _validate_token_binding(request, payload)
-        _validate_active_session("admin", payload.get("user_id"), payload)
+        _validate_active_session("admin", payload.get("user_id"), payload, request)
         email = payload.get("email") or payload.get("sub")
         username = payload.get("sub")
         token_type = payload.get("type")
@@ -359,7 +405,7 @@ async def get_current_admin_or_branch_staff(
     try:
         payload = decode_token(token, BRANCH_SECRET_KEY)
         _validate_token_binding(request, payload)
-        _validate_active_session("branch", payload.get("user_id"), payload)
+        _validate_active_session("branch", payload.get("user_id"), payload, request)
         email = payload.get("email") or payload.get("sub")
         username = payload.get("sub")
         token_type = payload.get("type")
@@ -444,7 +490,7 @@ async def get_current_admin_from_token(request: Request, db: Session) -> Admin:
     try:
         payload = decode_token(token, ADMIN_SECRET_KEY)
         _validate_token_binding(request, payload)
-        _validate_active_session("admin", payload.get("user_id"), payload)
+        _validate_active_session("admin", payload.get("user_id"), payload, request)
         email = payload.get("email") or payload.get("sub")
         username = payload.get("sub")
 
@@ -500,7 +546,7 @@ def decode_active_account_from_bearer_token(
         if not account or getattr(account, "status", "Active") != "Active":
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
 
-        _validate_active_session(portal, payload.get("user_id"), payload)
+        _validate_active_session(portal, payload.get("user_id"), payload, request)
         return portal, account, payload
 
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
