@@ -6,7 +6,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy.orm import Session
 
 from database.models import ActivityLog, Admin, AdminLoginSecurityProfile, Branch, BranchStaff, CitizenUser, PrivacyConsent, Queue, QueueHistory, TaxAssessmentRecord, TaxpayerIdentifierSubmission, get_db
@@ -16,6 +16,7 @@ from utils.security_validation import (
     ensure_contact_number_is_unique,
     ensure_email_is_unique,
     ensure_username_is_unique,
+    reject_dangerous_characters,
     normalize_email,
     normalize_username,
     normalize_citizen_full_name,
@@ -75,6 +76,12 @@ class UserCreate(BaseModel):
     assigned_window_number: Optional[int] = None
     status: str = "Active"
 
+    @field_validator("username", "email", "role", "full_name", "service_window", "status")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
+
 
 class UserUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -86,6 +93,12 @@ class UserUpdate(BaseModel):
     full_name: Optional[str] = None
     contact_number: Optional[str] = None
     current_admin_password: str
+
+    @field_validator("email", "role", "username", "full_name", "contact_number")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
 
 
 class ProtectedAccountAction(BaseModel):

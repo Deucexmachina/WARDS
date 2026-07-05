@@ -2238,9 +2238,21 @@ class RegisterRequest(BaseModel):
     dpa_version: Optional[str] = None
     recaptcha_token: Optional[str] = None
 
+    @field_validator("full_name", "contact_number", "address", "dpa_version", "recaptcha_token")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
+
 
 class CheckContactRequest(BaseModel):
     contact_number: str
+
+    @field_validator("contact_number")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
 
 
 class VerificationRequest(BaseModel):
@@ -2251,11 +2263,23 @@ class VerificationConfirmRequest(BaseModel):
     email: EmailStr
     code: str
 
+    @field_validator("code")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
+
 
 class InviteRegisterRequest(BaseModel):
     email: EmailStr
     password: str
     invite_token: str
+
+    @field_validator("invite_token")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
 
 
 def _generate_verification_code() -> str:

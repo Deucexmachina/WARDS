@@ -5,7 +5,7 @@ from slowapi.util import get_remote_address
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta, time
 from collections import Counter
@@ -51,11 +51,25 @@ class ReportGenerateRequest(BaseModel):
     service_type: Optional[str] = None
     transaction_category: Optional[str] = None
 
+    @field_validator("branch_id", "reportType", "dateFrom", "dateTo", "service_type", "transaction_category")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        from utils.security_validation import reject_dangerous_characters
+        reject_dangerous_characters(v)
+        return v
+
 
 class ReportAutomationSettingsPayload(BaseModel):
     enabled: bool = False
     frequency: str = "daily"
     dispatch_time: str = "17:00"
+
+    @field_validator("frequency", "dispatch_time")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        from utils.security_validation import reject_dangerous_characters
+        reject_dangerous_characters(v)
+        return v
     weekday: int = 0
     month_day: int = 1
     reportType: str = "Daily"

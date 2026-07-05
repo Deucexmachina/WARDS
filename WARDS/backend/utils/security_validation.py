@@ -11,15 +11,15 @@ from database.models import Admin, Branch, BranchStaff, CitizenUser
 from utils.field_crypto import find_citizen_by_contact_number, find_citizen_by_email, find_citizen_by_tin, hash_optional_value
 
 
-# Characters commonly used in single-line code injection (XSS, command injection, template injection).
+# Characters that are not allowed in user input for security reasons.
 # Rejects: < > { } ( ) ; = & | ` $ \
 DANGEROUS_CHARS_PATTERN = re.compile(r"[<>{\}();=&|`$\\]")
 
 
 def reject_dangerous_characters(value: str | None, field_name: str = "input") -> str | None:
-    """Reject strings containing characters that can trigger single-line code injection.
+    """Reject strings containing characters that are not allowed in user input.
 
-    Raises HTTPException 400 if dangerous characters are found.
+    Raises HTTPException 400 if disallowed characters are found.
     Returns the cleaned string on success, or None if input was None.
     """
     if value is None:
@@ -28,7 +28,7 @@ def reject_dangerous_characters(value: str | None, field_name: str = "input") ->
     if DANGEROUS_CHARS_PATTERN.search(text):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid characters in {field_name}. Please avoid symbols that can be used for code injection.",
+            detail="One or more fields contain an invalid value. Please check your input and try again.",
         )
     return text
 

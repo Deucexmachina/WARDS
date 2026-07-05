@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from database.models import ActivityLog, Policy, PolicyView, Admin, get_db
+from utils.security_validation import reject_dangerous_characters
 from auth import get_current_admin_user
 from utils.rbac import require_permission
 
@@ -39,6 +40,12 @@ class PolicyPayload(BaseModel):
     title: str
     category: str
     content: str
+
+    @field_validator("title", "category", "content")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
 
 @router.get("/")
 async def get_all_policies(

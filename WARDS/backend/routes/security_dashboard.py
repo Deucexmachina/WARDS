@@ -14,7 +14,7 @@ from fastapi.concurrency import run_in_threadpool
 
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 try:
@@ -27,6 +27,7 @@ if str(MASTER_ROOT) not in sys.path:
 from database.models import get_db, SessionLocal, ActivityLog, PermanentIpBlock, SecurityLogView, Backup
 from auth import get_current_admin_from_token
 from utils.background_jobs import job_manager, JobStatus
+from utils.security_validation import reject_dangerous_characters
 from middleware.dos_protection import get_blocked_ips, unblock_ip, block_ip, account_rate_limit_state, record_rate_limit_detection
 from services.ip_reputation import get_permanent_blocks, add_permanent_block, remove_permanent_block, check_ip_reputation
 from utils.backup_engine import backup_dir, create_database_backup as create_vm1_database_backup, is_database_backup_record, prune_database_backup_records, restore_database_backup
@@ -1619,11 +1620,23 @@ class PermanentBlockRequest(BaseModel):
     ip: str
     reason: str
 
+    @field_validator("ip", "reason")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
+
 
 class TemporaryUserRestrictionRequest(BaseModel):
     account_id: str
     account_type: str
     scope: str = "manual"
+
+    @field_validator("account_id", "account_type", "scope")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
     duration: int = 900
     reason: str = "Manual temporary user restriction"
 

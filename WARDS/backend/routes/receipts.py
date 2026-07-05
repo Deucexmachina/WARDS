@@ -17,7 +17,7 @@ from utils.file_delivery import deliver_file_response
 from utils.file_validation import validate_upload_file
 from PIL import Image
 import qrcode
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -35,7 +35,7 @@ from utils.distributed_ledger import append_ledger_entry
 from utils.branch_window_config import SERVICE_WINDOW_ALIASES
 from utils.branch_system_settings import get_branch_setting_value
 from utils.field_crypto import apply_payment_security, apply_queue_security, apply_receipt_record_security, apply_receipt_request_history_security, apply_receipt_request_security, find_citizen_by_email, find_payment_by_ref_number, get_decrypted_or_raw, hash_aware_any, hash_aware_match, hash_optional_value, queue_value, receipt_record_value, receipt_request_history_value, receipt_request_value, set_encrypted_hash_companions
-from utils.security_validation import normalize_email
+from utils.security_validation import normalize_email, reject_dangerous_characters
 from utils.system_settings import SYSTEM_DISABLED_MESSAGE, get_setting_value
 from auth import get_optional_current_user
 from routes.unified_auth import log_activity
@@ -181,6 +181,12 @@ class PublicReceiptRequestCreate(BaseModel):
     refNumber: str | None = None
     email: str
 
+    @field_validator("taxpayerName", "taxType", "requestReason", "requestReasonOther", "txnDate", "refNumber", "email")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
+
 
 class ReceiptFeePaymentRequest(BaseModel):
     paymentMethod: str = "gcash"
@@ -189,6 +195,12 @@ class ReceiptFeePaymentRequest(BaseModel):
     transactionDate: str | None = None
     branchId: int | None = None
     taxType: str | None = None
+
+    @field_validator("paymentMethod", "email", "taxpayerName", "transactionDate", "taxType")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
 
 
 class ReleaseReceiptResponse(BaseModel):

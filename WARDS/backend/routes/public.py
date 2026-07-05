@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_
 from sqlalchemy.exc import IntegrityError
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional
 from datetime import datetime, timedelta, timezone
 import random
@@ -32,7 +32,7 @@ from utils.branch_appointment_settings import (
     validate_branch_appointment_datetime,
 )
 from utils.branch_window_config import get_branch_service_options, get_branch_window_metadata, infer_service_window, STANDARD_SERVICE_SEQUENCE
-from utils.security_validation import normalize_citizen_full_name, normalize_email, normalize_ph_contact_number
+from utils.security_validation import normalize_citizen_full_name, normalize_email, normalize_ph_contact_number, reject_dangerous_characters
 from utils.branch_system_settings import get_branch_setting_value
 from utils.system_settings import SYSTEM_DISABLED_MESSAGE, BRANCH_QUEUE_DISABLED_MESSAGE, get_setting_value
 from utils.field_crypto import decrypt_optional_value
@@ -319,6 +319,12 @@ class QueueRegistration(BaseModel):
     queue_type: str = Field("immediate", max_length=20)  # immediate or appointment
     appointment_time: Optional[str] = Field(None, max_length=50)
 
+    @field_validator("service_type", "taxpayer_name", "contact_number", "email", "queue_type", "appointment_time")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
+
 
 def normalize_queue_type(raw_value: Optional[str]) -> str:
     normalized = (raw_value or "immediate").strip().lower()
@@ -332,6 +338,12 @@ class ReceiptRequestCreate(BaseModel):
     ref_number: Optional[str] = None
     email: str
 
+    @field_validator("taxpayer_name", "transaction_date", "ref_number", "email")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
+
 class OnlinePaymentCreate(BaseModel):
     taxpayer_name: str
     tin: str
@@ -339,6 +351,12 @@ class OnlinePaymentCreate(BaseModel):
     amount: float
     payment_method: str
     branch: str
+
+    @field_validator("taxpayer_name", "tin", "tax_type", "payment_method", "branch")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
 
 # ============= Branch Home Module =============
 
@@ -1420,6 +1438,12 @@ class ContactSubmit(BaseModel):
     email: str = Field(..., min_length=1, max_length=255)
     subject: str = Field(..., min_length=1, max_length=200)
     message: str = Field(..., min_length=1, max_length=5000)
+
+    @field_validator("full_name", "email", "subject", "message")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
 
 
 _FULL_NAME_PATTERN = re.compile(r"^[A-Za-z.\-' ]+$")

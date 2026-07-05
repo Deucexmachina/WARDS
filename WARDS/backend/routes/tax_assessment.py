@@ -159,10 +159,22 @@ class PublicProfileUpdateRequest(BaseModel):
     tin: str | None = None
     current_password: str
 
+    @field_validator("full_name", "email", "mobile_number", "address", "taxpayer_type", "tin")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
+
 
 class SubmissionReviewRequest(BaseModel):
     status: str
     remarks: str | None = None
+
+    @field_validator("status", "remarks")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
 
 
 class TaxAssessmentUpsertRequest(BaseModel):

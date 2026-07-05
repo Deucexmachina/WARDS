@@ -7,7 +7,7 @@ Forbidden: viewing or modifying any other account.
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 from typing import Optional
 
@@ -24,6 +24,7 @@ from utils.security_validation import (
     ensure_email_is_unique,
     normalize_citizen_full_name,
     normalize_email,
+    reject_dangerous_characters,
     normalize_ph_contact_number,
 )
 
@@ -41,6 +42,12 @@ class UpdateProfileRequest(BaseModel):
     email: str
     contact_number: str
     current_password: str
+
+    @field_validator("full_name", "email", "contact_number")
+    @classmethod
+    def _reject_dangerous(cls, v):
+        reject_dangerous_characters(v)
+        return v
 
 
 class ContactNumberCheckRequest(BaseModel):
