@@ -17,7 +17,8 @@ from auth import USER_SECRET_KEY, create_access_token, create_refresh_token
 from auth.jwt_utils import ALGORITHM
 from middleware import dos_protection
 from middleware.https import HttpsEnforcementMiddleware
-from database.models import Backup, BranchSystemSetting, Service, SystemSetting
+from database import models as db_models
+from database.models import ActivityLog, Backup, BranchSystemSetting, Service, SystemSetting
 from routes import public
 from routes import security_dashboard
 from utils import backup_engine
@@ -400,6 +401,26 @@ def test_prune_database_backup_records_keeps_ten_rows(monkeypatch, tmp_path):
         assert remaining == 10
         assert db.query(Backup).filter(Backup.filename == "files_backup_20260101_000000").count() == 1
         assert len(list(tmp_path.glob("database_*.sql.gz"))) == 10
+    finally:
+        db.close()
+
+
+def test_activity_logs_are_pruned_fifo_after_insert(monkeypatch, tmp_path):
+    monkeypatch.setattr(db_models, "ACTIVITY_LOG_RETENTION_LIMIT", 3)
+    engine = create_engine(f"sqlite:///{(tmp_path / 'logs.db').as_posix()}", connect_args={"check_same_thread": False})
+    event.listen(engine, "connect", lambda connection, _record: connection.create_collation("utf8mb4_bin", lambda a, b: (a > b) - (a < b)))
+    ActivityLog.__table__.create(bind=engine)
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        for idx in range(5):
+            db.add(ActivityLog(action=f"log-{idx}", user="tester", details="test", type="test"))
+        db.commit()
+
+        rows = db.query(ActivityLog).order_by(ActivityLog.id.asc()).all()
+
+        assert len(rows) == 3
+        assert [row.action for row in rows] == ["log-2", "log-3", "log-4"]
     finally:
         db.close()
 

@@ -38,7 +38,7 @@ else:
 
 from routes import branches, reports, announcements, memos, alerts, logs, backup, users, payments, receipts, settings, policies, privacy, rbac_routes, dashboard, public, admin_users, branch_portal, branch_settings, unified_auth, discrepancies, tax_assessment, security_dashboard, public_content, window_staff_account, kiosk
 from services import ocr_routes
-from database.models import Base, engine, SessionLocal, Admin, Announcement, AnnouncementAttachment, Branch, BusinessRegistry, BusinessTaxApplication, CollectionAccount, DiscrepancyReport, EmailOTP, EmailVerificationToken, FAQ, Invite, Memo, MemoView, MFASecret, Payment, Queue, QueueActivity, ReceiptRecord, ReceiptRequest, ReceiptRequestHistory, Remittance, RemittanceItem, RPTPropertyRecord, Service, ServiceWindowConfig, TaxpayerGuide
+from database.models import Base, engine, SessionLocal, ActivityLog, Admin, Announcement, AnnouncementAttachment, Branch, BusinessRegistry, BusinessTaxApplication, CitizenUser, CollectionAccount, DiscrepancyReport, EmailOTP, EmailVerificationToken, FAQ, Invite, Memo, MemoView, MFASecret, Payment, Queue, QueueActivity, ReceiptRecord, ReceiptRequest, ReceiptRequestHistory, Remittance, RemittanceItem, RPTPropertyRecord, Service, ServiceWindowConfig, TaxpayerGuide
 from utils.field_crypto import apply_citizen_user_security, apply_collection_account_security, apply_discrepancy_report_security, apply_email_otp_security, apply_email_verification_token_security, apply_faq_security, apply_invite_security, apply_memo_security, apply_memo_view_security, apply_mfa_secret_security, apply_payment_security, apply_queue_activity_security, apply_queue_security, apply_receipt_record_security, apply_receipt_request_history_security, apply_receipt_request_security, apply_remittance_item_security, apply_remittance_security, apply_rpt_property_record_security, apply_service_security, apply_service_window_config_security, apply_system_setting_security, apply_tax_assessment_record_security, apply_taxpayer_guide_security, apply_taxpayer_identifier_submission_security, build_redacted_text, get_decrypted_or_raw, hash_optional_value, set_encrypted_hash_companions
 from utils import log_integrity  # noqa: F401 - registers tamper-evident log signing hooks
 from utils.log_sanitization import install_uvicorn_reload_path_filter
@@ -468,6 +468,40 @@ def create_startup_tables():
 
 
 create_startup_tables()
+
+
+def ensure_critical_vm1_tables():
+    critical_tables = [
+        ActivityLog.__table__,
+        Admin.__table__,
+        Announcement.__table__,
+        Branch.__table__,
+        Payment.__table__,
+        CitizenUser.__table__,
+        Queue.__table__,
+        ReceiptRequest.__table__,
+    ]
+    for attempt in range(1, 4):
+        try:
+            inspector = inspect(engine)
+            existing = set(inspector.get_table_names())
+            missing = [table for table in critical_tables if table.name not in existing]
+            if not missing:
+                return
+            logging.getLogger("main").warning(
+                "Critical VM1 table(s) missing at startup: %s. Creating them now.",
+                ", ".join(table.name for table in missing),
+            )
+            with engine.begin() as conn:
+                Base.metadata.create_all(bind=conn, tables=missing)
+            return
+        except OperationalError as exc:
+            if not is_concurrent_ddl_error(exc) or attempt == 3:
+                raise
+            time.sleep(min(2 ** attempt, 10))
+
+
+ensure_critical_vm1_tables()
 
 def ensure_auth_extensions():
     inspector = inspect(engine)

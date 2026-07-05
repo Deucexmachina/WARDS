@@ -52,6 +52,8 @@ engine = create_engine(SQLALCHEMY_DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+ACTIVITY_LOG_RETENTION_LIMIT = int(os.getenv("ACTIVITY_LOG_RETENTION_LIMIT", "3000"))
+
 
 @event.listens_for(SASession, "after_begin")
 def apply_database_authorization_token(session, transaction, connection):
@@ -112,6 +114,58 @@ def authorize_database_session(db, context: str = "wards_backend_request", actor
     except Exception:
         db.rollback()
         return None
+
+
+@event.listens_for(SASession, "before_flush")
+def mark_activity_log_insert(session, flush_context, instances):
+    try:
+        if any(getattr(item, "__tablename__", None) == "activity_logs" for item in session.new):
+            session.info["prune_activity_logs_after_flush"] = True
+    except Exception:
+        pass
+
+
+@event.listens_for(SASession, "after_flush_postexec")
+def prune_activity_logs_after_insert(session, flush_context):
+    if not session.info.pop("prune_activity_logs_after_flush", False):
+        return
+    prune_activity_logs(session.connection())
+
+
+def prune_activity_logs(connection, limit: int | None = None) -> int:
+    limit = ACTIVITY_LOG_RETENTION_LIMIT if limit is None else int(limit)
+    if limit <= 0:
+        return 0
+    try:
+        total = connection.execute(text("SELECT COUNT(*) FROM activity_logs")).scalar() or 0
+        excess = int(total) - limit
+        if excess <= 0:
+            return 0
+        dialect_name = getattr(connection.dialect, "name", "")
+        if dialect_name.startswith("mysql"):
+            result = connection.execute(
+                text("DELETE FROM activity_logs ORDER BY created_at ASC, id ASC LIMIT :limit"),
+                {"limit": excess},
+            )
+        else:
+            result = connection.execute(
+                text(
+                    """
+                    DELETE FROM activity_logs
+                    WHERE id IN (
+                        SELECT id FROM (
+                            SELECT id FROM activity_logs
+                            ORDER BY created_at ASC, id ASC
+                            LIMIT :limit
+                        ) AS oldest_activity_logs
+                    )
+                    """
+                ),
+                {"limit": excess},
+            )
+        return int(result.rowcount or 0)
+    except Exception:
+        return 0
 
 
 def get_db():
