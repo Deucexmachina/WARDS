@@ -16,20 +16,29 @@ from utils.field_crypto import find_citizen_by_contact_number, find_citizen_by_e
 DANGEROUS_CHARS_PATTERN = re.compile(r"[<>{\}();=&|`$\\]")
 
 
+class InjectionAttemptError(HTTPException):
+    """Raised when dangerous characters are detected in user input."""
+
+    def __init__(self, field_name: str = "input", value: str = "") -> None:
+        self.field_name = field_name
+        self.raw_value = value
+        super().__init__(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="One or more fields contain an invalid value. Please check your input and try again.",
+        )
+
+
 def reject_dangerous_characters(value: str | None, field_name: str = "input") -> str | None:
     """Reject strings containing characters that are not allowed in user input.
 
-    Raises HTTPException 400 if disallowed characters are found.
+    Raises InjectionAttemptError if disallowed characters are found.
     Returns the cleaned string on success, or None if input was None.
     """
     if value is None:
         return None
     text = str(value)
     if DANGEROUS_CHARS_PATTERN.search(text):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="One or more fields contain an invalid value. Please check your input and try again.",
-        )
+        raise InjectionAttemptError(field_name=field_name, value=text)
     return text
 
 

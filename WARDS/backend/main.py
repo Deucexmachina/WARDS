@@ -45,6 +45,8 @@ from utils.redis_client import require_redis
 from utils.system_settings import seed_system_settings
 from utils.branch_system_settings import cleanup_duplicate_branch_system_settings
 from middleware.dos_protection import RequestSizeMiddleware, RequestTimeoutMiddleware, ConnectionLimitMiddleware, AbuseDetectionMiddleware, account_from_request
+from utils.security_validation import InjectionAttemptError
+from routes.unified_auth import log_activity
 try:
     from middleware.dos_protection import get_client_ip
 except ImportError:
@@ -267,6 +269,39 @@ app = FastAPI(title="WARDS API", version="1.0.0")
 @app.exception_handler(Exception)
 async def production_exception_handler(request: Request, exc: Exception):
     return JSONResponse(status_code=500, content={"detail": "An internal server error occurred."})
+
+
+@app.exception_handler(InjectionAttemptError)
+async def injection_attempt_handler(request: Request, exc: InjectionAttemptError):
+    client_ip = get_client_ip(request)
+    account_key, _, _ = account_from_request(request, client_ip)
+    field = getattr(exc, "field_name", "input")
+    raw = getattr(exc, "raw_value", "")
+    safe_value = str(raw)[:200].replace("\n", " ").replace("\r", " ")
+    endpoint = request.url.path or "unknown"
+    details = f"Endpoint: {endpoint}; Field: {field}; IP: {client_ip}; Account: {account_key}; Input snippet: {safe_value}"
+    db = None
+    try:
+        db = SessionLocal()
+        log_activity(
+            db,
+            "Injection Attempt",
+            account_key or "anonymous",
+            details,
+            "malicious",
+            request=request,
+            severity="high",
+        )
+        db.commit()
+    except Exception:
+        pass
+    finally:
+        if db:
+            db.close()
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content={"detail": "One or more fields contain an invalid value. Please check your input and try again."},
+    )
 
 def hybrid_rate_limit_key(request: Request) -> str:
     """Return account-based key for authenticated users, IP for anonymous."""
