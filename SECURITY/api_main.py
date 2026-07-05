@@ -1136,6 +1136,58 @@ def api_internal_deploy(request: Request = None):
     import os
     import time
 
+    deploy_cleanup_suffixes = {
+        ".py", ".js", ".jsx", ".ts", ".tsx", ".html", ".css", ".json", ".md",
+        ".txt", ".xml", ".yml", ".yaml", ".sql", ".db", ".sqlite", ".sqlite3",
+        ".php", ".phtml", ".pkl", ".csv", ".doc", ".docx", ".xls", ".xlsx", ".pdf",
+    }
+    deploy_cleanup_excluded_dirs = {
+        ".git", "__pycache__", ".pytest_cache", "node_modules", "venv", ".venv",
+        "dist", "build", "output", "uploads", "local_backups", "QUARANTINE",
+        "DEFACEMENT", "database_monitor", "vm1_snapshots", ".restore_content",
+        ".defaced", "SECURITY/local_backups", "SECURITY/vm1_snapshots",
+    }
+    deploy_cleanup_special_names = {"dockerfile", ".gitkeep"}
+
+    def _cleanup_ignored_repo_files(app_dir: str, logger) -> int:
+        repo_root = Path(app_dir).resolve(strict=False)
+        result = subprocess.run(
+            ["git", "ls-files", "-io", "--exclude-standard", "-z"],
+            cwd=app_dir,
+            capture_output=True,
+            text=False,
+        )
+        if result.returncode != 0:
+            logger.warning("Ignored-file cleanup skipped: %s", result.stderr.decode(errors="replace"))
+            return 0
+        removed = 0
+        for raw in result.stdout.split(b"\0"):
+            if not raw:
+                continue
+            rel = raw.decode("utf-8", errors="replace").replace("\\", "/")
+            path = (repo_root / rel).resolve(strict=False)
+            try:
+                path.relative_to(repo_root)
+            except ValueError:
+                continue
+            lower_parts = {part.lower() for part in rel.split("/")}
+            if lower_parts.intersection({item.lower() for item in deploy_cleanup_excluded_dirs}):
+                continue
+            lower_name = path.name.lower()
+            if ".env" in lower_name or lower_name == "env.example":
+                continue
+            if not path.is_file():
+                continue
+            if path.suffix.lower() not in deploy_cleanup_suffixes and lower_name not in deploy_cleanup_special_names:
+                continue
+            try:
+                path.unlink()
+                removed += 1
+                logger.info("Removed ignored deploy leftover: %s", rel)
+            except Exception as exc:
+                logger.warning("Failed to remove ignored deploy leftover %s: %s", rel, exc)
+        return removed
+
     def _deploy():
         from database.models import SessionLocal
         from SECURITY.security_engine import set_deployment_mode, create_full_system_backup
@@ -1159,6 +1211,8 @@ def api_internal_deploy(request: Request = None):
         if reset.returncode != 0:
             logger.error("git reset failed: %s", reset.stderr)
             return
+        ignored_removed = _cleanup_ignored_repo_files(app_dir, logger)
+        logger.info("VM2 ignored deploy leftovers removed: %d", ignored_removed)
 
         head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=app_dir, capture_output=True, text=True)
         logger.info("VM2 repo updated to %s", head.stdout.strip() if head.returncode == 0 else "unknown")

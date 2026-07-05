@@ -547,6 +547,38 @@ def test_webhook_deploy_waits_for_vm1_baseline_manifest():
     assert "timeout=120.0" not in script
 
 
+def test_deploy_cleanup_removes_only_safe_ignored_leftovers():
+    root = Path(__file__).resolve().parents[1]
+    webhook = (root / "scripts" / "webhook_deploy.py").read_text()
+    security_api = (root / "SECURITY" / "api_main.py").read_text()
+
+    for source in (webhook, security_api):
+        assert "git\", \"ls-files\", \"-io\", \"--exclude-standard\", \"-z\"" in source
+        assert "\".env\" in lower_name" in source
+        assert "\"vm1_snapshots\"" in source
+        assert ".docx" in source
+        assert ".xlsx" in source
+        assert "path.unlink()" in source
+
+    reset_index = webhook.index('run_cmd(["git", "reset", "--hard", "origin/main"]')
+    cleanup_index = webhook.index("_cleanup_ignored_repo_files(DEPLOY_DIR)")
+    compose_index = webhook.index('run_cmd(["docker", "compose", "up", "-d", "--build"]')
+    assert reset_index < cleanup_index < compose_index
+
+
+def test_deployment_manifest_retires_missing_vm1_files_without_incidents():
+    engine = (Path(__file__).resolve().parents[1] / "SECURITY" / "security_engine.py").read_text()
+
+    assert "def prune_deployment_removed_vm1_files" in engine
+    assert "def prune_deployment_removed_local_files" in engine
+    assert "def retire_deployment_removed_file" in engine
+    assert "status = MONITORING_REMOVED_STATUS" in engine
+    assert "seen_manifest_paths" in engine
+    assert '"retired": prune_summary["retired"]' in engine
+    assert "prune_deployment_removed_local_files(db, actor=\"deployment_scan\")" in engine
+    assert "cleanup_retired_file_copies" in engine
+
+
 def test_vm1_startup_creates_database_baseline_for_split_deployment():
     main_text = (Path(__file__).resolve().parents[1] / "WARDS" / "backend" / "main.py").read_text()
 

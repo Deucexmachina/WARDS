@@ -24,6 +24,7 @@ import subprocess
 import logging
 import time
 import threading
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, Request, HTTPException
@@ -40,6 +41,19 @@ DEPLOY_DIR = os.environ.get("DEPLOY_DIR", "/opt/wards/app")
 VM2_HOST = os.environ.get("VM2_HOST", "")
 VM2_API_KEY = os.environ.get("VM2_API_KEY", "")
 VM2_ADMIN_SECRET = os.environ.get("VM2_ADMIN_SECRET", "")
+
+DEPLOY_CLEANUP_SUFFIXES = {
+    ".py", ".js", ".jsx", ".ts", ".tsx", ".html", ".css", ".json", ".md",
+    ".txt", ".xml", ".yml", ".yaml", ".sql", ".db", ".sqlite", ".sqlite3",
+    ".php", ".phtml", ".pkl", ".csv", ".doc", ".docx", ".xls", ".xlsx", ".pdf",
+}
+DEPLOY_CLEANUP_EXCLUDED_DIRS = {
+    ".git", "__pycache__", ".pytest_cache", "node_modules", "venv", ".venv",
+    "dist", "build", "output", "uploads", "local_backups", "QUARANTINE",
+    "DEFACEMENT", "database_monitor", "vm1_snapshots", ".restore_content",
+    ".defaced", "SECURITY/local_backups", "SECURITY/vm1_snapshots",
+}
+DEPLOY_CLEANUP_SPECIAL_NAMES = {"dockerfile", ".gitkeep"}
 
 
 def _vm2_headers() -> dict[str, str]:
@@ -67,6 +81,49 @@ def run_cmd(cmd: list[str], cwd: str | None = None) -> str:
         raise RuntimeError(result.stderr)
     logger.info("Output: %s", result.stdout.strip())
     return result.stdout.strip()
+
+
+def _cleanup_ignored_repo_files(repo_dir: str) -> int:
+    """Remove ignored deploy leftovers without touching secrets or runtime data."""
+    root = Path(repo_dir).resolve(strict=False)
+    result = subprocess.run(
+        ["git", "ls-files", "-io", "--exclude-standard", "-z"],
+        cwd=repo_dir,
+        capture_output=True,
+        text=False,
+    )
+    if result.returncode != 0:
+        logger.warning("Ignored-file cleanup skipped: %s", result.stderr.decode(errors="replace"))
+        return 0
+
+    removed = 0
+    for raw in result.stdout.split(b"\0"):
+        if not raw:
+            continue
+        rel = raw.decode("utf-8", errors="replace").replace("\\", "/")
+        path = (root / rel).resolve(strict=False)
+        try:
+            path.relative_to(root)
+        except ValueError:
+            continue
+        parts = set(rel.split("/"))
+        lower_parts = {part.lower() for part in parts}
+        if lower_parts.intersection({item.lower() for item in DEPLOY_CLEANUP_EXCLUDED_DIRS}):
+            continue
+        lower_name = path.name.lower()
+        if ".env" in lower_name or lower_name == "env.example":
+            continue
+        if not path.is_file():
+            continue
+        if path.suffix.lower() not in DEPLOY_CLEANUP_SUFFIXES and lower_name not in DEPLOY_CLEANUP_SPECIAL_NAMES:
+            continue
+        try:
+            path.unlink()
+            removed += 1
+            logger.info("Removed ignored deploy leftover: %s", rel)
+        except Exception as exc:
+            logger.warning("Failed to remove ignored deploy leftover %s: %s", rel, exc)
+    return removed
 
 
 def _unpause_vm2() -> bool:
@@ -191,6 +248,8 @@ async def github_webhook(request: Request):
         logger.info("Deploying VM1 from %s", DEPLOY_DIR)
         run_cmd(["git", "fetch", "origin", "main"], cwd=DEPLOY_DIR)
         run_cmd(["git", "reset", "--hard", "origin/main"], cwd=DEPLOY_DIR)
+        ignored_removed = _cleanup_ignored_repo_files(DEPLOY_DIR)
+        logger.info("VM1 ignored deploy leftovers removed: %d", ignored_removed)
         run_cmd(["docker", "compose", "up", "-d", "--build"], cwd=DEPLOY_DIR)
 
         # --- Step 3: Verify VM1 is on target commit ---

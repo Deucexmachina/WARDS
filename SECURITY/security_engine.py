@@ -5052,6 +5052,119 @@ def mark_verified_removal(db: Session, file_entry: SecurityMonitoredFile, reason
     return detection
 
 
+def _safe_unlink_child(base: Path, candidate: Path) -> bool:
+    try:
+        resolved_base = base.resolve(strict=False)
+        resolved_candidate = candidate.resolve(strict=False)
+        resolved_candidate.relative_to(resolved_base)
+    except Exception:
+        return False
+    if not resolved_candidate.exists() or not resolved_candidate.is_file():
+        return False
+    try:
+        resolved_candidate.unlink()
+        return True
+    except Exception:
+        logger.warning("Failed to remove retired deployment copy %s", resolved_candidate, exc_info=True)
+        return False
+
+
+def cleanup_retired_file_copies(db: Session, relative_path: str | None) -> int:
+    rel = str(relative_path or "").replace("\\", "/").strip("/")
+    if not rel or ".." in rel.split("/"):
+        return 0
+    removed = 0
+    for root in (VM1_SNAPSHOT_ROOT, VM1_DEFACED_SNAPSHOT_ROOT):
+        removed += int(_safe_unlink_child(root, root / rel))
+    changed_backup_roots: set[Path] = set()
+    for root in all_backup_roots(db):
+        try:
+            target = backup_file_path(root, rel)
+        except Exception:
+            continue
+        if _safe_unlink_child(root, target):
+            removed += 1
+            changed_backup_roots.add(root)
+    for root in changed_backup_roots:
+        try:
+            write_backup_manifest(root)
+        except Exception:
+            logger.warning("Failed to refresh backup manifest after retiring %s from %s", rel, root, exc_info=True)
+    return removed
+
+
+def retire_deployment_removed_file(db: Session, file_entry: SecurityMonitoredFile, actor: str = "deployment_cleanup") -> int:
+    """Remove a no-longer-deployed file from active monitoring without an incident."""
+    for incident in (
+        db.query(SecurityIncident)
+        .join(SecurityDetectionEvent, SecurityIncident.detection_event_id == SecurityDetectionEvent.id)
+        .filter(
+            SecurityDetectionEvent.file_id == file_entry.id,
+            SecurityIncident.status.in_(["open", "investigating"]),
+        )
+        .all()
+    ):
+        incident.status = "resolved"
+        incident.response_action = "trusted_deployment_removal"
+        incident.resolved_at = now_utc()
+        cleanup_quarantine_paths(json_loads(incident.quarantine_paths_json, []))
+        db.add(incident)
+
+    removed_copies = cleanup_retired_file_copies(db, file_entry.relative_path)
+    file_entry.current_hash = ""
+    file_entry.baseline_hash = file_entry.baseline_hash or ""
+    file_entry.status = MONITORING_REMOVED_STATUS
+    file_entry.last_checked = now_utc()
+    db.add(file_entry)
+    logger.info(
+        "Retired %s from monitoring during %s; removed %d retained cop%s.",
+        file_entry.relative_path,
+        actor,
+        removed_copies,
+        "y" if removed_copies == 1 else "ies",
+    )
+    return removed_copies
+
+
+def prune_deployment_removed_local_files(db: Session, actor: str = "deployment_cleanup") -> dict[str, int]:
+    retired = 0
+    copies_removed = 0
+    for entry in active_monitored_files_query(db).order_by(SecurityMonitoredFile.relative_path.asc()).all():
+        if is_database_entry(entry) or is_vm1_file(entry):
+            continue
+        if portable_root_name(entry) not in MONITORED_ROOTS:
+            continue
+        path = portable_monitored_path(entry)
+        if path.exists():
+            continue
+        copies_removed += retire_deployment_removed_file(db, entry, actor=actor)
+        retired += 1
+    return {"retired": retired, "copies_removed": copies_removed}
+
+
+def prune_deployment_removed_vm1_files(
+    db: Session,
+    seen_manifest_paths: set[tuple[str, str]],
+    allowed_roots: set[str],
+    actor: str = "vm1_deployment_manifest",
+) -> dict[str, int]:
+    retired = 0
+    copies_removed = 0
+    normalized_allowed = {_clean_folder_root(root) for root in allowed_roots}
+    for entry in active_monitored_files_query(db).order_by(SecurityMonitoredFile.relative_path.asc()).all():
+        if not is_vm1_file(entry):
+            continue
+        folder_root = _clean_folder_root(str(entry.folder_root or ""))
+        rel_path = _clean_folder_root(str(entry.relative_path or "").replace("\\", "/"))
+        if folder_root not in normalized_allowed:
+            continue
+        if (folder_root, rel_path) in seen_manifest_paths:
+            continue
+        copies_removed += retire_deployment_removed_file(db, entry, actor=actor)
+        retired += 1
+    return {"retired": retired, "copies_removed": copies_removed}
+
+
 def mark_existing_deletion_incident_verified_rename(db: Session, detection: SecurityDetectionEvent, file_entry: SecurityMonitoredFile, replacement_path: str, actor: str) -> None:
     detection.change_type = "verified_renamed"
     detection.is_legitimate = True
@@ -5617,6 +5730,7 @@ def scan_all_files(db: Session, context: dict | None = None) -> list[SecurityDet
     if is_deployment_in_progress(db):
         logger.info("Deployment in progress — refreshing file registry without creating detections.")
         register_initial_files(db, refresh_existing=True, incremental=False)
+        local_prune_summary = prune_deployment_removed_local_files(db, actor="deployment_scan")
         # Force-update baselines for ALL existing local files so post-deploy scans
         # see current_hash == baseline_hash and do not create false positives.
         for entry in active_monitored_files_query(db).all():
@@ -5629,6 +5743,12 @@ def scan_all_files(db: Session, context: dict | None = None) -> list[SecurityDet
         _last_full_registration_at = now
         set_setting(db, "last_scan_at", now_utc().isoformat(), "security_scanner")
         db.commit()
+        if local_prune_summary["retired"]:
+            logger.info(
+                "Deployment scan retired %d missing local file(s) and removed %d retained copy/copies.",
+                local_prune_summary["retired"],
+                local_prune_summary["copies_removed"],
+            )
         return []
     if is_manual_scan:
         register_initial_files(db, refresh_existing=False, incremental=not bool(context and context.get("force_full_registration")))
@@ -9007,6 +9127,7 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
     if deployment_baseline_allowed:
         logger.info("Deployment in progress — skipping VM1 file change detections.")
         # Still register or update files so the baseline is correct post-deploy
+        seen_manifest_paths: set[tuple[str, str]] = set()
         for f in files:
             if not isinstance(f, dict):
                 continue
@@ -9019,10 +9140,16 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
                 continue
             if is_vm1_evidence_path(rel_path):
                 continue
+            if folder_root not in allowed_vm1_roots:
+                continue
+            rel_path_parts = {part.lower() for part in Path(rel_path).parts}
+            if rel_path_parts.intersection({item.lower() for item in DEFAULT_EXCLUDED_DIRS}):
+                continue
             current_hash = _valid_hash(f.get("current_hash"))
             size_bytes = _valid_size(f.get("size_bytes"))
             if Path(rel_path).name.lower() == ".env":
                 continue
+            seen_manifest_paths.add((folder_root, rel_path))
             # Skip non-monitorable file types during deployment — only update
             # existing entries, don't create new ones for e.g. images/audio.
             entry = (
@@ -9056,6 +9183,12 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
                 )
             # Store the snapshot during deployment so future diffs have a proper baseline
             _store_vm1_snapshot(rel_path, f.get("content_b64"))
+        prune_summary = prune_deployment_removed_vm1_files(
+            db,
+            seen_manifest_paths,
+            allowed_vm1_roots,
+            actor="vm1_deployment_manifest",
+        )
         db.commit()
         baseline_ready = bool(deployment_commit and target_commit and deployment_commit == target_commit)
         if baseline_ready:
@@ -9064,6 +9197,8 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
             "detections": [],
             "changed": 0,
             "registered": len(files),
+            "retired": prune_summary["retired"],
+            "retained_copies_removed": prune_summary["copies_removed"],
             "deployment_paused": True,
             "deployment_commit": deployment_commit,
             "deployment_target_commit": target_commit,
