@@ -2285,6 +2285,14 @@ async def get_branch_report_details(
         transaction_category=normalize_transaction_category(report.transaction_category),
     )
 
+    db.add(ActivityLog(
+        action="Branch Report Viewed",
+        user=current_staff.username,
+        details=f"Viewed branch report '{report.title}' (ID: {report_id})",
+        type="report",
+    ))
+    db.commit()
+
     return {
         "report": serialize_report_summary(report),
         "metrics": metrics,
@@ -2464,6 +2472,56 @@ async def delete_report_history(
     db.delete(history_entry)
     db.commit()
     return {"deleted_id": history_id, "title": title}
+
+
+@branch_router.post("/history/{history_id}/recover")
+async def recover_branch_report(
+    history_id: int,
+    db: Session = Depends(get_db),
+    current_staff = Depends(get_current_branch_staff),
+):
+    history_entry = db.query(ReportHistory).filter(
+        ReportHistory.id == history_id,
+        ReportHistory.branch_id == current_staff.branch_id,
+    ).first()
+    if not history_entry:
+        raise HTTPException(status_code=404, detail="Report history entry not found")
+
+    # Check if a report with the same original_id already exists in active reports
+    if history_entry.original_report_id:
+        existing_report = db.query(Report).filter(Report.id == history_entry.original_report_id).first()
+        if existing_report:
+            raise HTTPException(status_code=400, detail="A report with this ID already exists in active reports")
+
+    # Create new report from history entry
+    recovered_report = Report(
+        title=history_entry.title,
+        branch_id=history_entry.branch_id,
+        branch=history_entry.branch,
+        report_type=history_entry.report_type,
+        service_type=history_entry.service_type,
+        transaction_category=history_entry.transaction_category,
+        date_from=history_entry.date_from,
+        date_to=history_entry.date_to,
+        generated_by=history_entry.generated_by,
+        submitted_by=history_entry.submitted_by,
+        submitted_at=history_entry.submitted_at,
+        created_at=history_entry.created_at,
+    )
+    db.add(recovered_report)
+    db.flush()  # Get the new report ID
+
+    # Delete the history entry after successful recovery
+    db.delete(history_entry)
+
+    db.add(ActivityLog(
+        action="Branch Report Recovered",
+        user=current_staff.username,
+        details=f"Recovered branch report '{history_entry.title}' from Report History to Active Reports",
+        type="report",
+    ))
+    db.commit()
+    return {"recovered_id": recovered_report.id, "title": history_entry.title}
 
 
 @branch_router.delete("/{report_id}")

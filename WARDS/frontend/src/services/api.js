@@ -294,6 +294,7 @@ export const branchReportAPI = {
   updateAutomation: (data) => api.put('/branch/reports/automation', data),
   getHistory: (params) => api.get('/branch/reports/history', { params }),
   export: (reportId, format) => api.get(`/branch/reports/${reportId}/export/${format}`, { responseType: 'blob' }),
+  recover: (historyId) => api.post(`/branch/reports/history/${historyId}/recover`),
 };
 
 export const windowStaffAccountAPI = {
