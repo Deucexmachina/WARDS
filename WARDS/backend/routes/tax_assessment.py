@@ -202,16 +202,16 @@ class TaxAssessmentUpsertRequest(BaseModel):
     tdn: str | None = None
     property_type: str | None = None
     property_address: str | None = None
-    fair_market_value: float = Field(default=0, ge=1)
-    assessment_level: float = Field(default=0, ge=0.01, le=1)
+    fair_market_value: float | None = None
+    assessment_level: float | None = None
     months_late: int = Field(default=0, ge=0)
     discount_rate: float = Field(default=0, ge=0, le=1)
     mayor_permit_number: str | None = None
     sec_dti_cda_number: str | None = None
     business_name: str | None = None
     business_type: str | None = None
-    annual_gross_sales: float = Field(default=0, ge=1)
-    business_tax_rate: float = Field(default=0, ge=0.0001, le=1)
+    annual_gross_sales: float | None = None
+    business_tax_rate: float | None = None
 
     @field_validator("taxpayer_name", "taxpayer_type", "address", "tax_year", "remarks", "rejection_reason", "property_type", "property_address", "business_name", "business_type")
     @classmethod
@@ -1350,16 +1350,16 @@ async def upsert_tax_assessment(
     record.tdn = normalized_tdn
     record.property_type = (payload.property_type or "").strip() or None
     record.property_address = (payload.property_address or "").strip() or None
-    record.fair_market_value = payload.fair_market_value
-    record.assessment_level = payload.assessment_level
+    record.fair_market_value = payload.fair_market_value or 0.0
+    record.assessment_level = payload.assessment_level or 0.0
     record.months_late = payload.months_late
     record.discount_rate = payload.discount_rate
     record.mayor_permit_number = normalized_permit
     record.sec_dti_cda_number = normalized_registration
     record.business_name = (payload.business_name or "").strip() or None
     record.business_type = (payload.business_type or "").strip() or None
-    record.annual_gross_sales = payload.annual_gross_sales
-    record.business_tax_rate = payload.business_tax_rate
+    record.annual_gross_sales = payload.annual_gross_sales or 0.0
+    record.business_tax_rate = payload.business_tax_rate or 0.0
 
     if tax_type == "RPT":
         totals = compute_rpt_totals(payload.fair_market_value, payload.assessment_level, payload.months_late, payload.discount_rate)
