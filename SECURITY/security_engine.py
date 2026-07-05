@@ -8724,18 +8724,6 @@ def acknowledge_vm1_restore_command(db: Session, command_id: str, success: bool)
                 continue
             try:
                 expected_hash = cmd.get("expected_hash")
-                # Safety-net: if the file has already changed since the restore command
-                # was issued (e.g., a deployment updated it), don't overwrite the fresher
-                # baseline with a stale restore hash.
-                if file_entry.current_hash and expected_hash and file_entry.current_hash != expected_hash:
-                    logger.warning(
-                        "VM1 restore ack for %s skipped: file current_hash (%s...%s) no longer matches "
-                        "restore expected_hash (%s...%s). A deployment or manual update likely superseded it.",
-                        rel_path,
-                        file_entry.current_hash[:8], file_entry.current_hash[-8:],
-                        expected_hash[:8], expected_hash[-8:],
-                    )
-                    continue
                 clean_hash = None
                 content_file = cmd.get("restore_content_file")
                 if content_file:

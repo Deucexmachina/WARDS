@@ -20,22 +20,29 @@ if str(MASTER_ROOT) not in sys.path:
     sys.path.insert(0, str(MASTER_ROOT))
 
 from database.models import ActivityLog
-from SECURITY.security_models import (
-    SecurityAdminFileChange,
-    SecurityDetectionEvent,
-    SecurityIncident,
-    SecurityRecoveryEvent,
-)
+
+
+def _security_api_proxy_enabled() -> bool:
+    return bool((os.getenv("SECURITY_API_URL") or "").strip())
 
 
 INTEGRITY_COLUMNS = {"id", "integrity_hash", "previous_integrity_hash"}
-PROTECTED_MODELS = (
-    ActivityLog,
-    SecurityDetectionEvent,
-    SecurityRecoveryEvent,
-    SecurityIncident,
-    SecurityAdminFileChange,
-)
+PROTECTED_MODELS = [ActivityLog]
+
+if not _security_api_proxy_enabled():
+    from SECURITY.security_models import (
+        SecurityAdminFileChange,
+        SecurityDetectionEvent,
+        SecurityIncident,
+        SecurityRecoveryEvent,
+    )
+
+    PROTECTED_MODELS.extend([
+        SecurityDetectionEvent,
+        SecurityRecoveryEvent,
+        SecurityIncident,
+        SecurityAdminFileChange,
+    ])
 
 DEFAULT_VALUES = {
     "action_logs": {},

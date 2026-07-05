@@ -212,6 +212,20 @@ def test_backend_main_has_get_client_ip_import_fallback():
     assert "x-forwarded-for" in source
 
 
+def test_vm1_startup_does_not_manage_vm2_security_tables_when_proxying():
+    main_source = Path("WARDS/backend/main.py").read_text(encoding="utf-8")
+    integrity_source = Path("WARDS/backend/utils/log_integrity.py").read_text(encoding="utf-8")
+
+    assert "def security_api_proxy_enabled" in main_source
+    assert "SECURITY_TABLE_NAMES" in main_source
+    assert "return [table for table in tables if table.name not in SECURITY_TABLE_NAMES]" in main_source
+    assert "if security_api_proxy_enabled() and protected_table in SECURITY_TABLE_NAMES:" in main_source
+    assert "SELECT GET_LOCK(:name, 30)" in main_source
+    assert "is_concurrent_ddl_error" in main_source
+    assert "if not _security_api_proxy_enabled():" in integrity_source
+    assert "from SECURITY.security_models import" in integrity_source
+
+
 def test_vm1_database_recovery_is_audited_to_vm2():
     vm1_source = Path("WARDS/backend/routes/security_dashboard.py").read_text(encoding="utf-8")
     client_source = Path("WARDS/backend/utils/security_client.py").read_text(encoding="utf-8")

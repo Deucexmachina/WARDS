@@ -17,6 +17,7 @@ import logging
 
 from dotenv import load_dotenv
 from sqlalchemy import text, inspect, or_, event
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session as OrmSession
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -403,7 +404,70 @@ app.add_middleware(AbuseDetectionMiddleware)
 
 app.add_middleware(InjectionBlockingMiddleware)
 
-Base.metadata.create_all(bind=engine)
+SECURITY_TABLE_NAMES = {
+    "security_monitored_files",
+    "security_detection_events",
+    "security_recovery_events",
+    "security_incidents",
+    "security_admin_file_changes",
+    "security_settings",
+}
+
+
+def security_api_proxy_enabled() -> bool:
+    return bool((os.getenv("SECURITY_API_URL") or "").strip())
+
+
+def vm1_owned_metadata_tables():
+    tables = list(Base.metadata.sorted_tables)
+    if not security_api_proxy_enabled():
+        return tables
+    return [table for table in tables if table.name not in SECURITY_TABLE_NAMES]
+
+
+def is_concurrent_ddl_error(exc: Exception) -> bool:
+    current = exc
+    while current is not None:
+        args = getattr(current, "args", ())
+        if args and args[0] == 1684:
+            return True
+        message = str(current).lower()
+        if "definition is being modified by concurrent ddl" in message:
+            return True
+        current = getattr(current, "__cause__", None) or getattr(current, "orig", None)
+    return False
+
+
+def create_startup_tables():
+    tables = vm1_owned_metadata_tables()
+    for attempt in range(1, 7):
+        try:
+            with engine.begin() as conn:
+                if engine.dialect.name.startswith("mysql"):
+                    lock_name = "wards_vm1_startup_schema"
+                    lock_row = conn.execute(text("SELECT GET_LOCK(:name, 30)"), {"name": lock_name}).scalar()
+                    if lock_row != 1:
+                        raise RuntimeError("Could not acquire VM1 startup schema lock.")
+                    try:
+                        Base.metadata.create_all(bind=conn, tables=tables)
+                    finally:
+                        conn.execute(text("SELECT RELEASE_LOCK(:name)"), {"name": lock_name})
+                else:
+                    Base.metadata.create_all(bind=conn, tables=tables)
+            return
+        except OperationalError as exc:
+            if not is_concurrent_ddl_error(exc) or attempt == 6:
+                raise
+            wait_seconds = min(2 ** attempt, 30)
+            logging.getLogger("main").warning(
+                "Database schema check hit concurrent DDL; retrying in %s seconds (attempt %s/6).",
+                wait_seconds,
+                attempt,
+            )
+            time.sleep(wait_seconds)
+
+
+create_startup_tables()
 
 def ensure_auth_extensions():
     inspector = inspect(engine)
@@ -430,6 +494,8 @@ def ensure_auth_extensions():
             "security_incidents",
             "security_admin_file_changes",
         ):
+            if security_api_proxy_enabled() and protected_table in SECURITY_TABLE_NAMES:
+                continue
             ensure_integrity_columns(protected_table)
 
         if "admin_login_security_profiles" in table_names:
