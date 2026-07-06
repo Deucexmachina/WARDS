@@ -185,9 +185,7 @@ const isMarketValidUntilInvalid = (value) => {
   if (!parsed) {
     return false;
   }
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return parsed < today;
+  return false;
 };
 
 const getMarketPurposeSelectValue = (value) => {
@@ -2094,8 +2092,6 @@ const handleCancelScan = () => {
                           <label className="block text-sm font-semibold text-gray-700 mb-1">Valid Until</label>
                           <CustomDatePicker
                             name="market_valid_until"
-                            min={earliestReceiptDate || undefined}
-                            max={getTodayDateInputValue()}
                             value={formatDateInputValue(ocrDraft.market_valid_until)}
                             onChange={handleMarketDateChange}
                             hasError={missingRequiredFields.includes('market_valid_until')}
