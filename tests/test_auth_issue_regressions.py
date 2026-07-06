@@ -188,7 +188,7 @@ def test_blocked_escalation_attempts_create_system_alerts():
     assert "db.rollback()" in decorators_source
 
     assert "class BlockedAttemptAlertMiddleware" in main_source
-    assert "Session Token Reuse/Tampering Attempt" in main_source
+    assert "Session Token Reuse/Spoofing Attempt" in main_source
     assert "Parameter Pollution Elevation Attempt" in main_source
     assert "Ownership Spoofing Attempt" in main_source
     assert "app.add_middleware(BlockedAttemptAlertMiddleware)" in main_source
