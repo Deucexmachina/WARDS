@@ -751,6 +751,8 @@ def ensure_auth_extensions():
             conn.execute(text("ALTER TABLE payments ADD COLUMN related_request_id VARCHAR(255)"))
         if "receipt_sent_at" not in payment_columns:
             conn.execute(text("ALTER TABLE payments ADD COLUMN receipt_sent_at DATETIME"))
+        if "treasury_updated_by" not in payment_columns:
+            conn.execute(text("ALTER TABLE payments ADD COLUMN treasury_updated_by VARCHAR(255)"))
         if "paymongo_payment_intent_id" not in payment_columns:
             conn.execute(text("ALTER TABLE payments ADD COLUMN paymongo_payment_intent_id VARCHAR(255)"))
         if "paymongo_source_id" not in payment_columns:
