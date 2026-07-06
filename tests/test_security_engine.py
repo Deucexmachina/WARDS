@@ -579,6 +579,29 @@ def test_disabled_ai_rule_suppresses_matching_flag():
     assert "script_injection" not in flags
 
 
+def test_vite_module_script_tag_is_not_script_injection():
+    html = """<!doctype html>
+<html lang="en">
+  <head><title>WARDS</title></head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>"""
+
+    flags = content_flags(html, {"hour_of_day": 14, "day_of_week": 1}, path=Path("WARDS/frontend/index.html"))
+
+    assert "script_injection" not in flags
+
+
+def test_inline_script_tag_is_still_script_injection():
+    html = "<html><body><script>alert(document.cookie)</script></body></html>"
+
+    flags = content_flags(html, {"hour_of_day": 14, "day_of_week": 1}, path=Path("WARDS/frontend/index.html"))
+
+    assert "script_injection" in flags
+
+
 def test_content_flags_uses_enriched_event_time(monkeypatch):
     monkeypatch.setattr("SECURITY.security_engine.now_utc", lambda: datetime(2026, 6, 28, 22, 0, 0))
 

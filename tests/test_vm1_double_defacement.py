@@ -308,4 +308,70 @@ def test_double_defacement_hash_only_suppresses_baseline_corruption(monkeypatch,
     assert len(pending) == 1, f"Expected 1 restore command, got {len(pending)}"
     assert pending[0].get("restore_content_b64") is not None
 
+
+def test_vm1_poison_guard_trusts_local_repo_matching_vite_index(monkeypatch, tmp_path):
+    db = make_db()
+
+    monkeypatch.setattr("SECURITY.security_engine.VM1_SNAPSHOT_ROOT", tmp_path / "vm1_snapshots")
+    monkeypatch.setattr("SECURITY.security_engine.VM1_RESTORE_CONTENT_ROOT", tmp_path / ".restore_content")
+    monkeypatch.setattr(
+        "SECURITY.security_engine.VM1_DEFACED_SNAPSHOT_ROOT",
+        tmp_path / "vm1_snapshots" / ".defaced",
+    )
+    monkeypatch.setattr("SECURITY.security_engine.get_ai_rules", lambda _db: DEFAULT_AI_RULES)
+
+    html = """<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <title>WARDS - City Treasurer's Office</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>"""
+    html_hash = hashlib.sha256(html.encode("utf-8")).hexdigest()
+
+    entry = SecurityMonitoredFile(
+        file_path="vm1://WARDS/frontend/index.html",
+        relative_path="WARDS/frontend/index.html",
+        folder_root="WARDS",
+        baseline_hash=html_hash,
+        current_hash=html_hash,
+        status="clean",
+        file_type="html",
+        size_bytes=len(html.encode("utf-8")),
+        last_checked=datetime.now(timezone.utc),
+    )
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+
+    monkeypatch.setattr(
+        "SECURITY.security_engine._vm1_hash_matches_local_repo",
+        lambda rel_path, current_hash: rel_path == "WARDS/frontend/index.html" and current_hash == html_hash,
+    )
+
+    result = process_vm1_file_manifest(db, [
+        {
+            "relative_path": "WARDS/frontend/index.html",
+            "folder_root": "VM1_WARDS",
+            "file_path": "/opt/wards/app/WARDS/frontend/index.html",
+            "size_bytes": len(html.encode("utf-8")),
+            "current_hash": html_hash,
+            "content_b64": _b64(html),
+            "git_head_match": False,
+        }
+    ])
+
+    assert result["detections"] == 0
+    assert result["changed"] == 0
+    assert db.query(SecurityDetectionEvent).count() == 0
+    db.refresh(entry)
+    assert entry.status == "clean"
+    assert entry.baseline_hash == html_hash
+
     db.close()
