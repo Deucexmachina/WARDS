@@ -195,6 +195,7 @@ class OCRService:
         return ptr_signals >= 3 and has_ptr_number
 
     def _detect_category_from_image(self, image_path: str) -> Dict[str, Any]:
+        # --- Image loading: downsample to 96x96 for fast color analysis ---
         try:
             with Image.open(image_path) as image:
                 rgb = image.convert("RGB")
@@ -206,24 +207,32 @@ class OCRService:
         if not pixels:
             return {"detected_category": "UNKNOWN", "confidence": 0.0, "evidence": []}
 
+        # --- Compute average RGB channels across all pixels ---
         red = sum(pixel[0] for pixel in pixels) / len(pixels)
         green = sum(pixel[1] for pixel in pixels) / len(pixels)
         blue = sum(pixel[2] for pixel in pixels) / len(pixels)
+
+        # --- Color dito, Pag Green-Dominant yung receipt ---
+        
         green_dominant_pixels = sum(1 for r, g, b in pixels if g > r + 6 and g > b + 2)
-        cool_tinted_pixels = sum(1 for r, g, b in pixels if r + 8 < g and r + 8 < b)
         green_ratio = green_dominant_pixels / len(pixels)
-        cool_tint_ratio = cool_tinted_pixels / len(pixels)
         green_dominant = (
             green_ratio >= 0.12
             and green > red + 4
             and green > blue + 2
         )
+
+        # --- COlor din dito, Pag medjo tinted yung receipt --
+        cool_tinted_pixels = sum(1 for r, g, b in pixels if r + 8 < g and r + 8 < b)
+        cool_tint_ratio = cool_tinted_pixels / len(pixels)
         cool_tinted = (
             cool_tint_ratio >= 0.12
             and green > red + 8
             and blue > red + 8
         )
 
+        # --- Final image-based classification ---
+        # --- If tinted or green, automatic na MISC yon --- #
         if green_dominant or cool_tinted:
             return {
                 "detected_category": "MISC",
@@ -541,6 +550,8 @@ class OCRService:
 
     def _detect_category_from_text(self, text: str) -> Dict[str, Any]:
         normalized = text.upper()
+
+        # --- MGA KEYWORDS SA PAG DETERMINE NG RECEIPTS ---
         category_signals = {
             "RPT": [
                 "REAL PROPERTY TAX",
@@ -595,6 +606,7 @@ class OCRService:
             ],
         }
 
+        # --- Base scoring: dito binibilagn yung keywords based sa taas ---
         scores: dict[str, int] = {}
         evidence: dict[str, list[str]] = {}
         for category, signals in category_signals.items():
@@ -602,11 +614,13 @@ class OCRService:
             evidence[category] = matched_signals[:5]
             scores[category] = len(matched_signals)
 
+        # --- RPT bonus scoring ---
         ref_text = self._extract_reference_value(normalized, "RPT")
         if ref_text.startswith("R-"):
             scores["RPT"] += 2
             evidence["RPT"].append("R-prefixed reference")
 
+        # --- BUSINESS (BT) bonus scoring ---
         if re.search(r"\b\d{2}-\d{6}\b", normalized):
             scores["BUSINESS"] += 2
             evidence["BUSINESS"].append("Permit number format")
@@ -619,6 +633,7 @@ class OCRService:
             scores["BUSINESS"] += 2
             evidence["BUSINESS"].append("Business entity suffix")
 
+        # --- MISC bonus scoring ---
         if "MISC" in normalized and "BUSINESS" not in normalized and "PROPERTY" not in normalized:
             scores["MISC"] += 1
             evidence["MISC"].append("MISC keyword")
@@ -640,6 +655,7 @@ class OCRService:
             scores["MISC"] += 2
             evidence.setdefault("MISC", []).append("Official receipt MISC layout")
 
+        # --- PTR bonus scoring ---
         if re.search(r"\bPROFESSIONAL\s+TAX\b", normalized):
             scores["PTR"] += 2
             evidence.setdefault("PTR", []).append("Professional tax keyword")
@@ -660,6 +676,7 @@ class OCRService:
             scores["PTR"] += 2
             evidence.setdefault("PTR", []).append("Official receipt number format")
 
+        # --- MARKET bonus scoring ---
         if any(signal in normalized for signal in ("CERTIFICATE OF STALL OCCUPANCY", "STALL AWARDEE", "PUBLIC MARKET")):
             scores["MARKET"] += 3
             evidence.setdefault("MARKET", []).append("Market certificate keyword")
@@ -667,6 +684,7 @@ class OCRService:
             scores["MARKET"] += 1
             evidence.setdefault("MARKET", []).append("Valid until label")
 
+        # --- CTC bonus scoring ---
         if any(signal in normalized for signal in ("COMMUNITY TAX CERTIFICATE", "COMMUNITY TAX RECEIPT", "CEDULA")):
             scores["CTC"] += 3
             evidence.setdefault("CTC", []).append("Community tax certificate keyword")
@@ -674,6 +692,10 @@ class OCRService:
             scores["CTC"] += 2
             evidence.setdefault("CTC", []).append("Community tax keyword")
 
+        # --- Tie-breaking logic ng MISC vs PTR ---
+        # Pag close yung score ng PTR and MISC, use layout markers to decide.
+        # If there are 3+ PTR layout signals and no strong MISC keyword, lean PTR.
+        # Otherwise, a strong MISC keyword ("MISCELLANEOUS", "MISC.") breaks ties toward MISC.
         strong_misc_markers = ("MISCELLANEOUS", "MISC.")
         has_strong_misc_marker = any(marker in normalized for marker in strong_misc_markers)
         ptr_supporting_markers = (
@@ -692,6 +714,7 @@ class OCRService:
             scores["MISC"] += 2
             evidence.setdefault("MISC", []).append("Strong MISC marker")
 
+        # --- Final category selection and confidence scoring ---
         detected_category = max(scores, key=scores.get)
         max_score = scores[detected_category]
         if max_score <= 0:
