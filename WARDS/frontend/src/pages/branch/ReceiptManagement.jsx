@@ -473,6 +473,7 @@ const ReceiptManagement = () => {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadingReleaseId, setUploadingReleaseId] = useState(null);
+  const [autoReleasingRequestId, setAutoReleasingRequestId] = useState(null);
   const [processingFeedback, setProcessingFeedback] = useState(null);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
@@ -1394,6 +1395,34 @@ const ReceiptManagement = () => {
     setSelectedReleaseCopyPreview(null);
   };
 
+  const handleAutoReleaseClick = async (request) => {
+    if (!request?.requestId) return;
+    if (!request.matchedReceipt) {
+      setError('No matching receipt record found for this request.');
+      return;
+    }
+    const paymentStatus = request.paymentStatus || 'Pending';
+    if (!['Verified', 'Payment Verified'].includes(paymentStatus)) {
+      setError('Payment must be verified before auto-releasing the receipt copy.');
+      return;
+    }
+
+    setAutoReleasingRequestId(request.requestId);
+    setError('');
+    setSuccessMessage('');
+    try {
+      const response = await receiptAPI.autoReleaseRequest(request.requestId);
+      setSuccessMessage(
+        response.data?.emailMessage || `Receipt copy released and emailed to ${response.data?.email || 'requester'}.`
+      );
+      await refreshData({ emitReceiptEvent: true });
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to auto-release receipt copy.');
+    } finally {
+      setAutoReleasingRequestId(null);
+    }
+  };
+
   const renderRequestWorkflowActions = (request, { compact = false } = {}) => {
     const releaseDraft = releaseUploadDrafts[request.requestId];
     const buttonClassName = compact
@@ -2177,16 +2206,28 @@ const handleCancelScan = () => {
                       ['Tax Type', getBranchTaxDisplayName(request.taxType)],
                       ['Reason', request.requestReason === 'Other' ? (request.requestReasonOther || 'Other') : (request.requestReason || 'N/A')],
                       ['Transaction Date', request.transactionDate || 'N/A'],
-                      ['Reference', request.refNumber || 'N/A'],
+                      ['Reference', request.refNumber || 'N/A', true],
                       ['Matched Record', request.hasReleaseCopy
                         ? `Uploaded: ${request.releaseCopyFilename || 'receipt copy'}`
                         : request.matchedReceipt
                           ? request.matchedReceipt.receipt_number || 'Matched'
                           : 'Waiting for receipt upload'],
-                    ].map(([label, value]) => (
+                    ].map(([label, value, isReference]) => (
                       <div key={`${request.requestId}-${label}`} className="rounded-2xl border border-white bg-white px-4 py-3">
                         <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">{label}</p>
-                        <p className="mt-1 break-words text-sm font-semibold text-slate-900">{value}</p>
+                        {isReference && request.matchedReceipt ? (
+                          <button
+                            type="button"
+                            onClick={() => handleAutoReleaseClick(request)}
+                            disabled={autoReleasingRequestId === request.requestId}
+                            className="mt-1 inline-flex items-center gap-1 break-words text-sm font-semibold text-blue-600 underline decoration-blue-300 underline-offset-2 transition hover:text-blue-800 disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline"
+                          >
+                            {autoReleasingRequestId === request.requestId ? 'Releasing...' : value}
+                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Auto-release</span>
+                          </button>
+                        ) : (
+                          <p className="mt-1 break-words text-sm font-semibold text-slate-900">{value}</p>
+                        )}
                       </div>
                     ))}
                   </div>

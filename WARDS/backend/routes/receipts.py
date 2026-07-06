@@ -2830,17 +2830,18 @@ async def delete_receipt_request(
     return {"success": True, "requestId": request_id}
 
 
-@router.post("/requests/{request_id}/release")
-async def release_receipt_request(request_id: str, current_staff=Depends(get_current_branch_staff), db: Session = Depends(get_db)):
-    receipt_request = find_branch_receipt_request_by_request_id(
-        db,
-        request_id,
-        current_staff.branch_id,
-    )
-    if not receipt_request:
-        raise HTTPException(status_code=404, detail="Receipt request not found")
+async def _release_receipt_request_core(
+    db: Session,
+    receipt_request: ReceiptRequest,
+    current_staff: BranchStaff,
+    release_copy_path: str,
+    release_copy_filename: str | None,
+    *,
+    skip_ocr_validation: bool = False,
+) -> dict:
+    request_id = receipt_request_value(receipt_request, "request_id")
 
-    payment = get_latest_receipt_request_payment(db, receipt_request_value(receipt_request, "request_id"))
+    payment = get_latest_receipt_request_payment(db, request_id)
     payment_status = get_receipt_request_payment_status(receipt_request, payment)
     if payment_status == "Pending":
         raise HTTPException(status_code=400, detail="Receipt request fee has not been paid yet.")
@@ -2851,118 +2852,117 @@ async def release_receipt_request(request_id: str, current_staff=Depends(get_cur
     if not is_verified_receipt_payment(payment):
         raise HTTPException(status_code=400, detail="Receipt release is available only for verified payments.")
 
-    current_release_copy_path = receipt_request_value(receipt_request, "release_copy_path")
-    current_release_copy_filename = receipt_request_value(receipt_request, "release_copy_filename")
-    if not current_release_copy_path or not os.path.exists(current_release_copy_path):
-        raise HTTPException(status_code=400, detail="Upload the finished receipt copy first")
+    if not release_copy_path or not os.path.exists(release_copy_path):
+        raise HTTPException(status_code=400, detail="Release copy not found.")
 
-    # --- Release Copy Validation: Request Taxpayer Name vs OCR vs Filename ---
-    expected_tax_type = normalize_receipt_category(receipt_request_value(receipt_request, "tax_type") or "RPT")
-    if receipt_category_requires_ocr(expected_tax_type):
-        try:
-            with open(current_release_copy_path, "rb") as f:
-                file_bytes = f.read()
-        except (OSError, IOError):
-            raise HTTPException(status_code=400, detail="Unable to read the uploaded release copy. Please re-upload.")
+    if not skip_ocr_validation:
+        # --- Release Copy Validation: Request Taxpayer Name vs OCR vs Filename ---
+        expected_tax_type = normalize_receipt_category(receipt_request_value(receipt_request, "tax_type") or "RPT")
+        if receipt_category_requires_ocr(expected_tax_type):
+            try:
+                with open(release_copy_path, "rb") as f:
+                    file_bytes = f.read()
+            except (OSError, IOError):
+                raise HTTPException(status_code=400, detail="Unable to read the uploaded release copy. Please re-upload.")
 
-        request_taxpayer_name = receipt_request_value(receipt_request, "taxpayer_name") or ""
+            request_taxpayer_name = receipt_request_value(receipt_request, "taxpayer_name") or ""
 
-        class _DummyUploadFile:
-            def __init__(self, filename):
-                self.filename = filename
+            class _DummyUploadFile:
+                def __init__(self, filename):
+                    self.filename = filename
 
-        try:
-            analysis = await build_receipt_ocr_result_async(
-                db=db,
-                image_data=file_bytes,
-                file=_DummyUploadFile(current_release_copy_filename),
-                file_path=current_release_copy_path,
-                category=expected_tax_type,
-                branch_id=current_staff.branch_id,
-                uploaded_by=current_staff.username,
-                allow_exact_duplicate_match=True,
+            try:
+                analysis = await build_receipt_ocr_result_async(
+                    db=db,
+                    image_data=file_bytes,
+                    file=_DummyUploadFile(release_copy_filename),
+                    file_path=release_copy_path,
+                    category=expected_tax_type,
+                    branch_id=current_staff.branch_id,
+                    uploaded_by=current_staff.username,
+                    allow_exact_duplicate_match=True,
+                )
+            except HTTPException as exc:
+                db.add(ActivityLog(
+                    action="Receipt Release Validation Failed",
+                    user=current_staff.username,
+                    details=_branch_log_details(db, current_staff.branch_id, f"OCR validation error for request {request_id}: {exc.detail}"),
+                    type="branch_receipts",
+                ))
+                db.commit()
+                raise HTTPException(status_code=400, detail=f"Receipt validation failed: {exc.detail}")
+            except Exception:
+                db.add(ActivityLog(
+                    action="Receipt Release Validation Failed",
+                    user=current_staff.username,
+                    details=_branch_log_details(db, current_staff.branch_id, f"OCR validation exception for request {request_id}"),
+                    type="branch_receipts",
+                ))
+                db.commit()
+                raise HTTPException(status_code=400, detail="Failed to validate the uploaded receipt copy. Please re-upload a clear image.")
+
+            extracted_taxpayer_name = (analysis.get("taxpayer_name") or "").strip()
+
+            # Validation A: Request Taxpayer Name ↔ OCR Extracted Full Name
+            taxpayer_match = compare_taxpayer_names(extracted_taxpayer_name, request_taxpayer_name)
+
+            # Validation B: Uploaded File Name ↔ OCR Extracted Full Name
+            filename_validation = build_receipt_filename_validation(
+                filename=release_copy_filename,
+                taxpayer_name=extracted_taxpayer_name,
             )
-        except HTTPException as exc:
+            filename_match = filename_validation["filename_matches_taxpayer"]
+
+            if not taxpayer_match or not filename_match:
+                request_id_for_log = receipt_request_value(receipt_request, "request_id")
+                if not taxpayer_match and not filename_match:
+                    log_action = "Receipt Release Validation Failed"
+                    log_details = (
+                        f"Both validations failed for request {request_id_for_log}. "
+                        f"Request taxpayer: {request_taxpayer_name or 'N/A'}, "
+                        f"Extracted taxpayer: {extracted_taxpayer_name or 'N/A'}, "
+                        f"Filename: {release_copy_filename}"
+                    )
+                    error_detail = "Receipt validation failed. The uploaded receipt does not match the request information."
+                elif not filename_match:
+                    log_action = "Receipt Release File Name Mismatch"
+                    log_details = (
+                        f"Filename mismatch for request {request_id_for_log}. "
+                        f"Filename: {release_copy_filename}, "
+                        f"Expected taxpayer: {extracted_taxpayer_name or 'N/A'}"
+                    )
+                    error_detail = "Uploaded file name does not match the taxpayer name detected from the receipt. Please rename the file and try again."
+                else:
+                    log_action = "Receipt Release Taxpayer Name Mismatch"
+                    log_details = (
+                        f"Taxpayer mismatch for request {request_id_for_log}. "
+                        f"Request taxpayer: {request_taxpayer_name or 'N/A'}, "
+                        f"Extracted taxpayer: {extracted_taxpayer_name or 'N/A'}"
+                    )
+                    error_detail = "Taxpayer information in the request does not match the taxpayer name detected from the uploaded receipt."
+
+                db.add(ActivityLog(
+                    action=log_action,
+                    user=current_staff.username,
+                    details=_branch_log_details(db, current_staff.branch_id, log_details),
+                    type="branch_receipts",
+                ))
+                db.commit()
+                raise HTTPException(status_code=400, detail=error_detail)
+
+            # Validation passed
             db.add(ActivityLog(
-                action="Receipt Release Validation Failed",
+                action="Receipt Release Validation Passed",
                 user=current_staff.username,
-                details=_branch_log_details(db, current_staff.branch_id, f"OCR validation error for request {request_id}: {exc.detail}"),
+                details=_branch_log_details(
+                    db,
+                    current_staff.branch_id,
+                    f"Release copy validation passed for request {receipt_request_value(receipt_request, 'request_id')}. "
+                    f"Extracted taxpayer: {extracted_taxpayer_name or 'N/A'}",
+                ),
                 type="branch_receipts",
             ))
-            db.commit()
-            raise HTTPException(status_code=400, detail=f"Receipt validation failed: {exc.detail}")
-        except Exception:
-            db.add(ActivityLog(
-                action="Receipt Release Validation Failed",
-                user=current_staff.username,
-                details=_branch_log_details(db, current_staff.branch_id, f"OCR validation exception for request {request_id}"),
-                type="branch_receipts",
-            ))
-            db.commit()
-            raise HTTPException(status_code=400, detail="Failed to validate the uploaded receipt copy. Please re-upload a clear image.")
-
-        extracted_taxpayer_name = (analysis.get("taxpayer_name") or "").strip()
-
-        # Validation A: Request Taxpayer Name ↔ OCR Extracted Full Name
-        taxpayer_match = compare_taxpayer_names(extracted_taxpayer_name, request_taxpayer_name)
-
-        # Validation B: Uploaded File Name ↔ OCR Extracted Full Name
-        filename_validation = build_receipt_filename_validation(
-            filename=current_release_copy_filename,
-            taxpayer_name=extracted_taxpayer_name,
-        )
-        filename_match = filename_validation["filename_matches_taxpayer"]
-
-        if not taxpayer_match or not filename_match:
-            request_id_for_log = receipt_request_value(receipt_request, "request_id")
-            if not taxpayer_match and not filename_match:
-                log_action = "Receipt Release Validation Failed"
-                log_details = (
-                    f"Both validations failed for request {request_id_for_log}. "
-                    f"Request taxpayer: {request_taxpayer_name or 'N/A'}, "
-                    f"Extracted taxpayer: {extracted_taxpayer_name or 'N/A'}, "
-                    f"Filename: {current_release_copy_filename}"
-                )
-                error_detail = "Receipt validation failed. The uploaded receipt does not match the request information."
-            elif not filename_match:
-                log_action = "Receipt Release File Name Mismatch"
-                log_details = (
-                    f"Filename mismatch for request {request_id_for_log}. "
-                    f"Filename: {current_release_copy_filename}, "
-                    f"Expected taxpayer: {extracted_taxpayer_name or 'N/A'}"
-                )
-                error_detail = "Uploaded file name does not match the taxpayer name detected from the receipt. Please rename the file and try again."
-            else:
-                log_action = "Receipt Release Taxpayer Name Mismatch"
-                log_details = (
-                    f"Taxpayer mismatch for request {request_id_for_log}. "
-                    f"Request taxpayer: {request_taxpayer_name or 'N/A'}, "
-                    f"Extracted taxpayer: {extracted_taxpayer_name or 'N/A'}"
-                )
-                error_detail = "Taxpayer information in the request does not match the taxpayer name detected from the uploaded receipt."
-
-            db.add(ActivityLog(
-                action=log_action,
-                user=current_staff.username,
-                details=_branch_log_details(db, current_staff.branch_id, log_details),
-                type="branch_receipts",
-            ))
-            db.commit()
-            raise HTTPException(status_code=400, detail=error_detail)
-
-        # Validation passed
-        db.add(ActivityLog(
-            action="Receipt Release Validation Passed",
-            user=current_staff.username,
-            details=_branch_log_details(
-                db,
-                current_staff.branch_id,
-                f"Release copy validation passed for request {receipt_request_value(receipt_request, 'request_id')}. "
-                f"Extracted taxpayer: {extracted_taxpayer_name or 'N/A'}",
-            ),
-            type="branch_receipts",
-        ))
-    # --- End Release Copy Validation ---
+        # --- End Release Copy Validation ---
 
     receipt_request.branch_id = current_staff.branch_id
     final_status = "Completed" if is_appointment_request(receipt_request) else "Released"
@@ -2978,8 +2978,8 @@ async def release_receipt_request(request_id: str, current_staff=Depends(get_cur
         taxpayer_name=receipt_request_value(receipt_request, "taxpayer_name"),
         request_id=request_id,
         branch_name=branch_name,
-        attachment_path=current_release_copy_path,
-        attachment_name=current_release_copy_filename or os.path.basename(current_release_copy_path),
+        attachment_path=release_copy_path,
+        attachment_name=release_copy_filename or os.path.basename(release_copy_path),
     )
 
     if not email_result["sent"]:
@@ -2988,7 +2988,6 @@ async def release_receipt_request(request_id: str, current_staff=Depends(get_cur
             detail=email_result["message"] or "Failed to send receipt release email.",
         )
 
-    release_copy_path = current_release_copy_path
     request_email = receipt_request_value(receipt_request, "email")
     taxpayer_name = receipt_request_value(receipt_request, "taxpayer_name")
     db.delete(receipt_request)
@@ -3024,6 +3023,100 @@ async def release_receipt_request(request_id: str, current_staff=Depends(get_cur
         "email": request_email,
         "taxpayerName": taxpayer_name,
     }
+
+
+@router.post("/requests/{request_id}/release")
+async def release_receipt_request(request_id: str, current_staff=Depends(get_current_branch_staff), db: Session = Depends(get_db)):
+    receipt_request = find_branch_receipt_request_by_request_id(
+        db,
+        request_id,
+        current_staff.branch_id,
+    )
+    if not receipt_request:
+        raise HTTPException(status_code=404, detail="Receipt request not found")
+
+    current_release_copy_path = receipt_request_value(receipt_request, "release_copy_path")
+    current_release_copy_filename = receipt_request_value(receipt_request, "release_copy_filename")
+    if not current_release_copy_path or not os.path.exists(current_release_copy_path):
+        raise HTTPException(status_code=400, detail="Upload the finished receipt copy first")
+
+    return await _release_receipt_request_core(
+        db=db,
+        receipt_request=receipt_request,
+        current_staff=current_staff,
+        release_copy_path=current_release_copy_path,
+        release_copy_filename=current_release_copy_filename,
+        skip_ocr_validation=False,
+    )
+
+
+@router.post("/requests/{request_id}/auto-release")
+@limiter.limit("10/minute")
+async def auto_release_receipt_request(
+    request_id: str,
+    current_staff=Depends(get_current_branch_staff),
+    db: Session = Depends(get_db),
+):
+    receipt_request = find_branch_receipt_request_by_request_id(
+        db,
+        request_id,
+        current_staff.branch_id,
+    )
+    if not receipt_request:
+        raise HTTPException(status_code=404, detail="Receipt request not found")
+
+    matched_record = None
+    if receipt_request.matched_receipt_id:
+        matched_record = db.query(ReceiptRecord).filter(ReceiptRecord.id == receipt_request.matched_receipt_id).first()
+    if not matched_record:
+        matched_record = find_matching_receipt(
+            db,
+            current_staff.branch_id,
+            receipt_request_value(receipt_request, "ref_number"),
+            receipt_request_value(receipt_request, "taxpayer_name"),
+            receipt_request_value(receipt_request, "transaction_date"),
+            receipt_request_value(receipt_request, "tax_type"),
+        )
+    if not matched_record:
+        raise HTTPException(status_code=400, detail="No matching receipt record found for this request.")
+
+    source_image_path = receipt_record_value(matched_record, "source_image_path")
+    if not source_image_path or not os.path.exists(source_image_path):
+        raise HTTPException(status_code=400, detail="Matched receipt record has no image.")
+
+    os.makedirs(RELEASE_UPLOAD_DIR, exist_ok=True)
+    extension = os.path.splitext(source_image_path)[1].lower() or ".jpg"
+    safe_name = f"{request_id}_auto_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}{extension}"
+    release_copy_path = os.path.join(RELEASE_UPLOAD_DIR, safe_name)
+
+    try:
+        with open(source_image_path, "rb") as src:
+            file_bytes = src.read()
+        with open(release_copy_path, "wb") as dst:
+            dst.write(file_bytes)
+    except (OSError, IOError):
+        raise HTTPException(status_code=500, detail="Failed to copy matched receipt image for release.")
+
+    receipt_request.release_copy_path = release_copy_path
+    receipt_request.release_copy_filename = os.path.basename(release_copy_path)
+    sync_request_status(receipt_request)
+    apply_receipt_request_security(receipt_request)
+
+    db.add(ActivityLog(
+        action="Receipt Auto-Release Copy Prepared",
+        user=current_staff.username,
+        details=_branch_log_details(db, current_staff.branch_id, f"Prepared auto-release copy for {request_id} from record #{matched_record.id}"),
+        type="branch_receipts",
+    ))
+
+    return await _release_receipt_request_core(
+        db=db,
+        receipt_request=receipt_request,
+        current_staff=current_staff,
+        release_copy_path=release_copy_path,
+        release_copy_filename=os.path.basename(release_copy_path),
+        skip_ocr_validation=True,
+    )
 
 
 @router.post("/requests/{request_id}/complete-appointment")
