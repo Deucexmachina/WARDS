@@ -1,4 +1,5 @@
 import os
+import ipaddress
 
 from fastapi import HTTPException, status, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -27,6 +28,7 @@ from auth.permissions import (
 
 BINDING_STRICT_MODE = os.getenv("TOKEN_BINDING_STRICT", "true").lower() == "true"
 BINDING_CHECK_UA = os.getenv("TOKEN_BINDING_UA", "false").lower() == "true"
+TOKEN_BINDING_IP_MODE = os.getenv("TOKEN_BINDING_IP_MODE", "prefix").lower()
 
 
 def _get_request_ip(request: Request) -> str:
@@ -200,10 +202,27 @@ def _validate_token_binding(request: Request, payload: dict) -> None:
     token_ip = payload.get("ip")
     token_ua = payload.get("ua")
     user = payload.get("email") or payload.get("sub") or "unknown"
-    if token_ip and token_ip != client_ip:
+    def _ip_binding_matches(expected: str, actual: str) -> bool:
+        if TOKEN_BINDING_IP_MODE in {"off", "false", "disabled", "none"}:
+            return True
+        if expected == actual:
+            return True
+        if TOKEN_BINDING_IP_MODE != "prefix":
+            return False
+        try:
+            expected_ip = ipaddress.ip_address(expected)
+            actual_ip = ipaddress.ip_address(actual)
+            if expected_ip.version != actual_ip.version:
+                return False
+            prefix = 24 if expected_ip.version == 4 else 64
+            return expected_ip in ipaddress.ip_network(f"{actual}/{prefix}", strict=False)
+        except Exception:
+            return False
+
+    if token_ip and not _ip_binding_matches(str(token_ip), str(client_ip)):
         _log_spoofing_attempt(
             user,
-            f"Reason: Session binding mismatch (IP); expected_ip: {token_ip}; actual_ip: {client_ip}",
+            f"Reason: Session binding mismatch (IP); mode: {TOKEN_BINDING_IP_MODE}; expected_ip: {token_ip}; actual_ip: {client_ip}",
             request,
         )
         raise HTTPException(
@@ -248,7 +267,9 @@ def _validate_active_session(
     session_key = f"wards:session:{portal}:{user_id}"
     stored_sid = r.get(session_key)
     token_sid = payload.get("sid")
-    if stored_sid and token_sid and stored_sid != token_sid:
+    if isinstance(stored_sid, bytes):
+        stored_sid = stored_sid.decode("utf-8", errors="ignore")
+    if stored_sid and token_sid and str(stored_sid) != str(token_sid):
         if request is not None:
             _log_spoofing_attempt(
                 payload.get("email") or payload.get("sub") or "unknown",

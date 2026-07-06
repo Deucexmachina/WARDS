@@ -277,14 +277,17 @@ def test_double_defacement_hash_only_suppresses_baseline_corruption(monkeypatch,
         }
     ])
 
-    # After the fix, hash-only high-risk manifests should create a detection
-    # instead of silently poisoning the baseline.
+    # Hash-only high-risk manifests should not create a low-confidence incident
+    # or poison the baseline, but should queue a restore from the trusted copy.
     db.refresh(entry)
-    assert result2["detections"] == 1, f"Expected 1 detection on hash-only manifest, got {result2}"
+    assert result2["detections"] == 0, f"Expected 0 detections on hash-only manifest, got {result2}"
     assert entry.baseline_hash == clean_hash, f"Baseline was corrupted: {entry.baseline_hash}"
+    pending_after_hash_only = get_pending_vm1_restore_commands(db)
+    assert len(pending_after_hash_only) == 1
+    assert pending_after_hash_only[0].get("restore_content_b64") is not None
 
     # Third manifest WITH content (simulating forced scan)
-    # Should NOT create a duplicate detection because an open incident already exists.
+    # Now there is enough evidence to create the normal detection.
     result3 = process_vm1_file_manifest(db, [
         {
             "relative_path": "WARDS/frontend/index.html",
@@ -299,11 +302,10 @@ def test_double_defacement_hash_only_suppresses_baseline_corruption(monkeypatch,
 
     db.refresh(entry)
 
-    # No duplicate detection should be created.
-    assert result3["detections"] == 0, f"Expected 0 duplicate detections, got {result3}"
+    assert result3["detections"] == 1, f"Expected 1 content-backed detection, got {result3}"
     assert entry.baseline_hash == clean_hash, f"Baseline was corrupted: {entry.baseline_hash}"
 
-    # Verify auto-recovery command exists (created by the hash-only manifest)
+    # Verify the hash-only restore command remains available.
     pending = get_pending_vm1_restore_commands(db)
     assert len(pending) == 1, f"Expected 1 restore command, got {len(pending)}"
     assert pending[0].get("restore_content_b64") is not None

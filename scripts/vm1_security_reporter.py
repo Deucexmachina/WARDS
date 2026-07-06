@@ -54,6 +54,7 @@ MAX_MANIFEST_CONTENT_BYTES = int(os.getenv("VM1_MAX_MANIFEST_CONTENT_BYTES", "52
 CUSTOM_FOLDERS: list[Path] = []
 DYNAMIC_SCAN_INTERVAL = SCAN_INTERVAL
 FRONTEND_REBUILD_REASONS: set[str] = set()
+BACKEND_RESTART_REASONS: set[str] = set()
 LAST_DATABASE_CHECKSUM = ""
 
 LOG_PREFIX = "[VM1-REPORTER]"
@@ -410,6 +411,7 @@ def send_manifest(files: list[dict]) -> bool:
                 except Exception:
                     pass
             _flush_frontend_rebuild()
+            _flush_backend_restart()
             return True
         log(f"Manifest upload failed: HTTP {resp.status_code} {resp.text[:200]}")
         return False
@@ -585,6 +587,16 @@ def _queue_frontend_rebuild(rel_path: str):
         FRONTEND_REBUILD_REASONS.add(rel_path)
 
 
+def _restore_affects_backend(rel_path: str) -> bool:
+    lower = rel_path.lower().replace("\\", "/")
+    return any(p in lower for p in ("wards/backend/", "ocr/backend/", "/backend/"))
+
+
+def _queue_backend_restart(rel_path: str):
+    if _restore_affects_backend(rel_path):
+        BACKEND_RESTART_REASONS.add(rel_path)
+
+
 def _flush_frontend_rebuild():
     """Rebuild and restart frontend container once after a batch of restored frontend files."""
     if not FRONTEND_REBUILD_REASONS:
@@ -655,6 +667,69 @@ def _flush_frontend_rebuild():
         log(f"Frontend rebuild exception: {exc}")
 
 
+def _flush_backend_restart():
+    """Rebuild/restart backend once after a batch of restored backend files."""
+    if not BACKEND_RESTART_REASONS:
+        return
+    restored_count = len(BACKEND_RESTART_REASONS)
+    sample_path = sorted(BACKEND_RESTART_REASONS)[0]
+    BACKEND_RESTART_REASONS.clear()
+
+    compose_dirs = ["/opt/wards/app", "/wards", "/app", "/"]
+    cwd = None
+    for d in compose_dirs:
+        if Path(d).joinpath("docker-compose.yml").exists():
+            cwd = d
+            break
+
+    try:
+        import subprocess
+        kwargs = {"capture_output": True, "text": True, "timeout": 300}
+        if cwd:
+            kwargs["cwd"] = cwd
+
+        rebuild_cmds = [
+            ["docker", "compose", "up", "-d", "--no-deps", "--build", "backend"],
+            ["docker-compose", "up", "-d", "--no-deps", "--build", "backend"],
+        ]
+        result = None
+        for cmd in rebuild_cmds:
+            try:
+                result = subprocess.run(cmd, **kwargs)
+                if result.returncode == 0:
+                    log(f"Backend rebuilt and restarted after restoring {restored_count} backend file(s); sample={sample_path}")
+                    return
+                break
+            except FileNotFoundError:
+                continue
+
+        if result is not None and result.returncode != 0:
+            err = result.stderr.strip() if result.stderr else "(no stderr)"
+            log(f"Backend rebuild failed: {err}")
+
+        restart_cmds = [
+            ["docker", "compose", "restart", "backend"],
+            ["docker-compose", "restart", "backend"],
+        ]
+        for cmd in restart_cmds:
+            try:
+                fb = subprocess.run(
+                    cmd,
+                    **{k: v for k, v in kwargs.items() if k != "timeout"},
+                    timeout=60,
+                )
+                if fb.returncode == 0:
+                    log("Backend restart fallback succeeded")
+                    return
+                break
+            except FileNotFoundError:
+                continue
+
+        log("Docker not available inside vm1-reporter; backend will not auto-restart")
+    except Exception as exc:
+        log(f"Backend rebuild exception: {exc}")
+
+
 def apply_restore_command(cmd: dict) -> bool:
     if cmd.get("command_type") == "vm1_database_restore":
         return apply_database_restore_command(cmd)
@@ -707,6 +782,7 @@ def apply_restore_command(cmd: dict) -> bool:
 
         log(f"Restored {rel_path} (hash: {actual_hash})")
         _queue_frontend_rebuild(rel_path)
+        _queue_backend_restart(rel_path)
         return True
     except Exception as exc:
         log(f"Restore failed for {rel_path}: {exc}")
@@ -812,6 +888,7 @@ def poll_restore_commands():
                 timeout=10,
             )
         _flush_frontend_rebuild()
+        _flush_backend_restart()
     except Exception as exc:
         log(f"Restore poll exception: {exc}")
 

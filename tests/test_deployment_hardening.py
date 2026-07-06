@@ -18,7 +18,7 @@ from auth.jwt_utils import ALGORITHM
 from middleware import dos_protection
 from middleware.https import HttpsEnforcementMiddleware
 from database import models as db_models
-from database.models import ActivityLog, Backup, BranchSystemSetting, Service, SystemSetting
+from database.models import ActivityLog, Alert, AlertView, Backup, BranchSystemSetting, Service, SystemSetting
 from routes import public
 from routes import security_dashboard
 from utils import backup_engine
@@ -279,7 +279,7 @@ def test_vm1_repeat_hash_with_content_uses_normal_detection_flow():
     assert "hash-only deferral stores the modified hash as current" in engine_source
     assert "not open_incident_exists and content_supplied and new_content.strip()" in engine_source
     assert '_record_vm1_detection(\n                        db, entry, "vm1_content_modified", current_hash' in engine_source
-    assert "repeat modified hash scan" in engine_source
+    assert "repeat hash-only modified scan" in engine_source
     assert "if not has_pending_restore or not has_open_incident:" in engine_source
     assert "if not _has_pending_vm1_restore_for_file(db, entry.relative_path):" in engine_source
 
@@ -316,7 +316,7 @@ def test_vm1_recovery_retries_same_hash_and_existing_open_incidents():
     engine = Path("SECURITY/security_engine.py").read_text(encoding="utf-8")
 
     assert "def _queue_vm1_restore_if_needed" in engine
-    assert "reason=\"repeat modified hash scan\"" in engine
+    assert "reason=\"repeat hash-only modified scan\"" in engine
     assert "reason=f\"existing open incident SEC-{existing_incident.id}\"" in engine
     assert "reason=\"snapshot scan found existing open incident\"" in engine
     assert "is_vm1_evidence_entry(file_entry)" in engine
@@ -421,6 +421,27 @@ def test_activity_logs_are_pruned_fifo_after_insert(monkeypatch, tmp_path):
 
         assert len(rows) == 3
         assert [row.action for row in rows] == ["log-2", "log-3", "log-4"]
+    finally:
+        db.close()
+
+
+def test_system_alerts_are_pruned_fifo_after_insert(monkeypatch, tmp_path):
+    monkeypatch.setattr(db_models, "ALERT_RETENTION_LIMIT", 3)
+    engine = create_engine(f"sqlite:///{(tmp_path / 'alerts.db').as_posix()}", connect_args={"check_same_thread": False})
+    event.listen(engine, "connect", lambda connection, _record: connection.create_collation("utf8mb4_bin", lambda a, b: (a > b) - (a < b)))
+    Alert.__table__.create(bind=engine)
+    AlertView.__table__.create(bind=engine)
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        for idx in range(5):
+            db.add(Alert(type="security", title=f"alert-{idx}", message="test", severity="low"))
+        db.commit()
+
+        rows = db.query(Alert).order_by(Alert.id.asc()).all()
+
+        assert len(rows) == 3
+        assert [row.title for row in rows] == ["alert-2", "alert-3", "alert-4"]
     finally:
         db.close()
 
@@ -620,13 +641,14 @@ def test_vm1_config_exposes_force_scan_token_for_reporter():
     assert 'scan_and_send_manifest("forced" if force_scan_due else "interval")' in reporter
 
 
-def test_vm1_priority_hash_only_manifest_changes_create_detection():
+def test_vm1_priority_hash_only_manifest_changes_defer_detection():
     engine = (Path(__file__).resolve().parents[1] / "SECURITY" / "security_engine.py").read_text()
     reporter = (Path(__file__).resolve().parents[1] / "scripts" / "vm1_security_reporter.py").read_text()
 
-    assert "recording priority-file detection and triggering recovery" in engine
-    assert "Priority file auto-recovery was triggered from hash drift" in engine
-    assert "recording hash-only detection and triggering recovery" in engine
+    assert "recording priority-file detection and triggering recovery" not in engine
+    assert "Priority file auto-recovery was triggered from hash drift" not in engine
+    assert "recording hash-only detection and triggering recovery" not in engine
+    assert "repeat hash-only modified scan" in engine
     assert "deferring detection to avoid a hash-only false positive" in engine
     assert "content_missing_for_nonempty_file" in engine
     assert "size_bytes > 0" in engine
@@ -636,6 +658,31 @@ def test_vm1_priority_hash_only_manifest_changes_create_detection():
     assert "CRITICAL_INLINE_RELATIVE_PATHS" in reporter
     assert '"WARDS/frontend/index.html"' in reporter
     assert "inline_always" in reporter
+
+
+def test_vm2_deploy_retries_git_fetch_and_exposes_last_error():
+    security_api = (Path(__file__).resolve().parents[1] / "SECURITY" / "api_main.py").read_text()
+
+    assert "def _run_git_with_retry" in security_api
+    assert '"git", "fetch", "origin", "main"' in security_api
+    assert 'set_setting(db, "deployment_last_error"' in security_api
+    assert '"deployment_last_error": get_setting(db, "deployment_last_error", "")' in security_api
+    assert "set_deployment_mode(db, False)" in security_api
+
+
+def test_full_recovery_logs_vm1_database_audit_to_vm2():
+    vm1_source = (Path(__file__).resolve().parents[1] / "WARDS" / "backend" / "routes" / "security_dashboard.py").read_text()
+    engine_source = (Path(__file__).resolve().parents[1] / "SECURITY" / "security_engine.py").read_text()
+
+    assert '"recovery_type": "manual_full"' in vm1_source
+    assert "_safe_log_vm1_database_recovery({" in vm1_source
+    assert "vm1_restore_result = _restore_latest_vm1_database_backup(db2)" in vm1_source
+    assert "vm1_database_restore_failed" in vm1_source
+    assert "full_system_recovery(db2, admin_id, vm1_database_result=vm1_restore_result)" in vm1_source
+    assert "def full_system_recovery(db: Session, admin_id: int, vm1_database_result: dict | None = None)" in engine_source
+    assert 'reason="manual_full_system_recovery"' in engine_source
+    assert 'results[RECOVERY_DOMAIN_VM1_DATABASE] = {"failed": 1, "reason": "no valid backup"}' in engine_source
+    assert 'create_system_alert(db, "recovery_failed"' in engine_source
 
 
 def test_stale_deployment_pause_does_not_accept_vm1_manifest_as_baseline():
@@ -718,6 +765,11 @@ def test_vm1_frontend_rebuild_does_not_recreate_backend_dependency():
     assert "_queue_frontend_rebuild(rel_path)" in reporter
     assert "_flush_frontend_rebuild()" in reporter
     assert "Frontend rebuilt and restarted after restoring {restored_count} frontend file(s)" in reporter
+    assert "_queue_backend_restart(rel_path)" in reporter
+    assert "_flush_backend_restart()" in reporter
+    assert '["docker", "compose", "up", "-d", "--no-deps", "--build", "backend"]' in reporter
+    assert '["docker-compose", "up", "-d", "--no-deps", "--build", "backend"]' in reporter
+    assert "Backend rebuilt and restarted after restoring {restored_count} backend file(s)" in reporter
 
 
 def test_frontend_dockerfile_uses_static_nginx_server():

@@ -55,6 +55,22 @@ def test_session_timeout_helper_falls_back_without_settings_session():
     assert get_session_timeout_minutes(object()) == 30
 
 
+def test_auth_session_binding_uses_prefix_mode_and_single_session_storage():
+    decorators_source = open("WARDS/backend/auth/decorators.py", encoding="utf-8").read()
+    unified_source = open("WARDS/backend/routes/unified_auth.py", encoding="utf-8").read()
+    helpers_source = open("WARDS/backend/auth/helpers.py", encoding="utf-8").read()
+
+    assert 'TOKEN_BINDING_IP_MODE = os.getenv("TOKEN_BINDING_IP_MODE", "prefix").lower()' in decorators_source
+    assert "ipaddress.ip_network" in decorators_source
+    assert "str(stored_sid) != str(token_sid)" in decorators_source
+    assert "r.setex(session_key, ttl, session_id)" in unified_source
+    assert "previous_session_id = r.get(session_key)" in unified_source
+    assert "r.delete(session_key)" in unified_source
+    assert "MAX_ACTIVE_SESSIONS_PER_ACCOUNT" not in helpers_source
+    assert "remember_session_id" not in unified_source
+    assert "session_id_is_active" not in decorators_source
+
+
 def test_memo_branch_lookup_returns_decrypted_branch_names():
     branch = branches.Branch(
         id=10,

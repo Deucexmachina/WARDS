@@ -53,6 +53,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 ACTIVITY_LOG_RETENTION_LIMIT = int(os.getenv("ACTIVITY_LOG_RETENTION_LIMIT", "3000"))
+ALERT_RETENTION_LIMIT = int(os.getenv("ALERT_RETENTION_LIMIT", "3000"))
 
 
 @event.listens_for(SASession, "after_begin")
@@ -117,19 +118,23 @@ def authorize_database_session(db, context: str = "wards_backend_request", actor
 
 
 @event.listens_for(SASession, "before_flush")
-def mark_activity_log_insert(session, flush_context, instances):
+def mark_retained_log_insert(session, flush_context, instances):
     try:
         if any(getattr(item, "__tablename__", None) == "activity_logs" for item in session.new):
             session.info["prune_activity_logs_after_flush"] = True
+        if any(getattr(item, "__tablename__", None) == "alerts" for item in session.new):
+            session.info["prune_alerts_after_flush"] = True
     except Exception:
         pass
 
 
 @event.listens_for(SASession, "after_flush_postexec")
-def prune_activity_logs_after_insert(session, flush_context):
-    if not session.info.pop("prune_activity_logs_after_flush", False):
-        return
-    prune_activity_logs(session.connection())
+def prune_retained_logs_after_insert(session, flush_context):
+    connection = session.connection()
+    if session.info.pop("prune_activity_logs_after_flush", False):
+        prune_activity_logs(connection)
+    if session.info.pop("prune_alerts_after_flush", False):
+        prune_alerts(connection)
 
 
 def prune_activity_logs(connection, limit: int | None = None) -> int:
@@ -158,6 +163,84 @@ def prune_activity_logs(connection, limit: int | None = None) -> int:
                             ORDER BY created_at ASC, id ASC
                             LIMIT :limit
                         ) AS oldest_activity_logs
+                    )
+                    """
+                ),
+                {"limit": excess},
+            )
+        return int(result.rowcount or 0)
+    except Exception:
+        return 0
+
+
+def prune_alerts(connection, limit: int | None = None) -> int:
+    """Keep the newest alert rows using FIFO retention and clear orphan views."""
+    limit = ALERT_RETENTION_LIMIT if limit is None else int(limit)
+    if limit <= 0:
+        return 0
+    try:
+        total = connection.execute(text("SELECT COUNT(*) FROM alerts")).scalar() or 0
+        excess = int(total) - limit
+        if excess <= 0:
+            return 0
+        dialect_name = getattr(connection.dialect, "name", "")
+        if dialect_name.startswith("mysql"):
+            connection.execute(
+                text(
+                    """
+                    DELETE FROM alert_views
+                    WHERE alert_id IN (
+                        SELECT id FROM (
+                            SELECT id FROM alerts
+                            ORDER BY created_at ASC, id ASC
+                            LIMIT :limit
+                        ) AS oldest_alert_views
+                    )
+                    """
+                ),
+                {"limit": excess},
+            )
+            result = connection.execute(
+                text(
+                    """
+                    DELETE FROM alerts
+                    WHERE id IN (
+                        SELECT id FROM (
+                            SELECT id FROM alerts
+                            ORDER BY created_at ASC, id ASC
+                            LIMIT :limit
+                        ) AS oldest_alerts
+                    )
+                    """
+                ),
+                {"limit": excess},
+            )
+        else:
+            connection.execute(
+                text(
+                    """
+                    DELETE FROM alert_views
+                    WHERE alert_id IN (
+                        SELECT id FROM (
+                            SELECT id FROM alerts
+                            ORDER BY created_at ASC, id ASC
+                            LIMIT :limit
+                        ) AS oldest_alert_views
+                    )
+                    """
+                ),
+                {"limit": excess},
+            )
+            result = connection.execute(
+                text(
+                    """
+                    DELETE FROM alerts
+                    WHERE id IN (
+                        SELECT id FROM (
+                            SELECT id FROM alerts
+                            ORDER BY created_at ASC, id ASC
+                            LIMIT :limit
+                        ) AS oldest_alerts
                     )
                     """
                 ),

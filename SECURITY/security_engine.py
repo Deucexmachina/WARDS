@@ -6603,7 +6603,7 @@ def manual_recover_file(db: Session, file_id: int, admin_id: int) -> SecurityRec
     return restore_from_backup(db, file_entry, None, "manual", admin_id)
 
 
-def full_system_recovery(db: Session, admin_id: int) -> dict:
+def full_system_recovery(db: Session, admin_id: int, vm1_database_result: dict | None = None) -> dict:
     started = time.time()
     plan = {
         RECOVERY_DOMAIN_FILES: newest_valid_backup_for_domain(db, RECOVERY_DOMAIN_FILES),
@@ -6629,11 +6629,34 @@ def full_system_recovery(db: Session, admin_id: int) -> dict:
             failed += 1
             results[RECOVERY_DOMAIN_FILES] = {"failed": 1, "error": str(exc)}
 
-    results[RECOVERY_DOMAIN_VM1_DATABASE] = {
-        "skipped": True,
-        "reason": "vm1 database recovery is performed by the VM1 route before VM2 domain recovery",
-        "backup_available": bool(plan.get(RECOVERY_DOMAIN_VM1_DATABASE)),
-    }
+    if vm1_database_result is not None:
+        results[RECOVERY_DOMAIN_VM1_DATABASE] = vm1_database_result
+        if vm1_database_result.get("restored"):
+            restored_domains += 1
+        else:
+            failed += 1
+    elif plan[RECOVERY_DOMAIN_VM1_DATABASE]:
+        try:
+            restore_cmd = _queue_vm1_database_restore_command(db, None, reason="manual_full_system_recovery")
+            if restore_cmd:
+                results[RECOVERY_DOMAIN_VM1_DATABASE] = {
+                    "restore_queued": True,
+                    "command_id": restore_cmd.get("command_id"),
+                    "reason": "VM1 reporter will restore the latest VM1 database archive.",
+                }
+                restored_domains += 1
+            else:
+                failed += 1
+                results[RECOVERY_DOMAIN_VM1_DATABASE] = {
+                    "failed": 1,
+                    "reason": "VM1 database restore command could not be queued",
+                }
+        except Exception as exc:
+            failed += 1
+            results[RECOVERY_DOMAIN_VM1_DATABASE] = {"failed": 1, "error": str(exc)}
+    else:
+        failed += 1
+        results[RECOVERY_DOMAIN_VM1_DATABASE] = {"failed": 1, "reason": "no valid backup"}
 
     try:
         if plan[RECOVERY_DOMAIN_VM2_DATABASE]:
@@ -6691,7 +6714,10 @@ def full_system_recovery(db: Session, admin_id: int) -> dict:
     db.add(recovery)
     db.commit()
     db.refresh(recovery)
-    create_system_alert(db, "recovery_completed", f"Recovery #{recovery.id}: {recovery.summary}", "low", dedupe_key=f"Recovery #{recovery.id}")
+    if recovery.status == "success":
+        create_system_alert(db, "recovery_completed", f"Recovery #{recovery.id}: {recovery.summary}", "low", dedupe_key=f"Recovery #{recovery.id}")
+    else:
+        create_system_alert(db, "recovery_failed", f"Recovery #{recovery.id}: {recovery.summary}", "high", dedupe_key=f"Recovery #{recovery.id}")
     return {
         "failed_domains": failed,
         "restored_domains": restored_domains,
@@ -9498,34 +9524,14 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
                         detections.append(detection)
                     continue
 
-                if not open_incident_exists and is_high_risk_file_path(entry.relative_path or "", get_ai_rules(db)):
-                    entry.status = "modified"
-                    changed += 1
-                    db.add(entry)
-                    db.commit()
-                    detection = _record_vm1_detection(
-                        db,
-                        entry,
-                        "vm1_content_modified",
-                        current_hash,
-                        old_content=old_content,
-                        new_content=(
-                            f"VM1 reported a repeated hash change for {entry.relative_path} "
-                            "without inline content. Priority file auto-recovery was triggered from hash drift."
-                        ),
-                        original_content_bytes=old_snapshot_bytes,
-                    )
-                    if detection:
-                        detections.append(detection)
-                    continue
-
                 entry.status = "modified"
                 db.add(entry)
+                set_setting(db, "vm1_scan_requested_at", now_utc().isoformat(), "vm2_hash_only_defer")
                 _queue_vm1_restore_if_needed(
                     db,
                     entry,
                     detection_id=None,
-                    reason="repeat modified hash scan",
+                    reason="repeat hash-only modified scan",
                 )
                 continue
             has_open_incident = _has_open_incident(db, entry, "vm1_content_modified")
@@ -9640,28 +9646,6 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
                     and (not content_supplied or not new_content.strip())
                 )
                 if content_missing_for_nonempty_file:
-                    if is_high_risk_file_path(entry.relative_path or "", get_ai_rules(db)):
-                        logger.warning(
-                            "VM1 file %s hash changed to %s without inline content; "
-                            "recording priority-file detection and triggering recovery.",
-                            rel_path,
-                            current_hash,
-                        )
-                        detection = _record_vm1_detection(
-                            db,
-                            entry,
-                            "vm1_content_modified",
-                            current_hash,
-                            old_content=old_content,
-                            new_content=(
-                                f"VM1 reported a hash change for {entry.relative_path} "
-                                "without inline content. Priority file auto-recovery was triggered from hash drift."
-                            ),
-                            original_content_bytes=old_snapshot_bytes,
-                        )
-                        if detection:
-                            detections.append(detection)
-                        continue
                     logger.warning(
                         "VM1 file %s hash changed to %s but manifest did not include content; "
                         "deferring detection to avoid a hash-only false positive.",
@@ -9673,40 +9657,35 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
                     entry.last_checked = now_utc()
                     db.add(entry)
                     set_setting(db, "vm1_scan_requested_at", now_utc().isoformat(), "vm2_hash_only_defer")
+                    _queue_vm1_restore_if_needed(
+                        db,
+                        entry,
+                        detection_id=None,
+                        original_content_bytes=old_snapshot_bytes,
+                        reason="hash-only modified scan",
+                    )
                     db.commit()
                     continue
                 # Skip detection when both contents are empty (no meaningful diff possible).
                 # This typically happens for large files where content_b64 is not sent.
                 if not old_content.strip() and not new_content.strip() and not content_supplied:
-                    if is_high_risk_file_path(entry.relative_path or "", get_ai_rules(db)):
-                        logger.warning(
-                            "VM1 high-risk file %s changed without snapshot or inline content; "
-                            "recording hash-only detection and triggering recovery.",
-                            rel_path,
-                        )
-                        detection = _record_vm1_detection(
-                            db,
-                            entry,
-                            "vm1_content_modified",
-                            current_hash,
-                            old_content=old_content,
-                            new_content=(
-                                f"VM1 reported a hash change for {entry.relative_path} "
-                                "without snapshot or inline content. Priority file auto-recovery was triggered from hash drift."
-                            ),
-                            original_content_bytes=old_snapshot_bytes,
-                        )
-                        if detection:
-                            detections.append(detection)
-                        continue
                     logger.warning(
                         "VM1 file %s hash changed but both old/new content are empty "
-                        "(snapshot/content_b64 missing); updating baseline to %s and skipping detection.",
-                        rel_path, current_hash,
+                        "(snapshot/content_b64 missing); deferring detection to avoid a hash-only false positive.",
+                        rel_path,
                     )
-                    entry.baseline_hash = current_hash
-                    entry.status = "clean"
+                    entry.status = "modified"
+                    entry.current_hash = current_hash
+                    entry.last_checked = now_utc()
                     db.add(entry)
+                    set_setting(db, "vm1_scan_requested_at", now_utc().isoformat(), "vm2_hash_only_defer")
+                    _queue_vm1_restore_if_needed(
+                        db,
+                        entry,
+                        detection_id=None,
+                        original_content_bytes=old_snapshot_bytes,
+                        reason="hash-only modified scan",
+                    )
                     db.commit()
                     continue
                 detection = _record_vm1_detection(

@@ -1190,10 +1190,11 @@ def api_internal_deploy(request: Request = None):
 
     def _deploy():
         from database.models import SessionLocal
-        from SECURITY.security_engine import set_deployment_mode, create_full_system_backup
+        from SECURITY.security_engine import set_deployment_mode, set_setting
 
         db = SessionLocal()
         set_deployment_mode(db, True)
+        set_setting(db, "deployment_last_error", "", "vm2_internal_deploy")
         db.close()
 
         app_dir = os.getenv("VM2_APP_DIR", "/opt/wards/security/app")
@@ -1202,14 +1203,48 @@ def api_internal_deploy(request: Request = None):
             logger.warning("Repo not accessible in container at %s — skipping auto-deploy", app_dir)
             return
 
-        fetch = subprocess.run(["git", "fetch", "origin", "main"], cwd=app_dir, capture_output=True, text=True)
+        def _run_git_with_retry(args: list[str], label: str, attempts: int = 4):
+            last_result = None
+            for attempt in range(1, attempts + 1):
+                try:
+                    last_result = subprocess.run(
+                        args,
+                        cwd=app_dir,
+                        capture_output=True,
+                        text=True,
+                        timeout=180,
+                    )
+                except subprocess.TimeoutExpired as exc:
+                    last_result = subprocess.CompletedProcess(args, 124, "", f"{label} timed out after {exc.timeout}s")
+                if last_result.returncode == 0:
+                    if attempt > 1:
+                        logger.info("%s succeeded on attempt %d/%d", label, attempt, attempts)
+                    return last_result
+                logger.error("%s failed on attempt %d/%d: %s", label, attempt, attempts, last_result.stderr)
+                if attempt < attempts:
+                    time.sleep(min(30, 2 ** attempt))
+            return last_result
+
+        fetch = _run_git_with_retry(["git", "fetch", "origin", "main"], "git fetch")
         if fetch.returncode != 0:
             logger.error("git fetch failed: %s", fetch.stderr)
+            db = SessionLocal()
+            try:
+                set_setting(db, "deployment_last_error", f"git fetch failed: {fetch.stderr[:500]}", "vm2_internal_deploy")
+                set_deployment_mode(db, False)
+            finally:
+                db.close()
             return
 
-        reset = subprocess.run(["git", "reset", "--hard", "origin/main"], cwd=app_dir, capture_output=True, text=True)
+        reset = _run_git_with_retry(["git", "reset", "--hard", "origin/main"], "git reset", attempts=2)
         if reset.returncode != 0:
             logger.error("git reset failed: %s", reset.stderr)
+            db = SessionLocal()
+            try:
+                set_setting(db, "deployment_last_error", f"git reset failed: {reset.stderr[:500]}", "vm2_internal_deploy")
+                set_deployment_mode(db, False)
+            finally:
+                db.close()
             return
         ignored_removed = _cleanup_ignored_repo_files(app_dir, logger)
         logger.info("VM2 ignored deploy leftovers removed: %d", ignored_removed)
@@ -1265,6 +1300,7 @@ def api_internal_deploy_status(db: Session = Depends(get_db)):
         "deployment_in_progress": is_deployment_in_progress(db),
         "deployment_target_commit": get_setting(db, "deployment_target_commit", ""),
         "deployment_vm1_baseline_ready": (get_setting(db, "deployment_vm1_baseline_ready", "false") or "false").lower() == "true",
+        "deployment_last_error": get_setting(db, "deployment_last_error", ""),
         "vm1_last_manifest_commit": get_setting(db, "vm1_last_manifest_commit", ""),
         "vm1_last_manifest_at": get_setting(db, "vm1_last_manifest_at", ""),
     }

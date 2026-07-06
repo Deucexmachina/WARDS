@@ -95,7 +95,6 @@ from auth import (
     _extract_token_from_request,
     _get_cookie_name,
 )
-
 router = APIRouter()
 
 # Rate limiting configuration
@@ -1706,9 +1705,12 @@ async def unified_logout(request: Request, db: Session = Depends(get_db)):
         if portal and user_id and sid:
             r = get_redis_client()
             if r:
-                stored = r.get(f"wards:session:{portal}:{user_id}")
-                if stored == sid:
-                    r.delete(f"wards:session:{portal}:{user_id}")
+                session_key = f"wards:session:{portal}:{user_id}"
+                stored_sid = r.get(session_key)
+                if isinstance(stored_sid, bytes):
+                    stored_sid = stored_sid.decode("utf-8", errors="ignore")
+                if stored_sid and str(stored_sid) == str(sid):
+                    r.delete(session_key)
 
     account = None
     if portal:
@@ -1773,7 +1775,9 @@ async def unified_refresh_token(request: Request, payload: RefreshTokenRequest, 
         r = get_redis_client()
         if r:
             stored_sid = r.get(f"wards:session:{portal}:{user_id}")
-            if stored_sid != sid:
+            if isinstance(stored_sid, bytes):
+                stored_sid = stored_sid.decode("utf-8", errors="ignore")
+            if stored_sid and str(stored_sid) != str(sid):
                 raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired: logged in from another device.")
 
     identifier = decoded.get("email") or decoded.get("sub")

@@ -933,16 +933,41 @@ def recover_full(request: Request, background_tasks: BackgroundTasks = None, db:
         db2 = SessionLocal()
         try:
             job_manager.update_progress(job_id, 10, "restoring_vm1_database")
+            vm1_restore_result = None
             try:
-                _restore_latest_vm1_database_backup(db2)
+                vm1_restore_result = _restore_latest_vm1_database_backup(db2)
+                _safe_log_vm1_database_recovery({
+                    "status": "success",
+                    "filename": vm1_restore_result.get("filename"),
+                    "source": vm1_restore_result.get("source"),
+                    "actor": username,
+                    "recovery_type": "manual_full",
+                })
             except RuntimeError as exc:
-                job_manager.update_progress(job_id, 25, f"vm1_database_restore_skipped: {exc}")
+                _safe_log_vm1_database_recovery({
+                    "status": "failed",
+                    "filename": "unknown",
+                    "source": "vm1",
+                    "actor": username,
+                    "recovery_type": "manual_full",
+                    "error": str(exc),
+                })
+                vm1_restore_result = {
+                    "restored": False,
+                    "failed": 1,
+                    "source": "vm1",
+                    "error": str(exc),
+                }
+                job_manager.update_progress(job_id, 25, f"vm1_database_restore_failed: {exc}")
             job_manager.update_progress(job_id, 35, "restoring_vm2_domains")
-            result = full_system_recovery(db2, admin_id)
+            result = full_system_recovery(db2, admin_id, vm1_database_result=vm1_restore_result)
             db2.add(ActivityLog(
                 action="Security Full System Recovery Completed",
                 user=username,
-                details=f"Full system recovery completed. | IP: {client_ip}",
+                details=(
+                    f"Full system recovery completed with {result.get('failed_domains', 0)} failed domain(s). "
+                    f"| IP: {client_ip}"
+                ),
                 type="security",
             ))
             db2.commit()
