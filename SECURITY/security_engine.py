@@ -10,6 +10,7 @@ import logging
 import math
 import os
 import random
+import re
 import shlex
 import shutil
 import subprocess
@@ -242,6 +243,12 @@ SUSPICIOUS_PATTERNS = {
     "destructive_command_pattern": ("rm -rf", "del /f", "format ", "truncate table", "delete from", "drop database", "os.system(", "subprocess.call(", "subprocess.run("),
     "webshell_indicator": ("cmd=", "shell_exec", "passthru(", "system($_", "eval($_", "base64_decode("),
 }
+
+SAFE_LOCAL_SCRIPT_RE = re.compile(
+    r"<script\b(?=[^>]*\btype\s*=\s*['\"]module['\"])(?=[^>]*\bsrc\s*=\s*['\"]/(?:src|assets|static)/[^'\"]+['\"])[^>]*>\s*</script>",
+    re.IGNORECASE,
+)
+SCRIPT_TAG_RE = re.compile(r"<script\b[^>]*>(.*?)</script>", re.IGNORECASE | re.DOTALL)
 
 BEHAVIOR_LABELS = {
     "after_hours": "After-hours activity",
@@ -4189,6 +4196,16 @@ def content_flags(content: str, context: dict | None = None, path: Path | None =
             rule_patterns = ai_rule_config(rules, key).get("patterns") if key in rules else None
             if isinstance(rule_patterns, list) and rule_patterns:
                 patterns = tuple(str(pattern).lower() for pattern in rule_patterns if str(pattern).strip())
+            if key == "script_injection":
+                non_script_patterns = tuple(pattern for pattern in patterns if pattern != "<script")
+                has_non_script_indicator = any(pattern in lowered for pattern in non_script_patterns)
+                has_suspicious_script_tag = any(
+                    not SAFE_LOCAL_SCRIPT_RE.fullmatch(match.group(0).strip())
+                    for match in SCRIPT_TAG_RE.finditer(content or "")
+                )
+                if has_non_script_indicator or has_suspicious_script_tag:
+                    flags.append(key)
+                continue
             if any(pattern in lowered for pattern in patterns):
                 flags.append(key)
     if context.get("rapid_change"):
@@ -8294,6 +8311,9 @@ def _decode_vm1_manifest_content(file_payload: dict) -> tuple[bool, str, bytes |
 def _vm1_manifest_content_is_malicious(db: Session, rel_path: str, content: str) -> tuple[bool, list[str]]:
     if not content.strip():
         return False, []
+    content_hash = hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()
+    if _vm1_hash_matches_local_repo(rel_path, content_hash):
+        return False, []
     rules = get_ai_rules(db)
     path = Path(rel_path)
     flags = content_flags(
@@ -8315,11 +8335,8 @@ def _vm1_manifest_content_is_malicious(db: Session, rel_path: str, content: str)
         "webshell_indicator",
         "destructive_command_pattern",
     }
-    return (
-        is_high_risk_file_path(rel_path, rules)
-        and bool(concrete_tamper_flags.intersection(flags)),
-        flags,
-    )
+    concrete_hits = concrete_tamper_flags.intersection(flags)
+    return (is_high_risk_file_path(rel_path, rules) and bool(concrete_hits), sorted(concrete_hits))
 
 
 def _quarantine_vm1_snapshot(entry: SecurityMonitoredFile, detection_id: int) -> str | None:
@@ -9715,6 +9732,15 @@ def process_vm1_file_manifest(db: Session, files: list[dict], deployment_commit:
                 db.add(entry)
         else:
             content_supplied, new_content, new_content_bytes = _decode_vm1_manifest_content(f)
+            if f.get("git_head_match") or _vm1_hash_matches_local_repo(entry.relative_path, current_hash):
+                entry.status = "clean"
+                entry.baseline_hash = current_hash
+                db.add(entry)
+                if content_supplied:
+                    _store_vm1_snapshot(rel_path, f.get("content_b64"))
+                else:
+                    _store_vm1_snapshot_from_local_repo(rel_path)
+                continue
             malicious_content, malicious_flags = _vm1_manifest_content_is_malicious(
                 db,
                 entry.relative_path,
