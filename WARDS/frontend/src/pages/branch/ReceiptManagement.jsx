@@ -472,14 +472,10 @@ const ReceiptManagement = () => {
   const earliestReceiptDate = useMemo(() => getMinDateString(records.map((record) => record.created_at || record.transaction_date)), [records]);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [deletingRecordId, setDeletingRecordId] = useState(null);
-  const [deletingRequestId, setDeletingRequestId] = useState(null);
-  const [deletingHistoryId, setDeletingHistoryId] = useState(null);
   const [uploadingReleaseId, setUploadingReleaseId] = useState(null);
   const [processingFeedback, setProcessingFeedback] = useState(null);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
-  const [deleteTarget, setDeleteTarget] = useState(null);
   const [selectedCompletedRequest, setSelectedCompletedRequest] = useState(null);
   const [selectedReleaseCopyPreview, setSelectedReleaseCopyPreview] = useState(null);
   const [releaseTarget, setReleaseTarget] = useState(null);
@@ -1398,41 +1394,6 @@ const ReceiptManagement = () => {
     setSelectedReleaseCopyPreview(null);
   };
 
-  const handleDeleteRecord = async (recordId) => {
-    setDeletingRecordId(recordId);
-    setError('');
-    setSuccessMessage('');
-
-    try {
-      await receiptAPI.deleteRecord(recordId);
-      await refreshData({ emitReceiptEvent: true });
-    } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to delete receipt record.');
-    } finally {
-      setDeletingRecordId(null);
-    }
-  };
-
-  const requestDeleteConfirmation = (target) => {
-    setDeleteTarget(target);
-  };
-
-  const handleDeleteTarget = async () => {
-    if (!deleteTarget) {
-      return;
-    }
-
-    if (deleteTarget.type === 'record') {
-      await handleDeleteRecord(deleteTarget.id);
-    } else if (deleteTarget.type === 'request') {
-      await handleDeleteRequest(deleteTarget.id);
-    } else if (deleteTarget.type === 'history') {
-      await handleDeleteHistoryRequest(deleteTarget.id);
-    }
-
-    setDeleteTarget(null);
-  };
-
   const renderRequestWorkflowActions = (request, { compact = false } = {}) => {
     const releaseDraft = releaseUploadDrafts[request.requestId];
     const buttonClassName = compact
@@ -1498,23 +1459,6 @@ const ReceiptManagement = () => {
             className={`bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed ${buttonClassName}`}
           >
             Release Copy
-          </button>
-          <button
-            type="button"
-            onClick={() => requestDeleteConfirmation({
-              type: 'request',
-              id: request.requestId,
-              title: 'Delete this active receipt request?',
-              message: 'This will permanently remove the active receipt request and its temporary branch-side workflow record.',
-              details: [
-                { label: 'Request ID', value: request.requestId },
-                { label: 'Taxpayer', value: request.taxpayerName || 'N/A' },
-              ],
-            })}
-            disabled={deletingRequestId === request.requestId}
-            className={`bg-red-600 text-white hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed ${buttonClassName}`}
-          >
-            {deletingRequestId === request.requestId ? 'Deleting...' : 'Delete'}
           </button>
         </div>
         <div className="basis-full rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
@@ -1659,22 +1603,6 @@ const ReceiptManagement = () => {
                           >
                             Print
                           </button>
-                          <button
-                            onClick={() => requestDeleteConfirmation({
-                              type: 'record',
-                              id: record.id,
-                              title: 'Delete this receipt record?',
-                              message: 'This will permanently remove the verified receipt record from the branch receipt list.',
-                              details: [
-                                { label: 'Taxpayer', value: record.taxpayer_name || 'N/A' },
-                                { label: referenceLabelText || 'Reference', value: record.ref_number || 'N/A' },
-                              ],
-                            })}
-                            disabled={deletingRecordId === record.id}
-                            className="rounded-md bg-red-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-red-700 disabled:opacity-40"
-                          >
-                            {deletingRecordId === record.id ? '...' : 'Delete'}
-                          </button>
                         </div>
                       </td>
                     ) : null}
@@ -1776,22 +1704,6 @@ const renderMarketVerifiedRecordSection = (rows) => (
                               >
                                 Print
                               </button>
-                              <button
-                                onClick={() => requestDeleteConfirmation({
-                                  type: 'record',
-                                  id: record.id,
-                                  title: 'Delete this market receipt record?',
-                                  message: 'This will permanently remove the verified market record from the branch receipt list.',
-                                  details: [
-                                    { label: 'Name', value: record.taxpayer_name || 'N/A' },
-                                    { label: 'Certificate No.', value: record.ref_number || record.receipt_number || 'N/A' },
-                                  ],
-                                })}
-                                disabled={deletingRecordId === record.id}
-                                className="rounded-md bg-red-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-red-700 disabled:opacity-40"
-                              >
-                                {deletingRecordId === record.id ? '...' : 'Delete'}
-                              </button>
                             </div>
                           </td>
                         </tr>
@@ -1811,38 +1723,6 @@ const renderMarketVerifiedRecordSection = (rows) => (
       })()}
     </div>
   );
-
-  const handleDeleteRequest = async (requestId) => {
-    setDeletingRequestId(requestId);
-    setError('');
-    setSuccessMessage('');
-
-    try {
-      await receiptAPI.deleteRequest(requestId);
-      setSuccessMessage(`Receipt request ${requestId} deleted successfully.`);
-      await refreshData({ emitReceiptEvent: true });
-    } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to delete receipt request.');
-    } finally {
-      setDeletingRequestId(null);
-    }
-  };
-
-  const handleDeleteHistoryRequest = async (requestId) => {
-    setDeletingHistoryId(requestId);
-    setError('');
-    setSuccessMessage('');
-
-    try {
-      await receiptAPI.deleteRequestHistory(requestId);
-      setSuccessMessage(`Completed receipt request ${requestId} deleted successfully.`);
-      await refreshData({ emitReceiptEvent: true });
-    } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to delete completed receipt request.');
-    } finally {
-      setDeletingHistoryId(null);
-    }
-  };
 
   const renderCompletedRequestSection = ({
     title,
@@ -1925,22 +1805,6 @@ const renderMarketVerifiedRecordSection = (rows) => (
                           className="rounded-md bg-blue-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-blue-700"
                         >
                           View
-                        </button>
-                        <button
-                          onClick={() => requestDeleteConfirmation({
-                            type: 'history',
-                            id: request.requestId,
-                            title: 'Delete this completed receipt request?',
-                            message: 'This will permanently remove the completed receipt request from branch history.',
-                            details: [
-                              { label: 'Request ID', value: request.requestId },
-                              { label: 'Taxpayer', value: request.taxpayerName || 'N/A' },
-                            ],
-                          })}
-                          disabled={deletingHistoryId === request.requestId}
-                          className="rounded-md bg-red-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-red-700 disabled:opacity-40"
-                        >
-                          {deletingHistoryId === request.requestId ? '...' : 'Delete'}
                         </button>
                       </div>
                     </td>
@@ -2429,16 +2293,6 @@ const handleCancelScan = () => {
       })}
 
       {renderMarketVerifiedRecordSection(marketRecords)}
-
-      <DeleteConfirmationModal
-        open={Boolean(deleteTarget)}
-        title={deleteTarget?.title || 'Delete this item?'}
-        message={deleteTarget?.message || 'This action cannot be undone.'}
-        details={deleteTarget?.details || []}
-        onCancel={() => setDeleteTarget(null)}
-        onConfirm={handleDeleteTarget}
-        isLoading={Boolean(deletingRecordId || deletingRequestId || deletingHistoryId)}
-      />
 
       <DeleteConfirmationModal
         open={Boolean(releaseTarget)}
