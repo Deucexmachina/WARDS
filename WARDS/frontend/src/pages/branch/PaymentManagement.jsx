@@ -773,12 +773,12 @@ const PaymentManagement = () => {
       setFeedback({ type: '', message: '' });
       setDeclineReasonError('');
       const sanitizedReason = sanitizeDeclineReason(declineReason);
-      await api.put(`/branch/payments/${paymentToDecline.id}/decline`, { reason: sanitizedReason });
+      const response = await api.put(`/branch/payments/${paymentToDecline.id}/decline`, { reason: sanitizedReason });
       setShowDeclineModal(false);
       setPaymentToDecline(null);
       setDeclineReason('');
       setDeclineReasonError('');
-      setFeedback({ type: 'success', message: 'Payment declined successfully.' });
+      setFeedback({ type: 'success', message: response.data?.emailMessage || 'Payment declined successfully.' });
       window.dispatchEvent(new CustomEvent('branch-payment-updated', { detail: { action: 'declined', paymentId: paymentToDecline.id } }));
       window.dispatchEvent(new CustomEvent('receipt-payment-updated', { detail: { action: 'declined', paymentId: paymentToDecline.id } }));
       fetchPayments();
@@ -998,6 +998,7 @@ const PaymentManagement = () => {
     allowActions = false,
     paginated = false,
     showDelete = true,
+    deleteAsDecline = false,
   }) => {
     const totalPages = Math.max(1, Math.ceil(items.length / TRANSACTIONS_PER_PAGE));
     const page = sectionPages[pageKey];
@@ -1035,11 +1036,18 @@ const PaymentManagement = () => {
                   {allowActions ? (
                     <>
                       <button onClick={() => handleVerifyClick(payment)} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white">Verify</button>
-                      <button onClick={() => handleDeclineClick(payment)} className="rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-bold text-white">Decline</button>
+                      {!deleteAsDecline ? (
+                        <button onClick={() => handleDeclineClick(payment)} className="rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-bold text-white">Decline</button>
+                      ) : null}
                     </>
                   ) : null}
                   {showDelete ? (
-                    <button onClick={() => handleDeleteClick(payment)} className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-bold text-white">Delete</button>
+                    <button
+                      onClick={() => deleteAsDecline ? handleDeclineClick(payment) : handleDeleteClick(payment)}
+                      className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-bold text-white"
+                    >
+                      Delete
+                    </button>
                   ) : null}
                 </div>
               </div>
@@ -1109,17 +1117,19 @@ const PaymentManagement = () => {
                             >
                               Verify
                             </button>
-                            <button
-                              onClick={() => handleDeclineClick(payment)}
-                              className="rounded-lg bg-amber-500 px-2.5 py-1 text-[10px] font-bold text-white transition hover:bg-amber-600"
-                            >
-                              Decline
-                            </button>
+                            {!deleteAsDecline ? (
+                              <button
+                                onClick={() => handleDeclineClick(payment)}
+                                className="rounded-lg bg-amber-500 px-2.5 py-1 text-[10px] font-bold text-white transition hover:bg-amber-600"
+                              >
+                                Decline
+                              </button>
+                            ) : null}
                           </>
                         ) : null}
                         {showDelete ? (
                           <button
-                            onClick={() => handleDeleteClick(payment)}
+                            onClick={() => deleteAsDecline ? handleDeclineClick(payment) : handleDeleteClick(payment)}
                             className="rounded-lg bg-red-600 px-2.5 py-1 text-[10px] font-bold text-white transition hover:bg-red-700"
                           >
                             Delete
@@ -1160,6 +1170,7 @@ const PaymentManagement = () => {
     allowActions = false,
     paginated = false,
     showDelete = true,
+    deleteAsDecline = false,
   }) => {
     return (
       <SectionCard
@@ -1178,6 +1189,7 @@ const PaymentManagement = () => {
           allowActions,
           paginated,
           showDelete,
+          deleteAsDecline,
         })}
       </SectionCard>
     );
@@ -1636,7 +1648,8 @@ const PaymentManagement = () => {
         toneClassName: 'border-amber-200 bg-amber-50 text-amber-800',
         allowActions: true,
         paginated: true,
-        showDelete: false,
+        showDelete: true,
+        deleteAsDecline: true,
       })}
 
       {renderProcessedTransactionsSection()}

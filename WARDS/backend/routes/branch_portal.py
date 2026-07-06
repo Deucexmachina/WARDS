@@ -27,7 +27,7 @@ from utils.announcement_attachments import (
     store_announcement_attachment,
     attachment_bytes,
 )
-from services.email_service import send_payment_receipt_email
+from services.email_service import send_payment_decline_email, send_payment_receipt_email
 from routes.payments import apply_business_tax_application_security_fields, revert_linked_request_status_for_declined_payment, update_linked_request_status
 from utils.field_crypto import apply_announcement_view_security, apply_memo_security, apply_memo_view_security, apply_payment_security, apply_queue_security, apply_receipt_request_security, collection_account_number_value, collection_account_value, decrypt_optional_value, find_announcement_view, find_memo_view, get_announcement_viewed_ids, get_decrypted_or_raw, get_memo_viewed_ids, hash_aware_any, hash_aware_match, hash_optional_value, queue_value, remittance_numeric_value, remittance_value
 from utils.distributed_ledger import append_ledger_entry
@@ -2214,10 +2214,26 @@ async def decline_branch_payment(
             bt_application.payment_status = "Failed"
             bt_application.returned_at = datetime.utcnow()
             bt_application.verifier_remarks = "Business Tax submission was returned for correction by branch treasury personnel."
+    branch_name = get_decrypted_or_raw(branch, "name") or branch.name or f"Branch {current_staff.branch_id}"
+    email_result = send_payment_decline_email(
+        recipient_email=get_decrypted_or_raw(payment, "email") or payment.email,
+        taxpayer_name=get_decrypted_or_raw(payment, "taxpayer_name") or payment.taxpayer_name,
+        ref_number=payment.ref_number or "N/A",
+        tax_type=payment.tax_type or "Payment",
+        amount=float(payment.amount) if payment.amount is not None else 0,
+        branch_name=branch_name,
+        decline_reason=sanitized_reason,
+    )
+    if not email_result["sent"]:
+        raise HTTPException(
+            status_code=500,
+            detail=email_result["message"] or "Failed to send payment decline notification email.",
+        )
+
     log_branch_action(db, current_staff, "Payment Declined", f"Declined payment {payment.ref_number}: {sanitized_reason}", request.client.host, severity="medium")
     db.commit()
 
-    return {"message": "Payment declined successfully", "status": payment.status}
+    return {"message": "Payment declined successfully", "status": payment.status, "emailSent": True, "emailMessage": email_result["message"]}
 
 
 @router.delete("/payments/{payment_id}")
