@@ -1,5 +1,6 @@
 import { BrowserRouter as Router, Navigate, Routes, Route } from 'react-router-dom'
-import { Suspense, lazy } from 'react'
+import { Suspense, lazy, useEffect } from 'react'
+import { unifiedAuthAPI } from './services/api'
 import PublicLayout from './layouts/PublicLayout'
 import AdminLayout from './layouts/AdminLayout'
 import BranchLayout from './layouts/BranchLayout'
@@ -72,7 +73,47 @@ import { UnsavedChangesProvider } from './contexts/UnsavedChangesContext'
 
 const BackupRecovery = lazy(() => import('./pages/admin/BackupRecovery'))
 
+const SESSION_REFRESH_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+
+const hasStoredPortalSession = () => {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  return Boolean(
+    localStorage.getItem('wardsPortal')
+    || localStorage.getItem('adminUser')
+    || localStorage.getItem('branchUser')
+    || localStorage.getItem('user')
+    || localStorage.getItem('publicUser')
+  );
+};
+
+const useSessionRefresh = () => {
+  useEffect(() => {
+    // Refresh immediately once on mount if a session is already stored.
+    if (hasStoredPortalSession()) {
+      unifiedAuthAPI.refresh().catch(() => {
+        // If refresh fails, the interceptor will redirect on the next request.
+      });
+    }
+
+    const intervalId = window.setInterval(() => {
+      if (!hasStoredPortalSession()) {
+        return;
+      }
+      unifiedAuthAPI.refresh().catch(() => {
+        // Refresh failed; stop trying to avoid spamming the backend.
+        window.clearInterval(intervalId);
+      });
+    }, SESSION_REFRESH_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
+};
+
 function App() {
+  useSessionRefresh();
+
   return (
     <Router>
       <GlobalSystemMessageModal />

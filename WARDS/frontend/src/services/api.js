@@ -211,6 +211,7 @@ export const taxpayerAccountAPI = {
 export const unifiedAuthAPI = {
   login: (credentials) => api.post('/auth/unified/login', credentials),
   logout: () => api.post('/auth/unified/logout'),
+  refresh: () => api.post('/auth/unified/refresh', {}, { suppressGlobalErrorModal: true }),
   getCurrentUser: () => api.get('/auth/unified/me'),
   setupMfa: (data) => api.post('/auth/unified/setup-mfa', data),
   verifyMfaSetup: (data) => api.post('/auth/unified/verify-mfa-setup', data),

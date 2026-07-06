@@ -2,14 +2,14 @@ import os
 
 from fastapi import HTTPException, status, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.orm import Session
 from jose import JWTError, jwt
-
+from sqlalchemy.orm import Session
 from database.models import ActivityLog, Alert, Admin, BranchStaff, CitizenUser, get_db, SessionLocal
 from auth.token_revocation import is_token_revoked
 from utils.field_crypto import find_citizen_by_email
 from utils.redis_client import get_redis_client
 from utils.request_helpers import get_client_ip
+from auth.helpers import get_session_timeout_minutes
 from auth.jwt_utils import (
     ALGORITHM,
     ADMIN_SECRET_KEY,
@@ -17,6 +17,12 @@ from auth.jwt_utils import (
     USER_SECRET_KEY,
     PORTAL_CONFIG,
     decode_token,
+)
+from auth.permissions import (
+    ROLE_SUPERADMIN,
+    ROLE_MAIN_ADMIN,
+    ROLE_BRANCH_ADMIN,
+    ROLE_BRANCH_STAFF,
 )
 
 BINDING_STRICT_MODE = os.getenv("TOKEN_BINDING_STRICT", "true").lower() == "true"
@@ -218,8 +224,18 @@ def _validate_token_binding(request: Request, payload: dict) -> None:
         )
 
 
-def _validate_active_session(portal: str, user_id: int | None, payload: dict, request: Request | None = None) -> None:
-    """Raise 401 if the token session ID no longer matches the stored active session."""
+def _validate_active_session(
+    portal: str,
+    user_id: int | None,
+    payload: dict,
+    request: Request | None = None,
+    db: Session | None = None,
+) -> None:
+    """Raise 401 if the token session ID no longer matches the stored active session.
+
+    On successful validation, extends the Redis session TTL so active users stay
+    logged in while they are using the application.
+    """
     if not user_id:
         return
     # Super Admin manages branches from a variety of networks/devices; do not
@@ -229,7 +245,8 @@ def _validate_active_session(portal: str, user_id: int | None, payload: dict, re
     r = get_redis_client()
     if not r:
         return
-    stored_sid = r.get(f"wards:session:{portal}:{user_id}")
+    session_key = f"wards:session:{portal}:{user_id}"
+    stored_sid = r.get(session_key)
     token_sid = payload.get("sid")
     if stored_sid and token_sid and stored_sid != token_sid:
         if request is not None:
@@ -246,12 +263,13 @@ def _validate_active_session(portal: str, user_id: int | None, payload: dict, re
             detail="Session expired: logged in from another device.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-from auth.permissions import (
-    ROLE_SUPERADMIN,
-    ROLE_MAIN_ADMIN,
-    ROLE_BRANCH_ADMIN,
-    ROLE_BRANCH_STAFF,
-)
+    # Session is valid; extend its TTL to create a sliding session.
+    try:
+        session_timeout_minutes = get_session_timeout_minutes(db) if db else 30
+    except Exception:
+        session_timeout_minutes = 30
+    r.expire(session_key, session_timeout_minutes * 60)
+
 
 security = HTTPBearer(auto_error=False)
 optional_user_security = HTTPBearer(auto_error=False)
@@ -336,7 +354,7 @@ async def get_current_admin_user(
     try:
         payload = decode_token(token, ADMIN_SECRET_KEY)
         _validate_token_binding(request, payload)
-        _validate_active_session("admin", payload.get("user_id"), payload, request)
+        _validate_active_session("admin", payload.get("user_id"), payload, request, db)
         email = payload.get("email") or payload.get("sub")
         username = payload.get("sub")
         token_type = payload.get("type")
@@ -440,7 +458,7 @@ async def get_current_user(
     try:
         payload = decode_token(token, USER_SECRET_KEY)
         _validate_token_binding(request, payload)
-        _validate_active_session("public", payload.get("user_id"), payload, request)
+        _validate_active_session("public", payload.get("user_id"), payload, request, db)
         email = payload.get("email") or payload.get("sub")
         token_type = payload.get("type")
 
@@ -470,7 +488,7 @@ async def get_optional_current_user(
     try:
         payload = decode_token(token, USER_SECRET_KEY)
         _validate_token_binding(request, payload)
-        _validate_active_session("public", payload.get("user_id"), payload, request)
+        _validate_active_session("public", payload.get("user_id"), payload, request, db)
         email = payload.get("email") or payload.get("sub")
         token_type = payload.get("type")
         if email and token_type in ("user", "public"):
@@ -507,7 +525,7 @@ async def get_current_branch_staff(
     try:
         payload = decode_token(token, BRANCH_SECRET_KEY)
         _validate_token_binding(request, payload)
-        _validate_active_session("branch", payload.get("user_id"), payload, request)
+        _validate_active_session("branch", payload.get("user_id"), payload, request, db)
         email = payload.get("email") or payload.get("sub")
         username = payload.get("sub")
         token_type = payload.get("type")
@@ -551,7 +569,7 @@ async def get_current_admin_or_branch_staff(
     try:
         payload = decode_token(token, ADMIN_SECRET_KEY)
         _validate_token_binding(request, payload)
-        _validate_active_session("admin", payload.get("user_id"), payload, request)
+        _validate_active_session("admin", payload.get("user_id"), payload, request, db)
         email = payload.get("email") or payload.get("sub")
         username = payload.get("sub")
         token_type = payload.get("type")
@@ -571,7 +589,7 @@ async def get_current_admin_or_branch_staff(
     try:
         payload = decode_token(token, BRANCH_SECRET_KEY)
         _validate_token_binding(request, payload)
-        _validate_active_session("branch", payload.get("user_id"), payload, request)
+        _validate_active_session("branch", payload.get("user_id"), payload, request, db)
         email = payload.get("email") or payload.get("sub")
         username = payload.get("sub")
         token_type = payload.get("type")
@@ -678,7 +696,7 @@ async def get_current_admin_from_token(request: Request, db: Session) -> Admin:
     try:
         payload = decode_token(token, ADMIN_SECRET_KEY)
         _validate_token_binding(request, payload)
-        _validate_active_session("admin", payload.get("user_id"), payload, request)
+        _validate_active_session("admin", payload.get("user_id"), payload, request, db)
         email = payload.get("email") or payload.get("sub")
         username = payload.get("sub")
 
@@ -738,7 +756,7 @@ def decode_active_account_from_bearer_token(
 
         if request is not None:
             _validate_token_binding(request, payload)
-        _validate_active_session(portal, payload.get("user_id"), payload, request)
+        _validate_active_session(portal, payload.get("user_id"), payload, request, db)
         return portal, account, payload
 
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
