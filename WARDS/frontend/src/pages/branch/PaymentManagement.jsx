@@ -465,6 +465,7 @@ const ConfirmationModal = ({
   onConfirm,
   loading,
   iconType,
+  children,
 }) => (
   <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
     <div className="w-full max-w-md rounded-3xl bg-white shadow-2xl">
@@ -492,6 +493,7 @@ const ConfirmationModal = ({
             {errorMessage}
           </div>
         ) : null}
+        {children ? <div className="mt-4">{children}</div> : null}
         <div className="mt-6 flex gap-3">
           <button
             onClick={onCancel}
@@ -533,6 +535,8 @@ const PaymentManagement = () => {
   const [deleteError, setDeleteError] = useState('');
   const [showDeclineModal, setShowDeclineModal] = useState(false);
   const [paymentToDecline, setPaymentToDecline] = useState(null);
+  const [declineReason, setDeclineReason] = useState('');
+  const [declineReasonError, setDeclineReasonError] = useState('');
   const [declining, setDeclining] = useState(false);
   const [showVerifyModal, setShowVerifyModal] = useState(false);
   const [paymentToVerify, setPaymentToVerify] = useState(null);
@@ -722,20 +726,50 @@ const PaymentManagement = () => {
     setDeleteError('');
   };
 
+  const sanitizeDeclineReason = (value) => {
+    return value
+      .replace(/[<>{}();=&|`$\\]/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  };
+
+  const validateDeclineReason = (value) => {
+    const sanitized = sanitizeDeclineReason(value);
+    if (!sanitized) {
+      return 'Please provide a reason for declining this payment.';
+    }
+    if (sanitized.length > 50) {
+      return 'Reason must be 50 characters or fewer.';
+    }
+    return '';
+  };
+
   const handleDeclineClick = (payment) => {
     setPaymentToDecline(payment);
+    setDeclineReason('');
+    setDeclineReasonError('');
     setShowDeclineModal(true);
   };
 
   const handleDeclineConfirm = async () => {
     if (!paymentToDecline) return;
 
+    const reasonError = validateDeclineReason(declineReason);
+    if (reasonError) {
+      setDeclineReasonError(reasonError);
+      return;
+    }
+
     setDeclining(true);
     try {
       setFeedback({ type: '', message: '' });
-      await api.put(`/branch/payments/${paymentToDecline.id}/decline`);
+      setDeclineReasonError('');
+      const sanitizedReason = sanitizeDeclineReason(declineReason);
+      await api.put(`/branch/payments/${paymentToDecline.id}/decline`, { reason: sanitizedReason });
       setShowDeclineModal(false);
       setPaymentToDecline(null);
+      setDeclineReason('');
+      setDeclineReasonError('');
       setFeedback({ type: 'success', message: 'Payment declined successfully.' });
       window.dispatchEvent(new CustomEvent('branch-payment-updated', { detail: { action: 'declined', paymentId: paymentToDecline.id } }));
       window.dispatchEvent(new CustomEvent('receipt-payment-updated', { detail: { action: 'declined', paymentId: paymentToDecline.id } }));
@@ -751,6 +785,8 @@ const PaymentManagement = () => {
   const handleDeclineCancel = () => {
     setShowDeclineModal(false);
     setPaymentToDecline(null);
+    setDeclineReason('');
+    setDeclineReasonError('');
   };
 
   const handleViewDetails = (payment) => {
@@ -953,6 +989,7 @@ const PaymentManagement = () => {
     emptyMessage,
     allowActions = false,
     paginated = false,
+    showDelete = true,
   }) => {
     const totalPages = Math.max(1, Math.ceil(items.length / TRANSACTIONS_PER_PAGE));
     const page = sectionPages[pageKey];
@@ -993,7 +1030,9 @@ const PaymentManagement = () => {
                       <button onClick={() => handleDeclineClick(payment)} className="rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-bold text-white">Decline</button>
                     </>
                   ) : null}
-                  <button onClick={() => handleDeleteClick(payment)} className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-bold text-white">Delete</button>
+                  {showDelete ? (
+                    <button onClick={() => handleDeleteClick(payment)} className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-bold text-white">Delete</button>
+                  ) : null}
                 </div>
               </div>
             ))}
@@ -1070,12 +1109,14 @@ const PaymentManagement = () => {
                             </button>
                           </>
                         ) : null}
-                        <button
-                          onClick={() => handleDeleteClick(payment)}
-                          className="rounded-lg bg-red-600 px-2.5 py-1 text-[10px] font-bold text-white transition hover:bg-red-700"
-                        >
-                          Delete
-                        </button>
+                        {showDelete ? (
+                          <button
+                            onClick={() => handleDeleteClick(payment)}
+                            className="rounded-lg bg-red-600 px-2.5 py-1 text-[10px] font-bold text-white transition hover:bg-red-700"
+                          >
+                            Delete
+                          </button>
+                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -1110,6 +1151,7 @@ const PaymentManagement = () => {
     toneClassName,
     allowActions = false,
     paginated = false,
+    showDelete = true,
   }) => {
     return (
       <SectionCard
@@ -1127,6 +1169,7 @@ const PaymentManagement = () => {
           emptyMessage,
           allowActions,
           paginated,
+          showDelete,
         })}
       </SectionCard>
     );
@@ -1159,6 +1202,7 @@ const PaymentManagement = () => {
               pageKey: 'processedVerified',
               emptyMessage: 'No verified transactions were found for this branch.',
               paginated: true,
+              showDelete: false,
             })}
           </div>
 
@@ -1584,6 +1628,7 @@ const PaymentManagement = () => {
         toneClassName: 'border-amber-200 bg-amber-50 text-amber-800',
         allowActions: true,
         paginated: true,
+        showDelete: false,
       })}
 
       {renderProcessedTransactionsSection()}
@@ -1649,7 +1694,32 @@ const PaymentManagement = () => {
           onConfirm={handleDeclineConfirm}
           loading={declining}
           iconType="alert"
-        />
+          errorMessage={declineReasonError}
+        >
+          <label className="block">
+            <span className="mb-1.5 block text-sm font-semibold text-slate-700">
+              Reason for declining <span className="text-rose-500">*</span>
+            </span>
+            <input
+              type="text"
+              value={declineReason}
+              onChange={(event) => {
+                const value = event.target.value;
+                setDeclineReason(value);
+                if (declineReasonError) {
+                  setDeclineReasonError(validateDeclineReason(value));
+                }
+              }}
+              maxLength={50}
+              placeholder="e.g. Duplicate payment"
+              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm shadow-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
+            />
+            <span className="mt-1.5 flex items-center justify-between text-xs text-slate-500">
+              <span>Required, max 50 characters</span>
+              <span>{declineReason.length}/50</span>
+            </span>
+          </label>
+        </ConfirmationModal>
       ) : null}
 
       {showSubmitRemittanceModal ? (

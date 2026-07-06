@@ -2159,9 +2159,21 @@ async def verify_branch_payment(
     return {"message": "Payment verified successfully", "status": payment.status}
 
 
+class DeclinePaymentRequest(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=50, description="Reason for declining the payment")
+
+    @field_validator("reason")
+    @classmethod
+    def sanitize_reason(cls, value: str) -> str:
+        if value is None:
+            return value
+        return re.sub(r"\s+", " ", value.strip())
+
+
 @router.put("/payments/{payment_id}/decline")
 async def decline_branch_payment(
     payment_id: int,
+    request_body: DeclinePaymentRequest,
     request: Request,
     current_staff: BranchStaff = Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
@@ -2176,8 +2188,14 @@ async def decline_branch_payment(
     if get_effective_payment_status(payment) != "pending":
         raise HTTPException(status_code=409, detail="Only pending payments can be declined.")
 
+    sanitized_reason = reject_dangerous_characters(request_body.reason, field_name="decline_reason")
+    if not sanitized_reason or len(sanitized_reason) > 50:
+        raise HTTPException(status_code=400, detail="Decline reason must be between 1 and 50 characters.")
+
     payment.status = "Rejected" if payment.source_module == "receipt_request" else "Failed"
+    payment.treasury_remarks = sanitized_reason
     payment.treasury_updated_at = datetime.utcnow()
+    apply_payment_security(payment)
     revert_linked_request_status_for_declined_payment(db, payment)
     if payment.source_module == "business_tax_online_payment" and payment.related_request_id:
         bt_application = db.query(BusinessTaxApplication).filter(
@@ -2188,7 +2206,7 @@ async def decline_branch_payment(
             bt_application.payment_status = "Failed"
             bt_application.returned_at = datetime.utcnow()
             bt_application.verifier_remarks = "Business Tax submission was returned for correction by branch treasury personnel."
-    log_branch_action(db, current_staff, "Payment Declined", f"Declined payment {payment.ref_number}", request.client.host, severity="medium")
+    log_branch_action(db, current_staff, "Payment Declined", f"Declined payment {payment.ref_number}: {sanitized_reason}", request.client.host, severity="medium")
     db.commit()
 
     return {"message": "Payment declined successfully", "status": payment.status}
