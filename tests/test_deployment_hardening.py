@@ -673,6 +673,8 @@ def test_vm2_deploy_retries_git_fetch_and_exposes_last_error():
 def test_full_recovery_logs_vm1_database_audit_to_vm2():
     vm1_source = (Path(__file__).resolve().parents[1] / "WARDS" / "backend" / "routes" / "security_dashboard.py").read_text()
     engine_source = (Path(__file__).resolve().parents[1] / "SECURITY" / "security_engine.py").read_text()
+    client_source = (Path(__file__).resolve().parents[1] / "WARDS" / "backend" / "utils" / "security_client.py").read_text()
+    api_source = (Path(__file__).resolve().parents[1] / "SECURITY" / "api_main.py").read_text()
 
     assert '"recovery_type": "manual_full"' in vm1_source
     assert "_safe_log_vm1_database_recovery({" in vm1_source
@@ -683,6 +685,42 @@ def test_full_recovery_logs_vm1_database_audit_to_vm2():
     assert 'reason="manual_full_system_recovery"' in engine_source
     assert 'results[RECOVERY_DOMAIN_VM1_DATABASE] = {"failed": 1, "reason": "no valid backup"}' in engine_source
     assert 'create_system_alert(db, "recovery_failed"' in engine_source
+    assert "def full_system_recovery(db, admin_id, vm1_database_result: dict | None = None)" in client_source
+    assert 'payload["vm1_database_result"] = vm1_database_result' in client_source
+    assert 'vm1_database_result = payload.get("vm1_database_result")' in api_source
+    assert "full_system_recovery(db2, admin_id, vm1_database_result=vm1_database_result)" in api_source
+
+
+def test_security_client_full_recovery_forwards_vm1_database_result(monkeypatch):
+    from utils import security_client
+
+    calls = []
+
+    monkeypatch.setattr(security_client, "SECURITY_API_URL", "https://vm2.example")
+    monkeypatch.setattr(security_client, "_invalidate_security_state_cache", lambda: None)
+    monkeypatch.setattr(
+        security_client,
+        "_sync_post",
+        lambda path, payload, timeout=None: calls.append((path, payload, timeout)) or {"status": "processing"},
+    )
+
+    result = security_client.full_system_recovery(
+        None,
+        7,
+        vm1_database_result={"restored": True, "filename": "database_20260706.sql.gz"},
+    )
+
+    assert result == {"status": "processing"}
+    assert calls == [
+        (
+            "/v1/recover/full",
+            {
+                "admin_id": 7,
+                "vm1_database_result": {"restored": True, "filename": "database_20260706.sql.gz"},
+            },
+            600.0,
+        )
+    ]
 
 
 def test_stale_deployment_pause_does_not_accept_vm1_manifest_as_baseline():

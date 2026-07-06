@@ -443,11 +443,14 @@ def list_backup_inventory(db):
         return {"items": [], "timeout": True, "latest_by_domain": {}, "domains": []}
 
 
-def full_system_recovery(db, admin_id):
+def full_system_recovery(db, admin_id, vm1_database_result: dict | None = None):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import full_system_recovery as _local
-        return _local(db, admin_id)
-    result = _sync_post("/v1/recover/full", {"admin_id": admin_id}, timeout=600.0)
+        return _local(db, admin_id, vm1_database_result=vm1_database_result)
+    payload = {"admin_id": admin_id}
+    if vm1_database_result is not None:
+        payload["vm1_database_result"] = vm1_database_result
+    result = _sync_post("/v1/recover/full", payload, timeout=600.0)
     _invalidate_security_state_cache()
     return result
 
@@ -515,11 +518,17 @@ def recover_ml_artifacts(db, admin_id):
     return result
 
 
-def recover_full_system(db, admin_id):
+def recover_full_system(db, admin_id, vm1_database_result: dict | None = None):
     if not SECURITY_API_URL:
         from SECURITY.security_engine import recover_full_system as _local
+        if vm1_database_result is not None:
+            from SECURITY.security_engine import full_system_recovery as _full
+            return _full(db, admin_id, vm1_database_result=vm1_database_result)
         return _local(db, admin_id)
-    result = _sync_post("/v1/recover/full", {"admin_id": admin_id}, timeout=600.0)
+    payload = {"admin_id": admin_id}
+    if vm1_database_result is not None:
+        payload["vm1_database_result"] = vm1_database_result
+    result = _sync_post("/v1/recover/full", payload, timeout=600.0)
     _invalidate_security_state_cache()
     return result
 

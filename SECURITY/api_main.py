@@ -809,11 +809,14 @@ def api_backup_inventory(db=Depends(get_db)):
 @rate_limit("recover_full", max_requests=2, window_seconds=300)
 def api_recover_full(payload: dict = {}, background_tasks: BackgroundTasks = None, request: Request = None, db=Depends(get_db)):
     admin_id = _resolve_admin_id(db, payload.get("admin_id"))
+    vm1_database_result = payload.get("vm1_database_result")
+    if vm1_database_result is not None and not isinstance(vm1_database_result, dict):
+        raise HTTPException(status_code=400, detail="vm1_database_result must be an object when supplied")
 
     def _run_recovery():
         db2 = SessionLocal()
         try:
-            full_system_recovery(db2, admin_id)
+            full_system_recovery(db2, admin_id, vm1_database_result=vm1_database_result)
         finally:
             db2.close()
 
