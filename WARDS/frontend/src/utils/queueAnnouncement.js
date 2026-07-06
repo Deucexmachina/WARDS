@@ -1,6 +1,8 @@
 const VOICELINES_BASE = '/Voicelines';
+const AUDIO_EXT = '.mp3'; // Change to .wav, .ogg, .m4a, etc.
 
-
+// Play a single voiceline file and wait for it to finish. Errors are logged but not thrown
+// so a missing/corrupt file does not crash the entire announcement sequence.
 const playAudio = (audioPath, speed = 1.3) => {
   return new Promise((resolve, reject) => {
     console.log(`Attempting to play: ${audioPath} at ${speed}x speed`);
@@ -26,21 +28,25 @@ const playAudio = (audioPath, speed = 1.3) => {
 };
 
 
+// Map a single queue-number character (letter or digit) to its voiceline file path.
+// Dashes and other separators are handled before this function is called.
 const getCharacterAudioPath = (char) => {
   const upperChar = char.toUpperCase();
   
   if (/[A-Z]/.test(upperChar)) {
-    return `${VOICELINES_BASE}/letters/${upperChar}.mp3`;
+    return `${VOICELINES_BASE}/letters/${upperChar}${AUDIO_EXT}`;
   }
   
   if (/[0-9]/.test(char)) {
-    return `${VOICELINES_BASE}/numbers/${char}.mp3`;
+    return `${VOICELINES_BASE}/numbers/${char}${AUDIO_EXT}`;
   }
   
   return null;
 };
 
 
+// Resolve the service window identifier to a physical window number for the voiceline.
+// Supports explicit window numbers, service type codes (RPT, BUSINESS, etc.), and QW labels.
 const getWindowNumber = (serviceWindow) => {
   if (typeof serviceWindow === 'number') {
     return Math.min(Math.max(serviceWindow, 1), 6);
@@ -81,9 +87,8 @@ const getWindowNumber = (serviceWindow) => {
 };
 
 /**
- * @param {string} queueNumber - Queue number (e.g., "LA-001")
- * @param {string} serviceWindow - Service window to determine window number
- * @returns {Promise} - Resolves when announcement completes
+ * Announce a newly called queue number by playing the full voiceline sequence:
+ * alert → "queue number" → each character → "proceed to window" → window number.
  */
 export const playQueueAnnouncement = async (queueNumber, serviceWindow) => {
   if (!queueNumber) {
@@ -95,11 +100,12 @@ export const playQueueAnnouncement = async (queueNumber, serviceWindow) => {
 
   try {
     console.log('Step 1: Playing alert sound');
-    await playAudio(`${VOICELINES_BASE}/alerts/dingdong.mp3`, 1.0);
+    await playAudio(`${VOICELINES_BASE}/alerts/dingdong${AUDIO_EXT}`, 1.0);
     
     console.log('Step 2: Playing queue-number phrase');
-    await playAudio(`${VOICELINES_BASE}/phrases/queue-number.mp3`, 1.2);
+    await playAudio(`${VOICELINES_BASE}/phrases/queue-number${AUDIO_EXT}`, 1.2);
     
+    // Strip the dash so queue numbers like "LA-001" are spoken as "L A 0 0 1".
     const cleanedNumber = queueNumber.replace(/-/g, '');
     const characters = cleanedNumber.split('');
     console.log(`Step 3: Playing characters: ${characters.join(', ')}`);
@@ -107,24 +113,24 @@ export const playQueueAnnouncement = async (queueNumber, serviceWindow) => {
     for (const char of characters) {
       const audioPath = getCharacterAudioPath(char);
       if (audioPath) {
-        await playAudio(audioPath, 1.0); // Normal speed for individual characters
+        await playAudio(audioPath, 1.4); // Faster for individual characters
       }
     }
     
     console.log('Step 4: Playing proceed-window phrase');
-    await playAudio(`${VOICELINES_BASE}/phrases/proceed-window.mp3`, 1.2);
+    await playAudio(`${VOICELINES_BASE}/phrases/proceed-window${AUDIO_EXT}`, 1.2);
     
     const windowNumber = getWindowNumber(serviceWindow);
     console.log(`Step 5: Playing window ${windowNumber} announcement`);
     if (windowNumber <= 10) {
-      await playAudio(`${VOICELINES_BASE}/windows/window${windowNumber}.mp3`, 1.1);
+      await playAudio(`${VOICELINES_BASE}/windows/window${windowNumber}${AUDIO_EXT}`, 1.1);
     } else {
-      await playAudio(`${VOICELINES_BASE}/numbers/${String(windowNumber)[0]}.mp3`, 1.2);
+      await playAudio(`${VOICELINES_BASE}/numbers/${String(windowNumber)[0]}${AUDIO_EXT}`, 1.2);
     }
     
-    console.log(`✅ Queue announcement completed: ${queueNumber} -> Window ${windowNumber}`);
+    console.log(`Queue announcement completed: ${queueNumber} -> Window ${windowNumber}`);
   } catch (error) {
-    console.error('❌ Error during queue announcement:', error);
+    console.error('Error during queue announcement:', error);
   }
 };
 
@@ -136,6 +142,7 @@ export const isAnnouncementActive = () => isAnnouncementPlaying;
 const announcementQueue = [];
 let isProcessingQueue = false;
 
+// Drain the announcement queue one item at a time so overlapping calls do not interrupt each other.
 const processAnnouncementQueue = async () => {
   if (isProcessingQueue) return;
   isProcessingQueue = true;
@@ -160,6 +167,7 @@ const processAnnouncementQueue = async () => {
   isProcessingQueue = false;
 };
 
+// Add an announcement to the queue and start processing if not already running.
 const enqueueAnnouncement = (type, queueNumber, serviceWindow) => {
   return new Promise((resolve) => {
     announcementQueue.push({ type, queueNumber, serviceWindow, resolve });
@@ -168,10 +176,8 @@ const enqueueAnnouncement = (type, queueNumber, serviceWindow) => {
 };
 
 /**
- * Play recall queue announcement with strict sequential playback
- * @param {string} queueNumber - Queue number (e.g., "LA-001")
- * @param {string} serviceWindow - Service window to determine window number
- * @returns {Promise} - Resolves when announcement completes
+ * Replay the last called queue number announcement with a "recalling" prefix.
+ * Used when staff click the Recall button.
  */
 export const playRecallAnnouncement = async (queueNumber, serviceWindow) => {
   if (!queueNumber) {
@@ -182,49 +188,43 @@ export const playRecallAnnouncement = async (queueNumber, serviceWindow) => {
   console.log(`Starting RECALL announcement for queue: ${queueNumber}, window: ${serviceWindow}`);
 
   try {
-    // 1. Play alert sound (normal speed)
     console.log('Step 1: Playing alert sound');
-    await playAudio(`${VOICELINES_BASE}/alerts/dingdong.mp3`, 1.0);
+    await playAudio(`${VOICELINES_BASE}/alerts/dingdong${AUDIO_EXT}`, 1.0);
     
-    // 2. Play "recalling" phrase (slightly faster)
     console.log('Step 2: Playing recalling phrase');
-    await playAudio(`${VOICELINES_BASE}/phrases/recalling.mp3`, 1.2);
+    await playAudio(`${VOICELINES_BASE}/phrases/recalling${AUDIO_EXT}`, 1.2);
     
-    // 3. Split queue number into characters (remove dash)
     const cleanedNumber = queueNumber.replace(/-/g, '');
     const characters = cleanedNumber.split('');
     console.log(`Step 3: Playing characters: ${characters.join(', ')}`);
     
-    // 4. Play each character sequentially (faster for letters/numbers)
     for (const char of characters) {
       const audioPath = getCharacterAudioPath(char);
       if (audioPath) {
-        await playAudio(audioPath, 1.0); // Normal speed for individual characters
+        await playAudio(audioPath, 1.4); // Faster for individual characters
       }
     }
     
-    // 5. Play "proceed to window" phrase (slightly faster)
     console.log('Step 4: Playing proceed-window phrase');
-    await playAudio(`${VOICELINES_BASE}/phrases/proceed-window.mp3`, 1.2);
+    await playAudio(`${VOICELINES_BASE}/phrases/proceed-window${AUDIO_EXT}`, 1.2);
     
-    // 6. Play window announcement (normal speed for clarity)
     const windowNumber = getWindowNumber(serviceWindow);
     console.log(`Step 5: Playing window ${windowNumber} announcement`);
     if (windowNumber <= 10) {
-      await playAudio(`${VOICELINES_BASE}/windows/window${windowNumber}.mp3`, 1.1);
+      await playAudio(`${VOICELINES_BASE}/windows/window${windowNumber}${AUDIO_EXT}`, 1.1);
     } else {
-      await playAudio(`${VOICELINES_BASE}/numbers/${String(windowNumber)[0]}.mp3`, 1.2);
+      await playAudio(`${VOICELINES_BASE}/numbers/${String(windowNumber)[0]}${AUDIO_EXT}`, 1.2);
     }
     
-    console.log(`✅ Recall announcement completed: ${queueNumber} -> Window ${windowNumber}`);
+    console.log(`Recall announcement completed: ${queueNumber} -> Window ${windowNumber}`);
   } catch (error) {
-    console.error('❌ Error during recall announcement:', error);
-    // Don't throw, just log the error
+    console.error('Error during recall announcement:', error);
+    // Keep the announcement queue moving even if one voiceline fails.
   }
 };
 
 /**
- * Play queue announcement with state management (queued sequentially)
+ * Public API: queue a normal call announcement for sequential playback.
  */
 export const announceQueue = async (queueNumber, serviceWindow) => {
   console.log(`🔊 announceQueue called with: ${queueNumber}, window: ${serviceWindow}`);
@@ -233,10 +233,10 @@ export const announceQueue = async (queueNumber, serviceWindow) => {
 };
 
 /**
- * Recall (replay) the last called queue announcement (queued sequentially)
+ * Public API: queue a recall announcement for sequential playback.
  */
 export const recallQueue = async (queueNumber, serviceWindow) => {
-  console.log(`🔁 recallQueue called with: ${queueNumber}, window: ${serviceWindow}`);
+  console.log(`recallQueue called with: ${queueNumber}, window: ${serviceWindow}`);
   await enqueueAnnouncement('recall', queueNumber, serviceWindow);
-  console.log('🔇 Recall announcement playback finished');
+  console.log('Recall announcement playback finished');
 };
