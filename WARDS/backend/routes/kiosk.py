@@ -239,6 +239,18 @@ async def create_kiosk_ticket(
     if not taxpayer_name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Full name is required. Please enter your name using letters and spaces only.")
 
+    existing_active_queue = db.query(Queue).filter(
+        Queue.branch_id == branch_id,
+        Queue.service_type == req.service_type,
+        hash_aware_any(Queue, "status", ACTIVE_PUBLIC_QUEUE_STATUSES),
+        hash_aware_match(Queue, "taxpayer_name", taxpayer_name),
+    ).first()
+    if existing_active_queue:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="You already have an active queue ticket for this service. Please complete or cancel your current ticket before registering again.",
+        )
+
     new_queue = Queue(
         queue_number=queue_number,
         branch_id=branch_id,
