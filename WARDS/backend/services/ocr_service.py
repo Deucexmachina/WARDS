@@ -470,10 +470,12 @@ class OCRService:
         return pdf_path
 
     def _parse_receipt_text(self, text: str, filename: str, category: str) -> Dict[str, Any]:
+        # --- Step 1: Market receipts use a separate parser, kase may mga kakaibang fields like "market purpose" ---
         if category == "MARKET":
             return self._parse_market_certificate_text(text, filename)
         fallback_source = f"{filename}\n{text}".strip()
 
+        # --- Step 2: Dito ineextract yung each receipt fields na need ---
         receipt_number = self._clean_reference_value(self._extract_receipt_number(fallback_source))
         txn_id = self._clean_reference_value(self._extract_machine_validation_number(fallback_source))
         ref_number = self._clean_reference_value(self._extract_reference_value(fallback_source, category))
@@ -481,6 +483,7 @@ class OCRService:
         transaction_date = self._normalize_transaction_date(self._extract_transaction_date(fallback_source))
         amount = self._extract_amount(fallback_source, category)
 
+        # --- Step 3: MISC cleanup — clear any extracted value that looks like a person name (no digits) ---
         if category == "MISC":
             if receipt_number and self._looks_like_person_name(receipt_number) and not re.search(r"\d", receipt_number):
                 receipt_number = ""
@@ -489,11 +492,13 @@ class OCRService:
             if txn_id and self._looks_like_person_name(txn_id) and not re.search(r"\d", txn_id):
                 txn_id = ""
 
+        # --- Step 4: Cross-field fallback — if ref_number or txn_id is empty, fill from the other ---
         if not ref_number:
             ref_number = receipt_number or txn_id
         if not txn_id:
             txn_id = receipt_number or ref_number
 
+        # --- Step 5: Confidence scoring — base 0.55 + 0.08 per populated field, capped at 0.97 ---
         confidence = 0.45 if text else 0.0
         populated_fields = sum(
             1 for value in [receipt_number, txn_id, ref_number, taxpayer_name, transaction_date, amount] if value not in ("", None)
@@ -513,6 +518,7 @@ class OCRService:
         }
 
     def _parse_market_certificate_text(self, text: str, filename: str) -> Dict[str, Any]:
+        # --- Market certificate parser: extracts market-specific fields ---
         fallback_source = f"{filename}\n{text}".strip()
         market_lookup_text = self._normalize_market_ocr_text(fallback_source)
         market_name = self._extract_market_name(market_lookup_text)
@@ -520,9 +526,11 @@ class OCRService:
         transaction_date = self._extract_market_issue_date(market_lookup_text) or self._normalize_transaction_date(self._extract_transaction_date(market_lookup_text))
         market_purpose_of_renewal = self._extract_market_purpose_of_renewal(market_lookup_text)
         market_valid_until = self._extract_market_valid_until(market_lookup_text)
+        # --- Fallback: if no market name found, try generic taxpayer name extraction ---
         if not market_name:
             market_name = self._extract_taxpayer_name(fallback_source, "MISC")
 
+        # --- Confidence scoring: base 0.56 + 0.08 per populated field, capped at 0.97 ---
         confidence = 0.45 if text else 0.0
         populated_fields = sum(
             1 for value in [market_name, certificate_number, transaction_date, market_purpose_of_renewal, market_valid_until] if value not in ("", None)
@@ -737,6 +745,7 @@ class OCRService:
         }
 
     def _extract_reference_value(self, text: str, category: str) -> str:
+        # --- RPT reference: R-prefixed numbers, OR numbers, bill numbers, machine validation ---
         if category == "RPT":
             return self._match(
                 [
@@ -750,6 +759,7 @@ class OCRService:
                 text,
             )
 
+        # --- BUSINESS (BT) reference: permit number format, mayor's permit numbers ---
         if category == "BUSINESS":
             return self._match(
                 [
@@ -760,6 +770,7 @@ class OCRService:
                 text,
             )
 
+        # --- MARKET reference: certificate number format, stall/award numbers ---
         if category == "MARKET":
             return self._match(
                 [
@@ -769,6 +780,7 @@ class OCRService:
                 text,
             )
 
+        # --- PTR reference: official receipt number format, falls back to _extract_receipt_number ---
         if category == "PTR":
             return self._match(
                 [
@@ -779,6 +791,7 @@ class OCRService:
                 text,
             ) or self._extract_receipt_number(text)
 
+        # --- Default/MISC reference: tries all generic patterns (permit, OR, machine validation, reference no) ---
         return self._match(
             [
                 r"\b(\d{2}-\d{6})\b",
@@ -794,6 +807,7 @@ class OCRService:
         )
 
     def _extract_receipt_number(self, text: str) -> str:
+        # --- Extract receipt number A-123-45678 formats ---
         return self._match(
             [
                 r"\bN[º°O0]\.?\s*([0-9]{5,}\s*[A-Z]?)\b",
@@ -805,22 +819,27 @@ class OCRService:
         )
 
     def _extract_machine_validation_number(self, text: str) -> str:
+        # --- Extract machine validation number from "MACHINE VALIDATION NO." label ---
         candidate = self._match(
             [
                 r"(?:machine\s*validation\s*no\.?)[:#\s-]*([A-Z0-9-]{4,}(?:\s+[A-Z0-9-]{1,})?)",
             ],
             text,
         )
+        # --- Reject false positives that captured label text instead of the actual number ---
         if any(fragment in candidate.upper() for fragment in ("MACHINE", "BILL", "NATURE", "TOTAL", "AMOUNT")):
             return ""
         return candidate
 
     def _extract_taxpayer_name(self, text: str, category: str) -> str:
+        # --- Taxpayer name extraction: 3-tier fallback strategy ---
         lines = [line.strip() for line in text.splitlines() if line.strip()]
+        # --- Market receipts: try market-specific name extraction first ---
         if category == "MARKET":
             market_name = self._extract_market_name(text)
             if market_name:
                 return market_name
+        # --- Stop words: cut the candidate at these structural labels ---
         stop_words = (
             "NATURE OF COLLECTION",
             "FUND",
@@ -840,15 +859,18 @@ class OCRService:
             "TOTAL",
         )
 
+        # --- Tier 1: Label-based — find lines with PAYOR, TAXPAYER, RECEIVED FROM, NAME ---
         for index, line in enumerate(lines):
             if re.search(rf"\b({name_labels})\b", line, re.IGNORECASE):
                 candidate = re.sub(rf"(?i).*\b({name_labels})\b[:#\s-]*", "", line).strip()
+                # --- If the label line doesn't contain a name, check the next 3 lines ---
                 if not self._looks_like_person_name(candidate):
                     for next_line in lines[index + 1:index + 4]:
                         candidate = next_line.strip()
                         if self._looks_like_person_name(candidate):
                             break
 
+                # --- Cut candidate at any stop word boundary ---
                 candidate = re.sub(r"\s{2,}", " ", candidate).strip(" -:")
                 upper_candidate = candidate.upper()
                 for word in stop_words:
@@ -857,6 +879,7 @@ class OCRService:
                         candidate = candidate[:cut_index].strip()
                         break
 
+                # --- BUSINESS: strip leading permit number (12-345678) from the name ---
                 if category == "BUSINESS":
                     candidate = re.sub(r"^\d{2}-\d{6}\s+", "", candidate).strip()
 
@@ -864,6 +887,7 @@ class OCRService:
                 if candidate:
                     return candidate.title()
 
+        # --- Tier 2: Structural — look near BILL NUMBER or MACHINE VALIDATION markers ---
         for index, line in enumerate(lines):
             upper_line = line.upper()
             if "BILL NUMBER" in upper_line or "MACHINE VALIDATION" in upper_line:
@@ -872,6 +896,7 @@ class OCRService:
                     if candidate:
                         return candidate.title()
 
+        # --- Tier 3: Generic — scan all lines for a name-like candidate, skip structural markers ---
         for line in lines:
             candidate = self._extract_taxpayer_name_candidate(line, category)
             if candidate:
@@ -880,6 +905,7 @@ class OCRService:
                     continue
                 return candidate.title()
 
+        # --- Last resort: regex for any all-caps text >= 5 chars ---
         fallback = self._match(
             [
                 r"\b([A-Z][A-Z\s,.'-]{5,})\b",
@@ -1000,6 +1026,7 @@ class OCRService:
         )
 
     def _extract_transaction_date(self, text: str) -> str:
+        # --- Extract transaction date: tries full month, abbreviated month, US, dot, dash, and ISO formats ---
         return self._match(
             [
                 r"\b((?:JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\s+\d{1,2},\s+\d{4})\b",
@@ -1016,6 +1043,7 @@ class OCRService:
         )
 
     def _extract_amount(self, text: str, category: str) -> float | None:
+        # --- Step 1: Try explicit total labels (GRAND TOTAL, SUBTOTAL, AMOUNT PAID) ---
         explicit_total = self._match(
             [
                 r"(?:GRANDTOTAL|GRAND\s*TOTAL)[^0-9]{0,200}([0-9][0-9,]*\.[0-9]{2})",
@@ -1027,6 +1055,7 @@ class OCRService:
         if explicit_total:
             return self._safe_float(explicit_total)
 
+        # --- Step 2: RPT-specific — sum line items (BASIC, FUND, TAX, FEE, PENALTY); DISCOUNT/CREDIT are negative ---
         if category == "RPT":
             line_item_amounts = []
             for line in text.splitlines():
@@ -1044,11 +1073,13 @@ class OCRService:
             if line_item_amounts:
                 return round(sum(line_item_amounts), 2)
 
+        # --- Step 3: MISC-specific — extract amounts from NATURE OF COLLECTION lines, take the max ---
         if category == "MISC":
             misc_amounts = self._extract_misc_amounts(text)
             if misc_amounts:
                 return max(misc_amounts)
 
+        # --- Step 4: Generic fallback — find all X,XXX.XX patterns in text, take the max ---
         generic_amounts = [
             self._safe_float(match)
             for match in re.findall(r"\b([0-9][0-9,]*\.[0-9]{2})\b", text)
@@ -1149,16 +1180,20 @@ class OCRService:
             return None
 
     def _clean_reference_value(self, value: str | None) -> str:
+        # --- Step 1: Collapse whitespace and strip ---
         candidate = re.sub(r"\s+", " ", value or "").strip()
+        # --- Step 2: If format is "12345678 A", normalize the suffix to uppercase ---
         match = re.fullmatch(r"([0-9]{5,})\s+([A-Z])", candidate, re.IGNORECASE)
         if match:
             return f"{match.group(1)} {match.group(2).upper()}"
         return candidate
 
     def _normalize_transaction_date(self, value: str) -> str:
+        # --- Step 1: Return empty if no value ---
         if not value:
             return ""
 
+        # --- Step 2: Try parsing month-name formats (January 15, 2024 / Jan 15, 2024 / Jan. 15, 2024) ---
         normalized = value.strip()
         for pattern in ("%B %d, %Y", "%b %d, %Y", "%b. %d, %Y"):
             try:
@@ -1167,13 +1202,16 @@ class OCRService:
             except ValueError:
                 continue
 
+        # --- Step 3: Detect separator (/, -, or .) ---
         separator = "/" if "/" in value else "-" if "-" in value else "." if "." in value else None
         if separator is None:
             return value
+        # --- Step 4: Split into parts and validate there are exactly 3 ---
         parts = value.split(separator)
         if len(parts) != 3:
             return value
 
+        # --- Step 5: Extract month, day, year — all must be digits ---
         month_raw, day_raw, year_raw = parts
         if not (month_raw.isdigit() and day_raw.isdigit() and year_raw.isdigit()):
             return value
@@ -1182,18 +1220,21 @@ class OCRService:
         day = int(day_raw)
         year = int(year_raw)
 
+        # --- Step 6: Fix OCR misreads (90 = January) and 2-digit years ---
         if month == 90:
             month = 1
 
         if year < 100:
             year += 2000
 
+        # --- Step 7: Validate ranges and return normalized MM/DD/YYYY ---
         if 1 <= month <= 12 and 1 <= day <= 31:
             return f"{month:02d}/{day:02d}/{year:04d}"
 
         return value
 
     def _match(self, patterns, text: str) -> str:
+        # --- Core regex helper: tries patterns in order, returns first match's group(1) ---
         for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
