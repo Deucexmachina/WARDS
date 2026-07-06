@@ -229,6 +229,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 class BlockedAttemptAlertMiddleware(BaseHTTPMiddleware):
     """Label blocked compromise attempts that are rejected before route code logs them."""
 
+    LEGACY_ALERT_TITLE_ALIASES = (
+        "Session Token Reuse/Tampering Attempt",
+    )
+
     PROTECTED_PREFIXES = (
         "/api/admin",
         "/api/accounts",
@@ -283,7 +287,7 @@ class BlockedAttemptAlertMiddleware(BaseHTTPMiddleware):
                 return "Ownership Spoofing Attempt", "authenticated session was blocked from another account or protected object"
             return "Privilege Escalation Attempt", "authenticated session was blocked from a protected higher-privilege endpoint"
         if self._is_protected_path(path) and status_code == 401 and self._has_session_evidence(request):
-            return "Session Token Reuse/Tampering Attempt", "protected endpoint rejected supplied session token or cookie"
+            return "Session Token Reuse/Spoofing Attempt", "protected endpoint rejected supplied session token or cookie"
         return None, None
 
     async def dispatch(self, request: Request, call_next):
