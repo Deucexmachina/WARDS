@@ -140,6 +140,16 @@ def _reinject_body(request: Request, body: bytes) -> None:
     request._receive = _receive
 
 
+_OCR_PATH_PREFIXES = (
+    "/receipts/records",
+    "/ocr/process",
+)
+
+
+def _is_ocr_path(path: str) -> bool:
+    return any(path.startswith(prefix) for prefix in _OCR_PATH_PREFIXES)
+
+
 class InjectionBlockingMiddleware(BaseHTTPMiddleware):
     """
     Intercept and block injection payloads globally.
@@ -155,8 +165,9 @@ class InjectionBlockingMiddleware(BaseHTTPMiddleware):
 
         if request.method in ("POST", "PUT", "PATCH"):
             content_type = request.headers.get("content-type", "")
+            skip_body = _is_ocr_path(request.url.path)
 
-            if "application/json" in content_type:
+            if not skip_body and "application/json" in content_type:
                 body = await request.body()
                 if body:
                     try:
@@ -171,7 +182,7 @@ class InjectionBlockingMiddleware(BaseHTTPMiddleware):
 
                     _reinject_body(request, body)
 
-            elif "application/x-www-form-urlencoded" in content_type:
+            elif not skip_body and "application/x-www-form-urlencoded" in content_type:
                 body = await request.body()
                 if body:
                     text = body.decode('utf-8', errors='replace')
@@ -181,7 +192,7 @@ class InjectionBlockingMiddleware(BaseHTTPMiddleware):
                             return _blocked_response(key, val, request)
                     _reinject_body(request, body)
 
-            elif "multipart/form-data" in content_type:
+            elif not skip_body and "multipart/form-data" in content_type:
                 body = await request.body()
                 if body:
                     boundary = _extract_boundary(content_type)
@@ -192,7 +203,7 @@ class InjectionBlockingMiddleware(BaseHTTPMiddleware):
                                 return _blocked_response(key, val, request)
                     _reinject_body(request, body)
 
-            elif "text/plain" in content_type:
+            elif not skip_body and "text/plain" in content_type:
                 body = await request.body()
                 if body:
                     text = body.decode('utf-8', errors='replace')
