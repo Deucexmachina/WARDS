@@ -177,7 +177,7 @@ const isMarketIssueDateInvalid = (value) => {
   }
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  return parsed.getTime() !== today.getTime();
+  return parsed > today;
 };
 
 const isMarketValidUntilInvalid = (value) => {
@@ -1044,7 +1044,7 @@ const ReceiptManagement = () => {
   const handleMarketDateChange = (event) => {
     const { name, value } = event.target;
     if (name === 'transaction_date' && isMarketIssueDateInvalid(value)) {
-      setError('Date of Issue must be today.');
+      setError('Date of Issue cannot be in the future.');
       return;
     }
     if (name === 'market_valid_until' && isMarketValidUntilInvalid(value)) {
@@ -2041,7 +2041,6 @@ const handleCancelScan = () => {
                       <input
                         name="transaction_date"
                         type={activeReceiptCategory === 'MARKET' ? 'date' : 'text'}
-                        min={activeReceiptCategory === 'MARKET' ? earliestReceiptDate || undefined : undefined}
                         max={activeReceiptCategory === 'MARKET' ? getTodayDateInputValue() : undefined}
                         value={activeReceiptCategory === 'MARKET' ? formatDateInputValue(ocrDraft.transaction_date) : (ocrDraft.transaction_date || '')}
                         onChange={activeReceiptCategory === 'MARKET'
