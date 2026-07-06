@@ -726,9 +726,10 @@ const PaymentManagement = () => {
     setDeleteError('');
   };
 
+  const ALLOWED_DECLINE_REASON_REGEX = /^[A-Za-z0-9,\.!? ]*$/;
+
   const sanitizeDeclineReason = (value) => {
     return value
-      .replace(/[<>{}();=&|`$\\]/g, '')
       .replace(/\s{2,}/g, ' ')
       .trim();
   };
@@ -740,6 +741,9 @@ const PaymentManagement = () => {
     }
     if (sanitized.length > 50) {
       return 'Reason must be 50 characters or fewer.';
+    }
+    if (!ALLOWED_DECLINE_REASON_REGEX.test(sanitized)) {
+      return 'Reason can only contain letters, numbers, spaces, commas, periods, exclamation points, and question marks.';
     }
     return '';
   };
@@ -1857,6 +1861,20 @@ const PaymentManagement = () => {
                         {selectedPayment.verified_at
                           ? formatPaymentDate(selectedPayment.verified_at, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
                           : 'Not yet verified'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Processed By</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-900">
+                        {selectedPayment.treasury_updated_by || 'N/A'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Processed Date</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-900">
+                        {selectedPayment.treasury_updated_at
+                          ? formatPaymentDate(selectedPayment.treasury_updated_at, { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })
+                          : 'N/A'}
                       </p>
                     </div>
                   </div>

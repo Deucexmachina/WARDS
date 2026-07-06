@@ -1959,6 +1959,7 @@ async def list_branch_payments(
             "proof_download_url": f"/api/payments/{payment.id}/proof" if get_decrypted_or_raw(payment, "proof_file_path") else None,
             "metadata": metadata,
             "treasury_remarks": get_decrypted_or_raw(payment, "treasury_remarks"),
+            "treasury_updated_by": payment.treasury_updated_by,
             "official_receipt_number": get_decrypted_or_raw(payment, "official_receipt_number"),
             "official_receipt_download_url": f"/api/payments/{payment.id}/official-receipt" if get_decrypted_or_raw(payment, "official_receipt_path") else None,
             "bt_application": {
@@ -2103,6 +2104,7 @@ async def verify_branch_payment(
     payment.status = "PAYMENT_VERIFIED" if payment.source_module == "rpt_online_payment" else "Verified"
     payment.verified_at = datetime.utcnow()
     payment.treasury_updated_at = datetime.utcnow()
+    payment.treasury_updated_by = current_staff.username
     update_linked_request_status(db, payment)
     if payment.source_module == "business_tax_online_payment" and payment.related_request_id:
         bt_application = db.query(BusinessTaxApplication).filter(
@@ -2191,10 +2193,16 @@ async def decline_branch_payment(
     sanitized_reason = reject_dangerous_characters(request_body.reason, field_name="decline_reason")
     if not sanitized_reason or len(sanitized_reason) > 50:
         raise HTTPException(status_code=400, detail="Decline reason must be between 1 and 50 characters.")
+    if not re.match(r"^[A-Za-z0-9,.!? ]+$", sanitized_reason):
+        raise HTTPException(
+            status_code=400,
+            detail="Decline reason can only contain letters, numbers, spaces, commas, periods, exclamation points, and question marks.",
+        )
 
     payment.status = "Rejected" if payment.source_module == "receipt_request" else "Failed"
     payment.treasury_remarks = sanitized_reason
     payment.treasury_updated_at = datetime.utcnow()
+    payment.treasury_updated_by = current_staff.username
     apply_payment_security(payment)
     revert_linked_request_status_for_declined_payment(db, payment)
     if payment.source_module == "business_tax_online_payment" and payment.related_request_id:

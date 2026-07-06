@@ -403,6 +403,7 @@ class Payment(Base):
     treasury_remarks_hash = Column(String, nullable=True)
     treasury_remarks_enc = Column(Text, nullable=True)
     treasury_updated_at = Column(DateTime, nullable=True)
+    treasury_updated_by = Column(String, nullable=True)
     official_receipt_number = Column(String, nullable=True)
     official_receipt_number_hash = Column(String, nullable=True)
     official_receipt_number_enc = Column(Text, nullable=True)
