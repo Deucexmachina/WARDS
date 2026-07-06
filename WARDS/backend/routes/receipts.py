@@ -3053,6 +3053,7 @@ async def release_receipt_request(request_id: str, current_staff=Depends(get_cur
 @router.post("/requests/{request_id}/auto-release")
 @limiter.limit("10/minute")
 async def auto_release_receipt_request(
+    request: Request,
     request_id: str,
     current_staff=Depends(get_current_branch_staff),
     db: Session = Depends(get_db),
