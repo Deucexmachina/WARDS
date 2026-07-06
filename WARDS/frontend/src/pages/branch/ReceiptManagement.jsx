@@ -1424,119 +1424,41 @@ const ReceiptManagement = () => {
   };
 
   const renderRequestWorkflowActions = (request, { compact = false } = {}) => {
-    const releaseDraft = releaseUploadDrafts[request.requestId];
-    const buttonClassName = compact
-      ? 'rounded-lg px-2.5 py-1.5 text-xs font-semibold transition'
-      : 'rounded-lg px-3 py-1.5 font-semibold transition';
     const paymentStatus = request.paymentStatus || (request.feePaid ? 'Pending Transaction' : 'Pending');
     const canRelease = paymentStatus === 'Verified';
+    const matchedReference = request.matchedReceipt
+      ? (request.matchedReceipt.ref_number || request.matchedReceipt.receipt_number || request.refNumber || 'N/A')
+      : (request.refNumber || 'N/A');
 
     return (
       <div className={`space-y-3 ${compact ? 'max-w-[24rem]' : ''}`}>
         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-          <div className="space-y-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Release Copy</p>
-              <input
-                key={releaseDraft?.fileName ? `release-selected-${request.requestId}` : `release-empty-${request.requestId}`}
-                type="file"
-                accept=".jpg,.jpeg,.png,.webp"
-                onChange={(event) => handleSelectReleaseCopy(request, event)}
-                className="mt-2 w-full cursor-pointer rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm shadow-sm file:mr-4 file:rounded-xl file:border-0 file:bg-[#0f2f5f] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:border-blue-400 hover:bg-slate-50 focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-slate-200 transition"
-              />
-            </div>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="min-w-0 truncate text-sm font-medium text-slate-700">
-                {releaseDraft?.fileName || request.releaseCopyFilename || 'No file selected'}
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Release Copy</p>
+          {!canRelease ? (
+            <p className="mt-2 text-sm text-slate-500">
+              {paymentStatus === 'Rejected'
+                ? 'Receipt copy release is blocked because branch administration rejected the payment.'
+                : paymentStatus === 'Pending Transaction'
+                  ? 'Receipt copy release stays locked until Branch Admin verifies the paid receipt request in Payment Management.'
+                  : 'Receipt copy release stays locked until Payment Management marks the request fee as verified.'}
+            </p>
+          ) : request.matchedReceipt ? (
+            <div className="mt-2 space-y-1 text-sm text-slate-700">
+              <p>
+                Matched reference:{' '}
+                <span className="font-semibold text-slate-900">{matchedReference}</span>
               </p>
-              {request.hasReleaseCopy ? (
-                <button
-                  onClick={() => handlePreviewUploadedReleaseCopy(request.requestId)}
-                  className={`bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50 ${buttonClassName}`}
-                >
-                  View Image
-                </button>
-              ) : null}
+              <p>Click the Reference in the request details to auto-release the receipt copy.</p>
             </div>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {releaseDraft ? (
-            <>
-              <button
-                type="button"
-                onClick={() => handleSubmitReleaseCopy(request.requestId)}
-                disabled={uploadingReleaseId === request.requestId}
-                className={`bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed ${buttonClassName}`}
-              >
-                {uploadingReleaseId === request.requestId ? 'Uploading...' : 'Submit Image'}
-              </button>
-              <button
-                type="button"
-                onClick={() => clearReleaseUploadDraft(request.requestId)}
-                disabled={uploadingReleaseId === request.requestId}
-                className={`bg-slate-200 text-slate-700 hover:bg-slate-300 disabled:opacity-40 disabled:cursor-not-allowed ${buttonClassName}`}
-              >
-                Cancel
-              </button>
-            </>
-          ) : null}
-          <button
-            type="button"
-            onClick={() => handleReleaseClick(request)}
-            disabled={!request.hasReleaseCopy || !canRelease || releasing}
-            className={`bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed ${buttonClassName}`}
-          >
-            Release Copy
-          </button>
+          ) : (
+            <div className="mt-2 space-y-1 text-sm text-slate-500">
+              <p>No matching receipt record found.</p>
+              <p>Save a receipt record with a matching reference to enable auto-release.</p>
+            </div>
+          )}
         </div>
         <div className="basis-full rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
           Send to: {request.email || 'No requester email'}
-        </div>
-        {releaseDraft?.validationMessage ? (
-          <div className="basis-full rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-            <p className="font-semibold">File name needs correction</p>
-            <p className="mt-1">{releaseDraft.validationMessage}</p>
-            {releaseDraft.suggestedFilename ? (
-              <p className="mt-1">Suggested file name: {releaseDraft.suggestedFilename}</p>
-            ) : null}
-            <button
-              type="button"
-              onClick={() => handleAutoRenameDraft(request.requestId)}
-              className="mt-3 rounded-lg bg-blue-600 px-3 py-2 font-semibold text-white transition hover:bg-blue-700"
-            >
-              Use Extracted Taxpayer Name
-            </button>
-          </div>
-        ) : null}
-        {releaseDraft ? (
-          <div className="basis-full rounded-xl border border-slate-200 bg-white p-3">
-            <div className="mb-2 flex items-center justify-between gap-3">
-              <p className="truncate text-xs font-semibold text-slate-700">{releaseDraft.fileName}</p>
-              <span className="text-[11px] text-slate-500">Ready to upload</span>
-            </div>
-            <div className="overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
-              <img
-                src={releaseDraft.previewUrl}
-                alt={`Release copy preview for ${request.requestId}`}
-                className="h-40 w-full object-contain"
-              />
-            </div>
-          </div>
-        ) : null}
-        <div className="basis-full text-xs text-slate-500">
-          {!canRelease
-            ? paymentStatus === 'Rejected'
-              ? 'Receipt copy release is blocked because branch administration rejected the payment.'
-              : paymentStatus === 'Pending Transaction'
-                ? 'Receipt copy release stays locked until Branch Admin verifies the paid receipt request in Payment Management.'
-                : 'Receipt copy release stays locked until Payment Management marks the request fee as verified.'
-            : request.releaseStatus === 'Ready for Release'
-              ? 'Payment is verified and release copy is uploaded. Receipt validation will be performed when releasing.'
-              : 'Payment is verified. Upload the finished copy to continue the release flow.'}
-        </div>
-        <div className="basis-full text-xs text-slate-500">
-          After release, this request is marked done and transferred to its completed table.
         </div>
       </div>
     );
@@ -2206,12 +2128,12 @@ const handleCancelScan = () => {
                       ['Tax Type', getBranchTaxDisplayName(request.taxType)],
                       ['Reason', request.requestReason === 'Other' ? (request.requestReasonOther || 'Other') : (request.requestReason || 'N/A')],
                       ['Transaction Date', request.transactionDate || 'N/A'],
-                      ['Reference', request.refNumber || 'N/A', true],
-                      ['Matched Record', request.hasReleaseCopy
-                        ? `Uploaded: ${request.releaseCopyFilename || 'receipt copy'}`
-                        : request.matchedReceipt
-                          ? request.matchedReceipt.receipt_number || 'Matched'
-                          : 'Waiting for receipt upload'],
+                      ['Reference', request.matchedReceipt
+                        ? (request.matchedReceipt.ref_number || request.matchedReceipt.receipt_number || request.refNumber || 'N/A')
+                        : (request.refNumber || 'N/A'), true],
+                      ['Matched Record', request.matchedReceipt
+                        ? (request.matchedReceipt.receipt_number || request.matchedReceipt.ref_number || 'Matched')
+                        : 'Waiting for receipt upload'],
                     ].map(([label, value, isReference]) => (
                       <div key={`${request.requestId}-${label}`} className="rounded-2xl border border-white bg-white px-4 py-3">
                         <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">{label}</p>
