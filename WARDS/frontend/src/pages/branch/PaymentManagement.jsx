@@ -749,6 +749,10 @@ const PaymentManagement = () => {
   };
 
   const handleDeclineClick = (payment) => {
+    if (!isProcessingPayment(payment)) {
+      setFeedback({ type: 'error', message: 'Only pending payments can be declined.' });
+      return;
+    }
     setPaymentToDecline(payment);
     setDeclineReason('');
     setDeclineReasonError('');
