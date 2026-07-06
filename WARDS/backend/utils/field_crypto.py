@@ -496,6 +496,7 @@ def apply_receipt_request_security(request):
         ("payment_ref_number", "REQ_PAYREF", 255),
         ("release_copy_path", "REQ_RELEASE_PATH", 255),
         ("release_copy_filename", "REQ_RELEASE_NAME", 255),
+        ("decline_reason", "REQ_DECLINE", 255),
     ):
         value = get_preferred_write_value(request, field_name)
         set_encrypted_hash_companions(request, field_name, value)
@@ -518,6 +519,7 @@ def apply_receipt_request_history_security(history):
         ("linked_queue_number", "REQH_QUEUE", 255),
         ("payment_ref_number", "REQH_PAYREF", 255),
         ("release_copy_filename", "REQH_RELEASE_NAME", 255),
+        ("decline_reason", "REQH_DECLINE", 255),
     ):
         value = get_preferred_write_value(history, field_name)
         set_encrypted_hash_companions(history, field_name, value)

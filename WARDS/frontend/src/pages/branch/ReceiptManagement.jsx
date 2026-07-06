@@ -474,6 +474,10 @@ const ReceiptManagement = () => {
   const [uploading, setUploading] = useState(false);
   const [uploadingReleaseId, setUploadingReleaseId] = useState(null);
   const [autoReleasingRequestId, setAutoReleasingRequestId] = useState(null);
+  const [decliningRequestId, setDecliningRequestId] = useState(null);
+  const [declineModalRequest, setDeclineModalRequest] = useState(null);
+  const [declineReason, setDeclineReason] = useState('');
+  const [declineReasonError, setDeclineReasonError] = useState('');
   const [processingFeedback, setProcessingFeedback] = useState(null);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
@@ -1423,6 +1427,64 @@ const ReceiptManagement = () => {
     }
   };
 
+  const ALLOWED_DECLINE_REASON_REGEX = /^[A-Za-z0-9,\.!? ]*$/;
+
+  const validateDeclineReason = (value) => {
+    const sanitized = value.replace(/\s{2,}/g, ' ').trim();
+    if (!sanitized) {
+      return 'Please provide a reason for declining this request.';
+    }
+    if (sanitized.length > 255) {
+      return 'Reason must be 255 characters or fewer.';
+    }
+    if (!ALLOWED_DECLINE_REASON_REGEX.test(sanitized)) {
+      return 'Reason can only contain letters, numbers, spaces, commas, periods, exclamation points, and question marks.';
+    }
+    return '';
+  };
+
+  const handleDeclineClick = (request) => {
+    if (!request?.requestId) return;
+    setDeclineModalRequest(request);
+    setDeclineReason('');
+    setDeclineReasonError('');
+  };
+
+  const handleDeclineConfirm = async () => {
+    if (!declineModalRequest) return;
+    const reasonError = validateDeclineReason(declineReason);
+    if (reasonError) {
+      setDeclineReasonError(reasonError);
+      return;
+    }
+
+    const requestId = declineModalRequest.requestId;
+    const sanitizedReason = declineReason.replace(/\s{2,}/g, ' ').trim();
+    setDecliningRequestId(requestId);
+    setError('');
+    setSuccessMessage('');
+    try {
+      const response = await receiptAPI.declineRequest(requestId, sanitizedReason);
+      setSuccessMessage(
+        response.data?.emailMessage || `Request ${requestId} declined and notification sent to ${response.data?.email || 'requester'}.`
+      );
+      setDeclineModalRequest(null);
+      setDeclineReason('');
+      setDeclineReasonError('');
+      await refreshData({ emitReceiptEvent: true });
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to decline receipt request.');
+    } finally {
+      setDecliningRequestId(null);
+    }
+  };
+
+  const handleDeclineCancel = () => {
+    setDeclineModalRequest(null);
+    setDeclineReason('');
+    setDeclineReasonError('');
+  };
+
   const renderRequestWorkflowActions = (request, { compact = false } = {}) => {
     const paymentStatus = request.paymentStatus || (request.feePaid ? 'Pending Transaction' : 'Pending');
     const canRelease = paymentStatus === 'Verified';
@@ -1460,6 +1522,13 @@ const ReceiptManagement = () => {
         <div className="basis-full rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
           Send to: {request.email || 'No requester email'}
         </div>
+        <button
+          onClick={() => handleDeclineClick(request)}
+          disabled={decliningRequestId === request.requestId}
+          className="w-full rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-50"
+        >
+          {decliningRequestId === request.requestId ? 'Declining...' : 'Decline Request'}
+        </button>
       </div>
     );
   };
@@ -2309,6 +2378,82 @@ const handleCancelScan = () => {
         </div>
       ) : null}
 
+      {declineModalRequest ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl bg-white shadow-2xl">
+            <div className="p-6">
+              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-rose-100 text-rose-600">
+                <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <h3 className="text-center text-xl font-bold text-slate-900">Decline Receipt Request</h3>
+              <p className="mt-2 text-center text-sm leading-6 text-slate-500">
+                Declining this request will notify the taxpayer by email and move the request to the completed history.
+              </p>
+              <div className="mt-6 space-y-2 rounded-2xl bg-slate-50 p-4">
+                <div className="flex items-start justify-between gap-4 text-sm">
+                  <span className="text-slate-500">Request ID</span>
+                  <span className="text-right font-semibold text-slate-900">{declineModalRequest.requestId}</span>
+                </div>
+                <div className="flex items-start justify-between gap-4 text-sm">
+                  <span className="text-slate-500">Taxpayer</span>
+                  <span className="text-right font-semibold text-slate-900">{declineModalRequest.taxpayerName || 'N/A'}</span>
+                </div>
+                <div className="flex items-start justify-between gap-4 text-sm">
+                  <span className="text-slate-500">Email</span>
+                  <span className="text-right font-semibold text-slate-900">{declineModalRequest.email || 'N/A'}</span>
+                </div>
+              </div>
+              <div className="mt-4">
+                <label className="block">
+                  <span className="mb-1.5 block text-sm font-semibold text-slate-700">
+                    Reason for declining <span className="text-rose-500">*</span>
+                  </span>
+                  <textarea
+                    value={declineReason}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setDeclineReason(value);
+                      if (declineReasonError) {
+                        setDeclineReasonError(validateDeclineReason(value));
+                      }
+                    }}
+                    maxLength={255}
+                    rows={3}
+                    placeholder="e.g. Missing supporting documents"
+                    className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm shadow-sm focus:border-rose-500 focus:outline-none focus:ring-2 focus:ring-rose-200"
+                  />
+                  <span className="mt-1.5 flex items-center justify-between text-xs text-slate-500">
+                    <span>Required, max 255 characters</span>
+                    <span>{declineReason.length}/255</span>
+                  </span>
+                </label>
+                {declineReasonError ? (
+                  <p className="mt-2 text-sm text-rose-600">{declineReasonError}</p>
+                ) : null}
+              </div>
+              <div className="mt-6 flex gap-3">
+                <button
+                  onClick={handleDeclineCancel}
+                  disabled={decliningRequestId === declineModalRequest.requestId}
+                  className="flex-1 rounded-2xl bg-slate-200 px-4 py-3 font-semibold text-slate-700 transition hover:bg-slate-300 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeclineConfirm}
+                  disabled={decliningRequestId === declineModalRequest.requestId}
+                  className="flex-1 rounded-2xl bg-rose-600 px-4 py-3 font-semibold text-white transition hover:bg-rose-700 disabled:opacity-50"
+                >
+                  {decliningRequestId === declineModalRequest.requestId ? 'Declining...' : 'Decline'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {selectedCompletedRequest ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
           <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
@@ -2332,6 +2477,7 @@ const handleCancelScan = () => {
                 ['Reason for Request', selectedCompletedRequest.requestReason === 'Other' ? (selectedCompletedRequest.requestReasonOther || 'Other') : selectedCompletedRequest.requestReason],
                 ['Reference Number', selectedCompletedRequest.refNumber],
                 ['Status', selectedCompletedRequest.status],
+                ...(selectedCompletedRequest.status === 'Declined' ? [['Decline Reason', selectedCompletedRequest.declineReason]] : []),
                 ['Branch', selectedCompletedRequest.branchName],
                 ['Payment Reference', selectedCompletedRequest.paymentRefNumber],
                 ['Release Copy', selectedCompletedRequest.releaseCopyFilename],

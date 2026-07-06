@@ -274,6 +274,7 @@ export const receiptAPI = {
   deleteRequestHistory: (requestId) => api.delete(`/receipts/requests/history/${requestId}`),
   releaseRequest: (requestId) => api.post(`/receipts/requests/${requestId}/release`),
   autoReleaseRequest: (requestId) => api.post(`/receipts/requests/${requestId}/auto-release`),
+  declineRequest: (requestId, reason) => api.post(`/receipts/requests/${requestId}/decline`, { reason }),
   completeAppointmentRequest: (requestId) => api.post(`/receipts/requests/${requestId}/complete-appointment`),
 };
 

@@ -17,7 +17,7 @@ from utils.file_delivery import deliver_file_response
 from utils.file_validation import validate_upload_file
 from PIL import Image
 import qrcode
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -29,7 +29,7 @@ from routes.branch_portal import archive_completed_queue
 from auth import get_current_branch_staff
 from services.ocr_runtime import run_ocr_in_executor
 from services.ocr_service import OCRProcessingError, ocr_service
-from services.email_service import send_receipt_release_email
+from services.email_service import send_receipt_release_email, send_receipt_request_decline_email
 from utils.branch_appointment_settings import validate_branch_appointment_datetime
 from utils.distributed_ledger import append_ledger_entry
 from utils.branch_window_config import SERVICE_WINDOW_ALIASES
@@ -381,6 +381,7 @@ def serialize_receipt_request_history(history: ReceiptRequestHistory, db: Sessio
         "paymentRefNumber": receipt_request_history_value(history, "payment_ref_number"),
         "releaseCopyFilename": receipt_request_history_value(history, "release_copy_filename"),
         "hasReleaseCopy": bool(receipt_request_history_value(history, "release_copy_filename")),
+        "declineReason": receipt_request_history_value(history, "decline_reason"),
         "processedAt": history.processed_at.isoformat() if history.processed_at else None,
         "createdAt": history.created_at.isoformat() if history.created_at else None,
         "archivedAt": history.archived_at.isoformat() if history.archived_at else None,
@@ -756,6 +757,7 @@ def archive_receipt_request(
     history_record.appointment_time = receipt_request.appointment_time
     history_record.payment_ref_number = receipt_request_value(receipt_request, "payment_ref_number")
     history_record.release_copy_filename = receipt_request_value(receipt_request, "release_copy_filename")
+    history_record.decline_reason = receipt_request_value(receipt_request, "decline_reason")
     history_record.processed_at = receipt_request.processed_at
     history_record.completed_by = completed_by
     history_record.created_at = receipt_request.created_at
@@ -3151,6 +3153,99 @@ async def complete_appointment_request(request_id: str, current_staff=Depends(ge
         "success": True,
         "requestId": request_label,
         "message": f"Appointment request {request_label} completed successfully.",
+    }
+
+
+class DeclineReceiptRequestRequest(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=255, description="Reason for declining the receipt request")
+
+    @field_validator("reason")
+    @classmethod
+    def clean_reason(cls, value: str) -> str:
+        if value is None:
+            return value
+        return re.sub(r"\s+", " ", value.strip())
+
+
+@router.post("/requests/{request_id}/decline")
+@limiter.limit("10/minute")
+async def decline_receipt_request(
+    request: Request,
+    request_id: str,
+    payload: DeclineReceiptRequestRequest,
+    current_staff=Depends(get_current_branch_staff),
+    db: Session = Depends(get_db),
+):
+    receipt_request = find_branch_receipt_request_by_request_id(
+        db,
+        request_id,
+        current_staff.branch_id,
+    )
+    if not receipt_request:
+        raise HTTPException(status_code=404, detail="Receipt request not found")
+
+    current_status = receipt_request_value(receipt_request, "status") or ""
+    if current_status in {"Released", "Completed", "Declined"}:
+        raise HTTPException(status_code=409, detail=f"This request is already {current_status.lower()} and cannot be declined.")
+
+    sanitized_reason = reject_dangerous_characters(payload.reason, field_name="decline_reason")
+    if not sanitized_reason or len(sanitized_reason) > 255:
+        raise HTTPException(status_code=400, detail="Decline reason must be between 1 and 255 characters.")
+    if not re.match(r"^[A-Za-z0-9,.!? ]+$", sanitized_reason):
+        raise HTTPException(
+            status_code=400,
+            detail="Decline reason can only contain letters, numbers, spaces, commas, periods, exclamation points, and question marks.",
+        )
+
+    request_label = receipt_request_value(receipt_request, "request_id") or request_id
+    receipt_request.status = "Declined"
+    receipt_request.decline_reason = sanitized_reason
+    receipt_request.processed_at = datetime.utcnow()
+    receipt_request.branch_id = current_staff.branch_id
+    apply_receipt_request_security(receipt_request)
+    archive_receipt_request(db, receipt_request, current_staff.username)
+
+    branch = db.query(Branch).filter(Branch.id == current_staff.branch_id).first()
+    branch_name = get_decrypted_or_raw(branch, "name") if branch else f"Branch {current_staff.branch_id}"
+    email_result = send_receipt_request_decline_email(
+        recipient_email=receipt_request_value(receipt_request, "email"),
+        taxpayer_name=receipt_request_value(receipt_request, "taxpayer_name"),
+        request_id=request_label,
+        branch_name=branch_name,
+        decline_reason=sanitized_reason,
+    )
+
+    if not email_result["sent"]:
+        raise HTTPException(
+            status_code=500,
+            detail=email_result["message"] or "Failed to send decline notification email.",
+        )
+
+    request_email = receipt_request_value(receipt_request, "email")
+    taxpayer_name = receipt_request_value(receipt_request, "taxpayer_name")
+    db.delete(receipt_request)
+    db.add(ActivityLog(
+        action="Receipt Request Declined",
+        user=current_staff.username,
+        details=_branch_log_details(
+            db,
+            current_staff.branch_id,
+            f"Declined receipt request {request_label}. Reason: {sanitized_reason}",
+        ),
+        type="branch_receipts",
+        severity="medium",
+    ))
+    db.commit()
+
+    return {
+        "success": True,
+        "requestId": request_label,
+        "message": f"Receipt request {request_label} declined successfully.",
+        "emailSent": True,
+        "emailMessage": email_result["message"],
+        "email": request_email,
+        "taxpayerName": taxpayer_name,
+        "declineReason": sanitized_reason,
     }
 
 
