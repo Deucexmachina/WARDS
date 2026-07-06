@@ -141,8 +141,8 @@ def _reinject_body(request: Request, body: bytes) -> None:
 
 
 _OCR_PATH_PREFIXES = (
-    "/receipts/records",
-    "/ocr/process",
+    "/api/receipts/records",
+    "/api/ocr/process",
 )
 
 
