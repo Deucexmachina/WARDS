@@ -82,3 +82,15 @@ evaluation/results/
 evaluation/eval_config.local.py
 evaluation/.env
 ELEVATION.md
+DEFACEMENT_GUIDE.md
+AI_IMPLEMENTATION.md
+AI_SECURITY_DOCUMENTATION.md
+AI_SECURITY_RULES_REFERENCE.md
+CI_CD_DEPLOYMENT.md
+WARDS_AI_Rules.docx
+(old) COMPLETE_SETUP_GUIDE.md
+(old) PAYMENT_TESTING_GUIDE.md
+(old) SETUP_AND_RUN.md
+(old) setup_md.md
+(old) SETUP_PAYMONGO.md
+XSS_SECURITY_CHECKLIST.md
