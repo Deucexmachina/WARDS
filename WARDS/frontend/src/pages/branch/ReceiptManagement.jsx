@@ -486,6 +486,8 @@ const ReceiptManagement = () => {
   const [releaseUploadDrafts, setReleaseUploadDrafts] = useState({});
   const [fieldErrors, setFieldErrors] = useState({});
   const [highlightedRecordId, setHighlightedRecordId] = useState(null);
+  const [deleteRecordTarget, setDeleteRecordTarget] = useState(null);
+  const [deletingRecord, setDeletingRecord] = useState(false);
   const { registerDirty } = useUnsavedChanges();
   const navSaveRef = useRef(() => {});
 
@@ -1426,6 +1428,53 @@ const ReceiptManagement = () => {
     }
   };
 
+  const [deleteHistoryTarget, setDeleteHistoryTarget] = useState(null);
+  const [deletingHistory, setDeletingHistory] = useState(false);
+
+  const handleDeleteHistoryClick = (request) => {
+    setDeleteHistoryTarget(request);
+  };
+
+  const handleDeleteHistoryConfirm = async () => {
+    if (!deleteHistoryTarget) return;
+    const target = deleteHistoryTarget;
+    setDeleteHistoryTarget(null);
+    setDeletingHistory(true);
+    setError('');
+    setSuccessMessage('');
+    try {
+      await receiptAPI.deleteRequestHistory(target.requestId);
+      setSuccessMessage(`Completed request ${target.requestId} has been deleted.`);
+      await refreshData({ emitReceiptEvent: true });
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to delete completed request.');
+    } finally {
+      setDeletingHistory(false);
+    }
+  };
+
+  const handleDeleteRecordClick = (record) => {
+    setDeleteRecordTarget(record);
+  };
+
+  const handleDeleteRecordConfirm = async () => {
+    if (!deleteRecordTarget) return;
+    const recordToDelete = deleteRecordTarget;
+    setDeleteRecordTarget(null);
+    setDeletingRecord(true);
+    setError('');
+    setSuccessMessage('');
+    try {
+      await receiptAPI.deleteRecord(recordToDelete.id);
+      setSuccessMessage(`Receipt record for "${recordToDelete.taxpayer_name || 'Unknown'}" has been deleted.`);
+      await refreshData({ emitReceiptEvent: true });
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to delete receipt record.');
+    } finally {
+      setDeletingRecord(false);
+    }
+  };
+
   const handleScrollToMatchedRecord = (matchedReceipt) => {
     if (!matchedReceipt) return;
     const recordId = matchedReceipt.id;
@@ -1672,6 +1721,12 @@ const ReceiptManagement = () => {
                           >
                             Print
                           </button>
+                          <button
+                            onClick={() => handleDeleteRecordClick(record)}
+                            className="rounded-md bg-rose-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-rose-700"
+                          >
+                            Delete
+                          </button>
                         </div>
                       </td>
                     ) : null}
@@ -1772,6 +1827,12 @@ const renderMarketVerifiedRecordSection = (rows) => (
                                 className="rounded-md bg-purple-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-purple-700"
                               >
                                 Print
+                              </button>
+                              <button
+                                onClick={() => handleDeleteRecordClick(record)}
+                                className="rounded-md bg-rose-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-rose-700"
+                              >
+                                Delete
                               </button>
                             </div>
                           </td>
@@ -1874,6 +1935,12 @@ const renderMarketVerifiedRecordSection = (rows) => (
                           className="rounded-md bg-blue-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-blue-700"
                         >
                           View
+                        </button>
+                        <button
+                          onClick={() => handleDeleteHistoryClick(request)}
+                          className="rounded-md bg-rose-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-rose-700"
+                        >
+                          Delete
                         </button>
                       </div>
                     </td>
@@ -2371,6 +2438,40 @@ const handleCancelScan = () => {
       })}
 
       {renderMarketVerifiedRecordSection(marketRecords)}
+
+      <DeleteConfirmationModal
+        open={Boolean(deleteRecordTarget)}
+        title="Delete this receipt record?"
+        message="This will permanently remove the verified receipt record. This action cannot be undone."
+        details={deleteRecordTarget ? [
+          { label: 'Taxpayer', value: deleteRecordTarget.taxpayer_name || 'N/A' },
+          { label: 'Reference', value: deleteRecordTarget.ref_number || deleteRecordTarget.receipt_number || 'N/A' },
+          { label: 'Amount', value: deleteRecordTarget.amount != null ? `P${Number(deleteRecordTarget.amount).toFixed(2)}` : 'N/A' },
+        ] : []}
+        confirmLabel="Delete Record"
+        loadingLabel="Deleting..."
+        cancelLabel="Cancel"
+        onCancel={() => setDeleteRecordTarget(null)}
+        onConfirm={handleDeleteRecordConfirm}
+        isLoading={deletingRecord}
+      />
+
+      <DeleteConfirmationModal
+        open={Boolean(deleteHistoryTarget)}
+        title="Delete this completed request?"
+        message="This will permanently remove the completed request from the history. This action cannot be undone."
+        details={deleteHistoryTarget ? [
+          { label: 'Request ID', value: deleteHistoryTarget.requestId },
+          { label: 'Taxpayer', value: deleteHistoryTarget.taxpayerName || 'N/A' },
+          { label: 'Status', value: deleteHistoryTarget.status || 'Done' },
+        ] : []}
+        confirmLabel="Delete Request"
+        loadingLabel="Deleting..."
+        cancelLabel="Cancel"
+        onCancel={() => setDeleteHistoryTarget(null)}
+        onConfirm={handleDeleteHistoryConfirm}
+        isLoading={deletingHistory}
+      />
 
       <DeleteConfirmationModal
         open={Boolean(releaseTarget)}
