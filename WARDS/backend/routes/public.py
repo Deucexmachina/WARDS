@@ -1075,6 +1075,85 @@ async def get_my_active_ticket(
     }
 
 
+@router.delete("/queue/my-ticket/{queue_id}")
+@limiter.limit("5/minute")
+async def cancel_specific_ticket(
+    queue_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_citizen: CitizenUser = Depends(get_optional_current_user),
+):
+    """Cancel a specific queue ticket by ID."""
+    if not current_citizen:
+        raise HTTPException(status_code=401, detail="Authentication required to cancel your ticket")
+
+    queue = db.query(Queue).filter(Queue.id == queue_id).first()
+    if not queue:
+        raise HTTPException(status_code=404, detail="Queue ticket not found")
+
+    if queue.citizen_user_id != current_citizen.id:
+        raise HTTPException(status_code=403, detail="You can only cancel your own tickets")
+
+    current_status = queue_value(queue, "status")
+    if current_status == "Serving":
+        raise HTTPException(status_code=409, detail="You are currently being served. Please ask the staff to complete or skip your queue.")
+
+    # If this is a parent queue, also cancel all child queues
+    child_queues = db.query(Queue).filter(Queue.parent_queue_id == queue.id).all()
+    for child in child_queues:
+        child.status = "Cancelled"
+        apply_queue_security(child)
+        
+        # Create history record for child
+        child_history = QueueHistory(queue_number=queue_value(child, "queue_number"))
+        child_history.citizen_user_id = child.citizen_user_id
+        child_history.branch_id = child.branch_id
+        child_history.service_type = queue_value(child, "service_type")
+        child_history.taxpayer_name = queue_value(child, "taxpayer_name")
+        child_history.contact_number = queue_value(child, "contact_number")
+        child_history.email = queue_value(child, "email")
+        child_history.final_status = "Cancelled"
+        child_history.queue_type = queue_value(child, "queue_type") or "immediate"
+        child_history.appointment_time = child.appointment_time
+        child_history.estimated_wait_time = child.estimated_wait_time
+        child_history.recommended_arrival = child.recommended_arrival
+        child_history.created_at = child.created_at
+        child_history.served_at = child.served_at
+        child_history.completed_at = datetime.utcnow()
+        child_history.completed_by = "Citizen (Parent Cancelled)"
+        child_history.archived_at = datetime.utcnow()
+        db.add(child_history)
+        
+        db.delete(child)
+
+    queue.status = "Cancelled"
+    apply_queue_security(queue)
+
+    history_record = QueueHistory(queue_number=queue_value(queue, "queue_number"))
+    history_record.citizen_user_id = queue.citizen_user_id
+    history_record.branch_id = queue.branch_id
+    history_record.service_type = queue_value(queue, "service_type")
+    history_record.taxpayer_name = queue_value(queue, "taxpayer_name")
+    history_record.contact_number = queue_value(queue, "contact_number")
+    history_record.email = queue_value(queue, "email")
+    history_record.final_status = "Cancelled"
+    history_record.queue_type = queue_value(queue, "queue_type") or "immediate"
+    history_record.appointment_time = queue.appointment_time
+    history_record.estimated_wait_time = queue.estimated_wait_time
+    history_record.recommended_arrival = queue.recommended_arrival
+    history_record.created_at = queue.created_at
+    history_record.served_at = queue.served_at
+    history_record.completed_at = datetime.utcnow()
+    history_record.completed_by = "Citizen"
+    history_record.archived_at = datetime.utcnow()
+    db.add(history_record)
+
+    db.delete(queue)
+    db.commit()
+
+    return {"message": "Your queue ticket has been cancelled successfully."}
+
+
 @router.delete("/queue/my-ticket")
 @limiter.limit("5/minute")
 async def cancel_my_active_ticket(

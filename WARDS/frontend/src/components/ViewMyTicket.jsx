@@ -12,6 +12,8 @@ const ViewMyTicket = ({ onClose }) => {
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState(null);
+  const [cancellingTicketId, setCancellingTicketId] = useState(null);
+  const [ticketToCancel, setTicketToCancel] = useState(null);
   const [showAddTransaction, setShowAddTransaction] = useState(false);
   const [selectedService, setSelectedService] = useState('');
   const [addingTransaction, setAddingTransaction] = useState(false);
@@ -98,18 +100,34 @@ const ViewMyTicket = ({ onClose }) => {
   };
 
   const handleCancelTicket = async () => {
+    if (!ticketToCancel) return;
     setCancelling(true);
     setCancelError(null);
     try {
-      await queueAPI.cancelMyTicket();
-      setTicket(null);
+      if (ticketToCancel.is_parent && (ticket.tickets || []).length > 1) {
+        // Cancel all tickets if cancelling parent
+        await queueAPI.cancelMyTicket();
+      } else {
+        // Cancel specific ticket
+        await queueAPI.cancelSpecificTicket(ticketToCancel.id);
+      }
       setShowCancelConfirm(false);
+      setTicketToCancel(null);
+      // Refresh ticket to show updated status
+      await fetchTicket();
     } catch (err) {
       const detail = err.response?.data?.detail || modalText.cancelError;
       setCancelError(detail);
     } finally {
       setCancelling(false);
     }
+  };
+
+  const handleOpenCancelConfirm = (t) => {
+    if ((t.status || '').toLowerCase() === 'serving') return;
+    setTicketToCancel(t);
+    setCancelError(null);
+    setShowCancelConfirm(true);
   };
 
   const handleAddTransaction = async () => {
@@ -303,15 +321,27 @@ const ViewMyTicket = ({ onClose }) => {
             {ticket.tickets && ticket.tickets.length > 0 ? (
               ticket.tickets.map((t) => (
                 <div key={t.id} className="rounded-lg border-2 border-primary bg-gradient-to-br from-primary/5 to-secondary/5 p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Queue Number</p>
                       <p className="text-2xl font-bold text-primary">{t.queue_number}</p>
                       <p className="mt-1 text-sm font-semibold text-slate-800">{t.service_type}</p>
                     </div>
-                    <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm font-semibold ${getStatusColor(t.status)}`}>
-                      <span className="h-2 w-2 rounded-full bg-current animate-pulse"></span>
-                      {t.status}
+                    <div className="flex items-center gap-2">
+                      <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm font-semibold ${getStatusColor(t.status)}`}>
+                        <span className="h-2 w-2 rounded-full bg-current animate-pulse"></span>
+                        {t.status}
+                      </div>
+                      <button
+                        onClick={() => handleOpenCancelConfirm(t)}
+                        disabled={(t.status || '').toLowerCase() === 'serving'}
+                        className="rounded-lg border border-red-300 bg-white p-2 text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 transition"
+                        title="Cancel this ticket"
+                      >
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                      </button>
                     </div>
                   </div>
                   <div className="mt-3 grid grid-cols-2 gap-3">
@@ -369,13 +399,6 @@ const ViewMyTicket = ({ onClose }) => {
         {/* Footer Actions */}
         <div className="border-t border-slate-200 bg-slate-50 px-6 py-4 print:hidden">
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <button
-              onClick={() => { setShowCancelConfirm(true); setCancelError(null); }}
-              disabled={cancelling || (ticket.tickets || []).some(t => (t.status || '').toLowerCase() === 'serving')}
-              className="rounded-lg border border-red-300 bg-white px-5 py-2.5 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {modalText.cancelTicket}
-            </button>
             <button
               onClick={handleOpenAddTransaction}
               disabled={(ticket.tickets || []).some(t => (t.status || '').toLowerCase() === 'serving' || (t.status || '').toLowerCase() === 'called')}
