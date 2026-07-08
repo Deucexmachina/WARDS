@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import api from '../services/api';
+import api, { queueAPI } from '../services/api';
 import { formatUtc8DateTime } from '../utils/dateTime';
 import { printQueueTicket } from '../utils/queueTicketPrint';
 import { usePublicLanguage } from '../utils/publicLanguage';
@@ -9,6 +9,9 @@ const ViewMyTicket = ({ onClose }) => {
   const [ticket, setTicket] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState(null);
 
   const modalText = language === 'tl'
     ? {
@@ -16,12 +19,26 @@ const ViewMyTicket = ({ onClose }) => {
         emptyTitle: 'Wala Kang Aktibong Queue Ticket',
         emptyMessage: 'Wala kang aktibong queue ticket sa kasalukuyan.',
         close: 'Isara',
+        cancelTicket: 'Kanselahin ang Ticket',
+        cancelConfirmTitle: 'Kanselahin ang Queue Ticket?',
+        cancelConfirmMessage: 'Sigurado ka bang gusto mong kanselahin ang iyong queue ticket? Hindi na ito mababawi.',
+        cancelConfirmBtn: 'Oo, Kanselahin ang Ticket',
+        cancelSuccess: 'Matagumpay na nakansela ang iyong queue ticket.',
+        cancelError: 'Nabigo ang pagkansela ng iyong ticket. Pakisubukang muli.',
+        servingWarning: 'Kasalukuyan kang nagseserbisyo at hindi maaaring kanselahin ang iyong ticket.',
       }
     : {
         title: 'My Queue Ticket',
         emptyTitle: 'No Active Queue Ticket',
         emptyMessage: "You don't have any active queue ticket at the moment.",
         close: 'Close',
+        cancelTicket: 'Cancel Ticket',
+        cancelConfirmTitle: 'Cancel Queue Ticket?',
+        cancelConfirmMessage: 'Are you sure you want to cancel your queue ticket? This action cannot be undone.',
+        cancelConfirmBtn: 'Yes, Cancel Ticket',
+        cancelSuccess: 'Your queue ticket has been cancelled successfully.',
+        cancelError: 'Failed to cancel your ticket. Please try again.',
+        servingWarning: 'You are currently being served and cannot cancel your ticket.',
       };
 
   useEffect(() => {
@@ -57,6 +74,21 @@ const ViewMyTicket = ({ onClose }) => {
   const handlePrint = () => {
     printQueueTicket();
   };
+
+  const handleCancelTicket = async () => {
+    setCancelling(true);
+    setCancelError(null);
+    try {
+      await queueAPI.cancelMyTicket();
+      setTicket(null);
+      setShowCancelConfirm(false);
+    } catch (err) {
+      const detail = err.response?.data?.detail || modalText.cancelError;
+      setCancelError(detail);
+    } finally {
+      setCancelling(false);
+    }
+   };
 
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
@@ -278,6 +310,13 @@ const ViewMyTicket = ({ onClose }) => {
         <div className="border-t border-slate-200 bg-slate-50 px-6 py-4 print:hidden">
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <button
+              onClick={() => { setShowCancelConfirm(true); setCancelError(null); }}
+              disabled={cancelling || (ticket.status || '').toLowerCase() === 'serving'}
+              className="rounded-lg border border-red-300 bg-white px-5 py-2.5 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {modalText.cancelTicket}
+            </button>
+            <button
               onClick={onClose}
               className="rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
             >
@@ -295,6 +334,39 @@ const ViewMyTicket = ({ onClose }) => {
           </div>
         </div>
       </div>
+
+      {/* Cancel Confirmation Modal */}
+      {showCancelConfirm && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
+            <div className="border-b border-slate-200 px-6 py-4">
+              <h3 className="text-lg font-bold text-red-600">{modalText.cancelConfirmTitle}</h3>
+            </div>
+            <div className="px-6 py-6">
+              <p className="text-sm text-slate-600">{modalText.cancelConfirmMessage}</p>
+              {cancelError && (
+                <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">{cancelError}</p>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-4">
+              <button
+                onClick={() => { setShowCancelConfirm(false); setCancelError(null); }}
+                disabled={cancelling}
+                className="rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+              >
+                {modalText.close}
+              </button>
+              <button
+                onClick={handleCancelTicket}
+                disabled={cancelling}
+                className="rounded-lg bg-red-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {cancelling ? '...' : modalText.cancelConfirmBtn}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

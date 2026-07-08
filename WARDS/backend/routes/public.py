@@ -1121,6 +1121,62 @@ async def get_my_active_ticket(
         }
     }
 
+@router.delete("/queue/my-ticket")
+@limiter.limit("5/minute")
+async def cancel_my_active_ticket(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_citizen: CitizenUser = Depends(get_optional_current_user),
+):
+    """Cancel the authenticated citizen's active queue ticket."""
+    if not current_citizen:
+        raise HTTPException(status_code=401, detail="Authentication required to cancel your ticket")
+
+    active_queue = (
+        db.query(Queue)
+        .filter(
+            Queue.citizen_user_id == current_citizen.id,
+            hash_aware_any(Queue, "status", ACTIVE_PUBLIC_QUEUE_STATUSES),
+        )
+        .order_by(Queue.created_at.desc())
+        .first()
+    )
+
+    if not active_queue:
+        raise HTTPException(status_code=404, detail="You do not have an active queue ticket to cancel.")
+
+    current_status = queue_value(active_queue, "status")
+    if current_status == "Serving":
+        raise HTTPException(status_code=409, detail="You are currently being served. Please ask the staff to complete or skip your queue.")
+
+    active_queue.status = "Cancelled"
+    apply_queue_security(active_queue)
+
+    history_record = QueueHistory(queue_number=queue_value(active_queue, "queue_number"))
+    history_record.citizen_user_id = active_queue.citizen_user_id
+    history_record.branch_id = active_queue.branch_id
+    history_record.service_type = queue_value(active_queue, "service_type")
+    history_record.taxpayer_name = queue_value(active_queue, "taxpayer_name")
+    history_record.contact_number = queue_value(active_queue, "contact_number")
+    history_record.email = queue_value(active_queue, "email")
+    history_record.final_status = "Cancelled"
+    history_record.queue_type = queue_value(active_queue, "queue_type") or "immediate"
+    history_record.appointment_time = active_queue.appointment_time
+    history_record.estimated_wait_time = active_queue.estimated_wait_time
+    history_record.recommended_arrival = active_queue.recommended_arrival
+    history_record.created_at = active_queue.created_at
+    history_record.served_at = active_queue.served_at
+    history_record.completed_at = datetime.utcnow()
+    history_record.completed_by = "Citizen"
+    history_record.archived_at = datetime.utcnow()
+    db.add(history_record)
+
+    db.delete(active_queue)
+    db.commit()
+
+    return {"message": "Your queue ticket has been cancelled successfully."}
+
+
 @router.get("/queue/history")
 @limiter.limit("30/minute")
 async def get_my_queue_history(
