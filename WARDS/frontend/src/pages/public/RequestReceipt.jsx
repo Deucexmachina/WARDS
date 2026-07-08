@@ -104,6 +104,7 @@ const RequestReceipt = () => {
   const [error, setError] = useState('');
   const [nameError, setNameError] = useState('');
   const [emailError, setEmailError] = useState('');
+  const [refNumberError, setRefNumberError] = useState('');
   const [systemStatus, setSystemStatus] = useState(null);
 
   const text = language === 'tl'
@@ -313,6 +314,7 @@ const RequestReceipt = () => {
 
   const todayDate = useMemo(() => getTodayDateValue(), []);
   const isStandaloneNameLocked = Boolean(authenticatedProfileName);
+  const isStandaloneEmailLocked = Boolean(storedUser?.email);
   const namePattern = useMemo(() => /^[A-Za-z.\-' ]+$/, []);
 
   const [formData, setFormData] = useState({
@@ -329,6 +331,16 @@ const RequestReceipt = () => {
     () => branches.find((branch) => String(branch.id) === String(formData.branchId)) || null,
     [branches, formData.branchId]
   );
+
+  const getRefNumberLabel = useMemo(() => {
+    const raw = (formData.taxType || '').trim();
+    const clean = raw.replace(/ Window$/i, '').trim().toUpperCase();
+    const display = RECEIPT_TAX_DISPLAY_NAMES[clean] || RECEIPT_TAX_DISPLAY_NAMES[raw.toUpperCase()] || clean;
+    if (display === 'REAL PROPERTY TAX' || clean === 'RPT') return 'RPT Number';
+    if (display === 'BUSINESS TAX' || clean === 'BT' || clean === 'BUSINESS') return "Mayor's Permit";
+    if (display === 'MARKET' || clean === 'MARKET') return 'Certificate No.';
+    return 'Reference Number Taxpayer';
+  }, [formData.taxType]);
 
   useEffect(() => {
     setFormData((current) => ({
@@ -470,6 +482,10 @@ const RequestReceipt = () => {
       setEmailError(localizeEmailError(getEmailValidationMessage(value)));
     }
 
+    if (name === 'refNumber') {
+      setRefNumberError('');
+    }
+
     setError('');
   };
 
@@ -479,10 +495,12 @@ const RequestReceipt = () => {
       return;
     }
 
-    if (!formData.taxpayerName || !formData.taxType || !formData.branchId || !formData.txnDate || !formData.email || !formData.requestReason) {
+    if (!formData.taxpayerName || !formData.taxType || !formData.branchId || !formData.txnDate || !formData.email || !formData.requestReason || !formData.refNumber.trim()) {
+      if (!formData.refNumber.trim()) setRefNumberError(language === 'tl' ? 'Kinakailangan ang reference number.' : 'Reference number is required.');
       setError(text.pleaseFillRequired);
       return;
     }
+    setRefNumberError('');
 
     if (formData.requestReason === 'Other' && !formData.requestReasonOther.trim()) {
       setError(text.provideCustomReason);
@@ -761,9 +779,10 @@ const RequestReceipt = () => {
                           name="email"
                           value={formData.email}
                           onChange={handleInputChange}
+                          readOnly={isStandaloneEmailLocked}
                           disabled={Boolean(systemStatus && (!systemStatus.receiptRequestEnabled || systemStatus.maintenanceMode))}
                           placeholder={text.emailPlaceholder}
-                          className={`w-full rounded-2xl border px-4 py-3 ${emailError ? 'border-rose-400 bg-rose-50' : 'border-slate-300 bg-white'} focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-blue-100`}
+                          className={isStandaloneEmailLocked ? lockedFieldClasses : `w-full rounded-2xl border px-4 py-3 ${emailError ? 'border-rose-400 bg-rose-50' : 'border-slate-300 bg-white'} focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-blue-100`}
                         />
                         {emailError ? <p className="mt-2 text-sm font-medium text-rose-600">{emailError}</p> : null}
                       </div>
@@ -831,7 +850,7 @@ const RequestReceipt = () => {
 
                       <div className="md:col-span-2">
                         <label className="mb-2 block text-sm font-semibold text-slate-700">
-                          {text.referenceNumber} <span className="text-slate-400">{text.optional}</span>
+                          {getRefNumberLabel} <span className="text-rose-500">*</span>
                         </label>
                         <input
                           type="text"
@@ -839,9 +858,10 @@ const RequestReceipt = () => {
                           value={formData.refNumber}
                           onChange={handleInputChange}
                           disabled={Boolean(systemStatus && (!systemStatus.receiptRequestEnabled || systemStatus.maintenanceMode))}
-                          placeholder={text.referencePlaceholder}
-                          className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-blue-100"
+                          placeholder={getRefNumberLabel}
+                          className={`w-full rounded-2xl border px-4 py-3 ${refNumberError ? 'border-rose-400 bg-rose-50' : 'border-slate-300 bg-white'} focus:border-[#0f2f5f] focus:outline-none focus:ring-2 focus:ring-blue-100`}
                         />
+                        {refNumberError ? <p className="mt-2 text-sm font-medium text-rose-600">{refNumberError}</p> : null}
                       </div>
 
                     </div>
