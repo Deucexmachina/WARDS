@@ -77,7 +77,7 @@ const ViewMyTicket = ({ onClose }) => {
       setError(null);
       const response = await api.get('/public/queue/my-ticket', { suppressGlobalErrorModal: true });
       if (response.data.has_active_ticket) {
-        setTicket(response.data.ticket);
+        setTicket(response.data);
       } else {
         setTicket(null);
       }
