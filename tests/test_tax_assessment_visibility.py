@@ -46,6 +46,8 @@ def _make_citizen(db, email="jane@example.com"):
         full_name="Jane Doe",
         email=email,
         tin="123-456-789-000",
+        contact_number="09171234567",
+        address="Quezon City",
         status="Active",
     )
     db.add(citizen)
@@ -103,6 +105,36 @@ def _make_assessment(db, citizen, **kwargs):
     db.add(record)
     db.flush()
     return record
+
+
+def test_public_account_profile_snapshot_decrypts_secured_citizen_values():
+    """Account management must receive real values even after DB fields are redacted."""
+    temp_dir, engine, db, original_database_url = make_session()
+    try:
+        citizen = _make_citizen(db)
+        tax_routes.apply_citizen_user_security(citizen)
+        db.commit()
+        db.refresh(citizen)
+
+        assert citizen.email != "jane@example.com"
+        assert citizen.email_hash
+        assert citizen.email_enc
+
+        snapshot = tax_routes.get_citizen_profile_snapshot(citizen)
+
+        assert snapshot == {
+            "full_name": "Jane Doe",
+            "email": "jane@example.com",
+            "mobile_number": "09171234567",
+            "address": "Quezon City",
+            "taxpayer_type": "Individual",
+            "tin": "123-456-789-000",
+        }
+    finally:
+        database_models.SQLALCHEMY_DATABASE_URL = original_database_url
+        db.close()
+        engine.dispose()
+        temp_dir.cleanup()
 
 
 def test_filter_unsettled_returns_assessment_when_no_payments():

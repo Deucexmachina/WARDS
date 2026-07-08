@@ -7,6 +7,7 @@ import { getStoredPublicUser, setStoredPublicUser } from '../../utils/publicSess
 import { usePublicLanguage } from '../../utils/publicLanguage';
 import {
   getEmailValidationMessage,
+  normalizePhilippineContactDigits,
   validateStrongPassword,
   validateCitizenFullName,
   normalizeCitizenFullName,
