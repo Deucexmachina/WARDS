@@ -369,6 +369,16 @@ class UnifiedLoginRequest(BaseModel):
         reject_dangerous_characters(v)
         return v
 
+    @field_validator("totp_code")
+    @classmethod
+    def _validate_totp_format(cls, v):
+        if v is not None and v.strip():
+            # Only allow alphanumeric characters and hyphens (for backup codes)
+            sanitized = "".join(c for c in v if c.isalnum() or c == "-")
+            if sanitized != v:
+                raise ValueError("TOTP code can only contain letters, numbers, and hyphens")
+        return v
+
 
 class UnifiedSetupMFARequest(BaseModel):
     identifier: str
@@ -392,6 +402,16 @@ class UnifiedVerifyMFASetup(BaseModel):
     @classmethod
     def _reject_dangerous(cls, v):
         reject_dangerous_characters(v)
+        return v
+
+    @field_validator("totp_code")
+    @classmethod
+    def _validate_totp_format(cls, v):
+        if v is not None and v.strip():
+            # Only allow alphanumeric characters and hyphens (for backup codes)
+            sanitized = "".join(c for c in v if c.isalnum() or c == "-")
+            if sanitized != v:
+                raise ValueError("TOTP code can only contain letters, numbers, and hyphens")
         return v
 
 
@@ -1957,6 +1977,16 @@ async def unified_verify_mfa_setup(
 class UnifiedVerifyMFASetupAuthenticated(BaseModel):
     totp_code: str
 
+    @field_validator("totp_code")
+    @classmethod
+    def _validate_totp_format(cls, v):
+        if v is not None and v.strip():
+            # Only allow alphanumeric characters and hyphens (for backup codes)
+            sanitized = "".join(c for c in v if c.isalnum() or c == "-")
+            if sanitized != v:
+                raise ValueError("TOTP code can only contain letters, numbers, and hyphens")
+        return v
+
 
 @router.post("/verify-mfa-setup-authenticated")
 @limiter.limit("5/minute")
@@ -3256,6 +3286,16 @@ class WindowStaffResetMFARequest(BaseModel):
 
 class WindowStaffVerifyMFARequest(BaseModel):
     totp_code: str
+
+    @field_validator("totp_code")
+    @classmethod
+    def _validate_totp_format(cls, v):
+        if v is not None and v.strip():
+            # Only allow alphanumeric characters and hyphens (for backup codes)
+            sanitized = "".join(c for c in v if c.isalnum() or c == "-")
+            if sanitized != v:
+                raise ValueError("TOTP code can only contain letters, numbers, and hyphens")
+        return v
 
 
 @router.put("/branch/staff/password")
