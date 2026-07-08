@@ -1470,11 +1470,12 @@ class Queue(Base):
     __tablename__ = "queues"
     
     id = Column(Integer, primary_key=True, index=True)
-    queue_number = Column(String, unique=True, index=True)
+    queue_number = Column(String, index=True)
     queue_number_hash = Column(String, nullable=True, index=True)
     queue_number_enc = Column(Text, nullable=True)
     citizen_user_id = Column(Integer, ForeignKey("citizen_users.id"), nullable=True, index=True)
     branch_id = Column(Integer, ForeignKey("branches.id"))
+    parent_queue_id = Column(Integer, ForeignKey("queues.id"), nullable=True, index=True)
     service_type = Column(String)
     service_type_hash = Column(String, nullable=True)
     service_type_enc = Column(Text, nullable=True)

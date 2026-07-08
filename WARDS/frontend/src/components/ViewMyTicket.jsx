@@ -12,6 +12,11 @@ const ViewMyTicket = ({ onClose }) => {
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState(null);
+  const [showAddTransaction, setShowAddTransaction] = useState(false);
+  const [selectedService, setSelectedService] = useState('');
+  const [addingTransaction, setAddingTransaction] = useState(false);
+  const [addTransactionError, setAddTransactionError] = useState(null);
+  const [availableServices, setAvailableServices] = useState([]);
 
   const modalText = language === 'tl'
     ? {
@@ -26,6 +31,13 @@ const ViewMyTicket = ({ onClose }) => {
         cancelSuccess: 'Matagumpay na nakansela ang iyong queue ticket.',
         cancelError: 'Nabigo ang pagkansela ng iyong ticket. Pakisubukang muli.',
         servingWarning: 'Kasalukuyan kang nagseserbisyo at hindi maaaring kanselahin ang iyong ticket.',
+        addTransaction: 'Magdagdag ng Transaksyon',
+        addTransactionTitle: 'Magdagdag ng Transaksyon',
+        addTransactionMessage: 'Pumili ng serbisyo na nais mong idagdag sa iyong queue.',
+        selectService: 'Pumili ng Serbisyo',
+        addTransactionBtn: 'Idagdag',
+        addTransactionSuccess: 'Matagumpay na naidagdag ang transaksyon.',
+        addTransactionError: 'Nabigo ang pagdagdag ng transaksyon. Pakisubukang muli.',
       }
     : {
         title: 'My Queue Ticket',
@@ -39,6 +51,13 @@ const ViewMyTicket = ({ onClose }) => {
         cancelSuccess: 'Your queue ticket has been cancelled successfully.',
         cancelError: 'Failed to cancel your ticket. Please try again.',
         servingWarning: 'You are currently being served and cannot cancel your ticket.',
+        addTransaction: 'Add Transaction',
+        addTransactionTitle: 'Add Transaction',
+        addTransactionMessage: 'Select a service you want to add to your queue.',
+        selectService: 'Select Service',
+        addTransactionBtn: 'Add',
+        addTransactionSuccess: 'Transaction added successfully.',
+        addTransactionError: 'Failed to add transaction. Please try again.',
       };
 
   useEffect(() => {
@@ -88,7 +107,30 @@ const ViewMyTicket = ({ onClose }) => {
     } finally {
       setCancelling(false);
     }
-   };
+  };
+
+  const handleAddTransaction = async () => {
+    if (!selectedService) {
+      setAddTransactionError(modalText.selectService);
+      return;
+    }
+    setAddingTransaction(true);
+    setAddTransactionError(null);
+    try {
+      const response = await queueAPI.addTransaction(selectedService);
+      setShowAddTransaction(false);
+      setSelectedService('');
+      // Refresh ticket to show updated status
+      await fetchTicket();
+      // Show success message (could use a toast or alert)
+      alert(modalText.addTransactionSuccess);
+    } catch (err) {
+      const detail = err.response?.data?.detail || modalText.addTransactionError;
+      setAddTransactionError(detail);
+    } finally {
+      setAddingTransaction(false);
+    }
+  };
 
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
@@ -317,6 +359,13 @@ const ViewMyTicket = ({ onClose }) => {
               {modalText.cancelTicket}
             </button>
             <button
+              onClick={() => { setShowAddTransaction(true); setSelectedService(''); setAddTransactionError(null); }}
+              disabled={(ticket.status || '').toLowerCase() === 'serving' || (ticket.status || '').toLowerCase() === 'called'}
+              className="rounded-lg border border-primary bg-white px-5 py-2.5 text-sm font-semibold text-primary transition hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {modalText.addTransaction}
+            </button>
+            <button
               onClick={onClose}
               className="rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
             >
@@ -362,6 +411,54 @@ const ViewMyTicket = ({ onClose }) => {
                 className="rounded-lg bg-red-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {cancelling ? '...' : modalText.cancelConfirmBtn}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Transaction Modal */}
+      {showAddTransaction && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
+            <div className="border-b border-slate-200 px-6 py-4">
+              <h3 className="text-lg font-bold text-primary">{modalText.addTransactionTitle}</h3>
+            </div>
+            <div className="px-6 py-6">
+              <p className="text-sm text-slate-600">{modalText.addTransactionMessage}</p>
+              <label className="mt-4 block">
+                <span className="mb-2 block text-sm font-semibold text-slate-700">{modalText.selectService}</span>
+                <select
+                  value={selectedService}
+                  onChange={(e) => { setSelectedService(e.target.value); setAddTransactionError(null); }}
+                  className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                >
+                  <option value="">-- Select a service --</option>
+                  <option value="RPT">RPT (Real Property Tax)</option>
+                  <option value="BT">BT (Business Tax)</option>
+                  <option value="Payment">Payment</option>
+                  <option value="Certificate">Certificate</option>
+                  <option value="Assessment">Assessment</option>
+                </select>
+              </label>
+              {addTransactionError && (
+                <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">{addTransactionError}</p>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-4">
+              <button
+                onClick={() => { setShowAddTransaction(false); setSelectedService(''); setAddTransactionError(null); }}
+                disabled={addingTransaction}
+                className="rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+              >
+                {modalText.close}
+              </button>
+              <button
+                onClick={handleAddTransaction}
+                disabled={addingTransaction || !selectedService}
+                className="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {addingTransaction ? '...' : modalText.addTransactionBtn}
               </button>
             </div>
           </div>

@@ -1177,6 +1177,101 @@ async def cancel_my_active_ticket(
     return {"message": "Your queue ticket has been cancelled successfully."}
 
 
+class AddTransactionRequest(BaseModel):
+    service_type: str
+
+
+@router.post("/queue/add-transaction")
+@limiter.limit("5/minute")
+async def add_transaction_to_queue(
+    request: Request,
+    payload: AddTransactionRequest,
+    db: Session = Depends(get_db),
+    current_citizen: CitizenUser = Depends(get_optional_current_user),
+):
+    """Add a transaction to the citizen's existing active queue."""
+    if not current_citizen:
+        raise HTTPException(status_code=401, detail="Authentication required to add transaction")
+
+    # Find the parent queue (the one with parent_queue_id IS NULL)
+    parent_queue = (
+        db.query(Queue)
+        .filter(
+            Queue.citizen_user_id == current_citizen.id,
+            Queue.parent_queue_id.is_(None),
+            hash_aware_any(Queue, "status", ACTIVE_PUBLIC_QUEUE_STATUSES)
+        )
+        .order_by(Queue.created_at.desc())
+        .first()
+    )
+
+    if not parent_queue:
+        raise HTTPException(status_code=404, detail="You do not have an active queue ticket.")
+
+    current_status = queue_value(parent_queue, "status")
+    if current_status in {"Serving", "Called"}:
+        raise HTTPException(status_code=409, detail="Cannot add transaction while being served.")
+
+    # Check if this service type already exists for this queue
+    existing_child = (
+        db.query(Queue)
+        .filter(
+            Queue.parent_queue_id == parent_queue.id,
+            hash_aware_match(Queue, "service_type", payload.service_type)
+        )
+        .first()
+    )
+    if existing_child:
+        raise HTTPException(status_code=409, detail=f"Transaction '{payload.service_type}' already added to this queue.")
+
+    # Get the branch for queue snapshot
+    branch = db.query(Branch).filter(Branch.id == parent_queue.branch_id).first()
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found.")
+
+    # Use the same queue number as the parent
+    parent_queue_number = queue_value(parent_queue, "queue_number")
+
+    # Get queue snapshot for the new service to calculate position
+    queue_snapshot = get_window_scoped_queue_snapshot(db, parent_queue.branch_id, payload.service_type)
+    waiting = queue_snapshot["waiting_count"]
+    serving = queue_snapshot["serving_count"]
+
+    # Calculate estimated wait time
+    queue_time_slot = get_transaction_duration_minutes(db, branch.id)
+    estimated_wait = (waiting + serving) * queue_time_slot
+
+    # Create child queue entry with the SAME queue number as parent
+    child_queue = Queue(
+        queue_number=parent_queue_number,
+        citizen_user_id=current_citizen.id,
+        branch_id=parent_queue.branch_id,
+        parent_queue_id=parent_queue.id,
+        service_type=payload.service_type,
+        taxpayer_name=queue_value(parent_queue, "taxpayer_name"),
+        contact_number=queue_value(parent_queue, "contact_number"),
+        email=queue_value(parent_queue, "email"),
+        status="Waiting",
+        queue_type=queue_value(parent_queue, "queue_type") or "immediate",
+        estimated_wait_time=estimated_wait,
+        recommended_arrival=parent_queue.recommended_arrival,
+        appointment_time=parent_queue.appointment_time,
+    )
+    apply_queue_security(child_queue)
+    db.add(child_queue)
+    db.commit()
+    db.refresh(child_queue)
+
+    return {
+        "message": "Transaction added successfully",
+        "queue_number": parent_queue_number,
+        "service_type": payload.service_type,
+        "position": waiting + 1,
+        "estimated_wait_time": estimated_wait,
+    }
+
+
+
 @router.get("/queue/history")
 @limiter.limit("30/minute")
 async def get_my_queue_history(

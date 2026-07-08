@@ -499,6 +499,7 @@ export const rbacAPI = {
 export const queueAPI = {
   getMyActiveTicket: () => api.get('/public/queue/my-ticket'),
   cancelMyTicket: () => api.delete('/public/queue/my-ticket'),
+  addTransaction: (serviceType) => api.post('/public/queue/add-transaction', { service_type: serviceType }),
   getMyHistory: () => api.get('/public/queue/history'),
   checkStatus: (queueNumber) => api.get(`/public/queue/${queueNumber}`),
 };
