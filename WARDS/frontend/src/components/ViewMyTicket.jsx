@@ -17,6 +17,7 @@ const ViewMyTicket = ({ onClose }) => {
   const [addingTransaction, setAddingTransaction] = useState(false);
   const [addTransactionError, setAddTransactionError] = useState(null);
   const [availableServices, setAvailableServices] = useState([]);
+  const [loadingServices, setLoadingServices] = useState(false);
 
   const modalText = language === 'tl'
     ? {
@@ -130,6 +131,26 @@ const ViewMyTicket = ({ onClose }) => {
     } finally {
       setAddingTransaction(false);
     }
+  };
+
+  const fetchAvailableServices = async () => {
+    setLoadingServices(true);
+    try {
+      const response = await queueAPI.getAvailableServices();
+      setAvailableServices(response.data.services || []);
+    } catch (err) {
+      console.error('Failed to fetch available services:', err);
+      setAvailableServices([]);
+    } finally {
+      setLoadingServices(false);
+    }
+  };
+
+  const handleOpenAddTransaction = () => {
+    setShowAddTransaction(true);
+    setSelectedService('');
+    setAddTransactionError(null);
+    fetchAvailableServices();
   };
 
   const formatDate = (dateString) => {
@@ -359,7 +380,7 @@ const ViewMyTicket = ({ onClose }) => {
               {modalText.cancelTicket}
             </button>
             <button
-              onClick={() => { setShowAddTransaction(true); setSelectedService(''); setAddTransactionError(null); }}
+              onClick={handleOpenAddTransaction}
               disabled={(ticket.status || '').toLowerCase() === 'serving' || (ticket.status || '').toLowerCase() === 'called'}
               className="rounded-lg border border-primary bg-white px-5 py-2.5 text-sm font-semibold text-primary transition hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -428,18 +449,28 @@ const ViewMyTicket = ({ onClose }) => {
               <p className="text-sm text-slate-600">{modalText.addTransactionMessage}</p>
               <label className="mt-4 block">
                 <span className="mb-2 block text-sm font-semibold text-slate-700">{modalText.selectService}</span>
-                <select
-                  value={selectedService}
-                  onChange={(e) => { setSelectedService(e.target.value); setAddTransactionError(null); }}
-                  className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-                >
-                  <option value="">-- Select a service --</option>
-                  <option value="RPT">RPT (Real Property Tax)</option>
-                  <option value="BT">BT (Business Tax)</option>
-                  <option value="Payment">Payment</option>
-                  <option value="Certificate">Certificate</option>
-                  <option value="Assessment">Assessment</option>
-                </select>
+                {loadingServices ? (
+                  <div className="flex items-center justify-center py-4">
+                    <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
+                  </div>
+                ) : availableServices.length === 0 ? (
+                  <p className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                    No additional services available for this branch.
+                  </p>
+                ) : (
+                  <select
+                    value={selectedService}
+                    onChange={(e) => { setSelectedService(e.target.value); setAddTransactionError(null); }}
+                    className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                  >
+                    <option value="">-- Select a service --</option>
+                    {availableServices.map((service) => (
+                      <option key={service.code} value={service.code}>
+                        {service.name} - {service.description}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </label>
               {addTransactionError && (
                 <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">{addTransactionError}</p>

@@ -1209,6 +1209,58 @@ class AddTransactionRequest(BaseModel):
     service_type: str
 
 
+@router.get("/queue/available-services")
+@limiter.limit("30/minute")
+async def get_available_services(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_citizen: CitizenUser = Depends(get_optional_current_user),
+):
+    """Get available service types for adding transactions to the citizen's active queue"""
+    if not current_citizen:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    # Get the citizen's active parent queue
+    parent_queue = (
+        db.query(Queue)
+        .filter(
+            Queue.citizen_user_id == current_citizen.id,
+            Queue.parent_queue_id.is_(None),
+            hash_aware_any(Queue, "status", ACTIVE_PUBLIC_QUEUE_STATUSES),
+        )
+        .order_by(Queue.created_at.desc())
+        .first()
+    )
+
+    if not parent_queue:
+        raise HTTPException(status_code=404, detail="No active queue found")
+
+    # Get available services for the branch
+    from utils.branch_window_config import get_branch_service_options
+    services = get_branch_service_options(db, parent_queue.branch_id)
+
+    # Get services already added to this queue to exclude them
+    existing_services = (
+        db.query(Queue.service_type)
+        .filter(Queue.parent_queue_id == parent_queue.id)
+        .all()
+    )
+    existing_service_types = {queue_value(q, "service_type") for q in existing_services}
+
+    # Also exclude the parent's service type
+    parent_service_type = queue_value(parent_queue, "service_type")
+    if parent_service_type:
+        existing_service_types.add(parent_service_type)
+
+    # Filter out already added services
+    available_services = [
+        service for service in services
+        if service["code"] not in existing_service_types
+    ]
+
+    return {"services": available_services}
+
+
 @router.post("/queue/add-transaction")
 @limiter.limit("5/minute")
 async def add_transaction_to_queue(
