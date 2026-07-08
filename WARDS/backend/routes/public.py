@@ -1015,111 +1015,65 @@ async def get_my_active_ticket(
         raise HTTPException(status_code=401, detail="Authentication required to view your ticket")
     
     # Find active queue for this citizen
-    active_queue = (
+    # Get all active queues for the citizen (parent + children)
+    active_queues = (
         db.query(Queue)
         .filter(
             Queue.citizen_user_id == current_citizen.id,
             hash_aware_any(Queue, "status", ACTIVE_PUBLIC_QUEUE_STATUSES)
         )
         .order_by(Queue.created_at.desc())
-        .first()
-    )
-    
-    if not active_queue:
-        return {"has_active_ticket": False, "ticket": None}
-    
-    branch = db.query(Branch).filter(Branch.id == active_queue.branch_id).first()
-    active_queue_number = queue_value(active_queue, "queue_number")
-    active_queue_email = (queue_value(active_queue, "email") or "").strip().lower()
-    citizen_email = ((get_decrypted_or_raw(current_citizen, "email") or current_citizen.email) or "").strip().lower()
-    linked_receipt_requests = (
-        db.query(ReceiptRequest)
-        .filter(hash_aware_match(ReceiptRequest, "linked_queue_number", active_queue_number))
-        .filter(ReceiptRequest.branch_id == active_queue.branch_id)
-        .order_by(ReceiptRequest.created_at.desc(), ReceiptRequest.id.desc())
         .all()
     )
-    linked_receipt_requests = [
-        request for request in linked_receipt_requests
-        if (
-            not citizen_email
-            or ((receipt_request_value(request, "email") or "").strip().lower() in {citizen_email, active_queue_email})
-        )
-    ]
     
-    # Calculate position in queue
-    position = 0
-    if queue_value(active_queue, "status") == "Waiting":
-        position = db.query(Queue).filter(
-            and_(
-                Queue.branch_id == active_queue.branch_id,
-                hash_aware_match(Queue, "status", "Waiting"),
-                Queue.created_at < active_queue.created_at
-            )
-        ).count() + 1
+    if not active_queues:
+        return {"has_active_ticket": False, "tickets": []}
+    
+    # Get the parent queue (first one without parent_queue_id)
+    parent_queue = next((q for q in active_queues if q.parent_queue_id is None), active_queues[0])
+    branch = db.query(Branch).filter(Branch.id == parent_queue.branch_id).first()
+    
+    # Build ticket list with position info for each
+    tickets = []
+    for queue in active_queues:
+        queue_number = queue_value(queue, "queue_number")
+        
+        # Calculate position in queue for this service type
+        position = 0
+        if queue_value(queue, "status") == "Waiting":
+            position = db.query(Queue).filter(
+                and_(
+                    Queue.branch_id == queue.branch_id,
+                    hash_aware_match(Queue, "status", "Waiting"),
+                    hash_aware_match(Queue, "service_type", queue_value(queue, "service_type")),
+                    Queue.created_at < queue.created_at
+                )
+            ).count() + 1
+        
+        tickets.append({
+            "id": queue.id,
+            "queue_number": queue_number,
+            "service_type": queue_value(queue, "service_type"),
+            "status": queue_value(queue, "status"),
+            "position": position,
+            "estimated_wait_time": queue.estimated_wait_time,
+            "is_parent": queue.parent_queue_id is None,
+            "created_at": serialize_manila_datetime(queue.created_at),
+        })
     
     return {
         "has_active_ticket": True,
-        "ticket": {
-            "id": active_queue.id,
-            "queue_number": active_queue_number,
-            "branch_name": (get_decrypted_or_raw(branch, "name") or branch.name) if branch else "Unknown",
-            "branch_address": (get_decrypted_or_raw(branch, "location") or branch.location) if branch else None,
-            "service_type": queue_value(active_queue, "service_type"),
-            "queue_type": queue_value(active_queue, "queue_type"),
-            "taxpayer_name": queue_value(active_queue, "taxpayer_name"),
-            "contact_number": queue_value(active_queue, "contact_number"),
-            "email": queue_value(active_queue, "email"),
-            "status": queue_value(active_queue, "status"),
-            "position": position,
-            "estimated_wait_time": active_queue.estimated_wait_time,
-            "recommended_arrival": serialize_queue_schedule_datetime(active_queue.recommended_arrival, queue_value(active_queue, "queue_type")),
-            "appointment_time": serialize_queue_schedule_datetime(active_queue.appointment_time, queue_value(active_queue, "queue_type")),
-            "created_at": serialize_manila_datetime(active_queue.created_at),
-            "served_at": serialize_manila_datetime(active_queue.served_at),
-            "linked_receipt_requests": [
-                ({
-                    "request_id": receipt_request_value(request, "request_id"),
-                    "tax_type": receipt_request_value(request, "tax_type"),
-                    "request_reason": receipt_request_value(request, "request_reason"),
-                    "request_reason_other": receipt_request_value(request, "request_reason_other"),
-                    "status": receipt_request_value(request, "status"),
-                    "fee_paid": bool(request.fee_paid),
-                    "payment_ref_number": receipt_request_value(request, "payment_ref_number"),
-                    "payment_status": (
-                        "Verified"
-                        if (
-                            (latest_payment := db.query(Payment)
-                                .filter(Payment.related_request_id == receipt_request_value(request, "request_id"))
-                                .order_by(Payment.created_at.desc(), Payment.id.desc())
-                                .first()
-                            )
-                            and (((latest_payment.status or "").strip().lower() in {"verified", "payment verified"}) or latest_payment.verified_at)
-                        )
-                        else "Rejected"
-                        if (
-                            latest_payment
-                            and (
-                                (latest_payment.status or "").strip().lower() in {"rejected", "failed", "declined", "payment_rejected", "expired"}
-                                or (latest_payment.paymongo_status or "").strip().lower() in {"failed", "declined", "expired", "cancelled", "canceled"}
-                            )
-                        )
-                        else "Pending Transaction"
-                        if (
-                            request.fee_paid
-                            or (
-                                latest_payment
-                                and (latest_payment.paymongo_status or "").strip().lower() in {"paid", "succeeded"}
-                            )
-                        )
-                        else "Pending"
-                    ),
-                    "created_at": serialize_manila_datetime(request.created_at),
-                })
-                for request in linked_receipt_requests
-            ],
-        }
+        "tickets": tickets,
+        "branch_name": (get_decrypted_or_raw(branch, "name") or branch.name) if branch else "Unknown",
+        "branch_address": (get_decrypted_or_raw(branch, "location") or branch.location) if branch else None,
+        "taxpayer_name": queue_value(parent_queue, "taxpayer_name"),
+        "contact_number": queue_value(parent_queue, "contact_number"),
+        "email": queue_value(parent_queue, "email"),
+        "queue_type": queue_value(parent_queue, "queue_type"),
+        "recommended_arrival": serialize_queue_schedule_datetime(parent_queue.recommended_arrival, queue_value(parent_queue, "queue_type")),
+        "appointment_time": serialize_queue_schedule_datetime(parent_queue.appointment_time, queue_value(parent_queue, "queue_type")),
     }
+
 
 @router.delete("/queue/my-ticket")
 @limiter.limit("5/minute")

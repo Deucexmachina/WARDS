@@ -18,6 +18,8 @@ const ViewMyTicket = ({ onClose }) => {
   const [addTransactionError, setAddTransactionError] = useState(null);
   const [availableServices, setAvailableServices] = useState([]);
   const [loadingServices, setLoadingServices] = useState(false);
+  const [showSuccessMessage, setShowSuccessMessage] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
 
   const modalText = language === 'tl'
     ? {
@@ -123,8 +125,9 @@ const ViewMyTicket = ({ onClose }) => {
       setSelectedService('');
       // Refresh ticket to show updated status
       await fetchTicket();
-      // Show success message (could use a toast or alert)
-      alert(modalText.addTransactionSuccess);
+      // Show success message
+      setSuccessMessage(modalText.addTransactionSuccess);
+      setShowSuccessMessage(true);
     } catch (err) {
       const detail = err.response?.data?.detail || modalText.addTransactionError;
       setAddTransactionError(detail);
@@ -226,7 +229,7 @@ const ViewMyTicket = ({ onClose }) => {
     );
   }
 
-  if (!ticket) {
+  if (!ticket || !ticket.has_active_ticket) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
         <div className="w-full max-w-2xl rounded-2xl bg-white shadow-2xl">
@@ -285,51 +288,67 @@ const ViewMyTicket = ({ onClose }) => {
 
         {/* Ticket Content */}
         <div className="px-6 py-6" data-print-ticket>
-          {/* Queue Number - Large Display */}
-          <div className="mb-6 rounded-2xl border-2 border-primary bg-gradient-to-br from-primary/5 to-secondary/5 p-6 text-center">
-            <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">Queue Number</p>
-            <p className="mt-2 text-5xl font-bold text-primary">{ticket.queue_number}</p>
-            <div className={`mt-4 inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-sm font-semibold ${getStatusColor(ticket.status)}`}>
-              <span className="h-2 w-2 rounded-full bg-current animate-pulse"></span>
-              {ticket.status}
-            </div>
+          {/* Branch Info */}
+          <div className="mb-6 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Branch</p>
+            <p className="mt-1 text-sm font-semibold text-slate-800">{ticket.branch_name}</p>
+            {ticket.branch_address && (
+              <p className="mt-0.5 text-xs text-slate-500">{ticket.branch_address}</p>
+            )}
           </div>
 
-          {/* Ticket Details */}
+          {/* Tickets List */}
           <div className="space-y-4">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Branch</p>
-                <p className="mt-1 text-sm font-semibold text-slate-800">{ticket.branch_name}</p>
-                {ticket.branch_address && (
-                  <p className="mt-0.5 text-xs text-slate-500">{ticket.branch_address}</p>
-                )}
-              </div>
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Service Type</p>
-                <p className="mt-1 text-sm font-semibold text-slate-800">{ticket.service_type}</p>
-              </div>
-            </div>
+            <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Your Tickets</h4>
+            {ticket.tickets && ticket.tickets.length > 0 ? (
+              ticket.tickets.map((t) => (
+                <div key={t.id} className="rounded-lg border-2 border-primary bg-gradient-to-br from-primary/5 to-secondary/5 p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Queue Number</p>
+                      <p className="text-2xl font-bold text-primary">{t.queue_number}</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-800">{t.service_type}</p>
+                    </div>
+                    <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm font-semibold ${getStatusColor(t.status)}`}>
+                      <span className="h-2 w-2 rounded-full bg-current animate-pulse"></span>
+                      {t.status}
+                    </div>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-3">
+                    {t.position > 0 && (
+                      <div>
+                        <p className="text-xs text-slate-500">Position</p>
+                        <p className="text-sm font-semibold text-slate-800">#{t.position}</p>
+                      </div>
+                    )}
+                    {t.estimated_wait_time != null && (
+                      <div>
+                        <p className="text-xs text-slate-500">Est. Wait</p>
+                        <p className="text-sm font-semibold text-slate-800">{t.estimated_wait_time} min</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-slate-500">No active tickets found.</p>
+            )}
+          </div>
 
+          {/* Common Details */}
+          <div className="mt-6 space-y-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Queue Type</p>
                 <p className="mt-1 text-sm font-semibold capitalize text-slate-800">{ticket.queue_type}</p>
               </div>
-              {ticket.position > 0 && (
+              {ticket.taxpayer_name && (
                 <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Position in Queue</p>
-                  <p className="mt-1 text-sm font-semibold text-slate-800">#{ticket.position}</p>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Taxpayer Name</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-800">{ticket.taxpayer_name}</p>
                 </div>
               )}
             </div>
-
-            {ticket.estimated_wait_time != null && (
-              <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Estimated Wait Time</p>
-                <p className="mt-1 text-sm font-semibold text-blue-900">{ticket.estimated_wait_time} minutes</p>
-              </div>
-            )}
 
             {ticket.appointment_time && (
               <div className="rounded-lg border border-purple-200 bg-purple-50 px-4 py-3">
@@ -344,28 +363,6 @@ const ViewMyTicket = ({ onClose }) => {
                 <p className="mt-1 text-sm font-semibold text-green-900">{formatDate(ticket.recommended_arrival)}</p>
               </div>
             )}
-
-            {(ticket.linked_receipt_requests || []).length > 0 && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Linked Request Receipt Transactions</p>
-                <div className="mt-3 space-y-3">
-                  {ticket.linked_receipt_requests.map((request) => (
-                    <div key={request.request_id} className="rounded-lg border border-amber-100 bg-white px-3 py-3">
-                      <p className="text-sm font-semibold text-slate-900">{request.request_id}</p>
-                      <p className="mt-1 text-sm text-slate-700">{request.tax_type} · {request.request_type}</p>
-                      <p className="mt-1 text-xs text-slate-500">Status: {request.status}</p>
-                      <p className="mt-1 text-xs text-slate-500">Payment: {request.payment_status || (request.fee_paid ? 'Verified' : 'Pending')}</p>
-                      <p className="mt-1 text-xs text-slate-500">Fee paid: {request.fee_paid ? 'Yes' : 'No'}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Issued On</p>
-              <p className="mt-1 text-sm font-semibold text-slate-800">{formatDate(ticket.created_at)}</p>
-            </div>
           </div>
         </div>
 
@@ -374,14 +371,14 @@ const ViewMyTicket = ({ onClose }) => {
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <button
               onClick={() => { setShowCancelConfirm(true); setCancelError(null); }}
-              disabled={cancelling || (ticket.status || '').toLowerCase() === 'serving'}
+              disabled={cancelling || (ticket.tickets || []).some(t => (t.status || '').toLowerCase() === 'serving')}
               className="rounded-lg border border-red-300 bg-white px-5 py-2.5 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {modalText.cancelTicket}
             </button>
             <button
               onClick={handleOpenAddTransaction}
-              disabled={(ticket.status || '').toLowerCase() === 'serving' || (ticket.status || '').toLowerCase() === 'called'}
+              disabled={(ticket.tickets || []).some(t => (t.status || '').toLowerCase() === 'serving' || (t.status || '').toLowerCase() === 'called')}
               className="rounded-lg border border-primary bg-white px-5 py-2.5 text-sm font-semibold text-primary transition hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {modalText.addTransaction}
@@ -432,6 +429,27 @@ const ViewMyTicket = ({ onClose }) => {
                 className="rounded-lg bg-red-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {cancelling ? '...' : modalText.cancelConfirmBtn}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Success Message Modal */}
+      {showSuccessMessage && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white shadow-2xl">
+            <div className="px-6 py-6 text-center">
+              <svg className="mx-auto h-16 w-16 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              </svg>
+              <h3 className="mt-4 text-lg font-bold text-slate-800">Success</h3>
+              <p className="mt-2 text-sm text-slate-600">{successMessage}</p>
+              <button
+                onClick={() => setShowSuccessMessage(false)}
+                className="mt-6 rounded-lg bg-primary px-6 py-2.5 text-sm font-semibold text-white hover:bg-secondary transition"
+              >
+                OK
               </button>
             </div>
           </div>
