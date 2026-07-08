@@ -1149,6 +1149,34 @@ async def cancel_my_active_ticket(
     if current_status == "Serving":
         raise HTTPException(status_code=409, detail="You are currently being served. Please ask the staff to complete or skip your queue.")
 
+    # If this is a parent queue, also cancel all child queues
+    child_queues = db.query(Queue).filter(Queue.parent_queue_id == active_queue.id).all()
+    for child in child_queues:
+        child.status = "Cancelled"
+        apply_queue_security(child)
+        
+        # Create history record for child
+        child_history = QueueHistory(queue_number=queue_value(child, "queue_number"))
+        child_history.citizen_user_id = child.citizen_user_id
+        child_history.branch_id = child.branch_id
+        child_history.service_type = queue_value(child, "service_type")
+        child_history.taxpayer_name = queue_value(child, "taxpayer_name")
+        child_history.contact_number = queue_value(child, "contact_number")
+        child_history.email = queue_value(child, "email")
+        child_history.final_status = "Cancelled"
+        child_history.queue_type = queue_value(child, "queue_type") or "immediate"
+        child_history.appointment_time = child.appointment_time
+        child_history.estimated_wait_time = child.estimated_wait_time
+        child_history.recommended_arrival = child.recommended_arrival
+        child_history.created_at = child.created_at
+        child_history.served_at = child.served_at
+        child_history.completed_at = datetime.utcnow()
+        child_history.completed_by = "Citizen (Parent Cancelled)"
+        child_history.archived_at = datetime.utcnow()
+        db.add(child_history)
+        
+        db.delete(child)
+
     active_queue.status = "Cancelled"
     apply_queue_security(active_queue)
 
