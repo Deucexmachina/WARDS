@@ -272,6 +272,7 @@ const AccountManagement = () => {
       const response = await unifiedAuthAPI.setupMfa({
         identifier: profile.email,
         password: mfaPassword,
+        portal: 'public',
       });
       setMfaSetupData(response.data);
       setMfaMessage('');
@@ -302,6 +303,7 @@ const AccountManagement = () => {
         identifier: profile.email,
         password: mfaPassword,
         totp_code: mfaTotpCode,
+        portal: 'public',
       });
       setMfaEnabled(true);
       setShowMfaSetup(false);
