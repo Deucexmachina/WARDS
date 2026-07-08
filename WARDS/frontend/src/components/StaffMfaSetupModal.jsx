@@ -9,6 +9,7 @@ const StaffMfaSetupModal = ({ isOpen, user, portal, onLogout, onSuccess }) => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [backupCodes, setBackupCodes] = useState(null);
 
   if (!isOpen) return null;
 
@@ -21,6 +22,7 @@ const StaffMfaSetupModal = ({ isOpen, user, portal, onLogout, onSuccess }) => {
     setMfaSetupData(null);
     setError('');
     setLoading(false);
+    setBackupCodes(null);
   };
 
   const handleSetup = async () => {
@@ -53,14 +55,19 @@ const StaffMfaSetupModal = ({ isOpen, user, portal, onLogout, onSuccess }) => {
     setLoading(true);
     setError('');
     try {
-      await unifiedAuthAPI.verifyMfaSetup({
+      const response = await unifiedAuthAPI.verifyMfaSetup({
         identifier,
         password,
         portal,
         totp_code: totpCode,
       });
-      resetState();
-      onSuccess();
+      if (response.data?.backup_codes?.length) {
+        setBackupCodes(response.data.backup_codes);
+        setStep('backup-codes');
+      } else {
+        resetState();
+        onSuccess();
+      }
     } catch (err) {
       setError(err.response?.data?.detail || 'Verification failed. Please try again.');
       setTotpCode('');
@@ -208,6 +215,29 @@ const StaffMfaSetupModal = ({ isOpen, user, portal, onLogout, onSuccess }) => {
                 {loading ? 'Verifying...' : 'Verify & Enable'}
               </button>
             </div>
+          </div>
+        )}
+
+        {step === 'backup-codes' && backupCodes && (
+          <div className="space-y-4">
+            <h2 className="text-lg font-bold text-slate-900">Your MFA Backup Codes</h2>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              Save these codes in a safe place. Each code can only be used once. You will need them if you lose access to your authenticator app.
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {backupCodes.map((code, index) => (
+                <div key={index} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-center font-mono text-sm font-semibold text-slate-800">
+                  {code}
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => { resetState(); onSuccess(); }}
+              className="w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700"
+            >
+              I've Saved Them
+            </button>
           </div>
         )}
       </div>

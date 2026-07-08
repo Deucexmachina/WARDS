@@ -509,6 +509,7 @@ function ResetMFAModal({ open, onClose, onSuccess }) {
   const [totpCode, setTotpCode] = useState('');
   const [totpError, setTotpError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [backupCodes, setBackupCodes] = useState(null);
 
   useEffect(() => {
     if (open) {
@@ -519,6 +520,7 @@ function ResetMFAModal({ open, onClose, onSuccess }) {
       setManualKey('');
       setTotpCode('');
       setTotpError('');
+      setBackupCodes(null);
     }
   }, [open]);
 
@@ -551,7 +553,12 @@ function ResetMFAModal({ open, onClose, onSuccess }) {
     setSaving(true);
     try {
       const res = await windowStaffAccountAPI.verifyMfa({ totp_code: totpCode.trim() });
-      onSuccess(res?.data?.email_sent);
+      if (res?.data?.backup_codes?.length) {
+        setBackupCodes(res.data.backup_codes);
+        setStep('backup-codes');
+      } else {
+        onSuccess(res?.data?.email_sent);
+      }
     } catch (err) {
       const detail = err?.response?.data?.detail || '';
       if (detail.toLowerCase().includes('invalid') || detail.toLowerCase().includes('code')) {
@@ -653,6 +660,32 @@ function ResetMFAModal({ open, onClose, onSuccess }) {
           </div>
         </div>
       </div>
+    );
+  }
+
+  // ---- Step: Backup Codes ----
+  if (step === 'backup-codes' && backupCodes) {
+    return (
+      <ModalShell eyebrow="MFA Setup" title="Your MFA Backup Codes" onClose={onClose}>
+        <div className="space-y-4">
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Save these codes in a safe place. Each code can only be used once. You will need them if you lose access to your authenticator app.
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {backupCodes.map((code, index) => (
+              <div key={index} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-center font-mono text-sm font-semibold text-slate-800">
+                {code}
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-end pt-2">
+            <button type="button" onClick={() => onSuccess(false)}
+              className="px-5 py-2.5 rounded-lg bg-primary hover:bg-secondary text-white text-sm font-semibold transition">
+              I've Saved Them
+            </button>
+          </div>
+        </div>
+      </ModalShell>
     );
   }
 

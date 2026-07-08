@@ -12,7 +12,7 @@ import qrcode
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from database.models import EmailOTP, MFASecret
+from database.models import EmailOTP, MFABackupCode, MFASecret
 from services.email_service import send_mfa_recovery_email
 from utils.field_crypto import (
     apply_email_otp_security,
@@ -90,7 +90,11 @@ def delete_mfa_secret(db: Session, portal: str, username: str) -> None:
     record = find_mfa_secret_record(db, MFASecret, portal, username, enabled_only=False)
     if record:
         db.delete(record)
-        db.commit()
+    db.query(MFABackupCode).filter(
+        MFABackupCode.portal == portal,
+        MFABackupCode.username == username,
+    ).delete(synchronize_session=False)
+    db.commit()
 
 
 def get_mfa_secret_raw(db: Session, portal: str, username: str) -> Optional[MFASecret]:
@@ -196,3 +200,75 @@ def check_mfa_recovery_confirm_rate_limit(email: str) -> bool:
     window.append(current_time)
     mfa_recovery_confirm_rate_limits[email_lower] = window
     return True
+
+
+# ---------------------------------------------------------------------------
+# MFA Backup Codes
+# ---------------------------------------------------------------------------
+
+BACKUP_CODE_COUNT = 10
+_BACKUP_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+def _generate_single_backup_code() -> str:
+    return "-".join(
+        "".join(secrets.choice(_BACKUP_CODE_ALPHABET) for _ in range(4))
+        for _ in range(3)
+    )
+
+
+def generate_backup_codes(count: int = BACKUP_CODE_COUNT) -> list[str]:
+    return [_generate_single_backup_code() for _ in range(count)]
+
+
+def _hash_backup_code(code: str) -> str:
+    return hashlib.sha256(code.strip().upper().encode("utf-8")).hexdigest()
+
+
+def save_backup_codes(db: Session, portal: str, username: str, codes: list[str]) -> None:
+    db.query(MFABackupCode).filter(
+        MFABackupCode.portal == portal,
+        MFABackupCode.username == username,
+    ).delete(synchronize_session=False)
+    for code in codes:
+        record = MFABackupCode(
+            portal=portal,
+            username=username,
+            code_hash=_hash_backup_code(code),
+        )
+        db.add(record)
+    db.commit()
+
+
+def verify_backup_code(db: Session, portal: str, username: str, code: str) -> bool:
+    normalized = (code or "").strip().upper()
+    if not normalized:
+        return False
+    code_hash = _hash_backup_code(normalized)
+    record = (
+        db.query(MFABackupCode)
+        .filter(
+            MFABackupCode.portal == portal,
+            MFABackupCode.username == username,
+            MFABackupCode.code_hash == code_hash,
+            MFABackupCode.used_at.is_(None),
+        )
+        .first()
+    )
+    if not record:
+        return False
+    record.used_at = datetime.utcnow()
+    db.commit()
+    return True
+
+
+def count_unused_backup_codes(db: Session, portal: str, username: str) -> int:
+    return (
+        db.query(MFABackupCode)
+        .filter(
+            MFABackupCode.portal == portal,
+            MFABackupCode.username == username,
+            MFABackupCode.used_at.is_(None),
+        )
+        .count()
+    )

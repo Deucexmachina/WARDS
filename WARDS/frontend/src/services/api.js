@@ -217,6 +217,8 @@ export const unifiedAuthAPI = {
   verifyMfaSetup: (data) => api.post('/auth/unified/verify-mfa-setup', data),
   sendMfaRecoveryOtp: (data) => api.post('/auth/unified/mfa-recovery/send-otp', data),
   verifyMfaRecoveryOtp: (data) => api.post('/auth/unified/mfa-recovery/verify-otp', data),
+  regenerateBackupCodes: (password) => api.post('/auth/unified/regenerate-backup-codes', { password }),
+  getBackupCodesCount: () => api.get('/auth/unified/backup-codes-count'),
 };
 
 export const taxAssessmentAPI = {

@@ -374,6 +374,16 @@ class MFASecret(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+class MFABackupCode(Base):
+    __tablename__ = "mfa_backup_codes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    portal = Column(String, index=True)
+    username = Column(String, index=True)
+    code_hash = Column(String, nullable=False, index=True)
+    used_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 class Invite(Base):
     __tablename__ = "invites"
 

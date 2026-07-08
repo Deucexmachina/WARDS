@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { branchAPI, settingsAPI } from '../../services/api';
+import { branchAPI, settingsAPI, unifiedAuthAPI } from '../../services/api';
 import { formatUtc8Date, formatUtc8Time } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 import { CustomSelect } from '../../components/FormControls';
@@ -106,6 +106,12 @@ const Settings = () => {
   const [mfaError, setMfaError] = useState('');
   const [settingUpMfa, setSettingUpMfa] = useState(false);
   const [showMfaConfirmModal, setShowMfaConfirmModal] = useState(false);
+  const [backupCodesCount, setBackupCodesCount] = useState(0);
+  const [showRegenerateModal, setShowRegenerateModal] = useState(false);
+  const [regeneratePassword, setRegeneratePassword] = useState('');
+  const [regenerateLoading, setRegenerateLoading] = useState(false);
+  const [regenerateError, setRegenerateError] = useState('');
+  const [backupCodes, setBackupCodes] = useState(null);
   const savedSettings = useRef(null);
   const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}');
 
@@ -257,6 +263,34 @@ const Settings = () => {
       setMfaError(error.response?.data?.detail || 'Failed to start MFA setup.');
     } finally {
       setSettingUpMfa(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!adminUser?.mfa_setup_required) {
+      unifiedAuthAPI.getBackupCodesCount()
+        .then((res) => setBackupCodesCount(res.data?.unused_count ?? 0))
+        .catch(() => setBackupCodesCount(0));
+    }
+  }, [adminUser?.mfa_setup_required]);
+
+  const handleRegenerateBackupCodes = async () => {
+    if (!regeneratePassword) {
+      setRegenerateError('Please enter your current password to continue.');
+      return;
+    }
+    try {
+      setRegenerateLoading(true);
+      setRegenerateError('');
+      const response = await unifiedAuthAPI.regenerateBackupCodes(regeneratePassword);
+      setBackupCodes(response.data?.backup_codes || []);
+      setBackupCodesCount(response.data?.backup_codes?.length || 0);
+      setShowRegenerateModal(false);
+      setRegeneratePassword('');
+    } catch (err) {
+      setRegenerateError(err.response?.data?.detail || 'Failed to regenerate backup codes.');
+    } finally {
+      setRegenerateLoading(false);
     }
   };
 
@@ -531,6 +565,26 @@ const Settings = () => {
                   </code>
                 </div>
               )}
+
+              {!adminUser?.mfa_setup_required && (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-700">MFA Backup Codes</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {backupCodesCount} unused backup code{backupCodesCount === 1 ? '' : 's'} remaining. Each code can be used once if you lose access to your authenticator.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { setShowRegenerateModal(true); setRegenerateError(''); setRegeneratePassword(''); }}
+                      className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
+                    >
+                      Regenerate Codes
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -752,6 +806,101 @@ const Settings = () => {
                 className="rounded-lg bg-yellow-500 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-yellow-600"
               >
                 Yes, Reset MFA
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Backup Codes Display Modal */}
+      {backupCodes && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl">
+            <div className="border-b border-slate-200 px-6 py-4">
+              <h3 className="text-lg font-bold text-slate-900">Your MFA Backup Codes</h3>
+            </div>
+            <div className="px-6 py-6">
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                Save these codes in a safe place. Each code can only be used once. You will need them if you lose access to your authenticator app.
+              </div>
+              <div className="mt-5 grid grid-cols-2 gap-3">
+                {backupCodes.map((code, index) => (
+                  <div key={index} className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-center font-mono text-sm font-semibold text-slate-800">
+                    {code}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-4">
+              <button
+                type="button"
+                onClick={() => {
+                  const text = backupCodes.join('\n');
+                  const blob = new Blob([text], { type: 'text/plain' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = 'wards-mfa-backup-codes.txt';
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+                className="rounded-full border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              >
+                Download
+              </button>
+              <button
+                type="button"
+                onClick={() => setBackupCodes(null)}
+                className="rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-secondary"
+              >
+                I've Saved Them
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Regenerate Backup Codes Modal */}
+      {showRegenerateModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
+            <div className="border-b border-slate-200 px-6 py-4">
+              <h3 className="text-lg font-bold text-slate-900">Regenerate Backup Codes</h3>
+            </div>
+            <div className="px-6 py-6">
+              <p className="text-sm text-slate-600">
+                This will invalidate all existing backup codes and generate new ones. Enter your password to confirm.
+              </p>
+              <label className="mt-4 block">
+                <span className="mb-2 block text-sm font-semibold text-slate-700">Current Password</span>
+                <input
+                  type="password"
+                  value={regeneratePassword}
+                  onChange={(event) => { setRegeneratePassword(event.target.value); setRegenerateError(''); }}
+                  className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                  autoComplete="current-password"
+                />
+              </label>
+              {regenerateError && (
+                <p className="mt-3 text-sm font-medium text-rose-600">{regenerateError}</p>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-4">
+              <button
+                type="button"
+                onClick={() => { setShowRegenerateModal(false); setRegeneratePassword(''); setRegenerateError(''); }}
+                disabled={regenerateLoading}
+                className="rounded-full border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleRegenerateBackupCodes}
+                disabled={regenerateLoading || !regeneratePassword}
+                className="rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-secondary disabled:opacity-60"
+              >
+                {regenerateLoading ? 'Regenerating...' : 'Regenerate'}
               </button>
             </div>
           </div>

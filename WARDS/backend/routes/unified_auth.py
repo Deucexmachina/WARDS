@@ -31,7 +31,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
-from database.models import ActivityLog, Alert, Admin, AdminLoginSecurityProfile, BranchStaff, CitizenUser, EmailOTP, Invite, MFASecret, get_db
+from database.models import ActivityLog, Alert, Admin, AdminLoginSecurityProfile, BranchStaff, CitizenUser, EmailOTP, Invite, MFABackupCode, MFASecret, get_db
 from utils.redis_client import get_redis_client
 from utils.request_helpers import get_client_ip
 from services.email_service import (
@@ -72,13 +72,17 @@ from auth import (
     validate_password_strength,
     check_mfa_recovery_confirm_rate_limit,
     check_mfa_recovery_rate_limit,
+    count_unused_backup_codes,
     find_active_mfa_recovery_otp,
+    generate_backup_codes,
     generate_mfa_payload,
     get_mfa_secret,
     get_mfa_secret_raw,
     hash_mfa_recovery_code,
     issue_mfa_recovery_otp,
+    save_backup_codes,
     save_mfa_secret,
+    verify_backup_code,
     clear_auth_cookies,
     decode_active_account_from_bearer_token,
     get_current_admin_user,
@@ -1542,28 +1546,32 @@ async def unified_login(request: Request, credentials: UnifiedLoginRequest, db: 
             if not totp_ok:
                 # Extended-window check to detect time drift without blocking the user
                 extended_ok = totp.verify(totp_code, valid_window=5)
-                logger.warning(
-                    "[LOGIN] TOTP verification FAILED for %s (portal=%s) server_time=%s extended_window=%s",
-                    credentials.identifier,
-                    portal,
-                    datetime.utcnow().isoformat(),
-                    extended_ok,
-                )
-                log_activity(
-                    db,
-                    "MFA Verification Failed",
-                    credentials.identifier,
-                    f"Portal: {portal}; Reason: Invalid TOTP code",
-                    "auth",
-                    request=request,
-                    account=account,
-                )
-                record_failed_attempt(portal, credentials.identifier, client_ip, db=db, request=request)
-                info = _lockout_info(portal, credentials.identifier)
-                return JSONResponse(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    content={"detail": "Invalid authenticator code. Please try again.", **info},
-                )
+                # Try backup code if TOTP fails
+                backup_ok = verify_backup_code(db, portal, mfa_username, totp_code)
+                if not backup_ok:
+                    logger.warning(
+                        "[LOGIN] TOTP verification FAILED for %s (portal=%s) server_time=%s extended_window=%s",
+                        credentials.identifier,
+                        portal,
+                        datetime.utcnow().isoformat(),
+                        extended_ok,
+                    )
+                    log_activity(
+                        db,
+                        "MFA Verification Failed",
+                        credentials.identifier,
+                        f"Portal: {portal}; Reason: Invalid TOTP code",
+                        "auth",
+                        request=request,
+                        account=account,
+                    )
+                    record_failed_attempt(portal, credentials.identifier, client_ip, db=db, request=request)
+                    info = _lockout_info(portal, credentials.identifier)
+                    return JSONResponse(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        content={"detail": "Invalid authenticator code. Please try again.", **info},
+                    )
+                logger.warning("[LOGIN] Backup code used for %s (portal=%s)", credentials.identifier, portal)
             logger.warning("[LOGIN] TOTP verification PASSED for %s (portal=%s)", credentials.identifier, portal)
             log_activity(
                 db,
@@ -1930,6 +1938,10 @@ async def unified_verify_mfa_setup(
 
     mfa_record.enabled = True
     db.commit()
+
+    backup_codes = generate_backup_codes()
+    save_backup_codes(db, portal, mfa_username, backup_codes)
+
     log_activity(
         db,
         "Unified MFA Setup Verified",
@@ -1939,7 +1951,7 @@ async def unified_verify_mfa_setup(
         request=request,
         account=account,
     )
-    return {"message": "MFA enabled successfully", "portal": portal}
+    return {"message": "MFA enabled successfully", "portal": portal, "backup_codes": backup_codes}
 
 
 @router.post("/request-password-reset")
@@ -2181,6 +2193,10 @@ async def unified_mfa_recovery_verify_otp(
     secret = pyotp.random_base32()
     is_public = portal == "public"
     save_mfa_secret(db, portal, mfa_username, secret, enabled=not is_public)
+    db.query(MFABackupCode).filter(
+        MFABackupCode.portal == portal,
+        MFABackupCode.username == mfa_username,
+    ).delete(synchronize_session=False)
 
     db.commit()
 
@@ -2284,6 +2300,107 @@ async def unified_setup_mfa_authenticated(request: Request, db: Session = Depend
         account=account,
     )
     return generate_mfa_payload(portal, mfa_username, secret)
+
+
+class RegenerateBackupCodesRequest(BaseModel):
+    password: str
+
+
+@router.post("/regenerate-backup-codes")
+@limiter.limit("3/minute")
+async def regenerate_backup_codes(
+    request: Request,
+    payload: RegenerateBackupCodesRequest,
+    db: Session = Depends(get_db),
+):
+    """Regenerate MFA backup codes for the authenticated user. Requires password confirmation."""
+    token = None
+    for portal_name in ("admin", "branch", "public"):
+        token = _extract_token_from_request(request, _get_cookie_name(portal_name))
+        if token:
+            break
+
+    if not token:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header.split(" ", 1)[1]
+
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid authorization",
+        )
+
+    portal, account, _payload = decode_active_account_from_bearer_token(token, db, request=request)
+
+    if portal not in {"public", "admin", "branch"} or not account:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Backup codes are only available for citizen, staff, and admin accounts.",
+        )
+
+    if not pwd_context.verify(payload.password, account.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid password.",
+        )
+
+    mfa_username = get_mfa_username(portal, account)
+    mfa_record = get_mfa_secret_raw(db, portal, mfa_username)
+    if not mfa_record or not mfa_record.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="MFA is not enabled. Please set up MFA first.",
+        )
+
+    backup_codes = generate_backup_codes()
+    save_backup_codes(db, portal, mfa_username, backup_codes)
+
+    log_activity(
+        db,
+        "MFA Backup Codes Regenerated",
+        get_account_identifier(portal, account),
+        f"Portal: {portal}",
+        "security",
+        request=request,
+        account=account,
+    )
+
+    return {"backup_codes": backup_codes, "message": "Backup codes regenerated successfully."}
+
+
+@router.get("/backup-codes-count")
+async def get_backup_codes_count(request: Request, db: Session = Depends(get_db)):
+    """Get the count of unused backup codes for the authenticated user."""
+    token = None
+    for portal_name in ("admin", "branch", "public"):
+        token = _extract_token_from_request(request, _get_cookie_name(portal_name))
+        if token:
+            break
+
+    if not token:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header.split(" ", 1)[1]
+
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid authorization",
+        )
+
+    portal, account, _payload = decode_active_account_from_bearer_token(token, db, request=request)
+
+    if portal not in {"public", "admin", "branch"} or not account:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Backup codes are only available for citizen, staff, and admin accounts.",
+        )
+
+    mfa_username = get_mfa_username(portal, account)
+    count = count_unused_backup_codes(db, portal, mfa_username)
+
+    return {"unused_count": count}
 
 
 @router.get("/me")
@@ -3155,6 +3272,9 @@ async def branch_staff_verify_mfa(
     client_ip = request.client.host if request.client else "unknown"
     log_activity(db, "Window Staff MFA Configured", current_staff.username, "MFA configured successfully", request=request, role=current_staff.role, branch=current_staff.branch.name if current_staff.branch else None)
 
+    backup_codes = generate_backup_codes()
+    save_backup_codes(db, "branch", current_staff.username, backup_codes)
+
     email_result = send_account_change_notification_email(
         recipient_email=current_staff.email,
         display_name=current_staff.full_name or current_staff.username,
@@ -3166,7 +3286,7 @@ async def branch_staff_verify_mfa(
     if email_result.get("sent"):
         log_activity(db, "Window Staff MFA Configured", current_staff.username, "Security notification email sent after MFA reset.", request=request, account=current_staff)
 
-    return {"message": "MFA configured successfully.", "email_sent": email_result.get("sent", False)}
+    return {"message": "MFA configured successfully.", "email_sent": email_result.get("sent", False), "backup_codes": backup_codes}
 
 
 # ---------------------------------------------------------------------------

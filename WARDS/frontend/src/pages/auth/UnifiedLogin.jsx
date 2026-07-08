@@ -130,12 +130,15 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
   const validateTotpCode = (value) => {
     const trimmedValue = String(value || '').trim();
     if (!trimmedValue) {
-      return 'Please enter your Authenticator Code.';
+      return 'Please enter your Authenticator Code or a Backup Code.';
     }
-    if (!/^\d{6}$/.test(trimmedValue)) {
-      return 'Please enter a valid 6-digit authenticator code.';
+    if (/^\d{6}$/.test(trimmedValue)) {
+      return '';
     }
-    return '';
+    if (/^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/i.test(trimmedValue)) {
+      return '';
+    }
+    return 'Enter a 6-digit authenticator code or a backup code (XXXX-XXXX-XXXX).';
   };
 
   const validateRecoveryOtpCode = (value) => {
@@ -1019,25 +1022,28 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
             <form onSubmit={handleTotpSubmit} noValidate className="space-y-5">
               <div className={`text-center px-4 py-3 rounded-xl ${copy.badgeBg} bg-opacity-60`}>
                 <p className="text-xs font-medium">Open Microsoft Authenticator and enter the 6-digit code</p>
-                <p className="mt-1 text-xs opacity-75">If the code fails, check your device time is set automatically.</p>
+                <p className="mt-1 text-xs opacity-75">You can also enter a backup code (XXXX-XXXX-XXXX) if you lose your device.</p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Authenticator Code</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Authenticator Code or Backup Code</label>
                 <input
                   type="text"
                   value={totpCode}
                   onChange={(event) => {
-                    const nextValue = event.target.value.replace(/\D/g, '').slice(0, 6);
+                    const raw = event.target.value;
+                    const nextValue = /^\d*$/.test(raw.replace(/-/g, '')) && raw.length <= 6
+                      ? raw.replace(/\D/g, '').slice(0, 6)
+                      : raw.toUpperCase().slice(0, 14);
                     setTotpCode(nextValue);
                     setTotpError(validateTotpCode(nextValue));
                     setError('');
                   }}
                   aria-invalid={totpError ? 'true' : 'false'}
-                  className={`w-full px-4 py-3 border rounded-xl text-center text-2xl tracking-[0.5em] font-mono bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:border-transparent transition ${copy.focusRing} ${totpError ? 'border-red-400 bg-red-50' : 'border-gray-200'}`}
+                  className={`w-full px-4 py-3 border rounded-xl text-center text-2xl tracking-[0.3em] font-mono bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:border-transparent transition ${copy.focusRing} ${totpError ? 'border-red-400 bg-red-50' : 'border-gray-200'}`}
                   placeholder="000000"
                   required
-                  maxLength="6"
+                  maxLength="14"
                   autoComplete="one-time-code"
                 />
                 <p className={`mt-1.5 text-xs font-medium min-h-[1.25rem] ${totpError ? 'text-red-600' : 'invisible'}`}>{totpError || '\u00A0'}</p>
@@ -1069,7 +1075,7 @@ const UnifiedLogin = ({ preferredPortal = null }) => {
                 </button>
                 <button
                   type="submit"
-                  disabled={loading || totpCode.length !== 6 || (requiresCaptcha && RECAPTCHA_SITE_KEY && !recaptchaToken)}
+                  disabled={loading || totpCode.length < 6 || (requiresCaptcha && RECAPTCHA_SITE_KEY && !recaptchaToken)}
                   className={`flex-1 ${copy.button} text-white py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 shadow-md`}
                 >
                   {loading ? 'Signing in…' : 'Login'}
