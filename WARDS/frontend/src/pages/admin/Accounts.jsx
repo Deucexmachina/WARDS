@@ -5,9 +5,7 @@ import { accountAPI, branchAPI, branchSettingsAPI, settingsAPI } from '../../ser
 import {
   getEmailValidationMessage,
   normalizeCitizenFullName,
-  normalizePhilippineContactDigits,
   validateCitizenFullName,
-  validatePhilippineContactDigits,
   validateStrongPassword,
 } from '../../utils/validation';
 import { formatUtc8DateTime } from '../../utils/dateTime';
@@ -25,7 +23,6 @@ const EMPTY_FORM = {
   email: '',
   password: '',
   full_name: '',
-  contact_number: '',
   role: 'branch_staff',
   branch_id: null,
   service_window: '',
@@ -97,8 +94,6 @@ const Accounts = () => {
   });
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [emailError, setEmailError] = useState('');
-  const [contactError, setContactError] = useState('');
-  const [contactCheckingUniqueness, setContactCheckingUniqueness] = useState(false);
   const [fullNameError, setFullNameError] = useState('');
   const [authPasswordError, setAuthPasswordError] = useState('');
   const [jumpPage, setJumpPage] = useState('');
@@ -272,10 +267,6 @@ const Accounts = () => {
       if (name === 'email') {
         setFormData((current) => ({ ...current, email: value }));
         setEmailError(getAccountEmailValidationMessage(value, formData.role));
-      } else if (name === 'contact_number') {
-        const normalizedContact = normalizePhilippineContactDigits(value);
-        setFormData((current) => ({ ...current, contact_number: normalizedContact }));
-        setContactError(validatePhilippineContactDigits(normalizedContact));
       } else if (name === 'password') {
         setFormData((current) => ({ ...current, password: value }));
       } else if (name === 'username') {
@@ -302,14 +293,6 @@ const Accounts = () => {
       return;
     }
 
-    if (name === 'contact_number') {
-      const normalizedContact = normalizePhilippineContactDigits(value);
-      setFormData((current) => ({ ...current, contact_number: normalizedContact }));
-      setContactError(validatePhilippineContactDigits(normalizedContact));
-      setError('');
-      return;
-    }
-
     let cleanedValue = value;
     if (name === 'username') {
       cleanedValue = value.replace(/[^A-Za-z0-9_]/g, '').slice(0, 32);
@@ -330,31 +313,10 @@ const Accounts = () => {
     handleInputChange({ target: { name: fieldName, value } });
   };
 
-  const handleContactBlur = async () => {
-    if (formData.role !== 'public') return;
-    const digits = formData.contact_number;
-    if (!digits || validatePhilippineContactDigits(digits)) return;
-    setContactCheckingUniqueness(true);
-    try {
-      const response = await api.post('/auth/unified/check-contact', {
-        contact_number: `+63${digits}`,
-        exclude_citizen_id: editingAccount?.id ?? null,
-      });
-      if (!response.data.available) {
-        setContactError('This contact number is unavailable. Please enter a different contact number.');
-      }
-    } catch {
-      // silently skip — server-side enforces on save
-    } finally {
-      setContactCheckingUniqueness(false);
-    }
-  };
-
   const handleAddAccount = () => {
     setEditingAccount(null);
     setFormData(EMPTY_FORM);
     setEmailError('');
-    setContactError('');
     setFullNameError('');
     setAuthPasswordError('');
     setError('');
@@ -369,7 +331,6 @@ const Accounts = () => {
       email: account.email || '',
       password: '',
       full_name: account.full_name || '',
-      contact_number: account.contact_number ? normalizePhilippineContactDigits(account.contact_number) : '',
       role: account.role,
       branch_id: account.branch_id,
       service_window: account.service_window || '',
@@ -377,7 +338,6 @@ const Accounts = () => {
       status: account.status || 'Active',
     });
     setEmailError('');
-    setContactError('');
     setFullNameError('');
     setAuthPasswordError('');
     setError('');
@@ -404,15 +364,6 @@ const Accounts = () => {
       setEmailError(nextEmailError);
       setError('Please correct the highlighted email field.');
       return;
-    }
-
-    if (editingAccount && formData.role === 'public') {
-      const nextContactError = validatePhilippineContactDigits(formData.contact_number || '');
-      if (formData.contact_number && nextContactError) {
-        setContactError(nextContactError);
-        setError('Please correct the highlighted contact number field.');
-        return;
-      }
     }
 
     if (!editingAccount && formData.full_name) {
@@ -480,10 +431,6 @@ const Accounts = () => {
           if (formData.full_name) {
             updatePayload.full_name = formData.full_name;
           }
-        }
-
-        if (formData.role === 'public') {
-          updatePayload.contact_number = formData.contact_number || '';
         }
 
         setPendingAccountSave({
@@ -1116,7 +1063,7 @@ const Accounts = () => {
                   {editingAccount
                     ? (canEditIdentity
                       ? 'Email, password, username, and full name can be changed here. All other account details remain visible but read-only.'
-                      : 'Only email, password, and contact number can be changed here. All other account details remain visible but read-only.')
+                      : 'Only email and password can be changed here. All other account details remain visible but read-only.')
                     : 'Create a new account with the required branch, role, and access settings.'}
                 </p>
               </div>
@@ -1200,27 +1147,6 @@ const Accounts = () => {
                         />
                         {emailError && <p className="mt-2 text-sm font-medium text-red-600">{emailError}</p>}
                       </div>
-
-                      {isCitizenAccount && (
-                        <div>
-                          <label className="mb-2 block text-sm font-semibold text-slate-700">Contact Number</label>
-                          <div className={`flex overflow-hidden rounded-2xl border ${contactError ? 'border-red-300 bg-red-50' : 'border-slate-300 bg-white'}`}>
-                            <span className="flex items-center bg-slate-100 px-4 font-semibold text-slate-700">+63</span>
-                            <input
-                              type="text"
-                              name="contact_number"
-                              value={formData.contact_number}
-                              onChange={handleInputChange}
-                              onBlur={handleContactBlur}
-                              inputMode="numeric"
-                              maxLength={10}
-                              className="w-full px-4 py-3 text-sm font-medium text-slate-900 outline-none"
-                              placeholder="9123456789"
-                            />
-                          </div>
-                          {contactError && <p className="mt-2 text-sm font-medium text-red-600">{contactError}</p>}
-                        </div>
-                      )}
 
                       <div className="sm:col-span-2">
                         <label className="mb-2 block text-sm font-semibold text-slate-700">
@@ -1368,7 +1294,7 @@ const Accounts = () => {
                 </button>
                 <button
                   onClick={handleSaveAccount}
-                  disabled={loading || contactCheckingUniqueness}
+                  disabled={loading}
                   className="w-full rounded-2xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                 >
                   {loading ? 'Saving...' : editingAccount ? 'Save Changes' : 'Create Account'}
@@ -1494,9 +1420,6 @@ const Accounts = () => {
                       <p><span className="font-semibold">Full Name:</span> {pendingAccountSave.payload.full_name}</p>
                     )}
                     <p><span className="font-semibold">Email:</span> {pendingAccountSave.payload.email}</p>
-                    {pendingAccountSave.payload.contact_number !== undefined && (
-                      <p><span className="font-semibold">Contact Number:</span> {pendingAccountSave.payload.contact_number ? `+63 ${pendingAccountSave.payload.contact_number}` : 'Cleared'}</p>
-                    )}
                     <p><span className="font-semibold">Password:</span> {pendingAccountSave.payload.password ? 'Will be replaced with the new value you entered.' : 'No password change.'}</p>
                   </div>
                 </div>

@@ -8,9 +8,7 @@ import SystemMessageModal from '../../components/SystemMessageModal';
 import {
   getEmailValidationMessage,
   normalizeCitizenFullName,
-  normalizePhilippineContactDigits,
   validateCitizenFullName,
-  validatePhilippineContactDigits,
   validateStrongPassword,
 } from '../../utils/validation';
 
@@ -34,7 +32,6 @@ const EyeIcon = ({ open }) => (
 const initialFormState = {
   email: '',
   full_name: '',
-  contact_number: '',
   address: '',
   password: '',
   confirmPassword: '',
@@ -54,15 +51,6 @@ const getRegistrationFullNameError = (value) => {
   }
 
   return validateCitizenFullName(value);
-};
-
-const getRegistrationContactError = (value) => {
-  if (!String(value || '').trim()) {
-    return 'Please enter your Contact Number.';
-  }
-
-  return validatePhilippineContactDigits(value)
-    .replace('Contact number must begin with 9 and contain exactly 10 digits.', 'Please enter a valid Contact Number.');
 };
 
 const getRegistrationPasswordError = (value) => {
@@ -99,8 +87,6 @@ const UserRegister = () => {
   const [error, setError] = useState('');
   const [emailError, setEmailError] = useState('');
   const [fullNameError, setFullNameError] = useState('');
-  const [contactError, setContactError] = useState('');
-  const [contactCheckingUniqueness, setContactCheckingUniqueness] = useState(false);
   const [passwordError, setPasswordError] = useState('');
   const [confirmPasswordError, setConfirmPasswordError] = useState('');
   const [addressError, setAddressError] = useState('');
@@ -206,13 +192,6 @@ const UserRegister = () => {
       setFullNameError(getRegistrationFullNameError(value));
     }
 
-    if (name === 'contact_number') {
-      const normalizedDigits = normalizePhilippineContactDigits(value);
-      setFormData((current) => ({ ...current, contact_number: normalizedDigits }));
-      setContactError(getRegistrationContactError(normalizedDigits));
-      return;
-    }
-
     if (name === 'password') {
       setPasswordError(getRegistrationPasswordError(value));
       setConfirmPasswordError(getRegistrationConfirmPasswordError(value, formData.confirmPassword));
@@ -227,38 +206,11 @@ const UserRegister = () => {
     }
   };
 
-  const handleContactBlur = async () => {
-    const digits = formData.contact_number;
-    const formatError = getRegistrationContactError(digits);
-    if (formatError) {
-      setContactError(formatError);
-      return;
-    }
-    setContactCheckingUniqueness(true);
-    try {
-      const response = await axios.post(`${API_HOST}/api/auth/unified/check-contact`, {
-        contact_number: `+63${digits}`,
-      });
-      if (!response.data.available) {
-        setContactError('This contact number is unavailable. Please enter a different contact number.');
-      }
-    } catch {
-      // silently skip — server-side will catch it on submit
-    } finally {
-      setContactCheckingUniqueness(false);
-    }
-  };
-
   const canSubmit = useMemo(() => {
-    return (
-      !agreementLoading &&
-      !showAgreementModal &&
-      !contactCheckingUniqueness
-    );
+    return !agreementLoading && !showAgreementModal;
   }, [
     agreementLoading,
     showAgreementModal,
-    contactCheckingUniqueness,
   ]);
 
   const handleSubmit = async (event) => {
@@ -273,14 +225,12 @@ const UserRegister = () => {
 
     const nextEmailError = getRegistrationEmailError(formData.email);
     const nextFullNameError = getRegistrationFullNameError(formData.full_name);
-    const nextContactError = getRegistrationContactError(formData.contact_number);
     const nextPasswordError = getRegistrationPasswordError(formData.password);
     const nextConfirmPasswordError = getRegistrationConfirmPasswordError(formData.password, formData.confirmPassword);
     const nextAddressError = getRegistrationAddressError(formData.address);
 
     setEmailError(nextEmailError);
     setFullNameError(nextFullNameError);
-    setContactError(nextContactError);
     setPasswordError(nextPasswordError);
     setConfirmPasswordError(nextConfirmPasswordError);
     setAddressError(nextAddressError);
@@ -288,7 +238,6 @@ const UserRegister = () => {
     if (
       nextEmailError ||
       nextFullNameError ||
-      nextContactError ||
       nextPasswordError ||
       nextConfirmPasswordError ||
       nextAddressError
@@ -314,7 +263,6 @@ const UserRegister = () => {
       const response = await axios.post(`${API_HOST}/api/auth/unified/register`, {
         email: formData.email.trim(),
         full_name: normalizeCitizenFullName(formData.full_name),
-        contact_number: `+63${normalizePhilippineContactDigits(formData.contact_number)}`,
         address: formData.address,
         password: formData.password,
         dpa_consent: true,
@@ -423,28 +371,7 @@ const UserRegister = () => {
                     {emailError ? <p className="mt-1.5 text-xs font-medium text-rose-600">{emailError}</p> : null}
                   </div>
 
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-slate-700">Contact Number</label>
-                    <div className={`flex overflow-hidden rounded-xl border transition focus-within:ring-2 focus-within:ring-emerald-500/30 ${contactError ? 'border-rose-300 bg-rose-50 focus-within:border-rose-400' : 'border-slate-200 bg-white focus-within:border-emerald-400'}`}>
-                      <span className="flex items-center border-r border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-500">+63</span>
-                      <input
-                        type="tel"
-                        name="contact_number"
-                        value={formData.contact_number}
-                        onChange={handleChange}
-                        onBlur={handleContactBlur}
-                        inputMode="numeric"
-                        maxLength={10}
-                        placeholder="9123456789"
-                        aria-invalid={contactError ? 'true' : 'false'}
-                        className="w-full bg-transparent px-4 py-2.5 text-sm text-slate-900 outline-none"
-                        required
-                      />
-                    </div>
-                    {contactError ? <p className="mt-1.5 text-xs font-medium text-rose-600">{contactError}</p> : null}
-                  </div>
-
-                  <div>
+                  <div className="sm:col-span-2">
                     <label className="mb-1.5 block text-sm font-medium text-slate-700">
                       Address <span className="text-slate-400">(Optional)</span>
                     </label>

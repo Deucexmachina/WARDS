@@ -2466,7 +2466,7 @@ async def unified_register(
     citizen = CitizenUser(
         email=email,
         full_name=payload.full_name.strip(),
-        contact_number=payload.contact_number.strip(),
+        contact_number=payload.contact_number.strip() if payload.contact_number else "",
         address=payload.address.strip() if payload.address else "",
         hashed_password=pwd_context.hash(payload.password),
         role="public",

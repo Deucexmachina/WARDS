@@ -43,7 +43,6 @@ const UserDashboard = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <p className="text-gray-600"><strong>Email:</strong> {user?.email}</p>
-              <p className="text-gray-600"><strong>Contact:</strong> {user?.contact_number}</p>
               {user?.address && <p className="text-gray-600"><strong>Address:</strong> {user?.address}</p>}
             </div>
           </div>

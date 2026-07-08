@@ -7,8 +7,6 @@ import { getStoredPublicUser, setStoredPublicUser } from '../../utils/publicSess
 import { usePublicLanguage } from '../../utils/publicLanguage';
 import {
   getEmailValidationMessage,
-  normalizePhilippineContactDigits,
-  validatePhilippineContactDigits,
   validateStrongPassword,
   validateCitizenFullName,
   normalizeCitizenFullName,
@@ -17,7 +15,6 @@ import {
 const DEFAULT_PROFILE = {
   full_name: '',
   email: '',
-  mobile_number: '',
   address: '',
   taxpayer_type: 'Individual',
 };
@@ -83,7 +80,6 @@ const buildStoredPublicProfile = (profile) => ({
   id: profile?.id,
   email: profile?.email || '',
   full_name: profile?.full_name || '',
-  contact_number: profile?.mobile_number || '',
   address: profile?.address || '',
   taxpayer_type: profile?.taxpayer_type || 'Individual',
 });
@@ -92,7 +88,6 @@ const isProfileReady = (profile) =>
   Boolean(
     profile?.full_name?.trim() &&
     profile?.email?.trim() &&
-    profile?.mobile_number?.trim() &&
     profile?.address?.trim() &&
     profile?.taxpayer_type?.trim()
   );
@@ -117,8 +112,6 @@ const AccountManagement = () => {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [emailError, setEmailError] = useState('');
-  const [contactError, setContactError] = useState('');
-  const [contactCheckingUniqueness, setContactCheckingUniqueness] = useState(false);
   const [fullNameError, setFullNameError] = useState('');
   const [addressError, setAddressError] = useState('');
   const [identifierErrors, setIdentifierErrors] = useState({});
@@ -336,15 +329,6 @@ const AccountManagement = () => {
 
   const handleProfileChange = (event) => {
     const { name, value } = event.target;
-    if (name === 'mobile_number') {
-      const normalizedDigits = normalizePhilippineContactDigits(value);
-      setProfile((current) => ({ ...current, mobile_number: normalizedDigits }));
-      setContactError(validatePhilippineContactDigits(normalizedDigits));
-      setMessage('');
-      setError('');
-      return;
-    }
-
     setProfile((current) => ({ ...current, [name]: value }));
     if (name === 'email') {
       setEmailError(getEmailValidationMessage(value));
@@ -361,29 +345,6 @@ const AccountManagement = () => {
     }
     setMessage('');
     setError('');
-  };
-
-  const handleContactBlur = async () => {
-    const digits = profile.mobile_number;
-    const formatError = validatePhilippineContactDigits(digits);
-    if (formatError) {
-      return;
-    }
-    const storedUser = getStoredPublicUser();
-    setContactCheckingUniqueness(true);
-    try {
-      const response = await api.post('/auth/unified/check-contact', {
-        contact_number: `+63${digits}`,
-        exclude_citizen_id: storedUser?.id ?? null,
-      });
-      if (!response.data.available) {
-        setContactError('This contact number is unavailable. Please enter a different contact number.');
-      }
-    } catch {
-      // silently skip — server-side will catch it on save
-    } finally {
-      setContactCheckingUniqueness(false);
-    }
   };
 
   const handleIdentifierChange = (event) => {
@@ -424,13 +385,6 @@ const AccountManagement = () => {
       return;
     }
 
-    const nextContactError = validatePhilippineContactDigits(profile.mobile_number);
-    if (nextContactError) {
-      setContactError(nextContactError);
-      setError('Correct the highlighted contact number field before saving.');
-      return;
-    }
-
     const nextFullNameError = validateCitizenFullName(profile.full_name);
     if (nextFullNameError) {
       setFullNameError(nextFullNameError);
@@ -464,8 +418,8 @@ const AccountManagement = () => {
         current_password: confirmProfilePassword,
       });
       const nextProfile = response.data?.profile || profile;
-      setProfile((current) => ({ ...current, ...nextProfile, mobile_number: normalizePhilippineContactDigits(nextProfile.mobile_number || current.mobile_number) }));
-      setOriginalProfile((current) => ({ ...current, ...nextProfile, mobile_number: normalizePhilippineContactDigits(nextProfile.mobile_number || current.mobile_number) }));
+      setProfile((current) => ({ ...current, ...nextProfile }));
+      setOriginalProfile((current) => ({ ...current, ...nextProfile }));
       const currentStoredUser = getStoredPublicUser();
       setStoredPublicUser({
         ...(currentStoredUser || {}),
@@ -490,7 +444,6 @@ const AccountManagement = () => {
   const handleCancelEditProfile = () => {
     setProfile(originalProfile);
     setEmailError('');
-    setContactError('');
     setFullNameError('');
     setAddressError('');
     setIsProfileLocked(true);
@@ -579,7 +532,6 @@ const AccountManagement = () => {
     formData.append('taxpayer_type', profile.taxpayer_type);
     formData.append('full_name', profile.full_name);
     formData.append('email', profile.email);
-    formData.append('mobile_number', profile.mobile_number);
     formData.append('address', profile.address || '');
     if (identifierForm.tdn) formData.append('tdn', identifierForm.tdn);
     if (identifierForm.mayor_permit_number) formData.append('mayor_permit_number', identifierForm.mayor_permit_number);
@@ -689,7 +641,7 @@ const AccountManagement = () => {
                     </button>
                     <button
                       type="submit"
-                      disabled={savingProfile || contactCheckingUniqueness}
+                      disabled={savingProfile}
                       className="rounded-full bg-[#0f5b83] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#0c4d6f] disabled:opacity-60"
                     >
                       {savingProfile ? 'Saving...' : 'Save Changes'}
@@ -707,24 +659,6 @@ const AccountManagement = () => {
                     <span className="mb-2 block text-sm font-semibold text-slate-700">Email Address</span>
                     <input name="email" type="email" value={profile.email} onChange={handleProfileChange} disabled={isProfileLocked} className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 focus:ring-2 focus:ring-[#0f5b83]/10 ${emailError ? 'border-rose-400 bg-rose-50 focus:border-rose-500' : 'border-slate-300 focus:border-[#0f5b83]'}`} />
                     {emailError ? <span className="mt-2 block text-xs font-medium text-rose-600">{emailError}</span> : null}
-                  </label>
-                  <label className="block">
-                    <span className="mb-2 block text-sm font-semibold text-slate-700">Contact Number</span>
-                    <div className={`flex overflow-hidden rounded-2xl border ${contactError ? 'border-rose-400 bg-rose-50' : 'border-slate-300'} ${isProfileLocked ? 'bg-slate-100' : 'bg-white'}`}>
-                      <span className="flex items-center bg-slate-100 px-4 font-semibold text-slate-700">+63</span>
-                      <input
-                        name="mobile_number"
-                        value={profile.mobile_number}
-                        onChange={handleProfileChange}
-                        onBlur={handleContactBlur}
-                        disabled={isProfileLocked}
-                        inputMode="numeric"
-                        maxLength={10}
-                        className="w-full px-4 py-3 text-sm outline-none transition disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
-                        placeholder="9123456789"
-                      />
-                    </div>
-                    {contactError ? <span className="mt-2 block text-xs font-medium text-rose-600">{contactError}</span> : null}
                   </label>
                   <label className="block">
                     <span className="mb-2 block text-sm font-semibold text-slate-700">Taxpayer Type</span>

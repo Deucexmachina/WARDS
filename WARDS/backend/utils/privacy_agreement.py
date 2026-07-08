@@ -1,22 +1,22 @@
 from __future__ import annotations
 
 
-PUBLIC_DPA_VERSION = "WARDS-DPA-2026.06"
+PUBLIC_DPA_VERSION = "WARDS-DPA-2026.07"
 PUBLIC_DPA_TITLE = "WARDS Data Privacy Agreement"
-PUBLIC_DPA_EFFECTIVE_DATE = "2026-06-05"
+PUBLIC_DPA_EFFECTIVE_DATE = "2026-07-08"
 PUBLIC_DPA_CATEGORY = "Data Privacy Agreement"
 
 PUBLIC_DPA_CONTENT = """
 WARDS DATA PRIVACY AGREEMENT
 
-Effective Date: June 5, 2026
-Version: WARDS-DPA-2026.06
+Effective Date: July 8, 2026
+Version: WARDS-DPA-2026.07
 
 1. Purpose of Collection
 The WARDS system collects personal information to create and manage your citizen account, verify your identity, support queueing and service transactions, send notifications, secure your access, respond to lawful requests, and improve public service delivery.
 
 2. Information Collected
-The personal information that may be collected includes your full name, email address, mobile or contact number, address, taxpayer details when applicable, login credentials, verification records, and system-generated security or audit metadata connected with your use of the platform.
+The personal information that may be collected includes your full name, email address, address, taxpayer details when applicable, login credentials, verification records, and system-generated security or audit metadata connected with your use of the platform.
 
 3. Legal Basis
 Your personal information is processed in accordance with Republic Act No. 10173, also known as the Philippine Data Privacy Act of 2012, its Implementing Rules and Regulations, and other applicable government rules on records management, security, and lawful disclosure.

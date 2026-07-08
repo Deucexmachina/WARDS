@@ -158,7 +158,7 @@ ASSESSMENT_CLEAR_PAYMENT_STATUSES = {"PAYMENT_VERIFIED", "OR_GENERATED", "COMPLE
 class PublicProfileUpdateRequest(BaseModel):
     full_name: str
     email: str
-    mobile_number: str
+    mobile_number: str = ""
     address: str | None = None
     taxpayer_type: str
     tin: str | None = None
@@ -784,8 +784,9 @@ async def update_public_account_profile(
         normalized_email = normalize_email(payload.email, check_deliverability=True)
         ensure_email_is_unique(db, normalized_email, exclude_citizen_id=current_user.id)
         taxpayer_type = normalize_taxpayer_type(payload.taxpayer_type)
-        mobile_number = normalize_mobile_number(payload.mobile_number)
-        ensure_contact_number_is_unique(db, mobile_number, exclude_citizen_id=current_user.id)
+        mobile_number = normalize_mobile_number(payload.mobile_number) if (payload.mobile_number or "").strip() else ""
+        if mobile_number:
+            ensure_contact_number_is_unique(db, mobile_number, exclude_citizen_id=current_user.id)
         full_name = normalize_citizen_full_name(payload.full_name)
 
         normalized_tin = None
