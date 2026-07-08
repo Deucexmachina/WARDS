@@ -1954,6 +1954,89 @@ async def unified_verify_mfa_setup(
     return {"message": "MFA enabled successfully", "portal": portal, "backup_codes": backup_codes}
 
 
+class UnifiedVerifyMFASetupAuthenticated(BaseModel):
+    totp_code: str
+
+
+@router.post("/verify-mfa-setup-authenticated")
+@limiter.limit("5/minute")
+async def unified_verify_mfa_setup_authenticated(
+    request: Request,
+    credentials: UnifiedVerifyMFASetupAuthenticated,
+    db: Session = Depends(get_db),
+):
+    """Verify MFA setup for authenticated user (extracts account from token)."""
+    token = None
+    for portal_name in ("admin", "branch", "public"):
+        token = _extract_token_from_request(request, _get_cookie_name(portal_name))
+        if token:
+            break
+
+    if not token:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header.split(" ", 1)[1]
+
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid authorization",
+        )
+
+    portal, account, _payload = decode_active_account_from_bearer_token(token, db, request=request)
+
+    if portal not in {"public", "admin", "branch"} or not account:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="MFA verification is only available for citizen, staff, and admin accounts.",
+        )
+
+    if getattr(account, "status", "Active") != "Active":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid credentials or account status.",
+        )
+
+    mfa_username = get_mfa_username(portal, account)
+    mfa_record = get_mfa_secret_raw(db, portal, mfa_username)
+    if not mfa_record:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="MFA setup not initiated. Please start setup first.",
+        )
+
+    secret = get_decrypted_or_raw(mfa_record, "secret")
+    if not secret:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to read MFA secret.",
+        )
+
+    totp = pyotp.TOTP(secret)
+    if not totp.verify(credentials.totp_code, valid_window=MFA_VALID_WINDOW_STEPS):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired authenticator code. Please try again.",
+        )
+
+    mfa_record.enabled = True
+    db.commit()
+
+    backup_codes = generate_backup_codes()
+    save_backup_codes(db, portal, mfa_username, backup_codes)
+
+    log_activity(
+        db,
+        "Unified MFA Setup Verified (Authenticated)",
+        get_account_identifier(portal, account),
+        f"Portal: {portal}",
+        "auth",
+        request=request,
+        account=account,
+    )
+    return {"message": "MFA enabled successfully", "portal": portal, "backup_codes": backup_codes}
+
+
 @router.post("/request-password-reset")
 @limiter.limit("5/hour")
 async def unified_request_password_reset(

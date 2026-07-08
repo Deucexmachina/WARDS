@@ -258,22 +258,10 @@ const AccountManagement = () => {
   };
 
   const handleRequestMfaSetup = async () => {
-    if (!mfaPassword) {
-      setMfaError(
-        language === 'en'
-          ? 'Please enter your current password to continue.'
-          : 'Mangyaring ilagay ang iyong kasalukuyang password para magpatuloy.'
-      );
-      return;
-    }
     try {
       setMfaLoading(true);
       setMfaError('');
-      const response = await unifiedAuthAPI.setupMfa({
-        identifier: profile.email,
-        password: mfaPassword,
-        portal: 'public',
-      });
+      const response = await unifiedAuthAPI.setupMfaAuthenticated();
       setMfaSetupData(response.data);
       setMfaMessage('');
     } catch (err) {
@@ -299,11 +287,8 @@ const AccountManagement = () => {
       setMfaLoading(true);
       setMfaError('');
       setMfaTotpError('');
-      const response = await unifiedAuthAPI.verifyMfaSetup({
-        identifier: profile.email,
-        password: mfaPassword,
+      const response = await unifiedAuthAPI.verifyMfaSetupAuthenticated({
         totp_code: mfaTotpCode,
-        portal: 'public',
       });
       setMfaEnabled(true);
       setShowMfaSetup(false);
