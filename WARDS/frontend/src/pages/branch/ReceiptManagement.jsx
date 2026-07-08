@@ -485,6 +485,7 @@ const ReceiptManagement = () => {
   const [releasing, setReleasing] = useState(false);
   const [releaseUploadDrafts, setReleaseUploadDrafts] = useState({});
   const [fieldErrors, setFieldErrors] = useState({});
+  const [highlightedRecordId, setHighlightedRecordId] = useState(null);
   const { registerDirty } = useUnsavedChanges();
   const navSaveRef = useRef(() => {});
 
@@ -1425,6 +1426,25 @@ const ReceiptManagement = () => {
     }
   };
 
+  const handleScrollToMatchedRecord = (matchedReceipt) => {
+    if (!matchedReceipt) return;
+    const recordId = matchedReceipt.id;
+    if (!recordId) {
+      setError('Unable to locate the matched receipt record.');
+      setTimeout(() => setError(''), 3000);
+      return;
+    }
+    const element = document.getElementById(`record-${recordId}`);
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setHighlightedRecordId(recordId);
+      setTimeout(() => setHighlightedRecordId(null), 4000);
+    } else {
+      setError('The matched receipt record is not currently visible. Try browsing the verified records pages below.');
+      setTimeout(() => setError(''), 3000);
+    }
+  };
+
   const ALLOWED_DECLINE_REASON_REGEX = /^[A-Za-z0-9,\.!? ]*$/;
 
   const validateDeclineReason = (value) => {
@@ -1503,12 +1523,20 @@ const ReceiptManagement = () => {
                   : 'Receipt copy release stays locked until Payment Management marks the request fee as verified.'}
             </p>
           ) : request.matchedReceipt ? (
-            <div className="mt-2 space-y-1 text-sm text-slate-700">
-              <p>
+            <button
+              type="button"
+              onClick={() => handleScrollToMatchedRecord(request.matchedReceipt)}
+              className="mt-2 flex w-full items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-left text-sm text-slate-700 transition hover:border-emerald-400 hover:bg-emerald-100"
+            >
+              <svg className="h-4 w-4 flex-shrink-0 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+              </svg>
+              <span>
                 Matched reference:{' '}
                 <span className="font-semibold text-slate-900">{matchedReference}</span>
-              </p>
-            </div>
+              </span>
+              <span className="ml-auto text-xs font-medium text-emerald-600">Click to locate</span>
+            </button>
           ) : (
             <div className="mt-2 space-y-1 text-sm text-slate-500">
               <p>No matching receipt record found.</p>
@@ -1614,7 +1642,7 @@ const ReceiptManagement = () => {
                 </tr>
               ) : (
                 visibleRows.map((record) => (
-                  <tr key={record.id} className="transition hover:bg-slate-50">
+                  <tr key={record.id} id={`record-${record.id}`} className={`transition-all duration-500 ${highlightedRecordId === record.id ? 'bg-emerald-50 ring-2 ring-inset ring-emerald-400' : 'hover:bg-slate-50'}`}>
                     {showReferenceColumn ? (
                       <td className="px-4 py-4 font-mono text-xs text-slate-600">{record.ref_number || 'N/A'}</td>
                     ) : null}
@@ -1716,7 +1744,7 @@ const renderMarketVerifiedRecordSection = (rows) => (
                       </tr>
                     ) : (
                       visibleRows.map((record) => (
-                        <tr key={record.id} className="transition hover:bg-slate-50">
+                        <tr key={record.id} id={`record-${record.id}`} className={`transition-all duration-500 ${highlightedRecordId === record.id ? 'bg-emerald-50 ring-2 ring-inset ring-emerald-400' : 'hover:bg-slate-50'}`}>
                           <td className="px-4 py-4 font-mono text-xs text-slate-600">{record.ref_number || record.receipt_number || 'N/A'}</td>
                           <td className="px-4 py-4 font-medium text-slate-900">{record.taxpayer_name || 'N/A'}</td>
                           <td className="px-4 py-4">{record.transaction_date || 'N/A'}</td>
