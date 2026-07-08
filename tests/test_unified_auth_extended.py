@@ -29,6 +29,14 @@ class FakeQuery:
             return []
         return [self._result]
 
+    def delete(self, *_args, **_kwargs):
+        pass
+
+    def count(self):
+        if self._result is None:
+            return 0
+        return 1
+
 
 class FakeDB:
     def __init__(self, admin=None, branch=None, citizen=None, email_otp=None):
