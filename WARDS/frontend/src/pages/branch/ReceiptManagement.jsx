@@ -1508,7 +1508,6 @@ const ReceiptManagement = () => {
                 Matched reference:{' '}
                 <span className="font-semibold text-slate-900">{matchedReference}</span>
               </p>
-              <p>Click the Reference in the request details to auto-release the receipt copy.</p>
             </div>
           ) : (
             <div className="mt-2 space-y-1 text-sm text-slate-500">
@@ -1520,10 +1519,34 @@ const ReceiptManagement = () => {
         <div className="basis-full rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
           Send to: {request.email || 'No requester email'}
         </div>
+        {canRelease && request.matchedReceipt ? (
+          <button
+            onClick={() => handleAutoReleaseClick(request)}
+            disabled={autoReleasingRequestId === request.requestId}
+            className="w-full rounded-2xl bg-emerald-600 px-6 py-5 text-lg font-bold text-white shadow-md transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {autoReleasingRequestId === request.requestId ? (
+              <span className="flex items-center justify-center gap-2">
+                <svg className="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Releasing...
+              </span>
+            ) : (
+              <span className="flex items-center justify-center gap-2">
+                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Auto Release
+              </span>
+            )}
+          </button>
+        ) : null}
         <button
           onClick={() => handleDeclineClick(request)}
           disabled={decliningRequestId === request.requestId}
-          className="w-full rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-50"
+          className="w-full rounded-lg border border-rose-200 bg-transparent px-3 py-2 text-xs font-medium text-rose-600 transition hover:bg-rose-50 disabled:opacity-50"
         >
           {decliningRequestId === request.requestId ? 'Declining...' : 'Decline Request'}
         </button>
@@ -2194,7 +2217,7 @@ const handleCancelScan = () => {
                       ['Transaction Date', request.transactionDate || 'N/A'],
                       ['Reference', request.matchedReceipt
                         ? (request.matchedReceipt.ref_number || request.matchedReceipt.receipt_number || request.refNumber || 'N/A')
-                        : (request.refNumber || 'N/A'), true],
+                        : (request.refNumber || 'N/A'), false],
                       ['Matched Record', request.matchedReceipt
                         ? (request.matchedReceipt.receipt_number || request.matchedReceipt.ref_number || 'Matched')
                         : 'Waiting for receipt upload'],
