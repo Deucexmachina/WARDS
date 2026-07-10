@@ -770,6 +770,9 @@ async def update_branch(
         ))
     deactivated_count = len(deactivated_accounts)
 
+    # Flush pending changes (new accounts, status updates) so the query sees them
+    db.flush()
+
     # Sync branch enabledServices with all active service windows
     active_service_windows = sorted({
         account.service_window
