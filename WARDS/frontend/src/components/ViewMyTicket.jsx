@@ -483,8 +483,8 @@ const ViewMyTicket = ({ onClose }) => {
       {/* Add Transaction Modal */}
       {showAddTransaction && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
-            <div className="border-b border-slate-200 px-6 py-4">
+          <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
+            <div className="rounded-t-2xl border-b border-slate-200 px-6 py-4">
               <h3 className="text-lg font-bold text-primary">{modalText.addTransactionTitle}</h3>
             </div>
             <div className="px-6 py-6">
@@ -515,7 +515,7 @@ const ViewMyTicket = ({ onClose }) => {
                 <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">{addTransactionError}</p>
               )}
             </div>
-            <div className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-4">
+            <div className="flex justify-end gap-2 rounded-b-2xl border-t border-slate-200 bg-slate-50 px-6 py-4">
               <button
                 onClick={() => { setShowAddTransaction(false); setSelectedService(''); setAddTransactionError(null); }}
                 disabled={addingTransaction}
