@@ -904,7 +904,6 @@ const PayTaxesBT = () => {
                             }}
                             onContinue={selectedApplication.payment_ref_number ? handleProceedToPayment : handleGenerateReference}
                             processing={generatingReference || processingPayment}
-                            readOnlyCustomer
                             referenceNumber={selectedApplication.payment_ref_number}
                             title={text.businessTaxCheckoutTitle}
                             language={language}
