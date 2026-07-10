@@ -5,6 +5,7 @@ import { useSearchParams } from 'react-router-dom';
 import { taxpayerAccountAPI, queueAPI, receiptAPI, unifiedAuthAPI } from '../../services/api';
 import { getStoredPublicUser, setStoredPublicUser } from '../../utils/publicSession';
 import { usePublicLanguage } from '../../utils/publicLanguage';
+import { formatUtc8DateTime } from '../../utils/dateTime';
 import {
   getEmailValidationMessage,
   normalizePhilippineContactDigits,
@@ -75,7 +76,7 @@ const formatCurrency = (value) =>
   `PHP ${Number(value || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const formatTimestamp = (value) =>
-  value ? new Date(value).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }) : 'N/A';
+  value ? formatUtc8DateTime(value, 'en-PH', { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }) : 'N/A';
 
 const buildStoredPublicProfile = (profile) => ({
   id: profile?.id,
