@@ -106,6 +106,7 @@ const RequestReceipt = () => {
   const [emailError, setEmailError] = useState('');
   const [refNumberError, setRefNumberError] = useState('');
   const [systemStatus, setSystemStatus] = useState(null);
+  const [showEmailConfirmModal, setShowEmailConfirmModal] = useState(false);
 
   const text = language === 'tl'
     ? {
@@ -171,6 +172,11 @@ const RequestReceipt = () => {
         requestAnotherCopy: 'Humiling ng Panibagong Kopya',
         notYetAssigned: 'Hindi pa naitatalaga',
         notApplicable: 'Wala',
+        emailConfirmTitle: 'Kumpirmahin ang Email Address',
+        emailConfirmMessage: 'Ang kopya ng opisyal na resibo ay ipadala sa sumusunod na email address. Pakikumpirma kung ito ay tama.',
+        emailConfirmRecipient: 'Padadalahan ng Email',
+        emailConfirmCancel: 'Hindi, Ibalik',
+        emailConfirmProceed: 'Oo, Ipadala ang Request',
       }
     : {
         defaultDisabledMessage: 'This service is currently unavailable because it has been disabled by system administration.',
@@ -235,6 +241,11 @@ const RequestReceipt = () => {
         requestAnotherCopy: 'Request Another Copy',
         notYetAssigned: 'Not yet assigned',
         notApplicable: 'N/A',
+        emailConfirmTitle: 'Confirm Email Address',
+        emailConfirmMessage: 'The official receipt copy will be sent to the following email address. Please confirm if this is correct.',
+        emailConfirmRecipient: 'Recipient Email',
+        emailConfirmCancel: 'No, Go Back',
+        emailConfirmProceed: 'Yes, Submit Request',
       };
 
   const localizeReceiptReason = (value) => {
@@ -520,6 +531,11 @@ const RequestReceipt = () => {
       return;
     }
 
+    setShowEmailConfirmModal(true);
+  };
+
+  const handleConfirmEmailAndSubmit = async () => {
+    setShowEmailConfirmModal(false);
     setLoading(true);
     setError('');
 
@@ -892,6 +908,39 @@ const RequestReceipt = () => {
           </div>
         </div>
       </div>
+
+      {showEmailConfirmModal ? (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
+            <div className="border-b border-slate-200 px-6 py-4">
+              <h3 className="text-lg font-bold text-slate-900">{text.emailConfirmTitle}</h3>
+            </div>
+            <div className="px-6 py-6">
+              <p className="text-sm text-slate-600">{text.emailConfirmMessage}</p>
+              <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{text.emailConfirmRecipient}</p>
+                <p className="mt-1 text-sm font-semibold text-slate-900 break-all">{formData.email}</p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-4">
+              <button
+                type="button"
+                onClick={() => setShowEmailConfirmModal(false)}
+                className="rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+              >
+                {text.emailConfirmCancel}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmEmailAndSubmit}
+                className="rounded-lg bg-[#0f2f5f] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#19498d]"
+              >
+                {text.emailConfirmProceed}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 };
