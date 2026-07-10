@@ -870,14 +870,17 @@ def send_mfa_recovery_email(recipient_email: str, verification_code: str, expire
 
     smtp_from_email = os.getenv("SMTP_FROM_EMAIL")
     smtp_from_name = os.getenv("SMTP_FROM_NAME", "WARDS Admin")
-    logos = _load_email_logos()
+    # Brevo's HTTP transactional API treats uploaded image data as attachments.
+    # For short MFA/OTP emails, attachments are unnecessary and can hurt inbox placement.
+    logos = [] if os.getenv("BREVO_API_KEY") else _load_email_logos()
     message = EmailMessage()
     message["Subject"] = "WARDS MFA Reset Verification Code"
     message["From"] = f"{smtp_from_name} <{smtp_from_email}>"
     message["To"] = recipient_email
     message.set_content(_build_mfa_recovery_text(verification_code, expires_minutes))
     message.add_alternative(_build_mfa_recovery_html(verification_code, expires_minutes, logos), subtype="html")
-    _attach_inline_logos(message, logos)
+    if logos:
+        _attach_inline_logos(message, logos)
 
     try:
         result = _send_email_message(message)
