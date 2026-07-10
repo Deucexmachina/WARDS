@@ -112,7 +112,7 @@ def _default_taxpayer_guide_page_settings() -> dict[str, Any]:
         "help_description_en": "If you can't find the answer you're looking for, please contact us directly.",
         "help_description_tl": "Kung hindi mo mahanap ang sagot na iyong hinahanap, mangyaring makipag-ugnayan sa amin nang direkta.",
         "help_contacts": [
-            {"label_en": "Phone", "label_tl": "Telepono", "value": "(02) 1234-5678"},
+            {"label_en": "Phone", "label_tl": "Telepono", "value": "8988-4242 locals 8157, 8320, 8176, 8263, 8265, 8299, 8145, 8156"},
             {"label_en": "Email", "label_tl": "Email", "value": "treasurer@city.gov.ph"},
         ],
     }

@@ -77,7 +77,7 @@ const FAQs = () => {
     && String(language === 'en' ? contact?.label_en || '' : contact?.label_tl || '').trim()
   ));
   const fallbackHelpContacts = [
-    { label_en: 'Phone', label_tl: 'Telepono', value: '(02) 1234-5678' },
+    { label_en: 'Phone', label_tl: 'Telepono', value: '8988-4242 locals 8157, 8320, 8176, 8263, 8265, 8299, 8145, 8156' },
     { label_en: 'Email', label_tl: 'Email', value: 'treasurer@city.gov.ph' },
   ];
 
