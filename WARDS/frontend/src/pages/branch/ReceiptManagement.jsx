@@ -488,6 +488,7 @@ const ReceiptManagement = () => {
   const [highlightedRecordId, setHighlightedRecordId] = useState(null);
   const [deleteRecordTarget, setDeleteRecordTarget] = useState(null);
   const [deletingRecord, setDeletingRecord] = useState(false);
+  const [activeSection, setActiveSection] = useState('online');
   const { registerDirty } = useUnsavedChanges();
   const navSaveRef = useRef(() => {});
 
@@ -1483,15 +1484,19 @@ const ReceiptManagement = () => {
       setTimeout(() => setError(''), 3000);
       return;
     }
-    const element = document.getElementById(`record-${recordId}`);
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      setHighlightedRecordId(recordId);
-      setTimeout(() => setHighlightedRecordId(null), 4000);
-    } else {
-      setError('The matched receipt record is not currently visible. Try browsing the verified records pages below.');
-      setTimeout(() => setError(''), 3000);
-    }
+    const scrollToRecordElement = () => {
+      const element = document.getElementById(`record-${recordId}`);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setHighlightedRecordId(recordId);
+        setTimeout(() => setHighlightedRecordId(null), 4000);
+      } else {
+        setError('The matched receipt record is not currently visible. Try browsing the verified records pages below.');
+        setTimeout(() => setError(''), 3000);
+      }
+    };
+    setActiveSection('verified');
+    setTimeout(scrollToRecordElement, 50);
   };
 
   const ALLOWED_DECLINE_REASON_REGEX = /^[A-Za-z0-9,\.!? ]*$/;
@@ -2279,6 +2284,31 @@ const handleCancelScan = () => {
         </div>
       </div>
 
+      <div className="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+        {[
+          { key: 'online', label: 'Online Requests', count: onlineReceiptRequests.length },
+          { key: 'completed', label: 'Completed Requests', count: releasedRptRequests.length + releasedBusinessRequests.length + releasedMiscRequests.length + releasedCtcRequests.length + releasedPtrRequests.length + releasedMarketRequests.length },
+          { key: 'verified', label: 'Verified Records', count: rptRecords.length + businessTaxRecords.length + miscRecords.length + ctcRecords.length + ptrRecords.length + marketRecords.length },
+        ].map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            onClick={() => setActiveSection(tab.key)}
+            className={`flex-1 min-w-[180px] rounded-xl px-4 py-3 text-sm font-semibold transition ${
+              activeSection === tab.key
+                ? 'bg-primary text-white shadow-md'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            {tab.label}
+            <span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-bold ${activeSection === tab.key ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-600'}`}>
+              {tab.count}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {activeSection === 'online' ? (
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div className="space-y-1">
@@ -2364,7 +2394,10 @@ const handleCancelScan = () => {
           );
         })()}
       </div>
+      ) : null}
 
+      {activeSection === 'completed' ? (
+      <div className="space-y-8">
       {renderCompletedRequestSection({
         title: 'Completed RPT Receipt Requests',
         categoryKey: 'RPT',
@@ -2400,7 +2433,11 @@ const handleCancelScan = () => {
         categoryKey: 'MARKET',
         rows: releasedMarketRequests,
       })}
+      </div>
+      ) : null}
 
+      {activeSection === 'verified' ? (
+      <div className="space-y-8">
       {renderVerifiedRecordSection({
         title: 'Verified RPT Records',
         categoryKey: 'RPT',
@@ -2445,6 +2482,8 @@ const handleCancelScan = () => {
       })}
 
       {renderMarketVerifiedRecordSection(marketRecords)}
+      </div>
+      ) : null}
 
       <DeleteConfirmationModal
         open={Boolean(deleteRecordTarget)}
