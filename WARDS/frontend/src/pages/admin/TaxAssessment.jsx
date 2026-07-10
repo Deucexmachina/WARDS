@@ -818,7 +818,7 @@ const TaxAssessment = () => {
 
       {showAssessmentGenerator ? (
         <div ref={generatorScrollRef} className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 py-8">
-        <form onSubmit={handleSaveAssessment} className="w-full max-w-5xl rounded-[30px] border border-slate-200 bg-white p-6 shadow-2xl md:p-8">
+        <form onSubmit={handleSaveAssessment} noValidate className="w-full max-w-5xl rounded-[30px] border border-slate-200 bg-white p-6 shadow-2xl md:p-8">
           <div className="mb-6 flex flex-col gap-3 border-b border-slate-100 pb-6 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.26em] text-slate-500">Assessment Generator</p>
