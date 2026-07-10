@@ -16,13 +16,14 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 from sqlalchemy import false, or_
 
 from database.models import (
     ActivityLog,
     Branch,
+    BranchStaff,
     BusinessRegistry,
     BusinessTaxApplication,
     CitizenUser,
@@ -36,14 +37,14 @@ from database.models import (
 )
 from auth import require_main_admin, get_current_user
 from auth.decorators import decode_active_account_from_bearer_token, _extract_token_from_request, _get_cookie_name, _validate_token_binding
-from services.email_service import send_payment_receipt_email
+from services.email_service import send_payment_receipt_email, send_payment_decline_email, send_remittance_rejection_email
 from services.paymongo import paymongo_service
 from utils.branch_system_settings import get_branch_setting_value
 from utils.field_crypto import apply_citizen_user_security, apply_payment_security, apply_receipt_request_security, build_redacted_text, collection_account_number_value, collection_account_value, find_payment_by_field, find_payment_by_ref_number, get_decrypted_or_raw, hash_aware_match, hash_optional_value, receipt_request_value, remittance_numeric_value, remittance_value, set_encrypted_hash_companions, tax_assessment_value
 from utils.distributed_ledger import append_ledger_entry
 from utils.file_delivery import deliver_file_response
 from utils.file_validation import validate_upload_file
-from utils.security_validation import format_tin, normalize_email, normalize_identity_name, normalize_tin, ensure_tin_is_unique
+from utils.security_validation import format_tin, normalize_email, normalize_identity_name, normalize_tin, ensure_tin_is_unique, reject_dangerous_characters
 from utils.system_settings import SYSTEM_DISABLED_MESSAGE, get_setting_value
 from utils.request_signing import require_internal_signature
 
@@ -225,6 +226,17 @@ class PayMongoWebhookPayload(BaseModel):
 
 class RemittanceReviewPayload(BaseModel):
     remarks: str | None = None
+
+
+class RemittanceRejectPayload(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=255, description="Reason for rejecting the remittance")
+
+    @field_validator("reason")
+    @classmethod
+    def sanitize_reason(cls, value: str) -> str:
+        if value is None:
+            return value
+        return re.sub(r"\s+", " ", value.strip())
 
 
 class RptCartItem(BaseModel):
@@ -3147,7 +3159,7 @@ async def accept_main_remittance(
 @router.post("/remittances/{remittance_id}/reject")
 async def reject_main_remittance(
     remittance_id: int,
-    payload: RemittanceReviewPayload | None = None,
+    payload: RemittanceRejectPayload,
     current_admin=Depends(require_main_admin()),
     db: Session = Depends(get_db),
 ):
@@ -3156,11 +3168,15 @@ async def reject_main_remittance(
         raise HTTPException(status_code=404, detail="Remittance not found")
     if remittance.status != "Submitted":
         raise HTTPException(status_code=409, detail="Only submitted remittances can be rejected.")
+
+    sanitized_reason = reject_dangerous_characters(payload.reason, field_name="rejection_reason")
+    if not sanitized_reason or len(sanitized_reason) > 255:
+        raise HTTPException(status_code=400, detail="Rejection reason must be between 1 and 255 characters.")
+
     remittance.status = "Rejected"
     remittance.reviewed_by = getattr(current_admin, "username", None) or getattr(current_admin, "email", "main_admin")
     remittance.reviewed_at = datetime.utcnow()
-    if payload and payload.remarks:
-        remittance.remarks = payload.remarks.strip()
+    remittance.remarks = sanitized_reason
     for item in remittance.items or []:
         item.status = "Rejected"
     branch = remittance.branch
@@ -3168,12 +3184,29 @@ async def reject_main_remittance(
     db.add(ActivityLog(
         action="Remittance Rejected",
         user=remittance.reviewed_by,
-        details=f"branch: {branch_name} | Rejected remittance {remittance.remittance_number}",
+        details=f"branch: {branch_name} | Rejected remittance {remittance.remittance_number} | Reason: {sanitized_reason}",
         type="transaction",
         severity="medium",
     ))
     db.commit()
     db.refresh(remittance)
+
+    branch_admin = (
+        db.query(BranchStaff)
+        .filter(
+            BranchStaff.branch_id == remittance.branch_id,
+            BranchStaff.role == "branch_admin",
+            BranchStaff.status == "Active",
+        )
+        .first()
+    )
+    email_result = send_remittance_rejection_email(
+        recipient_email=get_decrypted_or_raw(branch_admin, "email") if branch_admin else None,
+        branch_name=branch_name,
+        remittance_number=remittance.remittance_number,
+        total_amount=float(remittance.total_amount or 0),
+        rejection_reason=sanitized_reason,
+    )
 
     append_ledger_entry(
         entry_type="remittance_rejected",
@@ -3269,18 +3302,40 @@ async def verify_payment_by_id(
     return {"message": "Payment verified successfully", "status": payment.status}
 
 
+class AdminDeclinePaymentRequest(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=50, description="Reason for declining the payment")
+
+    @field_validator("reason")
+    @classmethod
+    def sanitize_reason(cls, value: str) -> str:
+        if value is None:
+            return value
+        return re.sub(r"\s+", " ", value.strip())
+
+
 @router.put("/{payment_id}/decline")
 async def decline_payment(
     payment_id: int,
+    request_body: AdminDeclinePaymentRequest,
     db: Session = Depends(get_db),
     current_admin=Depends(require_main_admin()),
 ):
     payment = db.query(Payment).filter(Payment.id == payment_id).first()
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
-    
+
+    sanitized_reason = reject_dangerous_characters(request_body.reason, field_name="decline_reason")
+    if not sanitized_reason or len(sanitized_reason) > 50:
+        raise HTTPException(status_code=400, detail="Decline reason must be between 1 and 50 characters.")
+    if not re.match(r"^[A-Za-z0-9,.!? ]+$", sanitized_reason):
+        raise HTTPException(
+            status_code=400,
+            detail="Decline reason can only contain letters, numbers, spaces, commas, periods, exclamation points, and question marks.",
+        )
+
     payment.status = "PAYMENT_REJECTED" if payment.source_module == "rpt_online_payment" else ("Rejected" if payment.source_module == "receipt_request" else "Failed")
     payment.treasury_updated_at = datetime.utcnow()
+    payment.treasury_remarks = sanitized_reason
     revert_linked_request_status_for_declined_payment(db, payment)
     if payment.source_module == "business_tax_online_payment" and payment.related_request_id:
         application = db.query(BusinessTaxApplication).filter(
@@ -3301,7 +3356,25 @@ async def decline_payment(
         severity="medium",
     ))
     db.commit()
-    
+
+    decline_email_result = send_payment_decline_email(
+        recipient_email=payment_value(payment, "email"),
+        taxpayer_name=payment_value(payment, "taxpayer_name") or "Taxpayer",
+        ref_number=payment_value(payment, "ref_number") or str(payment.id),
+        tax_type=payment_value(payment, "tax_type") or "",
+        amount=payment.amount or 0,
+        branch_name=payment_branch_name,
+        decline_reason=sanitized_reason,
+    )
+    if decline_email_result.get("sent"):
+        db.add(ActivityLog(
+            action="Payment Decline Email Sent",
+            user=payment_value(payment, "email") or payment_value(payment, "taxpayer_name"),
+            details=f"Decline notification for {payment_value(payment, 'ref_number')} was emailed to the taxpayer.",
+            type="transaction",
+        ))
+        db.commit()
+
     return {"message": "Payment declined successfully", "status": payment.status}
 
 

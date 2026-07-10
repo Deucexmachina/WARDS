@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import api from '../../services/api';
-import { discrepancyAPI } from '../../services/api';
+import api, { discrepancyAPI, paymentAPI } from '../../services/api';
 import { formatUtc8DateTime, formatUtc8Date, formatUtc8Time } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
@@ -116,6 +115,11 @@ const Dashboard = () => {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [deletingPaymentId, setDeletingPaymentId] = useState(null);
+  const [verifyingPaymentId, setVerifyingPaymentId] = useState(null);
+  const [rejectingPaymentId, setRejectingPaymentId] = useState(null);
+  const [paymentToReject, setPaymentToReject] = useState(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejectReasonError, setRejectReasonError] = useState('');
   const [selectedBranch, setSelectedBranch] = useState(null);
   const [selectedServiceType, setSelectedServiceType] = useState(null);
   const [dateFrom, setDateFrom] = useState('');
@@ -272,6 +276,59 @@ const Dashboard = () => {
       setDiscrepancyError(error.response?.data?.detail || 'Failed to verify discrepancy report.');
     } finally {
       setSavingVerification(false);
+    }
+  };
+
+  const handleVerifyPayment = async (payment) => {
+    try {
+      setVerifyingPaymentId(payment.id);
+      await paymentAPI.verifyById(payment.id);
+      await fetchDashboardData();
+    } catch (error) {
+      console.error('Failed to verify payment:', error);
+      setDiscrepancyError(error.response?.data?.detail || 'Failed to verify payment.');
+    } finally {
+      setVerifyingPaymentId(null);
+    }
+  };
+
+  const validateRejectReason = (reason) => {
+    const trimmed = reason.trim();
+    if (!trimmed) return 'Reason is required.';
+    if (trimmed.length > 50) return 'Reason must be 50 characters or fewer.';
+    if (!/^[A-Za-z0-9,.!? ]+$/.test(trimmed)) return 'Reason can only contain letters, numbers, spaces, commas, periods, exclamation points, and question marks.';
+    return '';
+  };
+
+  const handleRejectPayment = (payment) => {
+    setPaymentToReject(payment);
+    setRejectReason('');
+    setRejectReasonError('');
+  };
+
+  const handleConfirmRejectPayment = async () => {
+    const error = validateRejectReason(rejectReason);
+    if (error) {
+      setRejectReasonError(error);
+      return;
+    }
+    try {
+      setRejectingPaymentId(paymentToReject.id);
+      await paymentAPI.declineById(paymentToReject.id, rejectReason.trim());
+      setPaymentToReject(null);
+      setRejectReason('');
+      setRejectReasonError('');
+      await fetchDashboardData();
+    } catch (error) {
+      console.error('Failed to reject payment:', error);
+      const detail = error.response?.data?.detail;
+      if (typeof detail === 'string') {
+        setRejectReasonError(detail);
+      } else {
+        setDiscrepancyError(detail || 'Failed to reject payment.');
+      }
+    } finally {
+      setRejectingPaymentId(null);
     }
   };
 
@@ -752,18 +809,38 @@ const Dashboard = () => {
                           <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-500">{formatUtc8Date(payment.created_at)}</td>
                           <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-500">{formatUtc8Time(payment.created_at)}</td>
                           <td className="whitespace-nowrap px-5 py-4">
-                            {String(payment.status || '').trim().toLowerCase() === 'pending' ? (
-                              <button
-                                type="button"
-                                onClick={() => handleDeletePendingPayment(payment)}
-                                disabled={deletingPaymentId === payment.id}
-                                className="rounded-md bg-red-50 px-3 py-1 text-xs font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                {deletingPaymentId === payment.id ? 'Removing...' : 'Remove'}
-                              </button>
-                            ) : (
-                              <span className="text-xs text-slate-400">-</span>
-                            )}
+                            <div className="flex items-center gap-2">
+                              {String(payment.status || '').trim().toLowerCase() === 'pending' ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleVerifyPayment(payment)}
+                                    disabled={verifyingPaymentId === payment.id || rejectingPaymentId === payment.id}
+                                    className="rounded-md bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                  >
+                                    {verifyingPaymentId === payment.id ? 'Verifying...' : 'Verify'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRejectPayment(payment)}
+                                    disabled={verifyingPaymentId === payment.id || rejectingPaymentId === payment.id}
+                                    className="rounded-md bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                  >
+                                    Reject
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeletePendingPayment(payment)}
+                                    disabled={deletingPaymentId === payment.id || verifyingPaymentId === payment.id || rejectingPaymentId === payment.id}
+                                    className="rounded-md bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                  >
+                                    {deletingPaymentId === payment.id ? 'Removing...' : 'Remove'}
+                                  </button>
+                                </>
+                              ) : (
+                                <span className="text-xs text-slate-400">-</span>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ));})()}
@@ -1203,6 +1280,59 @@ const Dashboard = () => {
           </div>
         );
       })()}
+      {paymentToReject && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="mx-4 w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <h3 className="mb-2 text-lg font-bold text-slate-900">Reject Payment</h3>
+            <p className="mb-4 text-sm text-slate-600">
+              Provide a reason for rejecting this payment. The taxpayer will receive an email notification with this reason.
+            </p>
+            <div className="mb-4">
+              <label className="mb-1 block text-sm font-medium text-slate-700">Reason <span className="text-rose-600">*</span></label>
+              <textarea
+                value={rejectReason}
+                onChange={(e) => {
+                  setRejectReason(e.target.value);
+                  if (rejectReasonError) setRejectReasonError('');
+                }}
+                maxLength={50}
+                rows={3}
+                placeholder="Enter reason for rejection (max 50 characters)"
+                className={`w-full rounded-lg border px-3 py-2 text-sm outline-none transition ${rejectReasonError ? 'border-rose-400 focus:border-rose-500' : 'border-slate-300 focus:border-blue-500'}`}
+              />
+              <div className="mt-1 flex items-center justify-between">
+                {rejectReasonError ? (
+                  <p className="text-xs text-rose-600">{rejectReasonError}</p>
+                ) : (
+                  <p className="text-xs text-slate-400">{rejectReason.length}/50 characters</p>
+                )}
+              </div>
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setPaymentToReject(null);
+                  setRejectReason('');
+                  setRejectReasonError('');
+                }}
+                disabled={Boolean(rejectingPaymentId)}
+                className="rounded-lg bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-300 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmRejectPayment}
+                disabled={Boolean(rejectingPaymentId)}
+                className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {rejectingPaymentId ? 'Rejecting...' : 'Confirm Reject'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <DeleteConfirmationModal
         open={Boolean(paymentToDelete)}
         title="Delete this pending payment?"

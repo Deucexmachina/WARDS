@@ -177,6 +177,7 @@ export const paymentAPI = {
   getTransactions: (params) => api.get('/payments/transactions', { params }),
   getAll: (params) => api.get('/payments', { params }),
   verifyById: (paymentId) => api.put(`/payments/${paymentId}/verify`),
+  declineById: (paymentId, reason) => api.put(`/payments/${paymentId}/decline`, { reason }),
   searchRptProperty: (params) => api.get('/payments/rpt/search', { params }),
   getActiveRptPayment: () => api.get('/payments/rpt/active-payment'),
   generateRptReference: (data) => api.post('/payments/rpt/generate-reference', data),

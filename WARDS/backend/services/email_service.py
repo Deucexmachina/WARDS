@@ -2184,6 +2184,74 @@ This is an automated notification from the WARDS system.
         return {"sent": False, "status": "failed", "message": f"Contact inquiry email could not be sent: {exc}"}
 
 
+def send_remittance_rejection_email(
+    recipient_email: str,
+    branch_name: str,
+    remittance_number: str,
+    total_amount: float,
+    rejection_reason: str,
+) -> dict:
+    if not recipient_email:
+        return {"sent": False, "status": "skipped", "message": "No recipient email is available."}
+    if not smtp_is_configured():
+        return {"sent": False, "status": "skipped", "message": "SMTP is not configured."}
+
+    smtp_from_email = os.getenv("SMTP_FROM_EMAIL")
+    smtp_from_name = os.getenv("SMTP_FROM_NAME", "WARDS Admin")
+    reason_text = (rejection_reason or "").strip() or "No reason provided."
+    amount_text = f"PHP {total_amount:,.2f}" if total_amount is not None else "N/A"
+
+    message = EmailMessage()
+    message["Subject"] = f"Remittance Rejected | {remittance_number}"
+    message["From"] = f"{smtp_from_name} <{smtp_from_email}>"
+    message["To"] = recipient_email
+    message.set_content(
+        "\n".join(
+            [
+                f"Hello {branch_name} Branch Admin,",
+                "",
+                f"Your remittance batch {remittance_number} for {amount_text} has been rejected by the Main Office.",
+                "",
+                f"Reason: {reason_text}",
+                "",
+                "Please review the remittance details and resubmit if necessary.",
+                "",
+                "City Treasurer's Office",
+                "WARDS Admin",
+            ]
+        )
+    )
+    message.add_alternative(
+        f"""
+<!DOCTYPE html>
+<html lang="en">
+  <body style="margin:0;padding:0;background:#f3f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;">
+    <div style="max-width:640px;margin:0 auto;padding:32px 20px;">
+      {_build_email_shell_header("Remittance Rejected", "Your remittance batch has been rejected by the Main Office.", [])}
+      <div style="background:#ffffff;border-radius:0 0 24px 24px;padding:30px 30px 32px;box-shadow:0 18px 40px rgba(15,39,68,.10);border:1px solid #dbe3ef;border-top:none;">
+        <p style="margin:0 0 18px;font-size:16px;line-height:1.75;">Hello <strong>{_safe_html(branch_name)}</strong> Branch Admin,</p>
+        <div style="background:#f8fbff;border:1px solid #dbe7f3;border-radius:18px;padding:20px 22px;margin:0 0 22px;">
+          <p style="margin:0 0 8px;font-size:14px;line-height:1.7;color:#546273;"><strong>Remittance No.:</strong> {_safe_html(remittance_number)}</p>
+          <p style="margin:0 0 8px;font-size:14px;line-height:1.7;color:#546273;"><strong>Amount:</strong> {_safe_html(amount_text)}</p>
+          <p style="margin:0;font-size:14px;line-height:1.7;color:#546273;"><strong>Reason:</strong> {_safe_html(reason_text)}</p>
+        </div>
+        <p style="margin:0;font-size:14px;line-height:1.7;color:#546273;">Please review the remittance details and resubmit if necessary.</p>
+      </div>
+    </div>
+  </body>
+</html>
+""",
+        subtype="html",
+    )
+
+    try:
+        result = _send_email_message(message)
+        return {**result, "message": f"Remittance rejection notification sent to {recipient_email}."}
+    except Exception as exc:
+        logger.error("Remittance rejection email failed: %s", exc)
+        return {"sent": False, "status": "failed", "message": f"Remittance rejection email could not be sent: {exc}"}
+
+
 try:
     MANILA_TIMEZONE = ZoneInfo("Asia/Manila") if ZoneInfo else timezone(timedelta(hours=8))
 except ZoneInfoNotFoundError:

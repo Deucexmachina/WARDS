@@ -200,6 +200,10 @@ const RemittanceActionModal = ({
   confirmClassName = 'bg-emerald-600 hover:bg-emerald-700',
   onConfirm,
   onCancel,
+  isReject = false,
+  reason = '',
+  onReasonChange,
+  reasonError = '',
 }) => {
   if (!open) {
     return null;
@@ -231,6 +235,29 @@ const RemittanceActionModal = ({
                 </div>
               ))}
             </div>
+          </div>
+        ) : null}
+
+        {isReject ? (
+          <div className="mt-5">
+            <label className="block">
+              <span className="mb-2 block text-sm font-semibold text-slate-700">Reason for rejection <span className="text-rose-500">*</span></span>
+              <textarea
+                value={reason}
+                onChange={(e) => onReasonChange(e.target.value)}
+                maxLength={255}
+                rows={3}
+                placeholder="Enter reason for rejecting this remittance (max 255 characters)"
+                className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition ${reasonError ? 'border-rose-400 focus:border-rose-500' : 'border-slate-300 focus:border-blue-500'}`}
+              />
+              <span className="mt-1.5 flex items-center justify-between text-xs text-slate-500">
+                <span>Required, max 255 characters</span>
+                <span>{reason.length}/255</span>
+              </span>
+            </label>
+            {reasonError ? (
+              <p className="mt-2 text-sm text-rose-600">{reasonError}</p>
+            ) : null}
           </div>
         ) : null}
 
@@ -274,6 +301,12 @@ const PaymentManagement = () => {
   const [remittanceActionModal, setRemittanceActionModal] = useState({ action: null, remittance: null });
   const [remittanceActionLoading, setRemittanceActionLoading] = useState(false);
   const [remittanceActionError, setRemittanceActionError] = useState('');
+  const [remittanceRejectReason, setRemittanceRejectReason] = useState('');
+  const [remittanceRejectReasonError, setRemittanceRejectReasonError] = useState('');
+  const [paymentToReject, setPaymentToReject] = useState(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejectReasonError, setRejectReasonError] = useState('');
+  const [rejectingPaymentId, setRejectingPaymentId] = useState(null);
   const [pageError, setPageError] = useState('');
   const [messageModal, setMessageModal] = useState(null);
   const [successMessage, setSuccessMessage] = useState('');
@@ -342,9 +375,13 @@ const PaymentManagement = () => {
     }
   };
 
-  const reviewRemittance = async (remittanceId, action) => {
+  const reviewRemittance = async (remittanceId, action, reason) => {
     try {
-      await api.post(`/payments/remittances/${remittanceId}/${action}`);
+      if (action === 'reject') {
+        await api.post(`/payments/remittances/${remittanceId}/${action}`, { reason });
+      } else {
+        await api.post(`/payments/remittances/${remittanceId}/${action}`);
+      }
       setSuccessMessage(`Remittance ${action === 'accept' ? 'accepted' : 'rejected'} successfully.`);
       window.dispatchEvent(new CustomEvent('remittance-reviewed'));
       await fetchRemittances();
@@ -386,6 +423,52 @@ const PaymentManagement = () => {
       fetchPayments();
     } catch (error) {
       console.error('Failed to verify payment:', error);
+    }
+  };
+
+  const validateRejectReason = (reason) => {
+    const trimmed = reason.trim();
+    if (!trimmed) return 'Reason is required.';
+    if (trimmed.length > 50) return 'Reason must be 50 characters or fewer.';
+    if (!/^[A-Za-z0-9,.!? ]+$/.test(trimmed)) return 'Reason can only contain letters, numbers, spaces, commas, periods, exclamation points, and question marks.';
+    return '';
+  };
+
+  const handleRejectPayment = (payment) => {
+    setPaymentToReject(payment);
+    setRejectReason('');
+    setRejectReasonError('');
+  };
+
+  const handleConfirmRejectPayment = async () => {
+    const error = validateRejectReason(rejectReason);
+    if (error) {
+      setRejectReasonError(error);
+      return;
+    }
+    try {
+      setRejectingPaymentId(paymentToReject.id);
+      await api.put(`/payments/${paymentToReject.id}/decline`, { reason: rejectReason.trim() });
+      window.dispatchEvent(new CustomEvent('receipt-payment-updated', { detail: { action: 'declined', paymentId: paymentToReject.id } }));
+      window.dispatchEvent(new CustomEvent('branch-payment-updated', { detail: { action: 'declined', paymentId: paymentToReject.id } }));
+      setMessageModal({
+        tone: 'success',
+        title: 'Payment Rejected',
+        message: 'The payment was rejected and the taxpayer has been notified by email.',
+      });
+      setPaymentToReject(null);
+      setRejectReason('');
+      setRejectReasonError('');
+      fetchPayments();
+    } catch (err) {
+      const detail = err.response?.data?.detail;
+      if (typeof detail === 'string') {
+        setRejectReasonError(detail);
+      } else {
+        setPageError(detail || 'Failed to reject payment.');
+      }
+    } finally {
+      setRejectingPaymentId(null);
     }
   };
 
@@ -783,6 +866,8 @@ const PaymentManagement = () => {
     setRemittanceActionError('');
     setSuccessMessage('');
     setPageError('');
+    setRemittanceRejectReason('');
+    setRemittanceRejectReasonError('');
     setRemittanceActionModal({ action, remittance });
   };
 
@@ -791,16 +876,33 @@ const PaymentManagement = () => {
       return;
     }
 
+    if (remittanceActionModal.action === 'reject') {
+      const trimmed = remittanceRejectReason.trim();
+      if (!trimmed) {
+        setRemittanceRejectReasonError('Reason is required.');
+        return;
+      }
+      if (trimmed.length > 255) {
+        setRemittanceRejectReasonError('Reason must be 255 characters or fewer.');
+        return;
+      }
+    }
+
     setRemittanceActionLoading(true);
     setRemittanceActionError('');
     setPageError('');
     setSuccessMessage('');
 
     try {
-      await reviewRemittance(remittanceActionModal.remittance.id, remittanceActionModal.action);
+      await reviewRemittance(remittanceActionModal.remittance.id, remittanceActionModal.action, remittanceRejectReason.trim());
       closeRemittanceActionModal();
     } catch (error) {
-      setRemittanceActionError(error.message || 'Failed to review remittance.');
+      const detail = error.response?.data?.detail;
+      if (typeof detail === 'string' && detail.includes('reason')) {
+        setRemittanceRejectReasonError(detail);
+      } else {
+        setRemittanceActionError(error.message || 'Failed to review remittance.');
+      }
     } finally {
       setRemittanceActionLoading(false);
     }
@@ -1079,13 +1181,24 @@ const PaymentManagement = () => {
                             </td>
                             <td className="px-2 py-2.5">
                               {status === 'pending' ? (
-                                <button
-                                  type="button"
-                                  onClick={() => handleVerifyPayment(payment.id)}
-                                  className="rounded-md bg-emerald-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-emerald-700"
-                                >
-                                  Verify
-                                </button>
+                                <div className="flex flex-wrap gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleVerifyPayment(payment.id)}
+                                    disabled={rejectingPaymentId === payment.id}
+                                    className="rounded-md bg-emerald-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                  >
+                                    Verify
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRejectPayment(payment)}
+                                    disabled={rejectingPaymentId === payment.id}
+                                    className="rounded-md bg-rose-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                  >
+                                    Reject
+                                  </button>
+                                </div>
                               ) : (
                                 <span className="text-[10px] font-semibold text-slate-400">Recorded</span>
                               )}
@@ -1233,25 +1346,85 @@ const PaymentManagement = () => {
         </div>
       </section>
 
+      {paymentToReject && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="mx-4 w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <h3 className="mb-2 text-lg font-bold text-slate-900">Reject Payment</h3>
+            <p className="mb-4 text-sm text-slate-600">
+              Provide a reason for rejecting this payment. The taxpayer will receive an email notification with this reason.
+            </p>
+            <div className="mb-4">
+              <label className="mb-1 block text-sm font-medium text-slate-700">Reason <span className="text-rose-600">*</span></label>
+              <textarea
+                value={rejectReason}
+                onChange={(e) => {
+                  setRejectReason(e.target.value);
+                  if (rejectReasonError) setRejectReasonError('');
+                }}
+                maxLength={50}
+                rows={3}
+                placeholder="Enter reason for rejection (max 50 characters)"
+                className={`w-full rounded-lg border px-3 py-2 text-sm outline-none transition ${rejectReasonError ? 'border-rose-400 focus:border-rose-500' : 'border-slate-300 focus:border-blue-500'}`}
+              />
+              <div className="mt-1 flex items-center justify-between">
+                {rejectReasonError ? (
+                  <p className="text-xs text-rose-600">{rejectReasonError}</p>
+                ) : (
+                  <p className="text-xs text-slate-400">{rejectReason.length}/50 characters</p>
+                )}
+              </div>
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setPaymentToReject(null);
+                  setRejectReason('');
+                  setRejectReasonError('');
+                }}
+                disabled={Boolean(rejectingPaymentId)}
+                className="rounded-lg bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-300 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmRejectPayment}
+                disabled={Boolean(rejectingPaymentId)}
+                className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {rejectingPaymentId ? 'Rejecting...' : 'Confirm Reject'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <RemittanceActionModal
         open={Boolean(remittanceActionModal.remittance && remittanceActionModal.action)}
-        title={remittanceActionModal.action === 'accept' ? 'Accept this remittance batch?' : 'Delete this remittance batch from review?'}
+        title={remittanceActionModal.action === 'accept' ? 'Accept this remittance batch?' : 'Reject this remittance batch?'}
         message={remittanceActionModal.action === 'accept'
           ? 'Accepting this remittance adds the batch to the Main collection account and marks the review as complete.'
-          : 'Deleting this remittance from the Main review queue will reject the batch and return it to the branch workflow.'}
+          : 'Rejecting this remittance will return the batch to the branch workflow. The branch admin will receive an email notification with your reason.'}
         details={[
           { label: 'Remittance No.', value: remittanceActionModal.remittance?.remittance_number || 'N/A' },
           { label: 'Branch', value: remittanceActionModal.remittance ? (branchLookup[remittanceActionModal.remittance.branch_id] || formatBranchLabel(remittanceActionModal.remittance.branch_name, remittanceActionModal.remittance.branch_id)) : 'N/A' },
           { label: 'Payments', value: remittanceActionModal.remittance?.payment_count || '0' },
           { label: 'Amount', value: formatCurrency(remittanceActionModal.remittance?.total_amount) },
         ]}
-        confirmLabel={remittanceActionModal.action === 'accept' ? 'Yes, Accept' : 'Yes, Delete'}
-        loadingLabel={remittanceActionModal.action === 'accept' ? 'Accepting...' : 'Deleting...'}
+        confirmLabel={remittanceActionModal.action === 'accept' ? 'Yes, Accept' : 'Yes, Reject'}
+        loadingLabel={remittanceActionModal.action === 'accept' ? 'Accepting...' : 'Rejecting...'}
         isLoading={remittanceActionLoading}
         errorMessage={remittanceActionError}
         confirmClassName={remittanceActionModal.action === 'accept' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700'}
         onConfirm={handleConfirmRemittanceAction}
         onCancel={closeRemittanceActionModal}
+        isReject={remittanceActionModal.action === 'reject'}
+        reason={remittanceRejectReason}
+        onReasonChange={(value) => {
+          setRemittanceRejectReason(value);
+          if (remittanceRejectReasonError) setRemittanceRejectReasonError('');
+        }}
+        reasonError={remittanceRejectReasonError}
       />
 
       {showCollectionReportModal ? (
