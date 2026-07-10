@@ -210,6 +210,7 @@ const TaxAssessment = () => {
   const [rejectedPage, setRejectedPage] = useState(1);
   const SUBMISSIONS_PER_PAGE = 5;
   const [reviewDrafts, setReviewDrafts] = useState({});
+  const [activeTab, setActiveTab] = useState('pending');
   const [assessmentForm, setAssessmentForm] = useState(EMPTY_ASSESSMENT_FORM);
   const [assessmentValidationErrors, setAssessmentValidationErrors] = useState({});
   const [showAssessmentGenerator, setShowAssessmentGenerator] = useState(false);
@@ -741,12 +742,47 @@ const TaxAssessment = () => {
     await handleDeleteAssessment(deleteTarget.item);
   };
 
+  const closeAssessmentGenerator = () => {
+    setAssessmentForm(EMPTY_ASSESSMENT_FORM);
+    setShowAssessmentGenerator(false);
+    setAssessmentValidationErrors({});
+    setMessage('');
+    setError('');
+  };
+
+  const openBlankAssessmentGenerator = () => {
+    setAssessmentForm(EMPTY_ASSESSMENT_FORM);
+    setAssessmentValidationErrors({});
+    setMessage('');
+    setError('');
+    setShowAssessmentGenerator(true);
+  };
+
+  const TABS = [
+    { key: 'pending', label: 'Pending Review', count: filteredSubmissions.length },
+    { key: 'assessments', label: 'Assessment Records', count: totalAssessmentCount },
+    { key: 'verified', label: 'Verified Submissions', count: filteredVerifiedSubmissions.length },
+    { key: 'rejected', label: 'Rejected Submissions', count: filteredRejectedSubmissions.length },
+  ];
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <WardsPageHero
         eyebrow={adminUser?.internal_role === 'superadmin' || adminUser?.role === 'superadmin' ? 'Superadmin Dashboard' : 'Main Admin Dashboard'}
         title="Tax Assessment"
         subtitle="Review taxpayer identifier submissions, verify or reject them with remarks, and create RPT and Business Tax assessments that feed the public online payment module."
+        actions={(
+          <button
+            type="button"
+            onClick={openBlankAssessmentGenerator}
+            className="inline-flex items-center gap-2 rounded-full bg-[#0f5b83] px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-[#0f5b83]/20 transition hover:bg-[#0c4d6f]"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+            </svg>
+            New Assessment
+          </button>
+        )}
       />
 
       {(message || error) ? (
@@ -755,29 +791,50 @@ const TaxAssessment = () => {
         </div>
       ) : null}
 
+      {/* Section navigation - one queue/table visible at a time for easier scanning */}
+      <div className="flex flex-wrap gap-2 rounded-[24px] border border-slate-200 bg-white p-2 shadow-[0_10px_30px_rgba(15,23,42,0.04)]">
+        {TABS.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            onClick={() => setActiveTab(tab.key)}
+            className={`flex-1 min-w-[160px] rounded-2xl px-4 py-3 text-sm font-semibold transition ${
+              activeTab === tab.key
+                ? 'bg-[#0f5b83] text-white shadow-md'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            {tab.label}
+            <span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-bold ${activeTab === tab.key ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-600'}`}>
+              {tab.count}
+            </span>
+          </button>
+        ))}
+      </div>
+
       {showAssessmentGenerator ? (
-        <form onSubmit={handleSaveAssessment} className="rounded-[30px] border border-slate-200 bg-white p-6 shadow-[0_18px_40px_rgba(15,23,42,0.05)]">
-          <div className="mb-6 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 py-8">
+        <form onSubmit={handleSaveAssessment} className="w-full max-w-5xl rounded-[30px] border border-slate-200 bg-white p-6 shadow-2xl md:p-8">
+          <div className="mb-6 flex flex-col gap-3 border-b border-slate-100 pb-6 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.26em] text-slate-500">Assessment Generator</p>
               <h2 className="mt-2 text-2xl font-bold text-slate-900">{assessmentForm.assessment_id ? 'Edit Tax Assessment' : 'Create Tax Assessment'}</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                {assessmentForm.assessment_id
+                  ? 'Update the details below. Changes apply immediately to the taxpayer online payment portal.'
+                  : 'Fill in taxpayer details, then the tax-specific information below. Fields marked with an error need your attention before saving.'}
+              </p>
             </div>
             <div className="flex flex-wrap gap-3">
               <button
                 type="button"
-                onClick={() => {
-                  setAssessmentForm(EMPTY_ASSESSMENT_FORM);
-                  setShowAssessmentGenerator(false);
-                  setAssessmentValidationErrors({});
-                  setMessage('');
-                  setError('');
-                }}
+                onClick={closeAssessmentGenerator}
                 className="rounded-full bg-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-300"
               >
-                Close Generator
+                Cancel
               </button>
               <button type="submit" disabled={savingAssessment} className="rounded-full bg-[#0f5b83] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#0c4d6f] disabled:opacity-60">
-                {savingAssessment ? 'Saving...' : 'Save Assessment'}
+                {savingAssessment ? 'Saving...' : assessmentForm.assessment_id ? 'Save Changes' : 'Save Assessment'}
               </button>
             </div>
           </div>
@@ -788,7 +845,11 @@ const TaxAssessment = () => {
             </div>
           ) : null}
 
-          <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+          <div className="mb-3 flex items-center gap-2">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#0f5b83] text-xs font-bold text-white">1</span>
+            <h3 className="text-sm font-bold uppercase tracking-[0.14em] text-slate-500">Taxpayer Information</h3>
+          </div>
+          <div className="grid gap-5 rounded-2xl bg-slate-50/70 p-5 md:grid-cols-2 xl:grid-cols-4">
             <label className="block">
               <span className="mb-2 block text-sm font-semibold text-slate-700">Submission Type</span>
               <CustomSelect value={assessmentForm.tax_type} onChange={handleSelectChange('tax_type')} options={[{ value: 'RPT', label: 'RPT' }, { value: 'BT', label: 'BT' }]} placeholder="Select type" />
@@ -832,8 +893,14 @@ const TaxAssessment = () => {
             </label>
           </div>
 
+          <div className="mb-3 mt-6 flex items-center gap-2">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#0f5b83] text-xs font-bold text-white">2</span>
+            <h3 className="text-sm font-bold uppercase tracking-[0.14em] text-slate-500">
+              {assessmentForm.tax_type === 'RPT' ? 'Real Property Tax Details' : 'Business Tax Details'}
+            </h3>
+          </div>
           {assessmentForm.tax_type === 'RPT' ? (
-            <div className="mt-6 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-5 rounded-2xl bg-slate-50/70 p-5 md:grid-cols-2 xl:grid-cols-4">
               <label className="block">
                 <span className="mb-2 block text-sm font-semibold text-slate-700">TDN</span>
                 <input name="tdn" value={assessmentForm.tdn} onChange={handleAssessmentFormChange} className={`w-full rounded-2xl border px-4 py-3 text-sm uppercase ${assessmentValidationErrors.tdn ? 'border-rose-400 bg-rose-50' : 'border-slate-300'}`} required />
@@ -870,7 +937,7 @@ const TaxAssessment = () => {
               </label>
             </div>
           ) : (
-            <div className="mt-6 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-5 rounded-2xl bg-slate-50/70 p-5 md:grid-cols-2 xl:grid-cols-4">
               <label className="block">
                 <span className="mb-2 block text-sm font-semibold text-slate-700">Mayor&apos;s Permit Number</span>
                 <input name="mayor_permit_number" value={assessmentForm.mayor_permit_number} onChange={handleAssessmentFormChange} className={`w-full rounded-2xl border px-4 py-3 text-sm uppercase ${assessmentValidationErrors.mayor_permit_number ? 'border-rose-400 bg-rose-50' : 'border-slate-300'}`} required />
@@ -914,29 +981,36 @@ const TaxAssessment = () => {
             </div>
           )}
 
-          <div className="mt-6 grid gap-5 md:grid-cols-2">
+          <div className="mb-3 mt-6 flex items-center gap-2">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#0f5b83] text-xs font-bold text-white">3</span>
+            <h3 className="text-sm font-bold uppercase tracking-[0.14em] text-slate-500">Remarks &amp; Visibility</h3>
+          </div>
+          <div className="grid gap-5 rounded-2xl bg-slate-50/70 p-5 md:grid-cols-2">
             <label className="block">
               <span className="mb-2 block text-sm font-semibold text-slate-700">Remarks</span>
-              <textarea name="remarks" value={assessmentForm.remarks} onChange={handleAssessmentFormChange} rows={4} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm" />
+              <textarea name="remarks" value={assessmentForm.remarks} onChange={handleAssessmentFormChange} rows={4} className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm" />
             </label>
             <label className="block">
               <span className="mb-2 block text-sm font-semibold text-slate-700">Rejection Remarks</span>
-              <textarea name="rejection_reason" value={assessmentForm.rejection_reason} onChange={handleAssessmentFormChange} rows={4} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm" />
+              <textarea name="rejection_reason" value={assessmentForm.rejection_reason} onChange={handleAssessmentFormChange} rows={4} className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm" />
             </label>
           </div>
 
-          <label className="mt-6 inline-flex items-center gap-3 rounded-full bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700">
+          <label className="mt-4 inline-flex items-center gap-3 rounded-full bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700">
             <input type="checkbox" name="visible_to_taxpayer" checked={assessmentForm.visible_to_taxpayer} onChange={handleAssessmentFormChange} className="h-4 w-4 rounded border-slate-300" />
             Visible in taxpayer online payment portal
           </label>
         </form>
+        </div>
       ) : null}
 
+      {activeTab === 'pending' ? (
       <section className="rounded-[30px] border border-slate-200 bg-white p-6 shadow-[0_18px_40px_rgba(15,23,42,0.05)]">
         <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.26em] text-slate-500">Verification Queue</p>
             <h2 className="mt-2 text-2xl font-bold text-slate-900">Taxpayer Submissions</h2>
+            <p className="mt-1 text-sm text-slate-500">Set a status and remarks, then save. Use &quot;Create Assessment&quot; once a submission is verified.</p>
           </div>
           <input value={submissionSearch} onChange={(event) => handleSubmissionSearchChange(event.target.value)} placeholder="Search TDN, permit, registration, taxpayer" className="w-full max-w-sm rounded-full border border-slate-300 px-4 py-2.5 text-sm" />
         </div>
@@ -1013,12 +1087,15 @@ const TaxAssessment = () => {
           </div>
         )}
       </section>
+      ) : null}
 
+      {activeTab === 'assessments' ? (
       <section className="rounded-[30px] border border-slate-200 bg-white p-6 shadow-[0_18px_40px_rgba(15,23,42,0.05)]">
         <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.26em] text-slate-500">Live Assessment Records</p>
             <h2 className="mt-2 text-2xl font-bold text-slate-900">Online Payment Assessments</h2>
+            <p className="mt-1 text-sm text-slate-500">These records are what taxpayers see and pay against in the public portal.</p>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-3">
             <CustomSelect value={assessmentTaxTypeFilter} onChange={handleAssessmentTaxTypeChange} options={[{ value: '', label: 'All Tax Types' }, { value: 'RPT', label: 'RPT' }, { value: 'BT', label: 'BT' }]} placeholder="All Tax Types" />
@@ -1029,10 +1106,10 @@ const TaxAssessment = () => {
 
         <div className="space-y-4">
           {assessments.map((assessment) => (
-            <div key={assessment.id} className="rounded-2xl border border-slate-200 bg-[#fbfdff] p-5">
+            <div key={assessment.id} className="rounded-2xl border border-slate-200 bg-[#fbfdff] p-5 transition hover:border-slate-300 hover:shadow-sm">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">{assessment.tax_type}</p>
+                  <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.12em] ${assessment.tax_type === 'RPT' ? 'bg-sky-100 text-sky-800' : 'bg-violet-100 text-violet-800'}`}>{assessment.tax_type}</span>
                   <h3 className="mt-2 text-lg font-semibold text-slate-900">{assessment.taxpayer_name}</h3>
                   <p className="mt-1 text-sm text-slate-600">{assessment.tdn || assessment.mayor_permit_number}</p>
                   {assessment.business_name ? <p className="mt-1 text-sm text-slate-600">{assessment.business_name}</p> : null}
@@ -1053,7 +1130,10 @@ const TaxAssessment = () => {
                 </div>
               </div>
               <div className="mt-4 flex justify-end gap-2">
-                <button type="button" onClick={() => editAssessment(assessment)} className="rounded-full bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700">
+                <button type="button" onClick={() => editAssessment(assessment)} className="inline-flex items-center gap-1.5 rounded-full bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-300">
+                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
                   Edit
                 </button>
                 <button type="button" onClick={() => handleDeleteAssessment(assessment)} className="rounded-full bg-rose-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-600">
@@ -1091,7 +1171,9 @@ const TaxAssessment = () => {
           </div>
         )}
       </section>
+      ) : null}
 
+      {activeTab === 'verified' ? (
       <section className="rounded-[30px] border border-slate-200 bg-white p-6 shadow-[0_18px_40px_rgba(15,23,42,0.05)]">
         <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
@@ -1178,7 +1260,9 @@ const TaxAssessment = () => {
           </div>
         )}
       </section>
+      ) : null}
 
+      {activeTab === 'rejected' ? (
       <section className="rounded-[30px] border border-slate-200 bg-white p-6 shadow-[0_18px_40px_rgba(15,23,42,0.05)]">
         <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
@@ -1262,6 +1346,7 @@ const TaxAssessment = () => {
           </div>
         )}
       </section>
+      ) : null}
       <FileViewerModal
         open={fileViewer.open}
         title={fileViewer.title}
