@@ -256,7 +256,9 @@ const Accounts = () => {
 
   const submitJump = (event) => {
     event.preventDefault();
-    handlePageChange(jumpPage || pagination.page);
+    const totalPages = Math.max(1, Number(pagination.total_pages || 1));
+    const normalizedJump = String(jumpPage || '').replace(/\D/g, '').slice(0, String(totalPages).length);
+    handlePageChange(normalizedJump || pagination.page);
     setJumpPage('');
   };
 
@@ -1017,15 +1019,20 @@ const Accounts = () => {
         <p className="text-sm text-gray-500">
           Showing page {pagination.page} of {pagination.total_pages} · {pagination.total} total account{pagination.total === 1 ? '' : 's'}
         </p>
+        {Number(pagination.total_pages || 1) > 1 && (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <form onSubmit={submitJump} className="flex items-center gap-2">
             <label className="text-sm font-semibold text-slate-600">Jump to</label>
             <input
-              type="number"
-              min="1"
-              max={Math.max(1, Number(pagination.total_pages || 1))}
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
               value={jumpPage}
-              onChange={(event) => setJumpPage(event.target.value)}
+              onChange={(event) => {
+                const totalPages = Math.max(1, Number(pagination.total_pages || 1));
+                const digitsOnly = String(event.target.value || '').replace(/\D/g, '');
+                setJumpPage(digitsOnly.slice(0, String(totalPages).length));
+              }}
               placeholder={String(pagination.page || 1)}
               className="w-24 rounded-lg border border-slate-200 px-3 py-2 text-sm"
             />
@@ -1046,6 +1053,7 @@ const Accounts = () => {
             Next
           </button>
         </div>
+        )}
       </div>
 
       {showModal && (
