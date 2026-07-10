@@ -489,6 +489,8 @@ const ReceiptManagement = () => {
   const [deleteRecordTarget, setDeleteRecordTarget] = useState(null);
   const [deletingRecord, setDeletingRecord] = useState(false);
   const [activeSection, setActiveSection] = useState('online');
+  const [activeCompletedCategory, setActiveCompletedCategory] = useState('RPT');
+  const [activeVerifiedCategory, setActiveVerifiedCategory] = useState('RPT');
   const { registerDirty } = useUnsavedChanges();
   const navSaveRef = useRef(() => {});
 
@@ -2397,91 +2399,145 @@ const handleCancelScan = () => {
       ) : null}
 
       {activeSection === 'completed' ? (
-      <div className="space-y-8">
-      {renderCompletedRequestSection({
-        title: 'Completed RPT Receipt Requests',
-        categoryKey: 'RPT',
-        rows: releasedRptRequests,
-      })}
+      <div className="space-y-6">
+        <div className="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+          {[
+            { key: 'RPT', label: 'RPT', count: releasedRptRequests.length },
+            { key: 'BUSINESS', label: 'BT', count: releasedBusinessRequests.length },
+            { key: 'MISC', label: 'Misc', count: releasedMiscRequests.length },
+            { key: 'CTC', label: 'CTC', count: releasedCtcRequests.length },
+            { key: 'PTR', label: 'PTR', count: releasedPtrRequests.length },
+            { key: 'MARKET', label: 'Market', count: releasedMarketRequests.length },
+          ].map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setActiveCompletedCategory(tab.key)}
+              className={`flex-1 min-w-[110px] rounded-xl px-3 py-2.5 text-sm font-semibold transition ${
+                activeCompletedCategory === tab.key
+                  ? 'bg-primary text-white shadow-md'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              {tab.label}
+              <span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-bold ${activeCompletedCategory === tab.key ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-600'}`}>
+                {tab.count}
+              </span>
+            </button>
+          ))}
+        </div>
 
-      {renderCompletedRequestSection({
-        title: 'Completed BT Receipt Requests',
-        categoryKey: 'BUSINESS',
-        rows: releasedBusinessRequests,
-      })}
+        {activeCompletedCategory === 'RPT' ? renderCompletedRequestSection({
+          title: 'Completed RPT Receipt Requests',
+          categoryKey: 'RPT',
+          rows: releasedRptRequests,
+        }) : null}
 
-      {renderCompletedRequestSection({
-        title: 'Completed Misc Receipt Requests',
-        categoryKey: 'MISC',
-        rows: releasedMiscRequests,
-      })}
+        {activeCompletedCategory === 'BUSINESS' ? renderCompletedRequestSection({
+          title: 'Completed BT Receipt Requests',
+          categoryKey: 'BUSINESS',
+          rows: releasedBusinessRequests,
+        }) : null}
 
-      {renderCompletedRequestSection({
-        title: 'Completed CTC Receipt Requests',
-        categoryKey: 'CTC',
-        rows: releasedCtcRequests,
-      })}
+        {activeCompletedCategory === 'MISC' ? renderCompletedRequestSection({
+          title: 'Completed Misc Receipt Requests',
+          categoryKey: 'MISC',
+          rows: releasedMiscRequests,
+        }) : null}
 
-      {renderCompletedRequestSection({
-        title: 'Completed PTR Receipt Requests',
-        categoryKey: 'PTR',
-        rows: releasedPtrRequests,
-      })}
+        {activeCompletedCategory === 'CTC' ? renderCompletedRequestSection({
+          title: 'Completed CTC Receipt Requests',
+          categoryKey: 'CTC',
+          rows: releasedCtcRequests,
+        }) : null}
 
-      {renderCompletedRequestSection({
-        title: 'Completed Market Receipt Requests',
-        categoryKey: 'MARKET',
-        rows: releasedMarketRequests,
-      })}
+        {activeCompletedCategory === 'PTR' ? renderCompletedRequestSection({
+          title: 'Completed PTR Receipt Requests',
+          categoryKey: 'PTR',
+          rows: releasedPtrRequests,
+        }) : null}
+
+        {activeCompletedCategory === 'MARKET' ? renderCompletedRequestSection({
+          title: 'Completed Market Receipt Requests',
+          categoryKey: 'MARKET',
+          rows: releasedMarketRequests,
+        }) : null}
       </div>
       ) : null}
 
       {activeSection === 'verified' ? (
-      <div className="space-y-8">
-      {renderVerifiedRecordSection({
-        title: 'Verified RPT Records',
-        categoryKey: 'RPT',
-        referenceLabelText: 'RPT Number',
-        rows: rptRecords,
-        showReferenceColumn: true,
-      })}
+      <div className="space-y-6">
+        <div className="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+          {[
+            { key: 'RPT', label: 'RPT', count: rptRecords.length },
+            { key: 'BUSINESS', label: 'BT', count: businessTaxRecords.length },
+            { key: 'MISC', label: 'Misc', count: miscRecords.length },
+            { key: 'CTC', label: 'CTC', count: ctcRecords.length },
+            { key: 'PTR', label: 'PTR', count: ptrRecords.length },
+            { key: 'MARKET', label: 'Market', count: marketRecords.length },
+          ].map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setActiveVerifiedCategory(tab.key)}
+              className={`flex-1 min-w-[110px] rounded-xl px-3 py-2.5 text-sm font-semibold transition ${
+                activeVerifiedCategory === tab.key
+                  ? 'bg-primary text-white shadow-md'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              {tab.label}
+              <span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-bold ${activeVerifiedCategory === tab.key ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-600'}`}>
+                {tab.count}
+              </span>
+            </button>
+          ))}
+        </div>
 
-      {renderVerifiedRecordSection({
-        title: 'Verified BT Records',
-        categoryKey: 'BUSINESS',
-        referenceLabelText: "Mayor's Permit",
-        rows: businessTaxRecords,
-        showReferenceColumn: true,
-      })}
+        {activeVerifiedCategory === 'RPT' ? renderVerifiedRecordSection({
+          title: 'Verified RPT Records',
+          categoryKey: 'RPT',
+          referenceLabelText: 'RPT Number',
+          rows: rptRecords,
+          showReferenceColumn: true,
+        }) : null}
 
-      {renderVerifiedRecordSection({
-        title: 'Verified Misc Tax Records',
-        categoryKey: 'MISC',
-        referenceLabelText: 'Reference Number',
-        rows: miscRecords,
-        showReferenceColumn: true,
-      })}
+        {activeVerifiedCategory === 'BUSINESS' ? renderVerifiedRecordSection({
+          title: 'Verified BT Records',
+          categoryKey: 'BUSINESS',
+          referenceLabelText: "Mayor's Permit",
+          rows: businessTaxRecords,
+          showReferenceColumn: true,
+        }) : null}
 
-      {renderVerifiedRecordSection({
-        title: 'Verified CTC Records',
-        categoryKey: 'CTC',
-        referenceLabelText: 'Reference Number',
-        rows: ctcRecords,
-        showReferenceColumn: true,
-        showTaxpayerColumn: true,
-        showAmountColumn: true,
-        showActionColumn: true,
-      })}
+        {activeVerifiedCategory === 'MISC' ? renderVerifiedRecordSection({
+          title: 'Verified Misc Tax Records',
+          categoryKey: 'MISC',
+          referenceLabelText: 'Reference Number',
+          rows: miscRecords,
+          showReferenceColumn: true,
+        }) : null}
 
-      {renderVerifiedRecordSection({
-        title: 'Verified PTR Records',
-        categoryKey: 'PTR',
-        referenceLabelText: 'Reference Number',
-        rows: ptrRecords,
-        showReferenceColumn: true,
-      })}
+        {activeVerifiedCategory === 'CTC' ? renderVerifiedRecordSection({
+          title: 'Verified CTC Records',
+          categoryKey: 'CTC',
+          referenceLabelText: 'Reference Number',
+          rows: ctcRecords,
+          showReferenceColumn: true,
+          showTaxpayerColumn: true,
+          showAmountColumn: true,
+          showActionColumn: true,
+        }) : null}
 
-      {renderMarketVerifiedRecordSection(marketRecords)}
+        {activeVerifiedCategory === 'PTR' ? renderVerifiedRecordSection({
+          title: 'Verified PTR Records',
+          categoryKey: 'PTR',
+          referenceLabelText: 'Reference Number',
+          rows: ptrRecords,
+          showReferenceColumn: true,
+        }) : null}
+
+        {activeVerifiedCategory === 'MARKET' ? renderMarketVerifiedRecordSection(marketRecords) : null}
       </div>
       ) : null}
 
