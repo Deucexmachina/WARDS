@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { receiptAPI } from '../../services/api';
+import { receiptAPI, branchSettingsAPI } from '../../services/api';
 import { formatUtc8DateTime, getMinDateString } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
@@ -15,6 +15,23 @@ const BRANCH_RECEIPT_UPDATED_EVENT = 'branch-receipt-updated';
 const PROCESSING_SUCCESS_DELAY_MS = 1100;
 const OCR_REQUIRED_RECEIPT_CATEGORIES = new Set(['RPT', 'BUSINESS', 'MISC', 'PTR', 'MARKET']);
 const RECEIPT_CATEGORY_KEYS = ['RPT', 'BUSINESS', 'MISC', 'CTC', 'PTR', 'MARKET'];
+const ENABLED_SERVICE_ALIASES = {
+  RPT: 'RPT', 'REAL PROPERTY TAX': 'RPT', 'REAL_PROPERTY_TAX': 'RPT',
+  BUSINESS: 'BUSINESS', BT: 'BUSINESS', 'BUSINESS TAX': 'BUSINESS', 'BUSINESS_TAX': 'BUSINESS',
+  MISC: 'MISC', MISCELLANEOUS: 'MISC', 'MISCELLANEOUS TAX': 'MISC',
+  CTC: 'CTC', 'COMMUNITY TAX CERTIFICATE': 'CTC', 'COMMUNITY_TAX_CERTIFICATE': 'CTC',
+  PTR: 'PTR', 'PROFESSIONAL TAX RECEIPT': 'PTR', 'PROFESSIONAL_TAX_RECEIPT': 'PTR',
+  MARKET: 'MARKET',
+};
+
+const normalizeEnabledServiceCode = (value) => {
+  const rawValue = typeof value === 'string' ? value : (value?.code || value?.name || value?.service_window || '');
+  const normalized = String(rawValue).trim().toUpperCase().replace(/\s+/g, ' ');
+  if (!normalized) return '';
+  if (ENABLED_SERVICE_ALIASES[normalized]) return ENABLED_SERVICE_ALIASES[normalized];
+  const compact = normalized.replace(/[^A-Z0-9]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+  return ENABLED_SERVICE_ALIASES[compact] || '';
+};
 const MARKET_PURPOSE_OPTIONS = [
   'Renewal of Business Permit',
   'New Business Permit Application',
@@ -491,6 +508,7 @@ const ReceiptManagement = () => {
   const [activeSection, setActiveSection] = useState('online');
   const [activeCompletedCategory, setActiveCompletedCategory] = useState('RPT');
   const [activeVerifiedCategory, setActiveVerifiedCategory] = useState('RPT');
+  const [enabledServiceCategories, setEnabledServiceCategories] = useState(null);
   const { registerDirty } = useUnsavedChanges();
   const navSaveRef = useRef(() => {});
 
@@ -565,6 +583,22 @@ const ReceiptManagement = () => {
 
   useEffect(() => {
     refreshData();
+  }, []);
+
+  useEffect(() => {
+    const loadEnabledServices = async () => {
+      try {
+        const response = await branchSettingsAPI.getSystemSettings();
+        const rawEnabledServices = response.data?.enabledServices;
+        const normalized = Array.isArray(rawEnabledServices)
+          ? Array.from(new Set(rawEnabledServices.map(normalizeEnabledServiceCode).filter(Boolean)))
+          : [];
+        setEnabledServiceCategories(normalized);
+      } catch {
+        setEnabledServiceCategories([]);
+      }
+    };
+    loadEnabledServices();
   }, []);
 
   useEffect(() => () => {
@@ -926,6 +960,22 @@ const ReceiptManagement = () => {
         }),
     [normalizedRequestHistory, historySearch.MARKET]
   );
+
+  const visibleReceiptCategories = useMemo(() => (
+    enabledServiceCategories && enabledServiceCategories.length
+      ? RECEIPT_CATEGORY_KEYS.filter((categoryKey) => enabledServiceCategories.includes(categoryKey))
+      : RECEIPT_CATEGORY_KEYS
+  ), [enabledServiceCategories]);
+
+  useEffect(() => {
+    if (!visibleReceiptCategories.length) return;
+    if (!visibleReceiptCategories.includes(activeCompletedCategory)) {
+      setActiveCompletedCategory(visibleReceiptCategories[0]);
+    }
+    if (!visibleReceiptCategories.includes(activeVerifiedCategory)) {
+      setActiveVerifiedCategory(visibleReceiptCategories[0]);
+    }
+  }, [visibleReceiptCategories, activeCompletedCategory, activeVerifiedCategory]);
 
   useEffect(() => {
     setSectionPages((current) => ({
@@ -2408,7 +2458,7 @@ const handleCancelScan = () => {
             { key: 'CTC', label: 'CTC', count: releasedCtcRequests.length },
             { key: 'PTR', label: 'PTR', count: releasedPtrRequests.length },
             { key: 'MARKET', label: 'Market', count: releasedMarketRequests.length },
-          ].map((tab) => (
+          ].filter((tab) => visibleReceiptCategories.includes(tab.key)).map((tab) => (
             <button
               key={tab.key}
               type="button"
@@ -2475,7 +2525,7 @@ const handleCancelScan = () => {
             { key: 'CTC', label: 'CTC', count: ctcRecords.length },
             { key: 'PTR', label: 'PTR', count: ptrRecords.length },
             { key: 'MARKET', label: 'Market', count: marketRecords.length },
-          ].map((tab) => (
+          ].filter((tab) => visibleReceiptCategories.includes(tab.key)).map((tab) => (
             <button
               key={tab.key}
               type="button"
