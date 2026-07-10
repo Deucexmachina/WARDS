@@ -819,8 +819,8 @@ const TaxAssessment = () => {
       {showAssessmentGenerator ? (
         <div ref={generatorScrollRef} className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 py-8">
         <form onSubmit={handleSaveAssessment} noValidate className="w-full max-w-5xl rounded-[30px] border border-slate-200 bg-white p-6 shadow-2xl md:p-8">
-          <div className="mb-6 flex flex-col gap-3 border-b border-slate-100 pb-6 lg:flex-row lg:items-end lg:justify-between">
-            <div>
+          <div className="mb-6 flex flex-col gap-4 border-b border-slate-100 pb-6 md:flex-row md:items-start md:justify-between">
+            <div className="min-w-0 md:max-w-2xl">
               <p className="text-xs font-semibold uppercase tracking-[0.26em] text-slate-500">Assessment Generator</p>
               <h2 className="mt-2 text-2xl font-bold text-slate-900">{assessmentForm.assessment_id ? 'Edit Tax Assessment' : 'Create Tax Assessment'}</h2>
               <p className="mt-1 text-sm text-slate-500">
@@ -829,15 +829,15 @@ const TaxAssessment = () => {
                   : 'Fill in taxpayer details, then the tax-specific information below. Fields marked with an error need your attention before saving.'}
               </p>
             </div>
-            <div className="flex flex-wrap gap-3">
+            <div className="flex shrink-0 items-center gap-3">
               <button
                 type="button"
                 onClick={closeAssessmentGenerator}
-                className="rounded-full bg-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-300"
+                className="whitespace-nowrap rounded-full bg-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-300"
               >
                 Cancel
               </button>
-              <button type="submit" disabled={savingAssessment} className="rounded-full bg-[#0f5b83] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#0c4d6f] disabled:opacity-60">
+              <button type="submit" disabled={savingAssessment} className="whitespace-nowrap rounded-full bg-[#0f5b83] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#0c4d6f] disabled:opacity-60">
                 {savingAssessment ? 'Saving...' : assessmentForm.assessment_id ? 'Save Changes' : 'Save Assessment'}
               </button>
             </div>
