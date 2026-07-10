@@ -482,7 +482,7 @@ const ViewMyTicket = ({ onClose }) => {
       {/* Add Transaction Modal */}
       {showAddTransaction && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
+          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
             <div className="border-b border-slate-200 px-6 py-4">
               <h3 className="text-lg font-bold text-primary">{modalText.addTransactionTitle}</h3>
             </div>
@@ -499,18 +499,23 @@ const ViewMyTicket = ({ onClose }) => {
                     No additional services available for this branch.
                   </p>
                 ) : (
-                  <select
-                    value={selectedService}
-                    onChange={(e) => { setSelectedService(e.target.value); setAddTransactionError(null); }}
-                    className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-                  >
-                    <option value="">-- Select a service --</option>
-                    {availableServices.map((service) => (
-                      <option key={service.code} value={service.code}>
-                        {service.name} - {service.description}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="relative">
+                    <select
+                      value={selectedService}
+                      onChange={(e) => { setSelectedService(e.target.value); setAddTransactionError(null); }}
+                      className="w-full appearance-none rounded-lg border border-slate-300 bg-white px-4 py-2.5 pr-10 text-sm text-slate-700 outline-none transition hover:border-slate-400 focus:border-primary focus:ring-2 focus:ring-primary/10"
+                    >
+                      <option value="">-- Select a service --</option>
+                      {availableServices.map((service) => (
+                        <option key={service.code} value={service.code}>
+                          {service.name} - {service.description}
+                        </option>
+                      ))}
+                    </select>
+                    <svg className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path>
+                    </svg>
+                  </div>
                 )}
               </label>
               {addTransactionError && (
