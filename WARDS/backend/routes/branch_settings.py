@@ -321,6 +321,9 @@ async def reassign_branch_window_services(
             "window_label": _get_window_display_label(account),
         })
 
+    # Flush pending service window changes so the query sees them
+    db.flush()
+
     # Sync branch enabledServices with all active service windows
     active_service_windows = sorted({
         account.service_window
