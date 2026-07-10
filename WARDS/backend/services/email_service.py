@@ -1181,6 +1181,8 @@ def send_payment_decline_email(
                 "",
                 f"Reason: {reason_text}",
                 "",
+                f"The declined amount of {amount_text} will be refunded back to your original payment method. Please allow 3-5 business days for the refund to reflect in your account.",
+                "",
                 "If you believe this was a mistake, you may submit a new payment or contact the branch treasury office through the WARDS portal.",
                 "",
                 "City Treasurer's Office",
@@ -1203,6 +1205,9 @@ def send_payment_decline_email(
           <p style="margin:0 0 8px;font-size:14px;line-height:1.7;color:#546273;"><strong>Amount:</strong> {_safe_html(amount_text)}</p>
           <p style="margin:0 0 8px;font-size:14px;line-height:1.7;color:#546273;"><strong>Branch:</strong> {_safe_html(branch_name)}</p>
           <p style="margin:0;font-size:14px;line-height:1.7;color:#546273;"><strong>Reason:</strong> {_safe_html(reason_text)}</p>
+        </div>
+        <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:18px;padding:16px 20px;margin:0 0 22px;">
+          <p style="margin:0;font-size:14px;line-height:1.7;color:#92400e;"><strong>Refund Notice:</strong> The declined amount of {_safe_html(amount_text)} will be refunded back to your original payment method. Please allow 3-5 business days for the refund to reflect in your account.</p>
         </div>
         <p style="margin:22px 0 0;font-size:14px;line-height:1.7;color:#5b6471;">
           If you believe this was a mistake, you may submit a new payment or contact the branch treasury office through the WARDS portal.

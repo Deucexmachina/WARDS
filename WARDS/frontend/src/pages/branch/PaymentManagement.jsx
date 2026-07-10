@@ -1776,7 +1776,7 @@ const PaymentManagement = () => {
       {showDeclineModal && paymentToDecline ? (
         <ConfirmationModal
           title="Decline Payment"
-          message="Declining this payment will move it out of the pending queue for this branch."
+          message="Declining this payment will move it out of the pending queue for this branch. The declined amount will be refunded back to the taxpayer's original payment method."
           details={[
             { label: 'Reference', value: paymentToDecline.ref_number || 'N/A' },
             { label: 'Citizen', value: paymentToDecline.taxpayer_name || 'N/A' },

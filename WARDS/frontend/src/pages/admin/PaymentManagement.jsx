@@ -1353,6 +1353,11 @@ const PaymentManagement = () => {
             <p className="mb-4 text-sm text-slate-600">
               Provide a reason for rejecting this payment. The taxpayer will receive an email notification with this reason.
             </p>
+            <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3">
+              <p className="text-sm font-medium text-amber-800">
+                The declined amount will be refunded back to the taxpayer's original payment method within 3-5 business days.
+              </p>
+            </div>
             <div className="mb-4">
               <label className="mb-1 block text-sm font-medium text-slate-700">Reason <span className="text-rose-600">*</span></label>
               <textarea
