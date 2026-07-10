@@ -544,6 +544,7 @@ const PaymentManagement = () => {
   const [verifyError, setVerifyError] = useState('');
   const [activeTab, setActiveTab] = useState('remittance');
   const [showAnalytics, setShowAnalytics] = useState(false);
+  const [activeProcessedTab, setActiveProcessedTab] = useState('verified');
   const [sectionPages, setSectionPages] = useState({
     pending: 1,
     processedVerified: 1,
@@ -1208,43 +1209,68 @@ const PaymentManagement = () => {
           </div>
         )}
       >
-        <div className="space-y-8">
-          <div className="space-y-4">
-            <div className="flex flex-col gap-3 rounded-3xl border border-emerald-200 bg-emerald-50/60 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <h3 className="text-base font-bold text-slate-900">Verified Transactions Row</h3>
-                <p className="mt-1 text-sm text-slate-600">Branch-approved transactions kept for completed payment records.</p>
-              </div>
-              <div className="rounded-2xl border border-emerald-200 bg-white px-4 py-2 text-sm font-semibold text-emerald-800 shadow-sm">
-                {verifiedTransactions.length} transaction{verifiedTransactions.length === 1 ? '' : 's'}
-              </div>
-            </div>
-            {renderTransactionTable({
-              items: verifiedTransactions,
-              pageKey: 'processedVerified',
-              emptyMessage: 'No verified transactions were found for this branch.',
-              paginated: true,
-              showDelete: false,
-            })}
+        <div className="space-y-5">
+          <div className="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-2">
+            {[
+              { key: 'verified', label: 'Verified Transactions', count: verifiedTransactions.length, activeClass: 'bg-emerald-600 text-white shadow-md' },
+              { key: 'declined', label: 'Declined Transactions', count: declinedTransactions.length, activeClass: 'bg-rose-600 text-white shadow-md' },
+            ].map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveProcessedTab(tab.key)}
+                className={`flex-1 min-w-[180px] rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+                  activeProcessedTab === tab.key
+                    ? tab.activeClass
+                    : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                {tab.label}
+                <span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-bold ${activeProcessedTab === tab.key ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-600'}`}>
+                  {tab.count}
+                </span>
+              </button>
+            ))}
           </div>
 
-          <div className="space-y-4">
-            <div className="flex flex-col gap-3 rounded-3xl border border-rose-200 bg-rose-50/60 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <h3 className="text-base font-bold text-slate-900">Declined Transactions Row</h3>
-                <p className="mt-1 text-sm text-slate-600">Transactions marked failed, declined, or expired after branch review.</p>
+          {activeProcessedTab === 'verified' ? (
+            <div className="space-y-4">
+              <div className="flex flex-col gap-3 rounded-3xl border border-emerald-200 bg-emerald-50/60 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Verified Transactions Row</h3>
+                  <p className="mt-1 text-sm text-slate-600">Branch-approved transactions kept for completed payment records.</p>
+                </div>
+                <div className="rounded-2xl border border-emerald-200 bg-white px-4 py-2 text-sm font-semibold text-emerald-800 shadow-sm">
+                  {verifiedTransactions.length} transaction{verifiedTransactions.length === 1 ? '' : 's'}
+                </div>
               </div>
-              <div className="rounded-2xl border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-800 shadow-sm">
-                {declinedTransactions.length} transaction{declinedTransactions.length === 1 ? '' : 's'}
-              </div>
+              {renderTransactionTable({
+                items: verifiedTransactions,
+                pageKey: 'processedVerified',
+                emptyMessage: 'No verified transactions were found for this branch.',
+                paginated: true,
+                showDelete: false,
+              })}
             </div>
-            {renderTransactionTable({
-              items: declinedTransactions,
-              pageKey: 'processedDeclined',
-              emptyMessage: 'No declined transactions were found for this branch.',
-              paginated: true,
-            })}
-          </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex flex-col gap-3 rounded-3xl border border-rose-200 bg-rose-50/60 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Declined Transactions Row</h3>
+                  <p className="mt-1 text-sm text-slate-600">Transactions marked failed, declined, or expired after branch review.</p>
+                </div>
+                <div className="rounded-2xl border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-800 shadow-sm">
+                  {declinedTransactions.length} transaction{declinedTransactions.length === 1 ? '' : 's'}
+                </div>
+              </div>
+              {renderTransactionTable({
+                items: declinedTransactions,
+                pageKey: 'processedDeclined',
+                emptyMessage: 'No declined transactions were found for this branch.',
+                paginated: true,
+              })}
+            </div>
+          )}
         </div>
       </SectionCard>
     );
