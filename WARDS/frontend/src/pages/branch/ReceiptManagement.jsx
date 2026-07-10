@@ -2154,19 +2154,26 @@ const handleCancelScan = () => {
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-1">{activeReceiptCategory === 'MARKET' ? 'Date of Issue' : 'Transaction Date'}</label>
-                      <input
-                        name="transaction_date"
-                        type={activeReceiptCategory === 'MARKET' ? 'date' : 'text'}
-                        max={activeReceiptCategory === 'MARKET' ? getTodayDateInputValue() : undefined}
-                        value={activeReceiptCategory === 'MARKET' ? formatDateInputValue(ocrDraft.transaction_date) : (ocrDraft.transaction_date || '')}
-                        onChange={activeReceiptCategory === 'MARKET'
-                          ? handleMarketDateChange
-                          : handleDraftChange}
-                        aria-invalid={missingRequiredFields.includes('transaction_date') || fieldErrors.transaction_date ? 'true' : 'false'}
-                        className={`w-full px-4 py-2 border rounded-lg ${
-                          missingRequiredFields.includes('transaction_date') || fieldErrors.transaction_date ? 'border-red-500 bg-red-50' : 'border-gray-300'
-                        }`}
-                      />
+                      {activeReceiptCategory === 'MARKET' ? (
+                        <CustomDatePicker
+                          name="transaction_date"
+                          max={getTodayDateInputValue()}
+                          value={formatDateInputValue(ocrDraft.transaction_date)}
+                          onChange={handleMarketDateChange}
+                          hasError={missingRequiredFields.includes('transaction_date') || Boolean(fieldErrors.transaction_date)}
+                        />
+                      ) : (
+                        <input
+                          name="transaction_date"
+                          type="text"
+                          value={ocrDraft.transaction_date || ''}
+                          onChange={handleDraftChange}
+                          aria-invalid={missingRequiredFields.includes('transaction_date') || fieldErrors.transaction_date ? 'true' : 'false'}
+                          className={`w-full px-4 py-2 border rounded-lg ${
+                            missingRequiredFields.includes('transaction_date') || fieldErrors.transaction_date ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                          }`}
+                        />
+                      )}
                       {missingRequiredFields.includes('transaction_date') ? (
                         <p className="mt-1 text-xs font-semibold text-red-600">{getReceiptFieldLabel('transaction_date', effectiveSelectedCategory)} could not be extracted. Please enter a value.</p>
                       ) : fieldErrors.transaction_date ? (
