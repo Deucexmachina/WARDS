@@ -69,6 +69,17 @@ const FAQs = () => {
   }
 
   const totalVisible = filteredFaqs.length;
+  const helpDescription = String(
+    language === 'en' ? pageContent?.help_description_en || '' : pageContent?.help_description_tl || ''
+  ).trim();
+  const helpContacts = (Array.isArray(pageContent?.help_contacts) ? pageContent.help_contacts : []).filter((contact) => (
+    String(contact?.value || '').trim()
+    && String(language === 'en' ? contact?.label_en || '' : contact?.label_tl || '').trim()
+  ));
+  const fallbackHelpContacts = [
+    { label_en: 'Phone', label_tl: 'Telepono', value: '(02) 1234-5678' },
+    { label_en: 'Email', label_tl: 'Email', value: 'treasurer@city.gov.ph' },
+  ];
 
   return (
     <div className="min-h-screen bg-lightbg">
@@ -302,17 +313,14 @@ const FAQs = () => {
             </h2>
           </div>
           <p className="mb-6 text-blue-100">
-            {language === 'en'
-              ? (pageContent?.help_description_en || "If you can't find the answer you're looking for, please contact us directly.")
-              : (pageContent?.help_description_tl || 'Kung hindi mo mahanap ang sagot na iyong hinahanap, mangyaring makipag-ugnayan sa amin nang direkta.')}
+            {helpDescription || (
+              language === 'en'
+                ? "If you can't find the answer you're looking for, please contact us directly."
+                : 'Kung hindi mo mahanap ang sagot na iyong hinahanap, mangyaring makipag-ugnayan sa amin nang direkta.'
+            )}
           </p>
           <div className="grid gap-4 md:grid-cols-2">
-            {((pageContent?.help_contacts && pageContent.help_contacts.length > 0)
-              ? pageContent.help_contacts
-              : [
-                  { label_en: 'Phone', label_tl: 'Telepono', value: '(02) 1234-5678' },
-                  { label_en: 'Email', label_tl: 'Email', value: 'treasurer@city.gov.ph' },
-                ]).map((contact, index) => (
+            {(helpContacts.length > 0 ? helpContacts : fallbackHelpContacts).map((contact, index) => (
               <div key={`help-contact-${index}`} className="flex items-start gap-3 rounded-xl bg-white/10 p-4">
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/15">
                   <svg className="h-5 w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
