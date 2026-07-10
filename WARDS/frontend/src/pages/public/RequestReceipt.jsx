@@ -325,7 +325,7 @@ const RequestReceipt = () => {
 
   const todayDate = useMemo(() => getTodayDateValue(), []);
   const isStandaloneNameLocked = Boolean(authenticatedProfileName);
-  const isStandaloneEmailLocked = Boolean(storedUser?.email);
+  const isStandaloneEmailLocked = false;
   const namePattern = useMemo(() => /^[A-Za-z.\-' ]+$/, []);
 
   const [formData, setFormData] = useState({
