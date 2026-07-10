@@ -542,6 +542,8 @@ const PaymentManagement = () => {
   const [paymentToVerify, setPaymentToVerify] = useState(null);
   const [verifying, setVerifying] = useState(false);
   const [verifyError, setVerifyError] = useState('');
+  const [activeTab, setActiveTab] = useState('remittance');
+  const [showAnalytics, setShowAnalytics] = useState(false);
   const [sectionPages, setSectionPages] = useState({
     pending: 1,
     processedVerified: 1,
@@ -1303,6 +1305,30 @@ const PaymentManagement = () => {
         <KpiCard className="w-[85%] md:w-auto flex-shrink-0 snap-center" icon="clock" label="Today's Payments" value={stats.todaysPayments} helper="Transactions created today in the current branch view" />
       </section>
 
+      <div className="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+        {[
+          { key: 'remittance', label: 'Remittance', count: (remittanceSummary?.available_payments || []).length },
+          { key: 'payments', label: 'Payment Management', count: filteredPayments.length },
+        ].map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            onClick={() => setActiveTab(tab.key)}
+            className={`flex-1 min-w-[200px] rounded-xl px-4 py-3 text-sm font-semibold transition ${
+              activeTab === tab.key
+                ? 'bg-[#0f2f5f] text-white shadow-md'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            {tab.label}
+            <span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-bold ${activeTab === tab.key ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-600'}`}>
+              {tab.count}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'remittance' ? (
       <SectionCard
         title="Remit To Main"
         subtitle="Prepare secure remittance batches from verified branch collections. Submitted batches are locked until Main accepts or rejects them."
@@ -1503,7 +1529,10 @@ const PaymentManagement = () => {
           ) : null}
         </div>
       </SectionCard>
+      ) : null}
 
+      {activeTab === 'payments' ? (
+      <>
       <SectionCard
         title="Filter And Search"
         subtitle="Quickly narrow the branch payment list using focused operational filters."
@@ -1601,44 +1630,6 @@ const PaymentManagement = () => {
         </div>
       </SectionCard>
 
-      <SectionCard
-        title="Payment Monitoring Analytics"
-        subtitle="A quick visual read of method distribution, verification mix, and recent payment trends."
-      >
-        <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-          <div className="rounded-3xl border border-slate-300 bg-slate-50/90 p-5 shadow-sm">
-            <div className="mb-4">
-              <h3 className="text-base font-bold text-slate-900">Payments By Method</h3>
-              <p className="mt-1 text-sm text-slate-500">Method totals from the same filtered payment records shown in the table.</p>
-            </div>
-            <MiniBarChart items={paymentMethodChartItems} />
-          </div>
-          <div className="rounded-3xl border border-slate-300 bg-slate-50/90 p-5 shadow-sm">
-            <div className="mb-4">
-              <h3 className="text-base font-bold text-slate-900">Verification Status Mix</h3>
-              <p className="mt-1 text-sm text-slate-500">Verified, pending, and failed transactions for the current branch view.</p>
-            </div>
-            <DoughnutStatusChart values={stats} />
-          </div>
-        </div>
-        <div className="mt-5 grid gap-5 xl:grid-cols-2">
-          <TrendChart
-            title="Payment Trend Over Time"
-            subtitle="Transaction volume across the most recent operational days."
-            points={trendPoints}
-            color="#0f2f5f"
-            valueKey="count"
-          />
-          <TrendChart
-            title="Revenue Trend"
-            subtitle="Verified collections over the same recent days."
-            points={trendPoints}
-            color="#0f766e"
-            valueKey="amount"
-          />
-        </div>
-      </SectionCard>
-
       {renderTransactionSection({
         title: 'Pending Transactions',
         subtitle: 'Transactions still awaiting branch review, verification, or decline action.',
@@ -1653,6 +1644,64 @@ const PaymentManagement = () => {
       })}
 
       {renderProcessedTransactionsSection()}
+
+      <SectionCard
+        title="Payment Monitoring Analytics"
+        subtitle="A quick visual read of method distribution, verification mix, and recent payment trends."
+        action={(
+          <button
+            type="button"
+            onClick={() => setShowAnalytics((current) => !current)}
+            className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-100"
+          >
+            {showAnalytics ? 'Hide Analytics' : 'Show Analytics'}
+            <svg className={`h-4 w-4 transition-transform ${showAnalytics ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+        )}
+      >
+        {showAnalytics ? (
+          <>
+            <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+              <div className="rounded-3xl border border-slate-300 bg-slate-50/90 p-5 shadow-sm">
+                <div className="mb-4">
+                  <h3 className="text-base font-bold text-slate-900">Payments By Method</h3>
+                  <p className="mt-1 text-sm text-slate-500">Method totals from the same filtered payment records shown in the table.</p>
+                </div>
+                <MiniBarChart items={paymentMethodChartItems} />
+              </div>
+              <div className="rounded-3xl border border-slate-300 bg-slate-50/90 p-5 shadow-sm">
+                <div className="mb-4">
+                  <h3 className="text-base font-bold text-slate-900">Verification Status Mix</h3>
+                  <p className="mt-1 text-sm text-slate-500">Verified, pending, and failed transactions for the current branch view.</p>
+                </div>
+                <DoughnutStatusChart values={stats} />
+              </div>
+            </div>
+            <div className="mt-5 grid gap-5 xl:grid-cols-2">
+              <TrendChart
+                title="Payment Trend Over Time"
+                subtitle="Transaction volume across the most recent operational days."
+                points={trendPoints}
+                color="#0f2f5f"
+                valueKey="count"
+              />
+              <TrendChart
+                title="Revenue Trend"
+                subtitle="Verified collections over the same recent days."
+                points={trendPoints}
+                color="#0f766e"
+                valueKey="amount"
+              />
+            </div>
+          </>
+        ) : (
+          <p className="text-sm text-slate-500">Analytics is hidden. Click &quot;Show Analytics&quot; to view method distribution, verification mix, and payment trends.</p>
+        )}
+      </SectionCard>
+      </>
+      ) : null}
 
       {showVerifyModal && paymentToVerify ? (
         <ConfirmationModal
