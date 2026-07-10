@@ -2543,7 +2543,7 @@ async def unified_me(request: Request, db: Session = Depends(get_db)):
 class RegisterRequest(BaseModel):
     email: EmailStr
     full_name: str
-    contact_number: str
+    contact_number: str = ""
     address: str = ""
     password: str
     dpa_consent: bool = False

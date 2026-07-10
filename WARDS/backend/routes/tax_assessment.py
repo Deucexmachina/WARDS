@@ -858,7 +858,7 @@ async def create_taxpayer_identifier_submission(
     branch_id: int | None = Form(default=None),
     full_name: str = Form(...),
     email: str = Form(...),
-    mobile_number: str = Form(...),
+    mobile_number: str = Form(default=""),
     address: str | None = Form(default=None),
     tdn: str | None = Form(default=None),
     mayor_permit_number: str | None = Form(default=None),

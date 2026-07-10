@@ -580,6 +580,7 @@ const AccountManagement = () => {
     formData.append('full_name', profile.full_name);
     formData.append('email', profile.email);
     formData.append('address', profile.address || '');
+    formData.append('mobile_number', profile.mobile_number || '');
     if (identifierForm.tdn) formData.append('tdn', identifierForm.tdn);
     if (identifierForm.mayor_permit_number) formData.append('mayor_permit_number', identifierForm.mayor_permit_number);
     if (identifierForm.sec_dti_cda_number) formData.append('sec_dti_cda_number', identifierForm.sec_dti_cda_number);
@@ -599,7 +600,11 @@ const AccountManagement = () => {
       setError('');
       await loadAccount();
     } catch (submitError) {
-      setError(submitError.response?.data?.detail || 'Failed to submit taxpayer identifier.');
+      const detail = submitError.response?.data?.detail;
+      const errorMessage = Array.isArray(detail)
+        ? detail.map((e) => e.msg || String(e)).join('; ')
+        : detail || 'Failed to submit taxpayer identifier.';
+      setError(errorMessage);
     } finally {
       setSubmittingIdentifier(false);
     }
