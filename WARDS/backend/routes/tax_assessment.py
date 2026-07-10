@@ -9,7 +9,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, Request
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -180,6 +180,12 @@ class SubmissionReviewRequest(BaseModel):
     def _reject_dangerous(cls, v):
         reject_dangerous_characters(v)
         return v
+
+    @model_validator(mode="after")
+    def _require_remarks_on_rejection(self):
+        if self.status == "Rejected" and not (self.remarks or "").strip():
+            raise ValueError("A rejection reason is required when rejecting a submission.")
+        return self
 
 
 class TaxAssessmentUpsertRequest(BaseModel):

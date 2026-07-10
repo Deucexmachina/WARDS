@@ -401,6 +401,10 @@ const TaxAssessment = () => {
 
   const handleReviewSubmission = async (submission) => {
     const draft = reviewDrafts[submission.id] || { status: submission.status, remarks: submission.remarks || '' };
+    if (draft.status === 'Rejected' && !(draft.remarks || '').trim()) {
+      setError('A rejection reason is required when rejecting a submission.');
+      return;
+    }
     try {
       setReviewingSubmissionId(submission.id);
       const response = await taxAssessmentAPI.reviewSubmission(submission.id, draft);
@@ -1041,7 +1045,7 @@ const TaxAssessment = () => {
 
                   <div className="mt-4 flex flex-col gap-3 lg:flex-row lg:items-start">
                     <CustomSelect value={draft.status} onChange={(value) => handleReviewDraftChange(submission.id, 'status', value)} options={[{ value: 'Pending Verification', label: 'Pending Verification' }, { value: 'Verified', label: 'Verified' }, { value: 'Rejected', label: 'Rejected' }]} placeholder="Select status" className="lg:w-[180px]" />
-                    <input value={draft.remarks} onChange={(event) => handleReviewDraftChange(submission.id, 'remarks', event.target.value)} placeholder="Verification remarks or rejection reason" className="min-w-0 flex-1 rounded-2xl border border-slate-300 px-4 py-3 text-sm" />
+                    <input value={draft.remarks} onChange={(event) => handleReviewDraftChange(submission.id, 'remarks', event.target.value)} placeholder={draft.status === 'Rejected' ? 'Rejection reason (required)' : 'Verification remarks or rejection reason'} className="min-w-0 flex-1 rounded-2xl border border-slate-300 px-4 py-3 text-sm" />
                     <div className="flex shrink-0 flex-nowrap items-center gap-2">
                       <button type="button" onClick={() => handleReviewSubmission(submission)} disabled={reviewingSubmissionId === submission.id} className="whitespace-nowrap rounded-full bg-[#0f5b83] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#0c4d6f] disabled:cursor-not-allowed disabled:opacity-70">
                         {reviewingSubmissionId === submission.id ? 'Saving...' : 'Save Status'}

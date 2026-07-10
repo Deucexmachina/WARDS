@@ -831,14 +831,6 @@ const Dashboard = () => {
                                     >
                                       Reject
                                     </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDeletePendingPayment(payment)}
-                                      disabled={deletingPaymentId === payment.id || verifyingPaymentId === payment.id || rejectingPaymentId === payment.id}
-                                      className="rounded-md bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                    >
-                                      {deletingPaymentId === payment.id ? 'Removing...' : 'Remove'}
-                                    </button>
                                   </>
                                 ) : (
                                   <span className="text-xs text-slate-400">-</span>
