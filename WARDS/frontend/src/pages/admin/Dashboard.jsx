@@ -810,36 +810,40 @@ const Dashboard = () => {
                           <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-500">{formatUtc8Time(payment.created_at)}</td>
                           <td className="whitespace-nowrap px-5 py-4">
                             <div className="flex items-center gap-2">
-                              {String(payment.status || '').trim().toLowerCase() === 'pending' ? (
-                                <>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleVerifyPayment(payment)}
-                                    disabled={verifyingPaymentId === payment.id || rejectingPaymentId === payment.id}
-                                    className="rounded-md bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                  >
-                                    {verifyingPaymentId === payment.id ? 'Verifying...' : 'Verify'}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleRejectPayment(payment)}
-                                    disabled={verifyingPaymentId === payment.id || rejectingPaymentId === payment.id}
-                                    className="rounded-md bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                  >
-                                    Reject
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDeletePendingPayment(payment)}
-                                    disabled={deletingPaymentId === payment.id || verifyingPaymentId === payment.id || rejectingPaymentId === payment.id}
-                                    className="rounded-md bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                  >
-                                    {deletingPaymentId === payment.id ? 'Removing...' : 'Remove'}
-                                  </button>
-                                </>
-                              ) : (
-                                <span className="text-xs text-slate-400">-</span>
-                              )}
+                              {(() => {
+                                const normalizedStatus = String(payment.status || '').trim().toLowerCase();
+                                const isPending = normalizedStatus.includes('pending') || normalizedStatus === 'processing' || normalizedStatus === 'payment_submitted' || normalizedStatus === 'pending_treasury_validation' || normalizedStatus === 'validated' || normalizedStatus === 'documents_uploaded';
+                                return isPending ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleVerifyPayment(payment)}
+                                      disabled={verifyingPaymentId === payment.id || rejectingPaymentId === payment.id}
+                                      className="rounded-md bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                      {verifyingPaymentId === payment.id ? 'Verifying...' : 'Verify'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRejectPayment(payment)}
+                                      disabled={verifyingPaymentId === payment.id || rejectingPaymentId === payment.id}
+                                      className="rounded-md bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                      Reject
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeletePendingPayment(payment)}
+                                      disabled={deletingPaymentId === payment.id || verifyingPaymentId === payment.id || rejectingPaymentId === payment.id}
+                                      className="rounded-md bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                      {deletingPaymentId === payment.id ? 'Removing...' : 'Remove'}
+                                    </button>
+                                  </>
+                                ) : (
+                                  <span className="text-xs text-slate-400">-</span>
+                                );
+                              })()}
                             </div>
                           </td>
                         </tr>
