@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { branchAPI, taxAssessmentAPI } from '../../services/api';
 import WardsPageHero from '../../components/WardsPageHero';
 import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
@@ -211,6 +211,7 @@ const TaxAssessment = () => {
   const SUBMISSIONS_PER_PAGE = 5;
   const [reviewDrafts, setReviewDrafts] = useState({});
   const [activeTab, setActiveTab] = useState('pending');
+  const generatorScrollRef = useRef(null);
   const [assessmentForm, setAssessmentForm] = useState(EMPTY_ASSESSMENT_FORM);
   const [assessmentValidationErrors, setAssessmentValidationErrors] = useState({});
   const [showAssessmentGenerator, setShowAssessmentGenerator] = useState(false);
@@ -634,6 +635,9 @@ const TaxAssessment = () => {
     if (Object.keys(validationErrors).length) {
       setAssessmentValidationErrors(validationErrors);
       setError('Please correct the highlighted assessment fields before saving.');
+      if (generatorScrollRef.current) {
+        generatorScrollRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+      }
       return;
     }
 
@@ -813,7 +817,7 @@ const TaxAssessment = () => {
       </div>
 
       {showAssessmentGenerator ? (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 py-8">
+        <div ref={generatorScrollRef} className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 py-8">
         <form onSubmit={handleSaveAssessment} className="w-full max-w-5xl rounded-[30px] border border-slate-200 bg-white p-6 shadow-2xl md:p-8">
           <div className="mb-6 flex flex-col gap-3 border-b border-slate-100 pb-6 lg:flex-row lg:items-end lg:justify-between">
             <div>
@@ -841,7 +845,12 @@ const TaxAssessment = () => {
 
           {Object.keys(assessmentValidationErrors).length ? (
             <div className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">
-              Complete the required assessment fields before saving.
+              <p className="font-semibold">Complete the required assessment fields before saving:</p>
+              <ul className="mt-2 list-disc space-y-1 pl-5">
+                {Object.values(assessmentValidationErrors).map((fieldError, index) => (
+                  <li key={index}>{fieldError}</li>
+                ))}
+              </ul>
             </div>
           ) : null}
 
