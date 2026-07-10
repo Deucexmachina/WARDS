@@ -357,7 +357,7 @@ const RequestReceipt = () => {
     setFormData((current) => ({
       ...current,
       taxpayerName: authenticatedProfileName || current.taxpayerName || '',
-      email: storedUser?.email || current.email || '',
+      email: current.email || storedUser?.email || '',
     }));
     setPaymentCustomer((current) => ({
       ...current,
