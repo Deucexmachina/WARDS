@@ -44,6 +44,7 @@ const ViewMyTicket = ({ onClose }) => {
         addTransactionBtn: 'Idagdag',
         addTransactionSuccess: 'Matagumpay na naidagdag ang transaksyon.',
         addTransactionError: 'Nabigo ang pagdagdag ng transaksyon. Pakisubukang muli.',
+        skipWarning: 'Maging naroon ka sa branch kapag tinawag ang iyong queue number. Kung hindi ka nandoon sa bintana kapag tinawag, lalaktawan ang iyong queue number.',
       }
     : {
         title: 'My Queue Ticket',
@@ -64,6 +65,7 @@ const ViewMyTicket = ({ onClose }) => {
         addTransactionBtn: 'Add',
         addTransactionSuccess: 'Transaction added successfully.',
         addTransactionError: 'Failed to add transaction. Please try again.',
+        skipWarning: 'Please be present at the branch when your queue number is called. If you are not at the window when called, your queue number will be skipped.',
       };
 
   useEffect(() => {
@@ -489,6 +491,11 @@ const ViewMyTicket = ({ onClose }) => {
             </div>
             <div className="px-6 py-6">
               <p className="text-sm text-slate-600">{modalText.addTransactionMessage}</p>
+              <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3">
+                <p className="text-sm font-medium text-amber-800">
+                  {modalText.skipWarning}
+                </p>
+              </div>
               <label className="mt-4 block">
                 <span className="mb-2 block text-sm font-semibold text-slate-700">{modalText.selectService}</span>
                 {loadingServices ? (
