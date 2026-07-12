@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { receiptAPI } from '../../services/api';
+import { CustomDatePicker } from '../../components/FormControls';
 
 const MARKET_PURPOSE_OPTIONS = [
   'Renewal of Business Permit',
@@ -22,6 +23,48 @@ const getMarketPurposeSelectValue = (value) => {
 
 const isMarketCategory = (draft, session) =>
   (draft?.selected_category || draft?.category || session?.category || '').toUpperCase() === 'MARKET';
+
+const parseDate = (value) => {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const formatDateInputValue = (value) => {
+  const parsed = parseDate(value);
+  if (!parsed) return '';
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  return formatter.format(parsed);
+};
+
+const parseDateInputValue = (value) => {
+  const normalized = (value || '').trim();
+  if (!normalized) return null;
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+};
+
+const isMarketIssueDateInvalid = (value) => {
+  const parsed = parseDateInputValue(value);
+  if (!parsed) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return parsed.getTime() > today.getTime();
+};
+
+const getTodayDateInputValue = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 const MobileReceiptUpload = () => {
   const { token } = useParams();
@@ -448,6 +491,16 @@ const MobileReceiptUpload = () => {
     }));
   };
 
+  const handleMarketDateChange = (event) => {
+    const { name, value } = event.target;
+    if (name === 'transaction_date' && isMarketIssueDateInvalid(value)) {
+      setError('Date of Issue cannot be in the future.');
+      return;
+    }
+    setError('');
+    handleDraftChange(event);
+  };
+
   const handleSaveReceipt = async (event) => {
     event.preventDefault();
     if (!receiptDraft) {
@@ -533,11 +586,20 @@ const MobileReceiptUpload = () => {
                   </label>
                   <label className="block">
                     <span className="mb-2 block text-sm font-semibold text-slate-700">Date of Issue</span>
-                    <input name="transaction_date" value={receiptDraft.transaction_date || ''} onChange={handleDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#0f5b83]" />
+                    <CustomDatePicker
+                      name="transaction_date"
+                      max={getTodayDateInputValue()}
+                      value={formatDateInputValue(receiptDraft.transaction_date)}
+                      onChange={handleMarketDateChange}
+                    />
                   </label>
                   <label className="block">
                     <span className="mb-2 block text-sm font-semibold text-slate-700">Valid Until</span>
-                    <input name="market_valid_until" value={receiptDraft.market_valid_until || ''} onChange={handleDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#0f5b83]" />
+                    <CustomDatePicker
+                      name="market_valid_until"
+                      value={formatDateInputValue(receiptDraft.market_valid_until)}
+                      onChange={handleMarketDateChange}
+                    />
                   </label>
                   <div className="sm:col-span-2">
                     <span className="mb-2 block text-sm font-semibold text-slate-700">Purpose of Renewal</span>
