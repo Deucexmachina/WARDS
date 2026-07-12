@@ -1,5 +1,5 @@
 const WardsPageHero = ({ eyebrow, title, subtitle, actions, className = '' }) => (
-  <section className={`overflow-hidden rounded-[2rem] border border-slate-300 bg-white px-6 py-7 text-slate-900 shadow-2xl shadow-slate-200/60 md:px-8 ${className}`.trim()}>
+  <section className={`rounded-[2rem] border border-slate-300 bg-white px-6 py-7 text-slate-900 shadow-2xl shadow-slate-200/60 md:px-8 ${className}`.trim()}>
     <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
       <div className="max-w-3xl">
         {eyebrow ? (
