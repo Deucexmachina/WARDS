@@ -77,7 +77,7 @@ const normalizeStatus = (status) => {
     return 'confirmed';
   }
   if (normalized === 'expired') return 'expired';
-  if (['failed', 'declined', 'cancelled', 'canceled'].includes(normalized)) return 'failed';
+  if (['failed', 'declined', 'cancelled', 'canceled', 'payment_rejected', 'rejected'].includes(normalized)) return 'failed';
   return 'pending';
 };
 
@@ -304,6 +304,8 @@ const PaymentManagement = () => {
   const [remittanceRejectReason, setRemittanceRejectReason] = useState('');
   const [remittanceRejectReasonError, setRemittanceRejectReasonError] = useState('');
   const [paymentToReject, setPaymentToReject] = useState(null);
+  const [paymentToVerify, setPaymentToVerify] = useState(null);
+  const [verifyingPaymentId, setVerifyingPaymentId] = useState(null);
   const [rejectReason, setRejectReason] = useState('');
   const [rejectReasonError, setRejectReasonError] = useState('');
   const [rejectingPaymentId, setRejectingPaymentId] = useState(null);
@@ -410,19 +412,28 @@ const PaymentManagement = () => {
     }
   };
 
-  const handleVerifyPayment = async (paymentId) => {
+  const handleVerifyPayment = (payment) => {
+    setPaymentToVerify(payment);
+  };
+
+  const handleConfirmVerifyPayment = async () => {
     try {
-      await api.put(`/payments/${paymentId}/verify`);
-      window.dispatchEvent(new CustomEvent('receipt-payment-updated', { detail: { action: 'verified', paymentId } }));
-      window.dispatchEvent(new CustomEvent('branch-payment-updated', { detail: { action: 'verified', paymentId } }));
+      setVerifyingPaymentId(paymentToVerify.id);
+      await api.put(`/payments/${paymentToVerify.id}/verify`);
+      window.dispatchEvent(new CustomEvent('receipt-payment-updated', { detail: { action: 'verified', paymentId: paymentToVerify.id } }));
+      window.dispatchEvent(new CustomEvent('branch-payment-updated', { detail: { action: 'verified', paymentId: paymentToVerify.id } }));
       setMessageModal({
         tone: 'success',
         title: 'Payment Verified',
         message: 'The payment was verified successfully.',
       });
+      setPaymentToVerify(null);
       fetchPayments();
     } catch (error) {
       console.error('Failed to verify payment:', error);
+      setPageError(error.response?.data?.detail || 'Failed to verify payment.');
+    } finally {
+      setVerifyingPaymentId(null);
     }
   };
 
@@ -1184,8 +1195,8 @@ const PaymentManagement = () => {
                                 <div className="flex flex-wrap gap-1">
                                   <button
                                     type="button"
-                                    onClick={() => handleVerifyPayment(payment.id)}
-                                    disabled={rejectingPaymentId === payment.id}
+                                    onClick={() => handleVerifyPayment(payment)}
+                                    disabled={rejectingPaymentId === payment.id || verifyingPaymentId === payment.id}
                                     className="rounded-md bg-emerald-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
                                   >
                                     Verify
@@ -1193,7 +1204,7 @@ const PaymentManagement = () => {
                                   <button
                                     type="button"
                                     onClick={() => handleRejectPayment(payment)}
-                                    disabled={rejectingPaymentId === payment.id}
+                                    disabled={rejectingPaymentId === payment.id || verifyingPaymentId === payment.id}
                                     className="rounded-md bg-rose-600 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
                                   >
                                     Reject
@@ -1346,6 +1357,40 @@ const PaymentManagement = () => {
         </div>
       </section>
 
+      {paymentToVerify && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="mx-4 w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <h3 className="mb-2 text-lg font-bold text-slate-900">Verify Payment</h3>
+            <p className="mb-4 text-sm text-slate-600">
+              Are you sure you want to verify this payment? This will confirm the transaction and notify the taxpayer.
+            </p>
+            <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Reference</p>
+              <p className="mt-1 text-sm font-semibold text-slate-900">{paymentToVerify.ref_number || String(paymentToVerify.id)}</p>
+              <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Amount</p>
+              <p className="mt-1 text-sm font-semibold text-slate-900">{formatCurrency(paymentToVerify.amount)}</p>
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setPaymentToVerify(null)}
+                disabled={Boolean(verifyingPaymentId)}
+                className="rounded-lg bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-300 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmVerifyPayment}
+                disabled={Boolean(verifyingPaymentId)}
+                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {verifyingPaymentId ? 'Verifying...' : 'Confirm Verify'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {paymentToReject && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="mx-4 w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
