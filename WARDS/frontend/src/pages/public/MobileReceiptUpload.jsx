@@ -712,7 +712,7 @@ const MobileReceiptUpload = () => {
                 disabled={uploading || !file}
                 className="w-full rounded-2xl bg-[#0f5b83] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#0c4d6f] disabled:opacity-60"
               >
-                {uploading ? 'Uploading and Parsing...' : 'Upload Receipt'}
+                {uploading ? 'Uploading and Extracting...' : 'Upload Receipt'}
               </button>
             </form>
           )}

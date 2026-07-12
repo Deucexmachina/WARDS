@@ -759,8 +759,8 @@ const ReceiptManagement = () => {
     if (uploading) {
       return {
         status: 'loading',
-        title: 'Processing OCR',
-        message: 'Extracting receipt data... Please wait.',
+        title: 'Scanning Receipt',
+        message: 'Extracting receipt details... Please wait.',
       };
     }
 
@@ -1049,8 +1049,8 @@ const ReceiptManagement = () => {
     setUploading(true);
     setProcessingFeedback({
       status: 'loading',
-      title: 'Processing OCR',
-      message: 'Extracting receipt data... Please wait.',
+      title: 'Scanning Receipt',
+      message: 'Extracting receipt details... Please wait.',
     });
     setError('');
     setSuccessMessage('');
@@ -1073,8 +1073,8 @@ const ReceiptManagement = () => {
       }));
       setProcessingFeedback({
         status: 'success',
-        title: 'OCR Complete',
-        message: 'Run OCR completed successfully. Receipt data is ready for review.',
+        title: 'Scanning Complete',
+        message: 'Receipt scanning completed successfully. Receipt details are ready for review.',
       });
       await wait(PROCESSING_SUCCESS_DELAY_MS);
       setProcessingFeedback(null);

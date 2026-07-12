@@ -2299,7 +2299,7 @@ const QueueManagement = () => {
           window_assignment: windowMetadata?.assigned_window_number ? `Window ${windowMetadata.assigned_window_number}` : 'Window not assigned',
           completion_date_value: completionDate,
           served_by_search: servedBy.toLowerCase(),
-          document_processing_status: queue.document_processing_status || 'No linked OCR / document status',
+          document_processing_status: queue.document_processing_status || 'No linked receipt scan / document status',
         };
       })
       .filter((queue) => {
@@ -2795,7 +2795,7 @@ const QueueManagement = () => {
                 ['Window Assignment', selectedCompletedTransaction.window_assignment || 'N/A'],
                 ['Service Type', selectedCompletedTransaction.service_type || 'N/A'],
                 ['Transaction Status', selectedCompletedTransaction.status_label || 'Completed'],
-                ['OCR / Document Processing Status', selectedCompletedTransaction.document_processing_status || 'No linked OCR / document status'],
+                ['Receipt Scan / Document Processing Status', selectedCompletedTransaction.document_processing_status || 'No linked receipt scan / document status'],
                 ['Created At', selectedCompletedTransaction.created_at ? formatUtc8DateTime(selectedCompletedTransaction.created_at) : 'N/A'],
                 ['Served At', selectedCompletedTransaction.served_at ? formatUtc8DateTime(selectedCompletedTransaction.served_at) : 'N/A'],
                 ['Completed At', selectedCompletedTransaction.completed_at ? formatUtc8DateTime(selectedCompletedTransaction.completed_at) : 'N/A'],
@@ -2877,8 +2877,8 @@ const QueueManagement = () => {
                       <p className="text-lg font-bold text-blue-900">File Upload</p>
                       <p className="mt-2 text-sm leading-6 text-blue-700">
                         {isCtcFileOnlyCompletion
-                          ? 'Upload a receipt copy image from this computer. CTC is saved without OCR.'
-                          : 'Upload a receipt image from this computer and run OCR.'}
+                          ? 'Upload a receipt copy image from this computer. CTC is saved without scanning.'
+                          : 'Upload a receipt image from this computer and scan it.'}
                       </p>
                     </button>
                     {!isCtcFileOnlyCompletion ? (
@@ -2901,7 +2901,7 @@ const QueueManagement = () => {
               <form onSubmit={handleFileReceiptUpload} className="mt-6 space-y-5">
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-sm text-slate-600">
                   Default receipt category: <span className="font-bold text-slate-900">{resolveReceiptCategory(completionQueue)}</span>
-                  {isCtcFileOnlyCompletion ? <span className="ml-2 text-slate-500">File upload only, no OCR.</span> : null}
+                  {isCtcFileOnlyCompletion ? <span className="ml-2 text-slate-500">File upload only, no scanning.</span> : null}
                 </div>
                 <label className="block">
                   <span className="mb-2 block text-sm font-semibold text-slate-700">Receipt Image</span>
@@ -2925,7 +2925,7 @@ const QueueManagement = () => {
                     Back
                   </button>
                   <button type="submit" disabled={processingReceipt} className="rounded-xl bg-primary px-5 py-3 font-semibold text-white transition hover:bg-secondary disabled:opacity-60">
-                    {processingReceipt ? (isCtcFileOnlyCompletion ? 'Uploading...' : 'Parsing...') : (isCtcFileOnlyCompletion ? 'Upload File' : 'Run OCR')}
+                    {processingReceipt ? (isCtcFileOnlyCompletion ? 'Uploading...' : 'Extracting Data...') : (isCtcFileOnlyCompletion ? 'Upload File' : 'Scan Receipt')}
                   </button>
                 </div>
               </form>
@@ -3139,7 +3139,7 @@ const QueueManagement = () => {
                   )}
                 </div>
                 <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                  Category: {receiptDraft.selected_category || resolveReceiptCategory(completionQueue)} | Confidence: {receiptDraft.confidence || 0} | Engine: {receiptDraft.engine || 'ocr'}
+                  Category: {receiptDraft.selected_category || resolveReceiptCategory(completionQueue)} | Confidence: {receiptDraft.confidence || 0} | Engine: {receiptDraft.engine || 'scan'}
                 </div>
                 <div className="flex flex-col-reverse gap-3 md:flex-row md:justify-end">
                   <button type="button" onClick={() => {
@@ -3168,7 +3168,7 @@ const QueueManagement = () => {
                   <p className="text-xs font-semibold uppercase tracking-[0.25em] text-amber-500">Cancel Process</p>
                   <h4 className="mt-2 text-xl font-bold text-primary">Are you sure you want to cancel?</h4>
                   <p className="mt-3 text-sm leading-6 text-slate-600">
-                    This will close the Complete Queue process. Any unsaved receipt upload or OCR review in this modal will be discarded.
+                    This will close the Complete Queue process. Any unsaved receipt upload or receipt scan review in this modal will be discarded.
                   </p>
                   <div className="mt-6 grid gap-3 sm:grid-cols-2">
                     <button
