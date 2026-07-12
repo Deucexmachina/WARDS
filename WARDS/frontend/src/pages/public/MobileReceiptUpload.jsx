@@ -2,6 +2,27 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { receiptAPI } from '../../services/api';
 
+const MARKET_PURPOSE_OPTIONS = [
+  'Renewal of Business Permit',
+  'New Business Permit Application',
+  'Renewal of Stall Occupancy',
+  'Transfer of Stall Ownership',
+  'Change of Business Name',
+  'Change of Business Activity',
+  'Stall Verification',
+  'Market Clearance Requirement',
+  'Permit Renewal Requirement',
+];
+
+const getMarketPurposeSelectValue = (value) => {
+  const normalized = (value || '').trim().toLowerCase();
+  const match = MARKET_PURPOSE_OPTIONS.find((option) => option.toLowerCase() === normalized);
+  return match || 'Other';
+};
+
+const isMarketCategory = (draft, session) =>
+  (draft?.selected_category || draft?.category || session?.category || '').toUpperCase() === 'MARKET';
+
 const MobileReceiptUpload = () => {
   const { token } = useParams();
   const videoRef = useRef(null);
@@ -500,24 +521,74 @@ const MobileReceiptUpload = () => {
                 {' | '}
                 Confidence: <span className="font-bold text-slate-900">{receiptDraft.confidence || 0}</span>
               </div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="block">
-                  <span className="mb-2 block text-sm font-semibold text-slate-700">Reference Number</span>
-                  <input name="ref_number" value={receiptDraft.ref_number || ''} onChange={handleDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#0f5b83]" />
-                </label>
-                <label className="block">
-                  <span className="mb-2 block text-sm font-semibold text-slate-700">Taxpayer Name</span>
-                  <input name="taxpayer_name" value={receiptDraft.taxpayer_name || ''} onChange={handleDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#0f5b83]" />
-                </label>
-                <label className="block">
-                  <span className="mb-2 block text-sm font-semibold text-slate-700">Transaction Date</span>
-                  <input name="transaction_date" value={receiptDraft.transaction_date || ''} onChange={handleDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#0f5b83]" />
-                </label>
-                <label className="block">
-                  <span className="mb-2 block text-sm font-semibold text-slate-700">Amount</span>
-                  <input name="amount" type="number" step="0.01" value={receiptDraft.amount ?? ''} onChange={handleDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#0f5b83]" />
-                </label>
-              </div>
+              {isMarketCategory(receiptDraft, session) ? (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">Certificate Number</span>
+                    <input name="ref_number" value={receiptDraft.ref_number || ''} onChange={handleDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#0f5b83]" />
+                  </label>
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">Name</span>
+                    <input name="taxpayer_name" value={receiptDraft.taxpayer_name || ''} onChange={handleDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#0f5b83]" />
+                  </label>
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">Date of Issue</span>
+                    <input name="transaction_date" value={receiptDraft.transaction_date || ''} onChange={handleDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#0f5b83]" />
+                  </label>
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">Valid Until</span>
+                    <input name="market_valid_until" value={receiptDraft.market_valid_until || ''} onChange={handleDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#0f5b83]" />
+                  </label>
+                  <div className="sm:col-span-2">
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">Purpose of Renewal</span>
+                    <select
+                      value={getMarketPurposeSelectValue(receiptDraft.market_purpose_of_renewal)}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setReceiptDraft((current) => ({
+                          ...current,
+                          market_purpose_of_renewal: next === 'Other' ? (current.market_purpose_of_renewal || '') : next,
+                        }));
+                      }}
+                      className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#0f5b83]"
+                    >
+                      {MARKET_PURPOSE_OPTIONS.map((option) => (
+                        <option key={option} value={option}>{option}</option>
+                      ))}
+                      <option value="Other">Other (please specify)</option>
+                    </select>
+                    {getMarketPurposeSelectValue(receiptDraft.market_purpose_of_renewal) === 'Other' ? (
+                      <input
+                        name="market_purpose_of_renewal"
+                        value={receiptDraft.market_purpose_of_renewal || ''}
+                        onChange={handleDraftChange}
+                        placeholder="Type the purpose of renewal"
+                        maxLength={255}
+                        className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#0f5b83]"
+                      />
+                    ) : null}
+                  </div>
+                </div>
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">Reference Number</span>
+                    <input name="ref_number" value={receiptDraft.ref_number || ''} onChange={handleDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#0f5b83]" />
+                  </label>
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">Taxpayer Name</span>
+                    <input name="taxpayer_name" value={receiptDraft.taxpayer_name || ''} onChange={handleDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#0f5b83]" />
+                  </label>
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">Transaction Date</span>
+                    <input name="transaction_date" value={receiptDraft.transaction_date || ''} onChange={handleDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#0f5b83]" />
+                  </label>
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">Amount</span>
+                    <input name="amount" type="number" step="0.01" value={receiptDraft.amount ?? ''} onChange={handleDraftChange} className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#0f5b83]" />
+                  </label>
+                </div>
+              )}
               <div className="grid gap-3 sm:grid-cols-2">
                 <button
                   type="button"

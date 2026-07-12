@@ -2220,15 +2220,11 @@ const handleCancelScan = () => {
                           hasError={missingRequiredFields.includes('transaction_date') || Boolean(fieldErrors.transaction_date)}
                         />
                       ) : (
-                        <input
+                        <CustomDatePicker
                           name="transaction_date"
-                          type="text"
-                          value={ocrDraft.transaction_date || ''}
+                          value={formatDateInputValue(ocrDraft.transaction_date)}
                           onChange={handleDraftChange}
-                          aria-invalid={missingRequiredFields.includes('transaction_date') || fieldErrors.transaction_date ? 'true' : 'false'}
-                          className={`w-full px-4 py-2 border rounded-lg ${
-                            missingRequiredFields.includes('transaction_date') || fieldErrors.transaction_date ? 'border-red-500 bg-red-50' : 'border-gray-300'
-                          }`}
+                          hasError={missingRequiredFields.includes('transaction_date') || Boolean(fieldErrors.transaction_date)}
                         />
                       )}
                       {missingRequiredFields.includes('transaction_date') ? (
