@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect } from 'react';
 import WardsPageHero from '../../components/WardsPageHero';
 import SystemMessageModal from '../../components/SystemMessageModal';
 import CollectionReportView from '../../components/admin/CollectionReportView';
+import { CustomSelect } from '../../components/FormControls';
 
 import api from '../../services/api';
 const PAYMENT_TIME_ZONE = 'Asia/Manila';
@@ -62,6 +63,19 @@ const getCollectionMonthLabelFromValue = (value) => {
     timeZone: PAYMENT_TIME_ZONE,
     year: 'numeric',
   });
+};
+
+const getRecentMonthOptions = (currentMonthVal, count = 6) => {
+  const [year, month] = currentMonthVal.split('-').map(Number);
+  if (!year || !month) return [];
+  const options = [];
+  for (let i = 0; i < count; i++) {
+    const d = new Date(year, month - 1 - i, 1);
+    const val = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const label = d.toLocaleDateString('en-PH', { month: 'long', year: 'numeric', timeZone: PAYMENT_TIME_ZONE });
+    options.push({ value: val, label });
+  }
+  return options;
 };
 
 const isRecordInMonth = (value, monthValue) => getMonthValueFromDate(value) === monthValue;
@@ -317,9 +331,10 @@ const PaymentManagement = () => {
   const [selectedMonth, setSelectedMonth] = useState(() => getMonthValueFromDate());
   const collectionMonthLabel = useMemo(() => getCollectionMonthLabelFromValue(selectedMonth), [selectedMonth]);
   const collectionReportTitle = `Tax Collection: ${collectionMonthLabel}`;
+  const monthOptions = useMemo(() => getRecentMonthOptions(currentMonthValue), [currentMonthValue]);
 
   const handleCollectionMonthChange = (value) => {
-    setSelectedMonth(value === currentMonthValue ? value : currentMonthValue);
+    setSelectedMonth(value || currentMonthValue);
   };
 
   useEffect(() => {
@@ -938,17 +953,15 @@ const PaymentManagement = () => {
         subtitle="Monitor verified tax payments, branch collections, and remittances credited to the Main collection account."
         actions={(
           <div className="flex flex-wrap items-center gap-3">
-            <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm">
+            <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm">
               <span className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Month</span>
-              <input
-                type="month"
-                min={currentMonthValue}
-                max={currentMonthValue}
+              <CustomSelect
                 value={selectedMonth}
-                onChange={(event) => handleCollectionMonthChange(event.target.value)}
-                className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-[#0f2f5f] outline-none focus:border-[#0f2f5f]"
+                onChange={(val) => handleCollectionMonthChange(val)}
+                options={monthOptions}
+                className="min-w-[180px]"
               />
-            </label>
+            </div>
             <button
               type="button"
               onClick={() => {
