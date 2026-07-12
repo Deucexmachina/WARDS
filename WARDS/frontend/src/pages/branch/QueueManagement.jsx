@@ -88,7 +88,7 @@ const isMarketIssueDateInvalid = (value) => {
   }
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  return parsed.getTime() !== today.getTime();
+  return parsed.getTime() > today.getTime();
 };
 
 const isMarketValidUntilInvalid = (value) => {
@@ -1816,7 +1816,7 @@ const QueueManagement = () => {
   const handleMarketDateChange = (event) => {
     const { name, value } = event.target;
     if (name === 'transaction_date' && isMarketIssueDateInvalid(value)) {
-      setCompletionError('Date of Issue must be today.');
+      setCompletionError('Date of Issue cannot be in the future.');
       return;
     }
     if (name === 'market_valid_until' && isMarketValidUntilInvalid(value)) {
@@ -3053,8 +3053,8 @@ const QueueManagement = () => {
                         {completionReceiptCategory === 'MARKET' ? (
                           <CustomDatePicker
                             name="transaction_date"
-                            min={getTodayDateInputValue()}
-                            max={getTodayDateInputValue()}
+                            min={earliestQueueDate || currentDateInputValue}
+                            max={currentDateInputValue}
                             value={formatDateInputValue(receiptDraft.transaction_date)}
                             onChange={handleMarketDateChange}
                             hasError={receiptDraftMissingFields.includes('transaction_date')}
