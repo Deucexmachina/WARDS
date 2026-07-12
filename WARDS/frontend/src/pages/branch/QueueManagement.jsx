@@ -91,15 +91,7 @@ const isMarketIssueDateInvalid = (value) => {
   return parsed.getTime() > today.getTime();
 };
 
-const isMarketValidUntilInvalid = (value) => {
-  const parsed = parseDateInputValue(value);
-  if (!parsed) {
-    return false;
-  }
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return parsed < today;
-};
+const isMarketValidUntilInvalid = () => false;
 
 const getMarketPurposeSelectValue = (value) => {
   const normalized = (value || '').trim().toLowerCase();
@@ -1819,10 +1811,6 @@ const QueueManagement = () => {
       setCompletionError('Date of Issue cannot be in the future.');
       return;
     }
-    if (name === 'market_valid_until' && isMarketValidUntilInvalid(value)) {
-      setCompletionError('Valid Until cannot be in the past.');
-      return;
-    }
     setCompletionError('');
     handleReceiptDraftChange(event);
   };
@@ -3108,8 +3096,6 @@ const QueueManagement = () => {
                             <span className="mb-2 block text-sm font-semibold text-slate-700">Valid Until</span>
                             <CustomDatePicker
                               name="market_valid_until"
-                              min={earliestQueueDate || currentDateInputValue}
-                              max={currentDateInputValue}
                               value={formatDateInputValue(receiptDraft.market_valid_until)}
                               onChange={handleMarketDateChange}
                               hasError={receiptDraftMissingFields.includes('market_valid_until')}
