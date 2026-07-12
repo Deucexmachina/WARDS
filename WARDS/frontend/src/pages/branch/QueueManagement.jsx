@@ -1709,13 +1709,10 @@ const QueueManagement = () => {
       setCompletionNotice('');
       const response = await receiptAPI.uploadForOCR(formData, { queue_context: 'true' });
       const resolvedCategory = normalizeReceiptCategory(response.data?.selected_category || response.data?.tax_type || response.data?.category || category);
-      const todayDate = getTodayDateInputValue();
       setReceiptDraft(normalizeReceiptDraftReviewState({
         ...defaultReceiptDraft(completionQueue),
         ...response.data,
-        transaction_date: resolvedCategory === 'MARKET'
-          ? todayDate
-          : response.data?.transaction_date,
+        transaction_date: response.data?.transaction_date,
         ref_number: resolvedCategory === 'CTC' ? '' : response.data?.ref_number,
         taxpayer_name: resolvedCategory === 'CTC' ? '' : response.data?.taxpayer_name,
         amount: resolvedCategory === 'CTC' ? null : response.data?.amount,
@@ -1770,13 +1767,10 @@ const QueueManagement = () => {
         }
       } else if (response.data?.status === 'processed' && response.data?.result) {
         const resolvedCategory = normalizeReceiptCategory(response.data?.result?.selected_category || response.data?.result?.tax_type || response.data?.result?.category || resolveReceiptCategory(completionQueue));
-        const todayDate = getTodayDateInputValue();
         setReceiptDraft(normalizeReceiptDraftReviewState({
           ...defaultReceiptDraft(completionQueue),
           ...response.data.result,
-          transaction_date: resolvedCategory === 'MARKET'
-            ? todayDate
-            : response.data?.result?.transaction_date,
+          transaction_date: response.data?.result?.transaction_date,
           ref_number: resolvedCategory === 'CTC' ? '' : response.data?.result?.ref_number,
           taxpayer_name: resolvedCategory === 'CTC' ? '' : response.data?.result?.taxpayer_name,
           amount: resolvedCategory === 'CTC' ? null : response.data?.result?.amount,
