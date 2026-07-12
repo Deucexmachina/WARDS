@@ -3053,7 +3053,6 @@ const QueueManagement = () => {
                         {completionReceiptCategory === 'MARKET' ? (
                           <CustomDatePicker
                             name="transaction_date"
-                            min={earliestQueueDate || currentDateInputValue}
                             max={currentDateInputValue}
                             value={formatDateInputValue(receiptDraft.transaction_date)}
                             onChange={handleMarketDateChange}
