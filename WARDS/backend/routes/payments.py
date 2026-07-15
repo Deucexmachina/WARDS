@@ -1856,7 +1856,7 @@ def normalize_payment_status(status_value: str | None) -> str:
         return "confirmed"
     if normalized == "expired":
         return "expired"
-    if normalized in {"failed", "declined", "cancelled", "canceled", "expired"}:
+    if normalized in {"failed", "declined", "cancelled", "canceled", "rejected", "payment_rejected", "expired"}:
         return "failed"
     return "pending"
 
