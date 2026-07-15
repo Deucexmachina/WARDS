@@ -2,6 +2,10 @@ services:
   security-db:
     image: mysql:8.0
     restart: unless-stopped
+    command:
+      - --skip-log-bin
+      - --innodb-buffer-pool-size=256M
+      - --max-connections=50
     environment:
       MYSQL_ROOT_PASSWORD: ${SEC_MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: wards_security_db
