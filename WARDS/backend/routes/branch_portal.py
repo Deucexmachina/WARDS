@@ -1907,6 +1907,10 @@ async def complete_queue(
     apply_queue_security(queue)
     archive_completed_queue(db, queue, get_staff_display_name(current_staff))
     queue_number = queue_value(queue, "queue_number")
+    child_queues = db.query(Queue).filter(Queue.parent_queue_id == queue.id).all()
+    for child in child_queues:
+        child.parent_queue_id = None
+        apply_queue_security(child)
     db.delete(queue)
     log_branch_action(db, current_staff, "Queue Completed", f"Completed queue {queue_number}", request.client.host)
     db.commit()
@@ -1927,6 +1931,10 @@ async def delete_queue(
     ensure_queue_window_access(db, current_staff, queue)
 
     queue_number = queue_value(queue, "queue_number")
+    child_queues = db.query(Queue).filter(Queue.parent_queue_id == queue.id).all()
+    for child in child_queues:
+        child.parent_queue_id = None
+        apply_queue_security(child)
     db.delete(queue)
     log_branch_action(db, current_staff, "Queue Deleted", f"Deleted queue {queue_number}", request.client.host)
     db.commit()
