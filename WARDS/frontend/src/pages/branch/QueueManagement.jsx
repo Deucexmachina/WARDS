@@ -479,7 +479,7 @@ const QueueSection = ({
               const derivedStatus = getDerivedStatus(queue, now);
               const relevantDateTime = getRelevantDateTime(queue);
               return (
-                <div key={queue.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div key={queue.id} className={`rounded-xl border border-slate-200 bg-white p-4 shadow-sm ${queue.is_dependency_locked ? 'opacity-50' : ''}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-bold text-primary">{queue.queue_number}</p>
@@ -497,7 +497,12 @@ const QueueSection = ({
                         : (relevantDateTime ? formatUtc8DateTime(relevantDateTime) : 'N/A')}
                     </p>
                   </div>
-                  {canManageQueues ? (
+                  {queue.is_dependency_locked && (
+                    <p className="mt-2 rounded-lg bg-amber-50 px-3 py-1.5 text-[10px] font-semibold text-amber-700">
+                      Locked — waiting for original transaction to finish
+                    </p>
+                  )}
+                  {canManageQueues && !queue.is_dependency_locked ? (
                     <div className="mt-3 flex flex-wrap gap-2">
                       {skippedOnly || derivedStatus === 'skipped' ? (
                         <button onClick={() => onAction('recall-skipped', queue)} disabled={queueUnavailable} className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-40">Pull Up</button>
@@ -542,12 +547,15 @@ const QueueSection = ({
                 const relevantDateTime = getRelevantDateTime(queue);
 
                 return (
-                  <tr key={queue.id} className="align-top hover:bg-slate-50/80">
+                  <tr key={queue.id} className={`align-top hover:bg-slate-50/80 ${queue.is_dependency_locked ? 'opacity-50' : ''}`}>
                     <td className="px-3 py-2.5">
                         <p className="text-[11px] font-semibold text-primary">{queue.queue_number}</p>
                         <p className="mt-0.5 text-[10px] uppercase tracking-[0.18em] text-slate-400">
                           {queueTypeLabels[queue.queue_type] || 'Immediate'}
                         </p>
+                        {queue.is_dependency_locked && (
+                          <p className="mt-1 text-[9px] font-bold uppercase tracking-wider text-amber-600">Locked</p>
+                        )}
                       </td>
                       <td className="px-3 py-2.5">
                         <p className="text-[11px] font-medium text-slate-800">{queue.taxpayer_name || 'Walk-in'}</p>
@@ -574,7 +582,7 @@ const QueueSection = ({
                           <p className="mt-0.5 text-[10px] text-slate-500">{formatTimeLabel(queue.appointment_time)}</p>
                         ) : null}
                       </td>
-                      {canManageQueues ? (
+                      {canManageQueues && !queue.is_dependency_locked ? (
                         <td className="px-3 py-2.5">
                           <div className="flex flex-wrap gap-1">
                             {skippedOnly || derivedStatus === 'skipped' ? (
@@ -624,6 +632,10 @@ const QueueSection = ({
                               Delete
                             </button>
                           </div>
+                        </td>
+                      ) : canManageQueues ? (
+                        <td className="px-3 py-2.5">
+                          <span className="text-[10px] font-semibold text-slate-400">Locked</span>
                         </td>
                       ) : null}
                     </tr>
@@ -794,7 +806,7 @@ const WindowMonitoringSection = ({
                         : appointmentCount > 0
                           ? 'bg-violet-100 text-violet-800'
                           : 'bg-slate-200 text-slate-700';
-                  const nextQueue = window.queues.find((queue) => getDerivedStatus(queue, now) === 'waiting') || null;
+                  const nextQueue = window.queues.find((queue) => getDerivedStatus(queue, now) === 'waiting' && !queue.is_dependency_locked) || null;
 
                   return (
                     <article
@@ -895,7 +907,7 @@ const WindowMonitoringSection = ({
                                 {visibleQueues.slice(0, 5).map((queue) => {
                                   const derivedStatus = getDerivedStatus(queue, now);
                                   return (
-                                    <div key={queue.id} className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                                    <div key={queue.id} className={`rounded-2xl border border-slate-200 bg-white px-4 py-3 ${queue.is_dependency_locked ? 'opacity-50' : ''}`}>
                                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                                         <div className="flex flex-wrap items-center gap-2">
                                           <p className="text-sm font-bold text-primary">{queue.queue_number}</p>
@@ -905,6 +917,11 @@ const WindowMonitoringSection = ({
                                           <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
                                             {queue.service_type || 'N/A'}
                                           </span>
+                                          {queue.is_dependency_locked && (
+                                            <span className="inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
+                                              Locked
+                                            </span>
+                                          )}
                                         </div>
                                         <div className="flex items-center gap-2">
                                           <p className="text-xs text-slate-500">{queue.taxpayer_name || 'Walk-in'}</p>
@@ -2237,7 +2254,7 @@ const QueueManagement = () => {
     [filteredQueues, now],
   );
   const firstCallableQueue = useMemo(
-    () => sortQueues(filteredQueues.filter((queue) => getDerivedStatus(queue, now) === 'waiting'), now)[0] || null,
+    () => sortQueues(filteredQueues.filter((queue) => getDerivedStatus(queue, now) === 'waiting' && !queue.is_dependency_locked), now)[0] || null,
     [filteredQueues, now],
   );
 
