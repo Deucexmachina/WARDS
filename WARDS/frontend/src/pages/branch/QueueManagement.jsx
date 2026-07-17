@@ -499,7 +499,7 @@ const QueueSection = ({
                   </div>
                   {queue.is_dependency_locked && (
                     <p className="mt-2 rounded-lg bg-amber-50 px-3 py-1.5 text-[10px] font-semibold text-amber-700">
-                      Locked — waiting for original transaction to finish
+                      Locked — another transaction for this taxpayer is being served
                     </p>
                   )}
                   {canManageQueues && !queue.is_dependency_locked ? (

@@ -243,17 +243,23 @@ def get_service_window_label_for_branch(db: Session, branch_id: int, service_win
     return metadata["window_label"]
 
 
-DEPENDENCY_LOCKED_PARENT_STATUSES = {"waiting", "called", "serving"}
+DEPENDENCY_LOCKED_STATUSES = {"called", "serving"}
 
 
 def is_queue_dependency_locked(db: Session, queue: Queue) -> bool:
-    if not queue.parent_queue_id:
-        return False
-    parent = db.query(Queue).filter(Queue.id == queue.parent_queue_id).first()
-    if not parent:
-        return False
-    parent_status = (queue_value(parent, "status") or "").strip().lower()
-    return parent_status in DEPENDENCY_LOCKED_PARENT_STATUSES
+    if queue.parent_queue_id:
+        parent = db.query(Queue).filter(Queue.id == queue.parent_queue_id).first()
+        if not parent:
+            return False
+        parent_status = (queue_value(parent, "status") or "").strip().lower()
+        return parent_status in DEPENDENCY_LOCKED_STATUSES
+
+    parent = db.query(Queue).filter(Queue.parent_queue_id == queue.id).all()
+    for child in parent:
+        child_status = (queue_value(child, "status") or "").strip().lower()
+        if child_status in DEPENDENCY_LOCKED_STATUSES:
+            return True
+    return False
 
 
 def serialize_queue(queue: Queue, assigned_window_number: Optional[int] = None, window_label: Optional[str] = None, service_window: Optional[str] = None, dependency_locked: bool = False):
@@ -571,7 +577,7 @@ def get_next_waiting_queue_for_staff(
         is_ready_appointment = queue_type == "appointment" and queue.appointment_time and queue.appointment_time <= current_manila_time
         is_legacy_immediate = not queue_value(queue, "queue_type") and queue.appointment_time is None
         if is_immediate or is_ready_appointment or is_legacy_immediate:
-            if queue.parent_queue_id and is_queue_dependency_locked(db, queue):
+            if is_queue_dependency_locked(db, queue):
                 continue
             candidate_ids.append(queue.id)
 
@@ -581,7 +587,7 @@ def get_next_waiting_queue_for_staff(
         queue = queue_query.first()
         if not queue or (queue_value(queue, "status") or "").strip().lower() != "waiting":
             continue
-        if queue.parent_queue_id and is_queue_dependency_locked(db, queue):
+        if is_queue_dependency_locked(db, queue):
             continue
         if is_queue_window_staff(current_staff):
             queue_window = normalize_service_window_for_branch(db, current_staff.branch_id, queue_value(queue, "service_type"))
@@ -1594,8 +1600,8 @@ async def call_next_queue(
                     raise HTTPException(status_code=409, detail="Selected queue is no longer waiting.")
                 if not is_queue_ready_to_call(queue):
                     raise HTTPException(status_code=404, detail="Selected appointment queue is not ready to call yet.")
-                if queue.parent_queue_id and is_queue_dependency_locked(db, queue):
-                    raise HTTPException(status_code=409, detail="This queue is locked because the taxpayer's original transaction is still in progress. It will become available once the original transaction is completed.")
+                if is_queue_dependency_locked(db, queue):
+                    raise HTTPException(status_code=409, detail="This queue is locked because another transaction for the same taxpayer is currently being served. It will become available once that transaction is completed or skipped.")
             else:
                 queue = get_next_waiting_queue_for_staff(db, current_staff, service_window=requested_service_window)
             if not queue:
