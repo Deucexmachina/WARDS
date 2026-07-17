@@ -472,7 +472,10 @@ def apply_taxpayer_identifier_submission_security(submission):
     ):
         value = get_preferred_write_value(submission, field_name)
         set_encrypted_hash_companions(submission, field_name, value)
-        setattr(submission, field_name, build_redacted_text(prefix, value, length))
+        redacted = build_redacted_text(prefix, value, length)
+        if redacted is None and value is not None:
+            redacted = ""
+        setattr(submission, field_name, redacted)
     return submission
 
 
