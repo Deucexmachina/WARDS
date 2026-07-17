@@ -808,12 +808,12 @@ async def register_queue(
         )
 
     resolved_taxpayer_name = (
-        (get_decrypted_or_raw(current_citizen, "full_name") or current_citizen.full_name)
+        (get_decrypted_or_raw(current_citizen, "full_name") or current_citizen.full_name or registration.taxpayer_name)
         if current_citizen
         else registration.taxpayer_name
     )
     resolved_contact_number = (
-        (get_decrypted_or_raw(current_citizen, "contact_number") or current_citizen.contact_number)
+        (get_decrypted_or_raw(current_citizen, "contact_number") or current_citizen.contact_number or registration.contact_number)
         if current_citizen
         else registration.contact_number
     )
