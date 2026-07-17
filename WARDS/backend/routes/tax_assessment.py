@@ -877,7 +877,8 @@ async def create_taxpayer_identifier_submission(
     normalized_taxpayer_type = normalize_taxpayer_type(taxpayer_type)
     profile_snapshot = get_citizen_profile_snapshot(current_user)
     normalized_email = normalize_email(profile_snapshot["email"] or email)
-    normalized_mobile = normalize_mobile_number(profile_snapshot["mobile_number"] or mobile_number)
+    raw_mobile = profile_snapshot["mobile_number"] or mobile_number
+    normalized_mobile = normalize_mobile_number(raw_mobile) if (raw_mobile or "").strip() else ""
     normalized_full_name = re.sub(r"\s+", " ", (profile_snapshot["full_name"] or full_name).strip())
     if not normalized_full_name:
         raise HTTPException(status_code=400, detail="Full Name is required.")
