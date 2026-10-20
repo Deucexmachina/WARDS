@@ -1422,6 +1422,7 @@ const QueueManagement = () => {
   const [queueToDelete, setQueueToDelete] = useState(null);
   const [historyToDelete, setHistoryToDelete] = useState(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [queueActionConfirm, setQueueActionConfirm] = useState(null);
   const [deletingQueueId, setDeletingQueueId] = useState(null);
   const [deletingHistoryId, setDeletingHistoryId] = useState(null);
   const [queueTypeFilter, setQueueTypeFilter] = useState('all');
@@ -1657,6 +1658,35 @@ const QueueManagement = () => {
     setHistoryToDelete(queueHistoryItem);
     setQueueToDelete(queueHistoryItem);
     setShowDeleteModal(true);
+  };
+
+  const requestQueueAction = (action, queue) => {
+    if (action === 'serve') {
+      setQueueActionConfirm({ kind: 'serve', queue, source: 'list' });
+      return;
+    }
+    performAction(action, queue);
+  };
+
+  const confirmQueueAction = () => {
+    const pending = queueActionConfirm;
+    setQueueActionConfirm(null);
+    if (!pending) {
+      return;
+    }
+    if (pending.kind === 'serve') {
+      if (pending.source === 'window') {
+        handleWindowServe(pending.queue);
+      } else {
+        performAction('serve', pending.queue);
+      }
+      return;
+    }
+    if (pending.source === 'window') {
+      handleWindowRecall(pending.queue);
+    } else {
+      performAction('recall');
+    }
   };
 
   const closeDeleteModal = () => {
@@ -2633,7 +2663,7 @@ const QueueManagement = () => {
                 {callingNext ? 'Calling...' : isAnnouncementPlaying ? 'Announcing...' : 'Call Next'}
               </button>
               <button
-                onClick={() => performAction('recall')}
+                onClick={() => setQueueActionConfirm({ kind: 'recall', queue: lastCalledQueue, source: 'controls' })}
                 disabled={queueUnavailable || !lastCalledQueue}
                 className="rounded-xl bg-blue-600 px-6 py-3 font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
                 title={lastCalledQueue ? `Recall ${lastCalledQueue.queue_number}` : 'No queue to recall'}
@@ -2690,7 +2720,7 @@ const QueueManagement = () => {
             page={immediatePage}
             onPageChange={setImmediatePage}
             queueUnavailable={queueUnavailable}
-            onAction={performAction}
+            onAction={requestQueueAction}
             onDeleteRequest={openDeleteModal}
             now={now}
             canManageQueues={canManageQueueOperations}
@@ -2702,7 +2732,7 @@ const QueueManagement = () => {
             page={appointmentPage}
             onPageChange={setAppointmentPage}
             queueUnavailable={queueUnavailable}
-            onAction={performAction}
+            onAction={requestQueueAction}
             onDeleteRequest={openDeleteModal}
             now={now}
             canManageQueues={canManageQueueOperations}
@@ -2721,9 +2751,9 @@ const QueueManagement = () => {
           isSuperadminBranch={isSuperadminManagedBranch}
           isBranchAdmin={isBranchAdmin}
           onWindowCallNext={handleWindowCallNext}
-          onWindowRecall={handleWindowRecall}
+          onWindowRecall={(queue) => setQueueActionConfirm({ kind: 'recall', queue, source: 'window' })}
           onWindowSkip={handleWindowSkip}
-          onWindowServe={handleWindowServe}
+          onWindowServe={(queue) => setQueueActionConfirm({ kind: 'serve', queue, source: 'window' })}
           onWindowComplete={handleWindowComplete}
           onWindowRecallSkipped={handleWindowRecallSkipped}
           isAnnouncementPlaying={isAnnouncementPlaying}
@@ -2743,7 +2773,7 @@ const QueueManagement = () => {
         page={skippedPage}
         onPageChange={setSkippedPage}
         queueUnavailable={queueUnavailable}
-        onAction={performAction}
+        onAction={requestQueueAction}
         onDeleteRequest={openDeleteModal}
         now={now}
         skippedOnly
@@ -3194,6 +3224,66 @@ const QueueManagement = () => {
                 </div>
               </div>
             ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {queueActionConfirm ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4">
+          <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl md:p-8">
+            <div className="flex items-start gap-4">
+              <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${queueActionConfirm.kind === 'recall' ? 'bg-indigo-100 text-indigo-600' : 'bg-blue-100 text-blue-600'}`}>
+                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  {queueActionConfirm.kind === 'recall' ? (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"></path>
+                  ) : (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                  )}
+                </svg>
+              </div>
+              <div>
+                <p className={`text-xs font-semibold uppercase tracking-[0.25em] ${queueActionConfirm.kind === 'recall' ? 'text-indigo-400' : 'text-blue-400'}`}>
+                  {queueActionConfirm.kind === 'recall' ? 'Confirm Recall' : 'Confirm Serve'}
+                </p>
+                <h3 className="mt-2 text-2xl font-bold text-primary">
+                  {queueActionConfirm.kind === 'recall' ? 'Recall this queue?' : 'Serve this queue?'}
+                </h3>
+                <p className="mt-3 text-sm leading-6 text-slate-600">
+                  {queueActionConfirm.kind === 'recall' ? (
+                    <>Queue <span className="font-semibold text-slate-800">{queueActionConfirm.queue?.queue_number}</span> will be announced again on the live monitor.</>
+                  ) : (
+                    <>Queue <span className="font-semibold text-slate-800">{queueActionConfirm.queue?.queue_number}</span> will be marked as being served.</>
+                  )}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Queue Details</p>
+              <p className="mt-2 text-sm font-medium text-slate-700">
+                {queueActionConfirm.queue?.taxpayer_name || 'Walk-in'} • {queueActionConfirm.queue?.service_type || queueActionConfirm.queue?.service_window || 'N/A'}
+              </p>
+              <p className="mt-1 text-sm text-slate-500">
+                {queueActionConfirm.queue?.queue_type
+                  ? `${queueTypeLabels[queueActionConfirm.queue.queue_type] || 'Immediate'} queue`
+                  : 'Currently active queue'}
+              </p>
+            </div>
+
+            <div className="mt-6 flex flex-col-reverse gap-3 md:flex-row md:justify-end">
+              <button
+                onClick={() => setQueueActionConfirm(null)}
+                className="rounded-2xl bg-slate-200 px-5 py-3 font-semibold text-slate-700 transition hover:bg-slate-300"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmQueueAction}
+                className={`rounded-2xl px-5 py-3 font-semibold text-white transition ${queueActionConfirm.kind === 'recall' ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-blue-600 hover:bg-blue-700'}`}
+              >
+                {queueActionConfirm.kind === 'recall' ? 'Confirm Recall' : 'Confirm Serve'}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
