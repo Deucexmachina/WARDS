@@ -3,7 +3,7 @@ import { activityLogAPI } from '../../services/api';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 import WardsPageHero from '../../components/WardsPageHero';
 import { markActivityLogsViewed } from '../../utils/activityLogNotifications';
-import { CustomDatePicker } from '../../components/FormControls';
+import { CustomDatePicker, CustomSelect } from '../../components/FormControls';
 
 const typeColors = {
   admin: 'bg-purple-100 text-purple-800',
@@ -109,35 +109,33 @@ const ActivityLogs = () => {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-6">
           <div>
             <label className="block text-gray-700 font-semibold mb-2">Activity Type</label>
-            <select
-              name="type"
+            <CustomSelect
               value={filters.type}
-              onChange={handleFilterChange}
-              className="w-full rounded-lg border border-gray-300 px-4 py-3 focus:ring-2 focus:ring-accent focus:border-transparent bg-white"
-            >
-              <option value="">All Types</option>
-              <option value="admin">Admin</option>
-              <option value="security">Security</option>
-              <option value="transaction">Transaction</option>
-              <option value="auth">Auth</option>
-              <option value="branch_portal">Branch Portal</option>
-              <option value="public_content">Public Content</option>
-              <option value="error">Error</option>
-            </select>
+              onChange={(value) => handleFilterChange({ target: { name: 'type', value } })}
+              options={[
+                { value: 'admin', label: 'Admin' },
+                { value: 'security', label: 'Security' },
+                { value: 'transaction', label: 'Transaction' },
+                { value: 'auth', label: 'Auth' },
+                { value: 'branch_portal', label: 'Branch Portal' },
+                { value: 'public_content', label: 'Public Content' },
+                { value: 'error', label: 'Error' },
+              ]}
+              placeholder="All Types"
+            />
           </div>
           <div>
             <label className="block text-gray-700 font-semibold mb-2">Severity</label>
-            <select
-              name="severity"
+            <CustomSelect
               value={filters.severity}
-              onChange={handleFilterChange}
-              className="w-full rounded-lg border border-gray-300 px-4 py-3 focus:ring-2 focus:ring-accent focus:border-transparent bg-white"
-            >
-              <option value="">All Severities</option>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
-            </select>
+              onChange={(value) => handleFilterChange({ target: { name: 'severity', value } })}
+              options={[
+                { value: 'high', label: 'High' },
+                { value: 'medium', label: 'Medium' },
+                { value: 'low', label: 'Low' },
+              ]}
+              placeholder="All Severities"
+            />
           </div>
           <div>
             <label className="block text-gray-700 font-semibold mb-2">User</label>
