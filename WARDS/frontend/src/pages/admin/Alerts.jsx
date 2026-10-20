@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { alertAPI } from '../../services/api';
 import WardsPageHero from '../../components/WardsPageHero';
+import { CustomSelect } from '../../components/FormControls';
 import { formatUtc8DateTime } from '../../utils/dateTime';
 
 const Alerts = () => {
@@ -124,30 +125,28 @@ const Alerts = () => {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <div>
             <label className="block text-gray-700 font-semibold mb-2">Severity</label>
-            <select
-              name="severity"
+            <CustomSelect
               value={filters.severity}
-              onChange={handleFilterChange}
-              className="w-full rounded-lg border border-gray-300 px-4 py-3 focus:ring-2 focus:ring-accent focus:border-transparent bg-white"
-            >
-              <option value="">All Severities</option>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
-            </select>
+              onChange={(value) => handleFilterChange({ target: { name: 'severity', value } })}
+              options={[
+                { value: 'high', label: 'High' },
+                { value: 'medium', label: 'Medium' },
+                { value: 'low', label: 'Low' },
+              ]}
+              placeholder="All Severities"
+            />
           </div>
           <div>
             <label className="block text-gray-700 font-semibold mb-2">Read Status</label>
-            <select
-              name="read"
+            <CustomSelect
               value={filters.read}
-              onChange={handleFilterChange}
-              className="w-full rounded-lg border border-gray-300 px-4 py-3 focus:ring-2 focus:ring-accent focus:border-transparent bg-white"
-            >
-              <option value="">All</option>
-              <option value="false">Unread</option>
-              <option value="true">Read</option>
-            </select>
+              onChange={(value) => handleFilterChange({ target: { name: 'read', value } })}
+              options={[
+                { value: 'false', label: 'Unread' },
+                { value: 'true', label: 'Read' },
+              ]}
+              placeholder="All"
+            />
           </div>
           <div className="flex items-end">
             <button
