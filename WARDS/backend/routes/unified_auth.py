@@ -2851,6 +2851,7 @@ async def unified_verification_confirm(
 
     otp_record.consumed_at = utc_now()
     citizen.is_verified = True
+    delete_mfa_secret(db, "public", email)
     db.commit()
 
     return {"message": "Email verified. You can now log in."}
@@ -2948,6 +2949,10 @@ async def unified_invite_register(
         db.add(account)
 
     invite.used = True
+    if isinstance(account, CitizenUser):
+        delete_mfa_secret(db, "public", email)
+    elif getattr(account, "username", None):
+        delete_mfa_secret(db, "admin" if isinstance(account, Admin) else "branch", account.username)
     db.commit()
     db.refresh(account)
 

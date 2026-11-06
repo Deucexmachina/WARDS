@@ -9,7 +9,7 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from database.models import ActivityLog, Admin, AdminLoginSecurityProfile, BranchStaff, CitizenUser, get_db
-from auth import get_current_admin_user, hash_password
+from auth import get_current_admin_user, hash_password, delete_mfa_secret
 from utils.field_crypto import apply_citizen_user_security, serialize_citizen_user
 from utils.security_validation import (
     ensure_email_is_unique,
@@ -307,6 +307,15 @@ async def delete_user(
 
     if isinstance(user, Admin):
         db.query(AdminLoginSecurityProfile).filter(AdminLoginSecurityProfile.admin_id == user.id).delete(synchronize_session=False)
+
+    if isinstance(user, CitizenUser):
+        mfa_portal, mfa_username = "public", serialize_citizen_user(user)["email"]
+    elif isinstance(user, Admin):
+        mfa_portal, mfa_username = "admin", getattr(user, "username", None)
+    else:
+        mfa_portal, mfa_username = "branch", getattr(user, "username", None)
+    if mfa_username:
+        delete_mfa_secret(db, mfa_portal, mfa_username)
 
     db.add(ActivityLog(
         action="Admin User Deleted",
